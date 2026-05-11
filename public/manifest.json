@@ -1,0 +1,18 @@
+{
+  "name": "Organizatech",
+  "short_name": "Organizatech",
+  "description": "Registro y análisis inteligente de progreso físico.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07101A",
+  "theme_color": "#111827",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,349 @@
+import { demoEntries, exerciseTemplates } from "@/lib/data/demo";
+import type { ExerciseEntry, ExerciseTemplate, RoutineName } from "@/lib/progress/types";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+
+export type DataSource = "local" | "supabase";
+
+export interface AppData {
+  exercises: ExerciseTemplate[];
+  entries: ExerciseEntry[];
+  source: DataSource;
+}
+
+const LOCAL_EXERCISES_KEY = "organizatech:exercises";
+const LOCAL_ENTRIES_KEY = "organizatech:entries";
+
+export async function loadAppData(): Promise<AppData> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return loadLocalData();
+
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+  const userId = user?.id;
+  if (!userId) return loadLocalData();
+
+  await ensureProfile(userId, user.email ?? "");
+  const exercises = await fetchExercises(userId);
+  const entries = await fetchEntries(userId);
+  return { exercises, entries, source: "supabase" };
+}
+
+export async function saveExercise(exercise: ExerciseTemplate): Promise<ExerciseTemplate> {
+  const supabase = getSupabaseBrowserClient();
+  const { data: userData } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
+  const userId = userData.user?.id;
+
+  if (!supabase || !userId) {
+    const local = loadLocalData();
+    const exists = local.exercises.some((item) => item.id === exercise.id);
+    const exercises = exists
+      ? local.exercises.map((item) => (item.id === exercise.id ? exercise : item))
+      : [...local.exercises, exercise];
+    saveLocalData(exercises, local.entries);
+    return exercise;
+  }
+
+  const routineId = await upsertRoutine(userId, exercise.routine);
+  const payload = {
+    id: exercise.id,
+    user_id: userId,
+    routine_id: routineId,
+    name: exercise.name,
+    target_sets: exercise.targetSets,
+    target_reps: exercise.targetReps,
+    base_weight: exercise.baseWeight,
+    side_weight: exercise.sideWeight ?? null,
+    notes: exercise.notes ?? null,
+  };
+
+  const { data, error } = await supabase.from("exercises").upsert(payload).select("id").single();
+  if (error) throw error;
+  return { ...exercise, id: data.id };
+}
+
+export async function deleteExercise(exerciseId: string): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  const { data: userData } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
+  const userId = userData.user?.id;
+
+  if (!supabase || !userId) {
+    const local = loadLocalData();
+    saveLocalData(
+      local.exercises.filter((exercise) => exercise.id !== exerciseId),
+      local.entries.filter((entry) => entry.exerciseId !== exerciseId),
+    );
+    return;
+  }
+
+  const { error } = await supabase.from("exercises").delete().eq("id", exerciseId).eq("user_id", userId);
+  if (error) throw error;
+}
+
+export async function saveTrainingEntry(entry: ExerciseEntry): Promise<ExerciseEntry> {
+  const supabase = getSupabaseBrowserClient();
+  const { data: userData } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
+  const userId = userData.user?.id;
+
+  if (!supabase || !userId) {
+    const local = loadLocalData();
+    const entries = [...local.entries, entry];
+    saveLocalData(local.exercises, entries);
+    return entry;
+  }
+
+  const { data: session, error: sessionError } = await supabase
+    .from("training_sessions")
+    .insert({
+      user_id: userId,
+      week_number: entry.week,
+      trained_at: entry.date,
+      notes: entry.notes ?? null,
+    })
+    .select("id")
+    .single();
+
+  if (sessionError) throw sessionError;
+
+  const { data, error } = await supabase
+    .from("exercise_entries")
+    .insert({
+      id: entry.id,
+      user_id: userId,
+      session_id: session.id,
+      exercise_id: entry.exerciseId,
+      weight: entry.weight,
+      previous_weight: entry.previousWeight,
+      reps: entry.reps,
+      rir: entry.rir ?? null,
+      notes: entry.notes ?? null,
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return { ...entry, id: data.id };
+}
+
+export function resetLocalData() {
+  saveLocalData(exerciseTemplates, demoEntries);
+}
+
+function loadLocalData(): AppData {
+  if (typeof window === "undefined") {
+    return { exercises: exerciseTemplates, entries: demoEntries, source: "local" };
+  }
+
+  const savedExercises = window.localStorage.getItem(LOCAL_EXERCISES_KEY);
+  const savedEntries = window.localStorage.getItem(LOCAL_ENTRIES_KEY);
+  const exercises = savedExercises ? (JSON.parse(savedExercises) as ExerciseTemplate[]) : [];
+  const entries = savedEntries ? (JSON.parse(savedEntries) as ExerciseEntry[]) : [];
+
+  if (!savedExercises || !savedEntries) saveLocalData(exercises, entries);
+  return { exercises, entries, source: "local" };
+}
+
+function saveLocalData(exercises: ExerciseTemplate[], entries: ExerciseEntry[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LOCAL_EXERCISES_KEY, JSON.stringify(exercises));
+  window.localStorage.setItem(LOCAL_ENTRIES_KEY, JSON.stringify(entries));
+}
+
+async function ensureProfile(userId: string, email: string) {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return;
+
+  await supabase.from("profiles").upsert({
+    id: userId,
+    email,
+    display_name: email.split("@")[0] || "Usuario",
+  });
+}
+
+async function upsertRoutine(userId: string, routine: RoutineName) {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) throw new Error("Supabase no configurado.");
+
+  const existing = await supabase
+    .from("routines")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("name", routine)
+    .maybeSingle();
+
+  if (existing.data?.id) return existing.data.id as string;
+
+  const { data, error } = await supabase
+    .from("routines")
+    .insert({ user_id: userId, name: routine })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return data.id as string;
+}
+
+async function fetchExercises(userId: string): Promise<ExerciseTemplate[]> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("exercises")
+    .select("id,name,target_sets,target_reps,base_weight,side_weight,notes,routines(name)")
+    .eq("user_id", userId)
+    .order("created_at");
+
+  if (error) throw error;
+
+  return ((data ?? []) as unknown as SupabaseExerciseRow[]).map((row) => ({
+    id: row.id,
+    routine: readRoutineName(firstRelation(row.routines)?.name),
+    name: row.name,
+    targetSets: row.target_sets,
+    targetReps: row.target_reps,
+    baseWeight: Number(row.base_weight),
+    sideWeight: row.side_weight === null ? undefined : Number(row.side_weight),
+    notes: row.notes ?? undefined,
+  }));
+}
+
+async function fetchEntries(userId: string): Promise<ExerciseEntry[]> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("exercise_entries")
+    .select("id,weight,previous_weight,reps,rir,notes,training_sessions(week_number,trained_at),exercises(id,name,target_sets,target_reps,base_weight,notes,routines(name))")
+    .eq("user_id", userId)
+    .order("created_at");
+
+  if (error) throw error;
+
+  return ((data ?? []) as unknown as SupabaseEntryRow[]).map((row) => {
+    const session = firstRelation(row.training_sessions);
+    const exercise = firstRelation(row.exercises);
+
+    return {
+    id: row.id,
+    exerciseId: exercise.id,
+    exerciseName: exercise.name,
+    routine: readRoutineName(firstRelation(exercise.routines)?.name),
+    week: session.week_number,
+    date: session.trained_at,
+    targetSets: exercise.target_sets,
+    targetReps: exercise.target_reps,
+    weight: Number(row.weight),
+    previousWeight: Number(row.previous_weight),
+    reps: row.reps,
+    notes: row.notes ?? exercise.notes ?? undefined,
+    rir: row.rir ?? undefined,
+    };
+  });
+}
+
+async function seedSupabaseData(userId: string) {
+  const routineIds = new Map<RoutineName, string>();
+  for (const routine of [...new Set(exerciseTemplates.map((exercise) => exercise.routine))]) {
+    routineIds.set(routine, await upsertRoutine(userId, routine));
+  }
+
+  const exerciseIdMap = new Map<string, string>();
+  for (const exercise of exerciseTemplates) {
+    const routineId = routineIds.get(exercise.routine);
+    if (!routineId) continue;
+    const { data, error } = await getSupabaseBrowserClient()!
+      .from("exercises")
+      .insert({
+        user_id: userId,
+        routine_id: routineId,
+        name: exercise.name,
+        target_sets: exercise.targetSets,
+        target_reps: exercise.targetReps,
+        base_weight: exercise.baseWeight,
+        side_weight: exercise.sideWeight ?? null,
+        notes: exercise.notes ?? null,
+      })
+      .select("id")
+      .single();
+
+    if (error) throw error;
+    exerciseIdMap.set(exercise.id, data.id);
+  }
+
+  for (const entry of demoEntries) {
+    const exerciseId = exerciseIdMap.get(entry.exerciseId);
+    if (!exerciseId) continue;
+    const { data: session, error: sessionError } = await getSupabaseBrowserClient()!
+      .from("training_sessions")
+      .insert({
+        user_id: userId,
+        week_number: entry.week,
+        trained_at: entry.date,
+        notes: entry.notes ?? null,
+      })
+      .select("id")
+      .single();
+
+    if (sessionError) throw sessionError;
+
+    const { error } = await getSupabaseBrowserClient()!.from("exercise_entries").insert({
+      user_id: userId,
+      session_id: session.id,
+      exercise_id: exerciseId,
+      weight: entry.weight,
+      previous_weight: entry.previousWeight,
+      reps: entry.reps,
+      rir: entry.rir ?? null,
+      notes: entry.notes ?? null,
+    });
+
+    if (error) throw error;
+  }
+}
+
+function readRoutineName(value: string | undefined): RoutineName {
+  return value?.trim() || "Pecho Hombro Tríceps";
+}
+
+function firstRelation<T>(value: T | T[] | null): T {
+  if (Array.isArray(value)) return value[0];
+  if (!value) throw new Error("No se pudo leer una relación de Supabase.");
+  return value;
+}
+
+interface SupabaseExerciseRow {
+  id: string;
+  name: string;
+  target_sets: number;
+  target_reps: number;
+  base_weight: number | string;
+  side_weight: number | string | null;
+  notes: string | null;
+  routines: { name?: string } | Array<{ name?: string }> | null;
+}
+
+interface SupabaseEntryRow {
+  id: string;
+  weight: number | string;
+  previous_weight: number | string;
+  reps: number[];
+  rir: string | null;
+  notes: string | null;
+  training_sessions: { week_number: number; trained_at: string } | Array<{ week_number: number; trained_at: string }>;
+  exercises: {
+    id: string;
+    name: string;
+    target_sets: number;
+    target_reps: number;
+    base_weight: number | string;
+    notes: string | null;
+    routines: { name?: string } | Array<{ name?: string }> | null;
+  } | Array<{
+    id: string;
+    name: string;
+    target_sets: number;
+    target_reps: number;
+    base_weight: number | string;
+    notes: string | null;
+    routines: { name?: string } | Array<{ name?: string }> | null;
+  }>;
+}

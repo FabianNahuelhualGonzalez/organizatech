@@ -1,0 +1,3584 @@
+{
+  "exercises": [
+    {
+      "id": "plano-libre",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Plano libre",
+      "targetSets": 4,
+      "targetReps": 6,
+      "baseWeight": 90.0,
+      "sideWeight": 35.0,
+      "notes": null
+    },
+    {
+      "id": "inclinado",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Inclinado",
+      "targetSets": 4,
+      "targetReps": 10,
+      "baseWeight": 60.0,
+      "sideWeight": 20.0,
+      "notes": null
+    },
+    {
+      "id": "apertura-mancuernas",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Apertura mancuernas",
+      "targetSets": 4,
+      "targetReps": 15,
+      "baseWeight": 30.0,
+      "sideWeight": 15.0,
+      "notes": null
+    },
+    {
+      "id": "tr-ceps-franc-s",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Tríceps francés",
+      "targetSets": 4,
+      "targetReps": 6,
+      "baseWeight": 30.0,
+      "sideWeight": 15.0,
+      "notes": "Proxima semana se sube 2,5 x lado "
+    },
+    {
+      "id": "tr-ceps-v",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Tríceps V",
+      "targetSets": 4,
+      "targetReps": 20,
+      "baseWeight": 36.3,
+      "sideWeight": 36.3,
+      "notes": null
+    },
+    {
+      "id": "press-militar-smith",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Press militar Smith",
+      "targetSets": 4,
+      "targetReps": 10,
+      "baseWeight": 30.0,
+      "sideWeight": 15.0,
+      "notes": null
+    },
+    {
+      "id": "laterales",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Laterales",
+      "targetSets": 4,
+      "targetReps": 20,
+      "baseWeight": 15.0,
+      "sideWeight": 7.5,
+      "notes": null
+    },
+    {
+      "id": "antebrazo-supino-crossover",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Antebrazo supino crossover",
+      "targetSets": 4,
+      "targetReps": 15,
+      "baseWeight": 22.7,
+      "sideWeight": 18.0,
+      "notes": null
+    },
+    {
+      "id": "gemelos-hack",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Gemelos hack",
+      "targetSets": 4,
+      "targetReps": 15,
+      "baseWeight": 100.0,
+      "sideWeight": 50.0,
+      "notes": null
+    },
+    {
+      "id": "inclinado-polea-force",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Inclinado polea force",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 45.0,
+      "sideWeight": 45.0,
+      "notes": "Cambio a polea force"
+    },
+    {
+      "id": "press-inclinado-polea",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Press inclinado polea",
+      "targetSets": 4,
+      "targetReps": 8,
+      "baseWeight": 54.0,
+      "sideWeight": 54.0,
+      "notes": null
+    },
+    {
+      "id": "press-plano-polea",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Press plano polea",
+      "targetSets": 4,
+      "targetReps": 10,
+      "baseWeight": 40.0,
+      "sideWeight": 40.0,
+      "notes": null
+    },
+    {
+      "id": "smith-declinado",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Smith declinado",
+      "targetSets": 4,
+      "targetReps": 18,
+      "baseWeight": 50.0,
+      "sideWeight": 20.0,
+      "notes": null
+    },
+    {
+      "id": "press-franc-s",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Press francés",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 30.0,
+      "sideWeight": 15.0,
+      "notes": null
+    },
+    {
+      "id": "tr-ceps-polea-barra",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Tríceps polea barra",
+      "targetSets": 4,
+      "targetReps": 16,
+      "baseWeight": 40.0,
+      "sideWeight": 36.0,
+      "notes": null
+    },
+    {
+      "id": "press-militar-barra",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Press militar barra",
+      "targetSets": 4,
+      "targetReps": 10,
+      "baseWeight": 30.0,
+      "sideWeight": 15.0,
+      "notes": null
+    },
+    {
+      "id": "frontal-mancuerna-neutro",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Frontal mancuerna neutro",
+      "targetSets": 4,
+      "targetReps": 15,
+      "baseWeight": 10.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "press-inclinado-polea-force",
+      "routine": "Pecho Hombro Tríceps",
+      "name": "Press inclinado polea force",
+      "targetSets": 4,
+      "targetReps": 8,
+      "baseWeight": 54.0,
+      "sideWeight": 40.0,
+      "notes": null
+    },
+    {
+      "id": "abdomen-banca",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Abdomen banca",
+      "targetSets": 3,
+      "targetReps": 10,
+      "baseWeight": 0.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "abs-colgado",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Abs colgado",
+      "targetSets": 3,
+      "targetReps": 12,
+      "baseWeight": 0.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "abdomen-crossover",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Abdomen crossover",
+      "targetSets": 3,
+      "targetReps": 15,
+      "baseWeight": 50.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "peso-muerto-medio",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Peso muerto medio",
+      "targetSets": 3,
+      "targetReps": 6,
+      "baseWeight": 160.0,
+      "sideWeight": 65.0,
+      "notes": null
+    },
+    {
+      "id": "pulldown-neutro",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Pulldown neutro",
+      "targetSets": 4,
+      "targetReps": 8,
+      "baseWeight": 80.0,
+      "sideWeight": 80.0,
+      "notes": null
+    },
+    {
+      "id": "remo-t",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Remo T",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 45.0,
+      "sideWeight": 45.0,
+      "notes": "Mejorar tecnica 4ta serie"
+    },
+    {
+      "id": "pullover",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Pullover",
+      "targetSets": 4,
+      "targetReps": 16,
+      "baseWeight": 31.8,
+      "sideWeight": 31.8,
+      "notes": null
+    },
+    {
+      "id": "posterior-smith",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Posterior Smith",
+      "targetSets": 4,
+      "targetReps": 16,
+      "baseWeight": 16.5,
+      "sideWeight": 14.0,
+      "notes": null
+    },
+    {
+      "id": "b-ceps-barra",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Bíceps barra",
+      "targetSets": 4,
+      "targetReps": 15,
+      "baseWeight": 20.0,
+      "sideWeight": 7.5,
+      "notes": "Mejorar tecnica 4ta serie"
+    },
+    {
+      "id": "martillo-smith-cuerda",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Martillo Smith cuerda",
+      "targetSets": 4,
+      "targetReps": 16,
+      "baseWeight": 36.0,
+      "sideWeight": 36.0,
+      "notes": null
+    },
+    {
+      "id": "antebrazo-prono",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Antebrazo prono",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 33.5,
+      "sideWeight": 33.5,
+      "notes": null
+    },
+    {
+      "id": "trapecio-crossover-force",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Trapecio crossover force",
+      "targetSets": 4,
+      "targetReps": 15,
+      "baseWeight": 31.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "dominadas",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Dominadas",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 0.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "remo-polea-unilateral",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Remo polea unilateral",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 40.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "pulldown-estrecho",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Pulldown estrecho",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 52.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "posterior-mancuernas",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Posterior mancuernas",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 35.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "curl-biceps-martillo",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Curl biceps martillo",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 12.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "culr-biceps-con-giro",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Culr biceps con giro",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 15.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "antebrazo-supino",
+      "routine": "Espalda Bíceps Abdomen",
+      "name": "Antebrazo supino",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 36.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "b-lgaras",
+      "routine": "Piernas",
+      "name": "Búlgaras",
+      "targetSets": 3,
+      "targetReps": 12,
+      "baseWeight": 35.0,
+      "sideWeight": 17.5,
+      "notes": "Agregada desde semana 2."
+    },
+    {
+      "id": "sentadilla-libre",
+      "routine": "Piernas",
+      "name": "Sentadilla libre",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 110.0,
+      "sideWeight": 45.0,
+      "notes": null
+    },
+    {
+      "id": "hack",
+      "routine": "Piernas",
+      "name": "Hack",
+      "targetSets": 4,
+      "targetReps": 6,
+      "baseWeight": 185.0,
+      "sideWeight": 92.5,
+      "notes": null
+    },
+    {
+      "id": "cu-driceps",
+      "routine": "Piernas",
+      "name": "Cuádriceps",
+      "targetSets": 4,
+      "targetReps": 15,
+      "baseWeight": 75.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "hip-thrust",
+      "routine": "Piernas",
+      "name": "Hip thrust",
+      "targetSets": 4,
+      "targetReps": 8,
+      "baseWeight": 150.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "femoral-acostado",
+      "routine": "Piernas",
+      "name": "Femoral acostado",
+      "targetSets": 4,
+      "targetReps": 15,
+      "baseWeight": 45.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "rumano",
+      "routine": "Piernas",
+      "name": "Rumano",
+      "targetSets": 4,
+      "targetReps": 6,
+      "baseWeight": 60.0,
+      "sideWeight": null,
+      "notes": null
+    },
+    {
+      "id": "abductor",
+      "routine": "Piernas",
+      "name": "Abductor",
+      "targetSets": 4,
+      "targetReps": 12,
+      "baseWeight": 55.0,
+      "sideWeight": null,
+      "notes": null
+    }
+  ],
+  "entries": [
+    {
+      "id": "plano-libre-s1",
+      "exerciseId": "plano-libre",
+      "exerciseName": "Plano libre",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 90.0,
+      "previousWeight": 90.0,
+      "reps": [
+        6,
+        6,
+        5,
+        5
+      ],
+      "notes": "Mejorar técnica; serie 3 y 4 costaron."
+    },
+    {
+      "id": "inclinado-s1",
+      "exerciseId": "inclinado",
+      "exerciseName": "Inclinado",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 60.0,
+      "previousWeight": 60.0,
+      "reps": [
+        10,
+        10,
+        9,
+        9
+      ],
+      "notes": "Base actual; cuidar técnica y descansos."
+    },
+    {
+      "id": "apertura-mancuernas-s1",
+      "exerciseId": "apertura-mancuernas",
+      "exerciseName": "Apertura mancuernas",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        15,
+        15,
+        15,
+        12
+      ],
+      "notes": "Mejorar última serie."
+    },
+    {
+      "id": "tr-ceps-franc-s-s1",
+      "exerciseId": "tr-ceps-franc-s",
+      "exerciseName": "Tríceps francés",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        6,
+        6,
+        6,
+        6
+      ],
+      "notes": "Mejorar técnica; kg base."
+    },
+    {
+      "id": "tr-ceps-v-s1",
+      "exerciseId": "tr-ceps-v",
+      "exerciseName": "Tríceps V",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 20,
+      "weight": 31.0,
+      "previousWeight": 31.0,
+      "reps": [
+        20,
+        20,
+        18,
+        17
+      ],
+      "notes": "Buscar 20 reps en todas."
+    },
+    {
+      "id": "press-militar-smith-s1",
+      "exerciseId": "press-militar-smith",
+      "exerciseName": "Press militar Smith",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        10,
+        9,
+        9,
+        8
+      ],
+      "notes": "Mantener reps efectivas."
+    },
+    {
+      "id": "laterales-s1",
+      "exerciseId": "laterales",
+      "exerciseName": "Laterales",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 20,
+      "weight": 15.0,
+      "previousWeight": 15.0,
+      "reps": [
+        20,
+        20,
+        15,
+        15
+      ],
+      "notes": "Sentado y concentrado."
+    },
+    {
+      "id": "antebrazo-supino-crossover-s1",
+      "exerciseId": "antebrazo-supino-crossover",
+      "exerciseName": "Antebrazo supino crossover",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 18.0,
+      "previousWeight": 18.0,
+      "reps": [
+        15,
+        15,
+        12,
+        12
+      ],
+      "notes": "Una mano; mejorar reps."
+    },
+    {
+      "id": "gemelos-hack-s1",
+      "exerciseId": "gemelos-hack",
+      "exerciseName": "Gemelos hack",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 100.0,
+      "previousWeight": 100.0,
+      "reps": [
+        15,
+        12,
+        12,
+        12
+      ],
+      "notes": "Lunes y miércoles de pierna."
+    },
+    {
+      "id": "plano-libre-s2",
+      "exerciseId": "plano-libre",
+      "exerciseName": "Plano libre",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 90.0,
+      "previousWeight": 90.0,
+      "reps": [
+        6,
+        6,
+        6,
+        6
+      ],
+      "notes": "Mejorar técnica; serie 3 y 4 costaron."
+    },
+    {
+      "id": "inclinado-s2",
+      "exerciseId": "inclinado",
+      "exerciseName": "Inclinado",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 60.0,
+      "previousWeight": 60.0,
+      "reps": [
+        10,
+        10,
+        10,
+        9
+      ],
+      "notes": "Base actual; cuidar técnica y descansos."
+    },
+    {
+      "id": "apertura-mancuernas-s2",
+      "exerciseId": "apertura-mancuernas",
+      "exerciseName": "Apertura mancuernas",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        15,
+        15,
+        15,
+        14
+      ],
+      "notes": "Mejorar última serie."
+    },
+    {
+      "id": "tr-ceps-franc-s-s2",
+      "exerciseId": "tr-ceps-franc-s",
+      "exerciseName": "Tríceps francés",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "notes": "Mejorar técnica; kg base."
+    },
+    {
+      "id": "tr-ceps-v-s2",
+      "exerciseId": "tr-ceps-v",
+      "exerciseName": "Tríceps V",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 20,
+      "weight": 31.0,
+      "previousWeight": 31.0,
+      "reps": [
+        20,
+        20,
+        20,
+        20
+      ],
+      "notes": "Buscar 20 reps en todas."
+    },
+    {
+      "id": "press-militar-smith-s2",
+      "exerciseId": "press-militar-smith",
+      "exerciseName": "Press militar Smith",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        10,
+        10,
+        9,
+        9
+      ],
+      "notes": "Mantener reps efectivas."
+    },
+    {
+      "id": "laterales-s2",
+      "exerciseId": "laterales",
+      "exerciseName": "Laterales",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 20,
+      "weight": 15.0,
+      "previousWeight": 15.0,
+      "reps": [
+        20,
+        20,
+        16,
+        16
+      ],
+      "notes": "Sentado y concentrado."
+    },
+    {
+      "id": "antebrazo-supino-crossover-s2",
+      "exerciseId": "antebrazo-supino-crossover",
+      "exerciseName": "Antebrazo supino crossover",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 18.0,
+      "previousWeight": 18.0,
+      "reps": [
+        15,
+        15,
+        13,
+        13
+      ],
+      "notes": "Una mano; mejorar reps."
+    },
+    {
+      "id": "gemelos-hack-s2",
+      "exerciseId": "gemelos-hack",
+      "exerciseName": "Gemelos hack",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 100.0,
+      "previousWeight": 100.0,
+      "reps": [
+        15,
+        13,
+        13,
+        13
+      ],
+      "notes": "Lunes y miércoles de pierna."
+    },
+    {
+      "id": "plano-libre-s3",
+      "exerciseId": "plano-libre",
+      "exerciseName": "Plano libre",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 90.0,
+      "previousWeight": 90.0,
+      "reps": [
+        6,
+        6,
+        6,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "inclinado-s3",
+      "exerciseId": "inclinado",
+      "exerciseName": "Inclinado",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 60.0,
+      "previousWeight": 60.0,
+      "reps": [
+        9,
+        8,
+        7,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "apertura-mancuernas-s3",
+      "exerciseId": "apertura-mancuernas",
+      "exerciseName": "Apertura mancuernas",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        15,
+        15,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "tr-ceps-franc-s-s3",
+      "exerciseId": "tr-ceps-franc-s",
+      "exerciseName": "Tríceps francés",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        8,
+        8,
+        8,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "tr-ceps-v-s3",
+      "exerciseId": "tr-ceps-v",
+      "exerciseName": "Tríceps V",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 20,
+      "weight": 36.3,
+      "previousWeight": 36.3,
+      "reps": [
+        16,
+        16,
+        16,
+        14
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-militar-smith-s3",
+      "exerciseId": "press-militar-smith",
+      "exerciseName": "Press militar Smith",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        12,
+        11,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "laterales-s3",
+      "exerciseId": "laterales",
+      "exerciseName": "Laterales",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 20,
+      "weight": 15.0,
+      "previousWeight": 15.0,
+      "reps": [
+        20,
+        20,
+        17,
+        17
+      ],
+      "notes": null
+    },
+    {
+      "id": "antebrazo-supino-crossover-s3",
+      "exerciseId": "antebrazo-supino-crossover",
+      "exerciseName": "Antebrazo supino crossover",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 18.0,
+      "previousWeight": 18.0,
+      "reps": [
+        15,
+        15,
+        14,
+        14
+      ],
+      "notes": null
+    },
+    {
+      "id": "gemelos-hack-s3",
+      "exerciseId": "gemelos-hack",
+      "exerciseName": "Gemelos hack",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 100.0,
+      "previousWeight": 100.0,
+      "reps": [
+        15,
+        13,
+        13,
+        13
+      ],
+      "notes": null
+    },
+    {
+      "id": "plano-libre-s4",
+      "exerciseId": "plano-libre",
+      "exerciseName": "Plano libre",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 90.0,
+      "previousWeight": 90.0,
+      "reps": [
+        7,
+        6,
+        5,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "inclinado-polea-force-s4",
+      "exerciseId": "inclinado-polea-force",
+      "exerciseName": "Inclinado polea force",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 45.0,
+      "previousWeight": 45.0,
+      "reps": [
+        12,
+        12,
+        12,
+        9
+      ],
+      "notes": "Cambio a polea force"
+    },
+    {
+      "id": "apertura-mancuernas-s4",
+      "exerciseId": "apertura-mancuernas",
+      "exerciseName": "Apertura mancuernas",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        16,
+        16,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "tr-ceps-franc-s-s4",
+      "exerciseId": "tr-ceps-franc-s",
+      "exerciseName": "Tríceps francés",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        8,
+        8,
+        8,
+        8
+      ],
+      "notes": "Proxima semana se sube 2,5 x lado "
+    },
+    {
+      "id": "tr-ceps-v-s4",
+      "exerciseId": "tr-ceps-v",
+      "exerciseName": "Tríceps V",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 20,
+      "weight": 36.3,
+      "previousWeight": 36.3,
+      "reps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-militar-smith-s4",
+      "exerciseId": "press-militar-smith",
+      "exerciseName": "Press militar Smith",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        12,
+        11,
+        11,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "laterales-s4",
+      "exerciseId": "laterales",
+      "exerciseName": "Laterales",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 20,
+      "weight": 15.0,
+      "previousWeight": 15.0,
+      "reps": [
+        20,
+        20,
+        20,
+        20
+      ],
+      "notes": null
+    },
+    {
+      "id": "antebrazo-supino-crossover-s4",
+      "exerciseId": "antebrazo-supino-crossover",
+      "exerciseName": "Antebrazo supino crossover",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 22.7,
+      "previousWeight": 22.7,
+      "reps": [
+        13,
+        13,
+        11,
+        11
+      ],
+      "notes": null
+    },
+    {
+      "id": "gemelos-hack-s4",
+      "exerciseId": "gemelos-hack",
+      "exerciseName": "Gemelos hack",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 100.0,
+      "previousWeight": 100.0,
+      "reps": [
+        15,
+        14,
+        14,
+        13
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-inclinado-polea-s6",
+      "exerciseId": "press-inclinado-polea",
+      "exerciseName": "Press inclinado polea",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 6,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        8,
+        8,
+        8,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-plano-polea-s6",
+      "exerciseId": "press-plano-polea",
+      "exerciseName": "Press plano polea",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 6,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "smith-declinado-s6",
+      "exerciseId": "smith-declinado",
+      "exerciseName": "Smith declinado",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 6,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 18,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        18,
+        18,
+        18,
+        18
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-franc-s-s6",
+      "exerciseId": "press-franc-s",
+      "exerciseName": "Press francés",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 6,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 20.0,
+      "previousWeight": 20.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "tr-ceps-polea-barra-s6",
+      "exerciseId": "tr-ceps-polea-barra",
+      "exerciseName": "Tríceps polea barra",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 6,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 36.0,
+      "previousWeight": 36.0,
+      "reps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-militar-barra-s6",
+      "exerciseId": "press-militar-barra",
+      "exerciseName": "Press militar barra",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 6,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "frontal-mancuerna-neutro-s6",
+      "exerciseId": "frontal-mancuerna-neutro",
+      "exerciseName": "Frontal mancuerna neutro",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 6,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 10.0,
+      "previousWeight": 10.0,
+      "reps": [
+        15,
+        15,
+        15,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-inclinado-polea-s7",
+      "exerciseId": "press-inclinado-polea",
+      "exerciseName": "Press inclinado polea",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        9,
+        9,
+        9,
+        9
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-plano-polea-s7",
+      "exerciseId": "press-plano-polea",
+      "exerciseName": "Press plano polea",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        11,
+        10,
+        9,
+        9
+      ],
+      "notes": null
+    },
+    {
+      "id": "smith-declinado-s7",
+      "exerciseId": "smith-declinado",
+      "exerciseName": "Smith declinado",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 18,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        20,
+        20,
+        18,
+        18
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-franc-s-s7",
+      "exerciseId": "press-franc-s",
+      "exerciseName": "Press francés",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "tr-ceps-polea-barra-s7",
+      "exerciseId": "tr-ceps-polea-barra",
+      "exerciseName": "Tríceps polea barra",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 36.0,
+      "previousWeight": 36.0,
+      "reps": [
+        17,
+        17,
+        17,
+        17
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-militar-barra-s7",
+      "exerciseId": "press-militar-barra",
+      "exerciseName": "Press militar barra",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "frontal-mancuerna-neutro-s7",
+      "exerciseId": "frontal-mancuerna-neutro",
+      "exerciseName": "Frontal mancuerna neutro",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 10.0,
+      "previousWeight": 10.0,
+      "reps": [
+        16,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-inclinado-polea-force-s7",
+      "exerciseId": "press-inclinado-polea-force",
+      "exerciseName": "Press inclinado polea force",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 54.0,
+      "previousWeight": 54.0,
+      "reps": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-plano-polea-s8",
+      "exerciseId": "press-plano-polea",
+      "exerciseName": "Press plano polea",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        11,
+        11,
+        9,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "smith-declinado-s8",
+      "exerciseId": "smith-declinado",
+      "exerciseName": "Smith declinado",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 18,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        20,
+        20,
+        19,
+        18
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-franc-s-s8",
+      "exerciseId": "press-franc-s",
+      "exerciseName": "Press francés",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        11,
+        11,
+        11,
+        11
+      ],
+      "notes": null
+    },
+    {
+      "id": "tr-ceps-polea-barra-s8",
+      "exerciseId": "tr-ceps-polea-barra",
+      "exerciseName": "Tríceps polea barra",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 36.0,
+      "previousWeight": 36.0,
+      "reps": [
+        18,
+        18,
+        18,
+        18
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-militar-barra-s8",
+      "exerciseId": "press-militar-barra",
+      "exerciseName": "Press militar barra",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        12,
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "frontal-mancuerna-neutro-s8",
+      "exerciseId": "frontal-mancuerna-neutro",
+      "exerciseName": "Frontal mancuerna neutro",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 10.0,
+      "previousWeight": 10.0,
+      "reps": [
+        15,
+        15,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-inclinado-polea-s8",
+      "exerciseId": "press-inclinado-polea",
+      "exerciseName": "Press inclinado polea",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 54.0,
+      "previousWeight": 54.0,
+      "reps": [
+        8,
+        8,
+        8,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-plano-polea-s8",
+      "exerciseId": "press-plano-polea",
+      "exerciseName": "Press plano polea",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        12,
+        10,
+        10,
+        9
+      ],
+      "notes": null
+    },
+    {
+      "id": "smith-declinado-s8",
+      "exerciseId": "smith-declinado",
+      "exerciseName": "Smith declinado",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 18,
+      "weight": 50.0,
+      "previousWeight": 50.0,
+      "reps": [
+        16,
+        15,
+        13,
+        13
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-franc-s-s9",
+      "exerciseId": "press-franc-s",
+      "exerciseName": "Press francés",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 9,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        12,
+        11,
+        11,
+        11
+      ],
+      "notes": null
+    },
+    {
+      "id": "tr-ceps-polea-barra-s9",
+      "exerciseId": "tr-ceps-polea-barra",
+      "exerciseName": "Tríceps polea barra",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 9,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        17,
+        16,
+        16,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "press-militar-barra-s9",
+      "exerciseId": "press-militar-barra",
+      "exerciseName": "Press militar barra",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 9,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        12,
+        11,
+        11,
+        9
+      ],
+      "notes": null
+    },
+    {
+      "id": "frontal-mancuerna-neutro-s9",
+      "exerciseId": "frontal-mancuerna-neutro",
+      "exerciseName": "Frontal mancuerna neutro",
+      "routine": "Pecho Hombro Tríceps",
+      "week": 9,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 10.0,
+      "previousWeight": 10.0,
+      "reps": [
+        16,
+        16,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-banca-s1",
+      "exerciseId": "abdomen-banca",
+      "exerciseName": "Abdomen banca",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 3,
+      "targetReps": 15,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        15,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "abs-colgado-s1",
+      "exerciseId": "abs-colgado",
+      "exerciseName": "Abs colgado",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-crossover-s1",
+      "exerciseId": "abdomen-crossover",
+      "exerciseName": "Abdomen crossover",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 31.8,
+      "previousWeight": 31.8,
+      "reps": [
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "peso-muerto-medio-s1",
+      "exerciseId": "peso-muerto-medio",
+      "exerciseName": "Peso muerto medio",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 3,
+      "targetReps": 6,
+      "weight": 150.0,
+      "previousWeight": 150.0,
+      "reps": [
+        6,
+        6,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "pulldown-neutro-s1",
+      "exerciseId": "pulldown-neutro",
+      "exerciseName": "Pulldown neutro",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 80.0,
+      "previousWeight": 80.0,
+      "reps": [
+        8,
+        8,
+        8,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "remo-t-s1",
+      "exerciseId": "remo-t",
+      "exerciseName": "Remo T",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 45.0,
+      "previousWeight": 45.0,
+      "reps": [
+        12,
+        10,
+        7,
+        7
+      ],
+      "notes": null
+    },
+    {
+      "id": "pullover-s1",
+      "exerciseId": "pullover",
+      "exerciseName": "Pullover",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 31.8,
+      "previousWeight": 31.8,
+      "reps": [
+        16,
+        16,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "posterior-smith-s1",
+      "exerciseId": "posterior-smith",
+      "exerciseName": "Posterior Smith",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 14.0,
+      "previousWeight": 14.0,
+      "reps": [
+        16,
+        16,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "b-ceps-barra-s1",
+      "exerciseId": "b-ceps-barra",
+      "exerciseName": "Bíceps barra",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 15.0,
+      "previousWeight": 15.0,
+      "reps": [
+        15,
+        15,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "martillo-smith-cuerda-s1",
+      "exerciseId": "martillo-smith-cuerda",
+      "exerciseName": "Martillo Smith cuerda",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 36.0,
+      "previousWeight": 36.0,
+      "reps": [
+        16,
+        12,
+        12,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "antebrazo-prono-s1",
+      "exerciseId": "antebrazo-prono",
+      "exerciseName": "Antebrazo prono",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 31.0,
+      "previousWeight": 31.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "trapecio-crossover-force-s1",
+      "exerciseId": "trapecio-crossover-force",
+      "exerciseName": "Trapecio crossover force",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 13,
+      "weight": 59.0,
+      "previousWeight": 59.0,
+      "reps": [
+        13,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-banca-s2",
+      "exerciseId": "abdomen-banca",
+      "exerciseName": "Abdomen banca",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 3,
+      "targetReps": 15,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        15,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "abs-colgado-s2",
+      "exerciseId": "abs-colgado",
+      "exerciseName": "Abs colgado",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        13,
+        13,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-crossover-s2",
+      "exerciseId": "abdomen-crossover",
+      "exerciseName": "Abdomen crossover",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 31.8,
+      "previousWeight": 31.8,
+      "reps": [
+        15,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "peso-muerto-medio-s2",
+      "exerciseId": "peso-muerto-medio",
+      "exerciseName": "Peso muerto medio",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 3,
+      "targetReps": 6,
+      "weight": 150.0,
+      "previousWeight": 150.0,
+      "reps": [
+        7,
+        7,
+        7
+      ],
+      "notes": null
+    },
+    {
+      "id": "pulldown-neutro-s2",
+      "exerciseId": "pulldown-neutro",
+      "exerciseName": "Pulldown neutro",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 80.0,
+      "previousWeight": 80.0,
+      "reps": [
+        8,
+        8,
+        8,
+        7
+      ],
+      "notes": null
+    },
+    {
+      "id": "remo-t-s2",
+      "exerciseId": "remo-t",
+      "exerciseName": "Remo T",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 45.0,
+      "previousWeight": 45.0,
+      "reps": [
+        12,
+        10,
+        8,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "pullover-s2",
+      "exerciseId": "pullover",
+      "exerciseName": "Pullover",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 31.8,
+      "previousWeight": 31.8,
+      "reps": [
+        16,
+        16,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "posterior-smith-s2",
+      "exerciseId": "posterior-smith",
+      "exerciseName": "Posterior Smith",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 14.0,
+      "previousWeight": 14.0,
+      "reps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "b-ceps-barra-s2",
+      "exerciseId": "b-ceps-barra",
+      "exerciseName": "Bíceps barra",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 15.0,
+      "previousWeight": 15.0,
+      "reps": [
+        16,
+        16,
+        16,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "martillo-smith-cuerda-s2",
+      "exerciseId": "martillo-smith-cuerda",
+      "exerciseName": "Martillo Smith cuerda",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 36.0,
+      "previousWeight": 36.0,
+      "reps": [
+        16,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "antebrazo-prono-s2",
+      "exerciseId": "antebrazo-prono",
+      "exerciseName": "Antebrazo prono",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 33.5,
+      "previousWeight": 33.5,
+      "reps": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "trapecio-crossover-force-s3",
+      "exerciseId": "trapecio-crossover-force",
+      "exerciseName": "Trapecio crossover force",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 13,
+      "weight": 59.0,
+      "previousWeight": 59.0,
+      "reps": [
+        15,
+        15,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-banca-s3",
+      "exerciseId": "abdomen-banca",
+      "exerciseName": "Abdomen banca",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 3,
+      "targetReps": 15,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "abs-colgado-s3",
+      "exerciseId": "abs-colgado",
+      "exerciseName": "Abs colgado",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        13,
+        13,
+        13
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-crossover-s3",
+      "exerciseId": "abdomen-crossover",
+      "exerciseName": "Abdomen crossover",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 50.0,
+      "previousWeight": 50.0,
+      "reps": [
+        15,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "peso-muerto-medio-s3",
+      "exerciseId": "peso-muerto-medio",
+      "exerciseName": "Peso muerto medio",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 3,
+      "targetReps": 6,
+      "weight": 150.0,
+      "previousWeight": 150.0,
+      "reps": [
+        8,
+        8,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "pulldown-neutro-s3",
+      "exerciseId": "pulldown-neutro",
+      "exerciseName": "Pulldown neutro",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 80.0,
+      "previousWeight": 80.0,
+      "reps": [
+        8,
+        8,
+        8,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "remo-t-s3",
+      "exerciseId": "remo-t",
+      "exerciseName": "Remo T",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 45.0,
+      "previousWeight": 45.0,
+      "reps": [
+        12,
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "pullover-s3",
+      "exerciseId": "pullover",
+      "exerciseName": "Pullover",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 31.8,
+      "previousWeight": 31.8,
+      "reps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "posterior-smith-s3",
+      "exerciseId": "posterior-smith",
+      "exerciseName": "Posterior Smith",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 14.0,
+      "previousWeight": 14.0,
+      "reps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "b-ceps-barra-s4",
+      "exerciseId": "b-ceps-barra",
+      "exerciseName": "Bíceps barra",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 15.0,
+      "previousWeight": 15.0,
+      "reps": [
+        15,
+        15,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "martillo-smith-cuerda-s4",
+      "exerciseId": "martillo-smith-cuerda",
+      "exerciseName": "Martillo Smith cuerda",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 36.0,
+      "previousWeight": 36.0,
+      "reps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "antebrazo-prono-s4",
+      "exerciseId": "antebrazo-prono",
+      "exerciseName": "Antebrazo prono",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 33.5,
+      "previousWeight": 33.5,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "trapecio-crossover-force-s4",
+      "exerciseId": "trapecio-crossover-force",
+      "exerciseName": "Trapecio crossover force",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 13,
+      "weight": 59.0,
+      "previousWeight": 59.0,
+      "reps": [
+        15,
+        15,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-banca-s4",
+      "exerciseId": "abdomen-banca",
+      "exerciseName": "Abdomen banca",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 3,
+      "targetReps": 15,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        17,
+        17,
+        17
+      ],
+      "notes": null
+    },
+    {
+      "id": "abs-colgado-s4",
+      "exerciseId": "abs-colgado",
+      "exerciseName": "Abs colgado",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        14,
+        14,
+        14
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-crossover-s4",
+      "exerciseId": "abdomen-crossover",
+      "exerciseName": "Abdomen crossover",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 50.0,
+      "previousWeight": 50.0,
+      "reps": [
+        15,
+        13,
+        13
+      ],
+      "notes": null
+    },
+    {
+      "id": "peso-muerto-medio-s4",
+      "exerciseId": "peso-muerto-medio",
+      "exerciseName": "Peso muerto medio",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 3,
+      "targetReps": 6,
+      "weight": 160.0,
+      "previousWeight": 160.0,
+      "reps": [
+        6,
+        6,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "pulldown-neutro-s4",
+      "exerciseId": "pulldown-neutro",
+      "exerciseName": "Pulldown neutro",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 80.0,
+      "previousWeight": 80.0,
+      "reps": [
+        9,
+        9,
+        8,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "remo-t-s5",
+      "exerciseId": "remo-t",
+      "exerciseName": "Remo T",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 5,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 45.0,
+      "previousWeight": 45.0,
+      "reps": [
+        12,
+        11,
+        11,
+        11
+      ],
+      "notes": "Mejorar tecnica 4ta serie"
+    },
+    {
+      "id": "pullover-s5",
+      "exerciseId": "pullover",
+      "exerciseName": "Pullover",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 5,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 31.8,
+      "previousWeight": 31.8,
+      "reps": [
+        17,
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "posterior-smith-s5",
+      "exerciseId": "posterior-smith",
+      "exerciseName": "Posterior Smith",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 5,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 16.5,
+      "previousWeight": 16.5,
+      "reps": [
+        12,
+        12,
+        11,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "b-ceps-barra-s5",
+      "exerciseId": "b-ceps-barra",
+      "exerciseName": "Bíceps barra",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 5,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 20.0,
+      "previousWeight": 20.0,
+      "reps": [
+        15,
+        12,
+        10,
+        10
+      ],
+      "notes": "Mejorar tecnica 4ta serie"
+    },
+    {
+      "id": "martillo-smith-cuerda-s5",
+      "exerciseId": "martillo-smith-cuerda",
+      "exerciseName": "Martillo Smith cuerda",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 5,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 16,
+      "weight": 36.0,
+      "previousWeight": 36.0,
+      "reps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "antebrazo-prono-s5",
+      "exerciseId": "antebrazo-prono",
+      "exerciseName": "Antebrazo prono",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 5,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 33.5,
+      "previousWeight": 33.5,
+      "reps": [
+        13,
+        13,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "trapecio-crossover-force-s5",
+      "exerciseId": "trapecio-crossover-force",
+      "exerciseName": "Trapecio crossover force",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 5,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 13,
+      "weight": 59.0,
+      "previousWeight": 59.0,
+      "reps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-banca-s7",
+      "exerciseId": "abdomen-banca",
+      "exerciseName": "Abdomen banca",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 3,
+      "targetReps": 15,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "abs-colgado-s7",
+      "exerciseId": "abs-colgado",
+      "exerciseName": "Abs colgado",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        13,
+        13,
+        13
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-crossover-s7",
+      "exerciseId": "abdomen-crossover",
+      "exerciseName": "Abdomen crossover",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 50.0,
+      "previousWeight": 50.0,
+      "reps": [
+        15,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "dominadas-s7",
+      "exerciseId": "dominadas",
+      "exerciseName": "Dominadas",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 10,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "remo-polea-unilateral-s7",
+      "exerciseId": "remo-polea-unilateral",
+      "exerciseName": "Remo polea unilateral",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "pulldown-estrecho-s7",
+      "exerciseId": "pulldown-estrecho",
+      "exerciseName": "Pulldown estrecho",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 52.0,
+      "previousWeight": 52.0,
+      "reps": [
+        15,
+        15,
+        15,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "posterior-mancuernas-s7",
+      "exerciseId": "posterior-mancuernas",
+      "exerciseName": "Posterior mancuernas",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 35.0,
+      "previousWeight": 35.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "curl-biceps-martillo-s7",
+      "exerciseId": "curl-biceps-martillo",
+      "exerciseName": "Curl biceps martillo",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 12.0,
+      "previousWeight": 12.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "culr-biceps-con-giro-s7",
+      "exerciseId": "culr-biceps-con-giro",
+      "exerciseName": "Culr biceps con giro",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 15.0,
+      "previousWeight": 15.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "antebrazo-supino-s7",
+      "exerciseId": "antebrazo-supino",
+      "exerciseName": "Antebrazo supino",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 36.0,
+      "previousWeight": 36.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "trapecio-crossover-force-s7",
+      "exerciseId": "trapecio-crossover-force",
+      "exerciseName": "Trapecio crossover force",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 7,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 31.0,
+      "previousWeight": 31.0,
+      "reps": [
+        15,
+        15,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-banca-s8",
+      "exerciseId": "abdomen-banca",
+      "exerciseName": "Abdomen banca",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 3,
+      "targetReps": 10,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "abs-colgado-s8",
+      "exerciseId": "abs-colgado",
+      "exerciseName": "Abs colgado",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        13,
+        13,
+        13
+      ],
+      "notes": null
+    },
+    {
+      "id": "abdomen-crossover-s8",
+      "exerciseId": "abdomen-crossover",
+      "exerciseName": "Abdomen crossover",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 3,
+      "targetReps": 15,
+      "weight": 50.0,
+      "previousWeight": 50.0,
+      "reps": [
+        15,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "dominadas-s8",
+      "exerciseId": "dominadas",
+      "exerciseName": "Dominadas",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 0.0,
+      "previousWeight": 0.0,
+      "reps": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "remo-polea-unilateral-s8",
+      "exerciseId": "remo-polea-unilateral",
+      "exerciseName": "Remo polea unilateral",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 40.0,
+      "previousWeight": 40.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "pulldown-estrecho-s8",
+      "exerciseId": "pulldown-estrecho",
+      "exerciseName": "Pulldown estrecho",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 52.0,
+      "previousWeight": 52.0,
+      "reps": [
+        15,
+        15,
+        15,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "posterior-mancuernas-s8",
+      "exerciseId": "posterior-mancuernas",
+      "exerciseName": "Posterior mancuernas",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 35.0,
+      "previousWeight": 35.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "curl-biceps-martillo-s8",
+      "exerciseId": "curl-biceps-martillo",
+      "exerciseName": "Curl biceps martillo",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 12.0,
+      "previousWeight": 12.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "culr-biceps-con-giro-s8",
+      "exerciseId": "culr-biceps-con-giro",
+      "exerciseName": "Culr biceps con giro",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 8,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 15.0,
+      "previousWeight": 15.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "antebrazo-supino-s9",
+      "exerciseId": "antebrazo-supino",
+      "exerciseName": "Antebrazo supino",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 9,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 36.0,
+      "previousWeight": 36.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "trapecio-crossover-force-s9",
+      "exerciseId": "trapecio-crossover-force",
+      "exerciseName": "Trapecio crossover force",
+      "routine": "Espalda Bíceps Abdomen",
+      "week": 9,
+      "date": "2026-05-31",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 31.0,
+      "previousWeight": 31.0,
+      "reps": [
+        15,
+        15,
+        15,
+        15
+      ],
+      "notes": null
+    },
+    {
+      "id": "b-lgaras-s1",
+      "exerciseId": "b-lgaras",
+      "exerciseName": "Búlgaras",
+      "routine": "Piernas",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        12,
+        12,
+        12
+      ],
+      "notes": "Agregada desde semana 2."
+    },
+    {
+      "id": "sentadilla-libre-s1",
+      "exerciseId": "sentadilla-libre",
+      "exerciseName": "Sentadilla libre",
+      "routine": "Piernas",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 105.0,
+      "previousWeight": 105.0,
+      "reps": [
+        12,
+        12,
+        12,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "hack-s1",
+      "exerciseId": "hack",
+      "exerciseName": "Hack",
+      "routine": "Piernas",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 180.0,
+      "previousWeight": 180.0,
+      "reps": [
+        6,
+        6,
+        6,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "cu-driceps-s1",
+      "exerciseId": "cu-driceps",
+      "exerciseName": "Cuádriceps",
+      "routine": "Piernas",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 75.0,
+      "previousWeight": 75.0,
+      "reps": [
+        15,
+        10,
+        10,
+        10
+      ],
+      "notes": "Parciales registrados como nota; reps efectivas en columnas."
+    },
+    {
+      "id": "hip-thrust-s1",
+      "exerciseId": "hip-thrust",
+      "exerciseName": "Hip thrust",
+      "routine": "Piernas",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 130.0,
+      "previousWeight": 130.0,
+      "reps": [
+        8,
+        8,
+        8,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "femoral-acostado-s1",
+      "exerciseId": "femoral-acostado",
+      "exerciseName": "Femoral acostado",
+      "routine": "Piernas",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 45.0,
+      "previousWeight": 45.0,
+      "reps": [
+        15,
+        15,
+        15,
+        12
+      ],
+      "notes": "Última serie con 12 efectivas."
+    },
+    {
+      "id": "rumano-s1",
+      "exerciseId": "rumano",
+      "exerciseName": "Rumano",
+      "routine": "Piernas",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 125.0,
+      "previousWeight": 125.0,
+      "reps": [
+        6,
+        6,
+        6,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "abductor-s1",
+      "exerciseId": "abductor",
+      "exerciseName": "Abductor",
+      "routine": "Piernas",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 55.0,
+      "previousWeight": 55.0,
+      "reps": [
+        12,
+        10,
+        8,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "b-lgaras-s1",
+      "exerciseId": "b-lgaras",
+      "exerciseName": "Búlgaras",
+      "routine": "Piernas",
+      "week": 1,
+      "date": "2026-05-03",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 30.0,
+      "previousWeight": 30.0,
+      "reps": [
+        12,
+        12,
+        12
+      ],
+      "notes": "Agregada desde semana 2."
+    },
+    {
+      "id": "sentadilla-libre-s2",
+      "exerciseId": "sentadilla-libre",
+      "exerciseName": "Sentadilla libre",
+      "routine": "Piernas",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 105.0,
+      "previousWeight": 105.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "hack-s2",
+      "exerciseId": "hack",
+      "exerciseName": "Hack",
+      "routine": "Piernas",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 180.0,
+      "previousWeight": 180.0,
+      "reps": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "notes": null
+    },
+    {
+      "id": "cu-driceps-s2",
+      "exerciseId": "cu-driceps",
+      "exerciseName": "Cuádriceps",
+      "routine": "Piernas",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 75.0,
+      "previousWeight": 75.0,
+      "reps": [
+        15,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "hip-thrust-s2",
+      "exerciseId": "hip-thrust",
+      "exerciseName": "Hip thrust",
+      "routine": "Piernas",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 150.0,
+      "previousWeight": 150.0,
+      "reps": [
+        6,
+        6,
+        6,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "femoral-acostado-s2",
+      "exerciseId": "femoral-acostado",
+      "exerciseName": "Femoral acostado",
+      "routine": "Piernas",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 45.0,
+      "previousWeight": 45.0,
+      "reps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "notes": null
+    },
+    {
+      "id": "rumano-s2",
+      "exerciseId": "rumano",
+      "exerciseName": "Rumano",
+      "routine": "Piernas",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 125.0,
+      "previousWeight": 125.0,
+      "reps": [
+        6,
+        6,
+        6,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "abductor-s2",
+      "exerciseId": "abductor",
+      "exerciseName": "Abductor",
+      "routine": "Piernas",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 55.0,
+      "previousWeight": 55.0,
+      "reps": [
+        12,
+        10,
+        9,
+        9
+      ],
+      "notes": null
+    },
+    {
+      "id": "b-lgaras-s2",
+      "exerciseId": "b-lgaras",
+      "exerciseName": "Búlgaras",
+      "routine": "Piernas",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 35.0,
+      "previousWeight": 35.0,
+      "reps": [
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "sentadilla-libre-s2",
+      "exerciseId": "sentadilla-libre",
+      "exerciseName": "Sentadilla libre",
+      "routine": "Piernas",
+      "week": 2,
+      "date": "2026-05-10",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 110.0,
+      "previousWeight": 110.0,
+      "reps": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "hack-s3",
+      "exerciseId": "hack",
+      "exerciseName": "Hack",
+      "routine": "Piernas",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 180.0,
+      "previousWeight": 180.0,
+      "reps": [
+        8,
+        8,
+        8,
+        8
+      ],
+      "notes": null
+    },
+    {
+      "id": "cu-driceps-s3",
+      "exerciseId": "cu-driceps",
+      "exerciseName": "Cuádriceps",
+      "routine": "Piernas",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 75.0,
+      "previousWeight": 75.0,
+      "reps": [
+        15,
+        13,
+        13,
+        13
+      ],
+      "notes": null
+    },
+    {
+      "id": "hip-thrust-s3",
+      "exerciseId": "hip-thrust",
+      "exerciseName": "Hip thrust",
+      "routine": "Piernas",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 150.0,
+      "previousWeight": 150.0,
+      "reps": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "notes": null
+    },
+    {
+      "id": "femoral-acostado-s3",
+      "exerciseId": "femoral-acostado",
+      "exerciseName": "Femoral acostado",
+      "routine": "Piernas",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 45.0,
+      "previousWeight": 45.0,
+      "reps": [
+        17,
+        17,
+        17,
+        13
+      ],
+      "notes": null
+    },
+    {
+      "id": "rumano-s3",
+      "exerciseId": "rumano",
+      "exerciseName": "Rumano",
+      "routine": "Piernas",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 60.0,
+      "previousWeight": 60.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "abductor-s3",
+      "exerciseId": "abductor",
+      "exerciseName": "Abductor",
+      "routine": "Piernas",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 55.0,
+      "previousWeight": 55.0,
+      "reps": [
+        12,
+        9,
+        9,
+        9
+      ],
+      "notes": null
+    },
+    {
+      "id": "b-lgaras-s3",
+      "exerciseId": "b-lgaras",
+      "exerciseName": "Búlgaras",
+      "routine": "Piernas",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 3,
+      "targetReps": 12,
+      "weight": 35.0,
+      "previousWeight": 35.0,
+      "reps": [
+        11,
+        11,
+        11
+      ],
+      "notes": "Agregada desde semana 2."
+    },
+    {
+      "id": "sentadilla-libre-s3",
+      "exerciseId": "sentadilla-libre",
+      "exerciseName": "Sentadilla libre",
+      "routine": "Piernas",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 110.0,
+      "previousWeight": 110.0,
+      "reps": [
+        11,
+        11,
+        10,
+        10
+      ],
+      "notes": null
+    },
+    {
+      "id": "hack-s3",
+      "exerciseId": "hack",
+      "exerciseName": "Hack",
+      "routine": "Piernas",
+      "week": 3,
+      "date": "2026-05-17",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 185.0,
+      "previousWeight": 185.0,
+      "reps": [
+        6,
+        6,
+        6,
+        6
+      ],
+      "notes": null
+    },
+    {
+      "id": "cu-driceps-s4",
+      "exerciseId": "cu-driceps",
+      "exerciseName": "Cuádriceps",
+      "routine": "Piernas",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 75.0,
+      "previousWeight": 75.0,
+      "reps": [
+        15,
+        14,
+        14,
+        14
+      ],
+      "notes": null
+    },
+    {
+      "id": "hip-thrust-s4",
+      "exerciseId": "hip-thrust",
+      "exerciseName": "Hip thrust",
+      "routine": "Piernas",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 8,
+      "weight": 150.0,
+      "previousWeight": 150.0,
+      "reps": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "notes": null
+    },
+    {
+      "id": "femoral-acostado-s4",
+      "exerciseId": "femoral-acostado",
+      "exerciseName": "Femoral acostado",
+      "routine": "Piernas",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 15,
+      "weight": 45.0,
+      "previousWeight": 45.0,
+      "reps": [
+        17,
+        17,
+        17,
+        14
+      ],
+      "notes": null
+    },
+    {
+      "id": "rumano-s4",
+      "exerciseId": "rumano",
+      "exerciseName": "Rumano",
+      "routine": "Piernas",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 6,
+      "weight": 60.0,
+      "previousWeight": 60.0,
+      "reps": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "notes": null
+    },
+    {
+      "id": "abductor-s4",
+      "exerciseId": "abductor",
+      "exerciseName": "Abductor",
+      "routine": "Piernas",
+      "week": 4,
+      "date": "2026-05-24",
+      "targetSets": 4,
+      "targetReps": 12,
+      "weight": 55.0,
+      "previousWeight": 55.0,
+      "reps": [
+        12,
+        9,
+        9,
+        9
+      ],
+      "notes": null
+    }
+  ]
+}
