@@ -26,6 +26,7 @@ create table public.exercises (
   target_reps integer not null check (target_reps > 0),
   base_weight numeric(7,2) not null default 0,
   side_weight numeric(7,2),
+  day text,
   notes text,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()

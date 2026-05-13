@@ -53,12 +53,19 @@ export async function saveExercise(exercise: ExerciseTemplate): Promise<Exercise
     target_reps: exercise.targetReps,
     base_weight: exercise.baseWeight,
     side_weight: exercise.sideWeight ?? null,
+    day: exercise.day ?? null,
     notes: exercise.notes ?? null,
   };
 
-  const { data, error } = await supabase.from("exercises").upsert(payload).select("id").single();
+  let { data, error } = await supabase.from("exercises").upsert(payload).select("id").single();
+  if (isMissingDayColumnError(error)) {
+    const { day: _day, ...payloadWithoutDay } = payload;
+    const retry = await supabase.from("exercises").upsert(payloadWithoutDay).select("id").single();
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) throw error;
-  return { ...exercise, id: data.id };
+  return { ...exercise, id: data!.id };
 }
 
 export async function deleteExercise(exerciseId: string): Promise<void> {
@@ -186,11 +193,24 @@ async function fetchExercises(userId: string): Promise<ExerciseTemplate[]> {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return [];
 
-  const { data, error } = await supabase
+  const response = await supabase
     .from("exercises")
-    .select("id,name,target_sets,target_reps,base_weight,side_weight,notes,routines(name)")
+    .select("id,name,target_sets,target_reps,base_weight,side_weight,day,notes,routines(name)")
     .eq("user_id", userId)
     .order("created_at");
+  let data: unknown = response.data;
+  let error = response.error;
+
+  if (isMissingDayColumnError(error)) {
+    const retry = await supabase
+      .from("exercises")
+      .select("id,name,target_sets,target_reps,base_weight,side_weight,notes,routines(name)")
+      .eq("user_id", userId)
+      .order("created_at");
+
+    data = retry.data as unknown;
+    error = retry.error;
+  }
 
   if (error) throw error;
 
@@ -202,6 +222,7 @@ async function fetchExercises(userId: string): Promise<ExerciseTemplate[]> {
     targetReps: row.target_reps,
     baseWeight: Number(row.base_weight),
     sideWeight: row.side_weight === null ? undefined : Number(row.side_weight),
+    day: readExerciseDay(row.day, row.notes),
     notes: row.notes ?? undefined,
   }));
 }
@@ -304,6 +325,19 @@ function readRoutineName(value: string | undefined): RoutineName {
   return value?.trim() || "Pecho Hombro Tríceps";
 }
 
+function readExerciseDay(day: string | null | undefined, notes: string | null) {
+  if (day?.trim()) return day;
+  const match = notes?.match(/Rutina creada para ([^.]+)\./i);
+  return match?.[1]?.trim() || undefined;
+}
+
+function isMissingDayColumnError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const message = "message" in error ? String(error.message) : "";
+  const code = "code" in error ? String(error.code) : "";
+  return code === "PGRST204" || (message.toLowerCase().includes("day") && message.toLowerCase().includes("column"));
+}
+
 function firstRelation<T>(value: T | T[] | null): T {
   if (Array.isArray(value)) return value[0];
   if (!value) throw new Error("No se pudo leer una relación de Supabase.");
@@ -317,6 +351,7 @@ interface SupabaseExerciseRow {
   target_reps: number;
   base_weight: number | string;
   side_weight: number | string | null;
+  day?: string | null;
   notes: string | null;
   routines: { name?: string } | Array<{ name?: string }> | null;
 }

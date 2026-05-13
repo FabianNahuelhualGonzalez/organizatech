@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { calculateExerciseMetrics, calculateObjectiveStatus } from "./calculations";
+import { calculateExerciseMetrics, calculateObjectiveStatus, calculateWeeklySummary } from "./calculations";
 
 assert.equal(calculateObjectiveStatus(2, 0), "Cumplimos", "clasifica Cumplimos si suben repeticiones");
 
@@ -24,5 +24,23 @@ const result = calculateExerciseMetrics({
 assert.equal(result.totalReps, 42, "calcula total de repeticiones");
 assert.equal(result.volumeTotal, 3780, "calcula volumen como reps por peso");
 assert.equal(result.objectiveStatus, "Cumplimos", "clasifica progreso combinado");
+
+const maintained = calculateExerciseMetrics({
+  id: "2",
+  exerciseId: "crossover",
+  exerciseName: "Inclinado crossover",
+  routine: "Pecho Hombro TrÃ­ceps",
+  week: 1,
+  date: "2026-05-13",
+  targetSets: 4,
+  targetReps: 10,
+  weight: 45,
+  previousWeight: 45,
+  reps: [10, 10, 10, 10],
+});
+
+const firstWeekSummary = calculateWeeklySummary([result, maintained], 4);
+assert.equal(firstWeekSummary.repsDifference, 2, "compara reps contra objetivo cuando no hay semana anterior");
+assert.equal(firstWeekSummary.exerciseDifference, 0, "no cuenta objetivos cumplidos como ejercicios nuevos");
 
 console.log("Pruebas de progreso OK");

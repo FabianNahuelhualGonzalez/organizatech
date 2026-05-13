@@ -54,6 +54,7 @@ export interface WeeklySummary {
   volumeDifference: number;
   volumePercentage: number;
   repsDifference: number;
+  exerciseDifference: number;
   complianceRate: number;
 }
 

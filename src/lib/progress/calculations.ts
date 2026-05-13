@@ -65,10 +65,15 @@ export function calculateWeeklySummary(metrics: ExerciseMetrics[], week: number)
   const previousReps = previous.reduce((total, entry) => total + entry.totalReps, 0);
   const volumeTotal = current.reduce((total, entry) => total + entry.volumeTotal, 0);
   const totalReps = current.reduce((total, entry) => total + entry.totalReps, 0);
+  const fallbackVolumeDifference = current.reduce((total, entry) => total + entry.volumeDifference, 0);
+  const fallbackPreviousVolume = volumeTotal - fallbackVolumeDifference;
+  const fallbackRepsDifference = current.reduce((total, entry) => total + entry.repsDifference, 0);
+  const hasPreviousWeek = previous.length > 0;
   const objectivesOk = current.filter((entry) => entry.objectiveStatus === "Cumplimos").length;
   const objectivesFailed = current.filter((entry) => entry.objectiveStatus === "No cumplimos").length;
   const objectivesMaintained = current.filter((entry) => entry.objectiveStatus === "Mantenemos esfuerzo").length;
-  const volumeDifference = volumeTotal - previousVolume;
+  const volumeDifference = hasPreviousWeek ? volumeTotal - previousVolume : fallbackVolumeDifference;
+  const comparisonVolume = hasPreviousWeek ? previousVolume : fallbackPreviousVolume;
 
   return {
     week,
@@ -79,8 +84,9 @@ export function calculateWeeklySummary(metrics: ExerciseMetrics[], week: number)
     objectivesFailed,
     objectivesMaintained,
     volumeDifference,
-    volumePercentage: previousVolume > 0 ? (volumeDifference / previousVolume) * 100 : 0,
-    repsDifference: totalReps - previousReps,
+    volumePercentage: comparisonVolume > 0 ? (volumeDifference / comparisonVolume) * 100 : 0,
+    repsDifference: hasPreviousWeek ? totalReps - previousReps : fallbackRepsDifference,
+    exerciseDifference: hasPreviousWeek ? current.length - previous.length : 0,
     complianceRate: current.length > 0 ? Math.round((objectivesOk / current.length) * 100) : 0,
   };
 }

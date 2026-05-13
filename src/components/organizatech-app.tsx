@@ -4,9 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowDown,
+  ArrowRight,
   ArrowUp,
   Bell,
   CalendarDays,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Database,
   Dumbbell,
   Lock,
@@ -66,12 +70,13 @@ type Screen =
   | "resumen"
   | "inteligente";
 
-const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "comparacion", "historial", "analitica", "perfil", "graficos", "resumen", "inteligente"];
+const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "comparacion", "analitica", "perfil", "graficos", "resumen", "inteligente"];
 const routines: RoutineName[] = ["Pecho Hombro Tríceps", "Espalda Bíceps Abdomen", "Piernas"];
 const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
 interface SetupExerciseRow {
   id: string;
+  sourceExerciseId?: string;
   name: string;
   sets: number;
   reps: number;
@@ -104,9 +109,13 @@ export function OrganizatechApp() {
   const [formWeight, setFormWeight] = useState(90);
   const [formRir, setFormRir] = useState("RIR 1-2");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isEditingRoutinePlan, setIsEditingRoutinePlan] = useState(false);
+  const [routineNotice, setRoutineNotice] = useState("");
+  const [isTopbarHidden, setIsTopbarHidden] = useState(false);
   const [setupDay, setSetupDay] = useState("Lunes");
   const [setupByDay, setSetupByDay] = useState<Record<string, SetupDayState>>(() => createSetupByDay());
   const [activeRoutineDay, setActiveRoutineDay] = useState("Lunes");
+  const [comparisonDay, setComparisonDay] = useState("Lunes");
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
   const [exerciseDrafts, setExerciseDrafts] = useState<Record<string, ExerciseDraft>>({});
 
@@ -117,10 +126,24 @@ export function OrganizatechApp() {
     }
   }, []);
 
+  useEffect(() => {
+    let lastY = window.scrollY;
+    function handleScroll() {
+      const currentY = window.scrollY;
+      const isScrollingDown = currentY > lastY;
+      setIsTopbarHidden(currentY > 80 && isScrollingDown);
+      lastY = currentY;
+    }
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
   const metrics = useMemo(() => calculateWeeklyComparison(entries), [entries]);
   const currentWeek = Math.max(1, ...entries.map((entry) => entry.week));
   const hasTrainingEntries = entries.length > 0;
   const hasRoutinePlan = exercises.length > 0;
+  const routineDays = getRoutineDays(exercises);
   const visibleDay = getVisibleTrainingDay(exercises, activeRoutineDay);
   const dayExercises = exercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay);
   const visibleRoutine = dayExercises[0]?.routine ?? setupByDay[visibleDay]?.routineName ?? visibleDay;
@@ -159,6 +182,7 @@ export function OrganizatechApp() {
       setDataSource(next.source);
       setSelectedExerciseId((current) => current || next.exercises[0]?.id || "");
       setActiveRoutineDay((current) => getVisibleTrainingDay(next.exercises, current));
+      setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
       setStatusMessage(next.source === "supabase" ? "Datos sincronizados con Supabase." : "Datos guardados en este dispositivo.");
     } catch (error) {
       setStatusMessage(readError(error));
@@ -273,6 +297,7 @@ export function OrganizatechApp() {
   }
 
   function navigateTo(nextScreen: Screen) {
+    if (nextScreen !== "entrenamiento") setIsEditingRoutinePlan(false);
     setScreen(nextScreen);
     setIsMenuOpen(false);
   }
@@ -284,13 +309,13 @@ export function OrganizatechApp() {
     setFormReps(Array.from({ length: exercise?.targetSets ?? 4 }, () => exercise?.targetReps ?? 10));
   }
 
-  function updateSetupRow(id: string, field: keyof Omit<SetupExerciseRow, "id">, value: string) {
+  function updateSetupRow(id: string, field: keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId">, value: string) {
     setSetupByDay((current) =>
       updateSetupDay(current, setupDay, (state) => ({
         ...state,
         rows: state.rows.map((row) => (
           row.id === id
-            ? { ...row, [field]: field === "name" ? value : Number(value) }
+            ? { ...row, [field]: field === "name" ? value : readSetupNumber(value) }
             : row
         )),
       })),
@@ -318,10 +343,19 @@ export function OrganizatechApp() {
     );
   }
 
+  function openRoutineEditor(day = visibleDay) {
+    setSetupByDay(createSetupByDayFromExercises(exercises));
+    setSetupDay(day);
+    setIsEditingRoutinePlan(true);
+    setIsMenuOpen(false);
+    setScreen("entrenamiento");
+  }
+
   async function saveInitialRoutine() {
     const dayState = setupByDay[setupDay] ?? createSetupDayState();
     const routineName = dayState.routineName.trim() || setupDay;
     const validRows = dayState.rows.filter((row) => row.name.trim());
+    const shouldStayInEditor = hasRoutinePlan || isEditingRoutinePlan;
 
     if (validRows.length === 0) {
       setStatusMessage("Agrega al menos un ejercicio para crear la rutina.");
@@ -333,7 +367,7 @@ export function OrganizatechApp() {
       let firstExerciseId = "";
       for (const row of validRows) {
         const exercise = await saveExercise({
-          id: crypto.randomUUID(),
+          id: row.sourceExerciseId ?? row.id,
           routine: routineName,
           day: setupDay,
           name: row.name.trim(),
@@ -349,8 +383,25 @@ export function OrganizatechApp() {
       await refreshData();
       if (firstExerciseId) setSelectedExerciseId(firstExerciseId);
       setActiveRoutineDay(setupDay);
-      setStatusMessage("Rutina inicial registrada.");
-      setScreen("dashboard");
+      setSetupByDay((current) => ({
+        ...current,
+        [setupDay]: {
+          routineName,
+          rows: validRows.map((row) => ({
+            ...row,
+            sourceExerciseId: row.sourceExerciseId ?? row.id,
+          })),
+        },
+      }));
+      const successMessage = `Rutina de ${setupDay} guardada.`;
+      setStatusMessage(shouldStayInEditor ? successMessage : "Rutina inicial registrada.");
+      setRoutineNotice(successMessage);
+      if (shouldStayInEditor) {
+        setIsEditingRoutinePlan(false);
+        setScreen("entrenamiento");
+      } else {
+        setScreen("dashboard");
+      }
     } catch (error) {
       setStatusMessage(readError(error));
     } finally {
@@ -377,6 +428,7 @@ export function OrganizatechApp() {
     const firstExercise = exercises.find((exercise) => (exercise.day ?? day) === day);
     setActiveRoutineDay(day);
     setActiveExerciseIndex(0);
+    setRoutineNotice("");
     if (firstExercise) selectExerciseForTraining(firstExercise.id);
     setScreen("entrenamiento");
   }
@@ -446,6 +498,66 @@ export function OrganizatechApp() {
     }
   }
 
+  async function loadComparisonDemoData() {
+    if (exercises.length === 0) {
+      setStatusMessage("Crea una rutina antes de cargar datos de prueba.");
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const savedEntries: ExerciseEntry[] = [];
+      const baseDate = new Date().toISOString().slice(0, 10);
+
+      for (const exercise of exercises) {
+        const weekOneReps = Array.from({ length: exercise.targetSets }, () => exercise.targetReps);
+        const weekTwoReps = createDemoWeekTwoReps(exercise);
+        const weekTwoWeight = createDemoWeekTwoWeight(exercise);
+
+        const weekOne = await saveTrainingEntry({
+          id: crypto.randomUUID(),
+          exerciseId: exercise.id,
+          exerciseName: exercise.name,
+          routine: exercise.routine,
+          week: 1,
+          date: baseDate,
+          targetSets: exercise.targetSets,
+          targetReps: exercise.targetReps,
+          weight: exercise.baseWeight,
+          previousWeight: exercise.baseWeight,
+          reps: weekOneReps,
+          rir: "RIR 1-2",
+          notes: `Datos demo semana 1: ${exercise.day ?? "Lunes"}.`,
+        });
+
+        const weekTwo = await saveTrainingEntry({
+          id: crypto.randomUUID(),
+          exerciseId: exercise.id,
+          exerciseName: exercise.name,
+          routine: exercise.routine,
+          week: 2,
+          date: baseDate,
+          targetSets: exercise.targetSets,
+          targetReps: exercise.targetReps,
+          weight: weekTwoWeight,
+          previousWeight: exercise.baseWeight,
+          reps: weekTwoReps,
+          rir: "RIR 1-2",
+          notes: `Datos demo semana 2: ${exercise.day ?? "Lunes"}.`,
+        });
+
+        savedEntries.push(weekOne, weekTwo);
+      }
+
+      setEntries((current) => [...current, ...savedEntries]);
+      setStatusMessage("Datos de prueba cargados para comparar semana 2 vs semana 1.");
+    } catch (error) {
+      setStatusMessage(readError(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   if (screen === "login") {
     return (
       <main className="app-shell">
@@ -466,7 +578,7 @@ export function OrganizatechApp() {
 
   return (
     <main className="app-shell">
-      <header className="topbar">
+      <header className={`topbar ${isTopbarHidden ? "hidden" : ""}`}>
         <button
           className={`icon-button menu-trigger ${isMenuOpen ? "active" : ""}`}
           aria-label="Abrir menú"
@@ -548,9 +660,10 @@ export function OrganizatechApp() {
           currentMetrics={currentMetrics}
           startRegistration={() => setScreen("entrenamiento")}
           goToRoutine={() => openRoutineDay(visibleDay)}
+          editRoutine={() => openRoutineEditor(visibleDay)}
         />
       )}
-      {screen === "entrenamiento" && !hasRoutinePlan && (
+      {screen === "entrenamiento" && (!hasRoutinePlan || isEditingRoutinePlan) && (
         <InitialTrainingScreen
           day={setupDay}
           setDay={setSetupDay}
@@ -561,10 +674,17 @@ export function OrganizatechApp() {
           addRow={addSetupRow}
           removeRow={removeSetupRow}
           saveRoutine={saveInitialRoutine}
+          message={statusMessage}
           isBusy={isBusy}
+          isEditing={hasRoutinePlan || isEditingRoutinePlan}
+          configuredDays={setupDays.filter((day) => setupByDay[day]?.rows.some((row) => row.name.trim()))}
+          cancelEditing={() => {
+            setIsEditingRoutinePlan(false);
+            setScreen(hasRoutinePlan ? "entrenamiento" : "dashboard");
+          }}
         />
       )}
-      {screen === "entrenamiento" && hasRoutinePlan && (
+      {screen === "entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && (
         <GuidedTrainingScreen
           day={visibleDay}
           routine={visibleRoutine}
@@ -576,10 +696,24 @@ export function OrganizatechApp() {
           updateDraft={updateExerciseDraft}
           registerExercise={registerCurrentExercise}
           saveCompletedTraining={saveCompletedTraining}
+          editRoutine={() => openRoutineEditor(visibleDay)}
+          routineDays={routineDays}
+          switchDay={openRoutineDay}
+          notice={routineNotice}
           isBusy={isBusy}
         />
       )}
-      {screen === "comparacion" && <ComparisonScreen currentMetrics={currentMetrics} summary={summary} previousSummary={previousSummary} />}
+      {screen === "comparacion" && (
+        <ComparisonScreenV2
+          exercises={exercises}
+          metrics={metrics}
+          currentWeek={currentWeek}
+          selectedDay={comparisonDay}
+          setSelectedDay={setComparisonDay}
+          loadDemoData={loadComparisonDemoData}
+          isBusy={isBusy}
+        />
+      )}
       {screen === "historial" && (
         <HistoryScreen exercises={exercises} selectedExerciseId={selectedExerciseId} setSelectedExerciseId={setSelectedExerciseId} history={selectedHistory} />
       )}
@@ -654,6 +788,7 @@ function DashboardScreen({
   currentMetrics,
   startRegistration,
   goToRoutine,
+  editRoutine,
 }: {
   exercises: ExerciseTemplate[];
   hasTrainingEntries: boolean;
@@ -666,6 +801,7 @@ function DashboardScreen({
   currentMetrics: ExerciseMetrics[];
   startRegistration: () => void;
   goToRoutine: () => void;
+  editRoutine: () => void;
 }) {
   const chartData = currentMetrics.map((entry) => ({ name: entry.exerciseName, volumen: entry.volumeTotal }));
   const todayLabel = new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date());
@@ -703,6 +839,9 @@ function DashboardScreen({
           <button className="button secondary" style={{ width: "100%", marginTop: 12 }} onClick={goToRoutine}>
             Ir a rutina
           </button>
+          <button className="button secondary" style={{ width: "100%", marginTop: 8 }} onClick={editRoutine}>
+            Editar rutina semanal
+          </button>
         </div>
       </section>
     );
@@ -726,12 +865,15 @@ function DashboardScreen({
       </div>
       <MetricGrid summary={summary} />
       <div className="card wide">
-        <h3>Entrenamiento de hoy {todayLabel} · {registeredTraining}</h3>
+        <h3>Entrenamiento de hoy {todayLabel} | {registeredTraining} | Resumen</h3>
         <div className="exercise-list">
           {routinePreview.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)}
         </div>
         <button className="button secondary" style={{ width: "100%", marginTop: 12 }} onClick={goToRoutine}>
           Ir a rutina
+        </button>
+        <button className="button secondary" style={{ width: "100%", marginTop: 8 }} onClick={editRoutine}>
+          Editar rutina semanal
         </button>
       </div>
     </section>
@@ -765,28 +907,47 @@ function InitialTrainingScreen({
   addRow,
   removeRow,
   saveRoutine,
+  message,
   isBusy,
+  isEditing,
+  configuredDays,
+  cancelEditing,
 }: {
   day: string;
   setDay: (value: string) => void;
   routineName: string;
   setRoutineName: (value: string) => void;
   rows: SetupExerciseRow[];
-  updateRow: (id: string, field: keyof Omit<SetupExerciseRow, "id">, value: string) => void;
+  updateRow: (id: string, field: keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId">, value: string) => void;
   addRow: () => void;
   removeRow: (id: string) => void;
   saveRoutine: () => void;
+  message: string;
   isBusy: boolean;
+  isEditing: boolean;
+  configuredDays: string[];
+  cancelEditing: () => void;
 }) {
   return (
     <section className="setup-screen">
+      {isEditing && (
+        <div className="card wide routine-editor-intro">
+          <div>
+            <p className="eyebrow">Rutina semanal</p>
+            <h3>Agrega o modifica tus días de entrenamiento</h3>
+          </div>
+          <button className="button secondary compact-button" type="button" onClick={cancelEditing}>
+            Volver
+          </button>
+        </div>
+      )}
       <div className="setup-card">
         <h3>Selecciona día de entrenamiento</h3>
         <div className="day-grid">
           {setupDays.map((item) => (
             <button
               key={item}
-              className={`day-pill ${day === item ? "active" : ""}`}
+              className={`day-pill ${day === item ? "active" : ""} ${configuredDays.includes(item) ? "configured" : ""}`}
               onClick={() => setDay(item)}
             >
               {item}
@@ -818,9 +979,9 @@ function InitialTrainingScreen({
           {rows.map((row, index) => (
             <div className="setup-row" key={row.id}>
               <input placeholder={`Ejercicio ${index + 1}`} value={row.name} onChange={(event) => updateRow(row.id, "name", event.target.value)} />
-              <input type="number" placeholder="Series" value={row.sets || ""} onChange={(event) => updateRow(row.id, "sets", event.target.value)} />
-              <input type="number" placeholder="Reps" value={row.reps || ""} onChange={(event) => updateRow(row.id, "reps", event.target.value)} />
-              <input type="number" placeholder="Kg" value={row.weight || ""} onChange={(event) => updateRow(row.id, "weight", event.target.value)} />
+              <input type="number" min={1} placeholder="Series" value={row.sets || ""} onChange={(event) => updateRow(row.id, "sets", event.target.value)} />
+              <input type="number" min={1} placeholder="Reps" value={row.reps || ""} onChange={(event) => updateRow(row.id, "reps", event.target.value)} />
+              <input type="number" min={0} placeholder="Kg" value={String(row.weight)} onChange={(event) => updateRow(row.id, "weight", event.target.value)} />
               <button className="row-delete" aria-label="Eliminar ejercicio" onClick={() => removeRow(row.id)}>
                 <Trash2 size={13} />
               </button>
@@ -830,9 +991,10 @@ function InitialTrainingScreen({
         <div className="setup-actions">
           <button className="small-green-button" onClick={addRow}>Agregar más</button>
           <button className="start-button compact" onClick={saveRoutine} disabled={isBusy}>
-            {isBusy ? "Guardando..." : "Guardar rutina"}
+            {isBusy ? "Guardando..." : isEditing ? `Guardar ${day}` : "Guardar rutina"}
           </button>
         </div>
+        <p className="setup-message">{message}</p>
       </div>
     </section>
   );
@@ -987,6 +1149,10 @@ function GuidedTrainingScreen({
   updateDraft,
   registerExercise,
   saveCompletedTraining,
+  editRoutine,
+  routineDays,
+  switchDay,
+  notice,
   isBusy,
 }: {
   day: string;
@@ -999,12 +1165,19 @@ function GuidedTrainingScreen({
   updateDraft: (exercise: ExerciseTemplate, patch: Partial<ExerciseDraft>) => void;
   registerExercise: () => void;
   saveCompletedTraining: () => void;
+  editRoutine: () => void;
+  routineDays: string[];
+  switchDay: (day: string) => void;
+  notice: string;
   isBusy: boolean;
 }) {
   const activeExercise = exercises[activeIndex] ?? exercises[0];
   const draft = activeExercise ? (drafts[activeExercise.id] ?? createExerciseDraft(activeExercise)) : null;
   const completedCount = exercises.filter((exercise) => drafts[exercise.id]?.registered).length;
   const allRegistered = exercises.length > 0 && completedCount === exercises.length;
+  const currentDayIndex = Math.max(0, routineDays.indexOf(day));
+  const previousDay = routineDays[(currentDayIndex - 1 + routineDays.length) % routineDays.length] ?? day;
+  const nextDay = routineDays[(currentDayIndex + 1) % routineDays.length] ?? day;
   const preview = activeExercise && draft
     ? calculateExerciseMetrics({
         id: "preview",
@@ -1034,29 +1207,72 @@ function GuidedTrainingScreen({
 
   return (
     <section className="screen">
+      <div className="card wide day-switcher-card">
+        <button className="icon-button" type="button" aria-label="Rutina anterior" onClick={() => switchDay(previousDay)} disabled={routineDays.length <= 1}>
+          <ChevronLeft size={19} />
+        </button>
+        <div className="routine-day-pills">
+          {routineDays.map((item) => (
+            <button
+              key={item}
+              className={`routine-day-pill ${item === day ? "active" : ""}`}
+              type="button"
+              onClick={() => switchDay(item)}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+        <button className="icon-button" type="button" aria-label="Rutina siguiente" onClick={() => switchDay(nextDay)} disabled={routineDays.length <= 1}>
+          <ChevronRight size={19} />
+        </button>
+      </div>
+
       <div className="card wide routine-summary-card">
-        <p className="eyebrow">{routine}</p>
         <h3>Entrenamiento día {day}</h3>
+        <p className="eyebrow">{routine}</p>
+        {notice ? <div className="notice-banner">{notice}</div> : null}
         <p className="eyebrow">Ejercicio {activeIndex + 1} de {exercises.length} · {completedCount} registrados</p>
         <div className="metric-grid">
           <div className="metric"><span>Volumen total entrenamiento</span><strong>{formatKg(targetSummary.volume)}</strong></div>
           <div className="metric"><span>Total reps</span><strong>{targetSummary.reps}</strong></div>
           <div className="metric"><span>Ejercicios total</span><strong>{targetSummary.exerciseCount}</strong></div>
         </div>
+        <button className="button secondary" type="button" onClick={editRoutine}>
+          <Pencil size={16} />
+          Editar rutina semanal
+        </button>
       </div>
 
       <div className="card wide">
-        <h3>Ejercicios a realizar</h3>
-        <div className="routine-tabs">
-          {exercises.map((exercise, index) => (
-            <button
-              key={exercise.id}
-              className={`routine-tab ${index === activeIndex ? "active" : ""} ${drafts[exercise.id]?.registered ? "done" : ""}`}
-              onClick={() => setActiveIndex(index)}
-            >
-              {exercise.name}
-            </button>
-          ))}
+        <div className="section-heading">
+          <div>
+            <h3>Ejercicios a realizar</h3>
+            <p className="eyebrow">Elige el ejercicio, revisa el objetivo y registra tus series.</p>
+          </div>
+        </div>
+        <div className="routine-list">
+          {exercises.map((exercise, index) => {
+            const isActive = index === activeIndex;
+            const isDone = Boolean(drafts[exercise.id]?.registered);
+
+            return (
+              <button
+                key={exercise.id}
+                className={`routine-item ${isActive ? "active" : ""} ${isDone ? "done" : ""}`}
+                onClick={() => setActiveIndex(index)}
+              >
+                <span className="routine-item-index">{index + 1}</span>
+                <span className="routine-item-main">
+                  <strong>{exercise.name}</strong>
+                  <small>{exercise.targetSets} series · {exercise.targetReps} reps · {exercise.baseWeight} kg</small>
+                </span>
+                <span className="routine-item-status">
+                  {isDone ? "Registrado" : isActive ? "Actual" : "Pendiente"}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1107,19 +1323,292 @@ function GuidedTrainingScreen({
   );
 }
 
-function ComparisonScreen({ currentMetrics, summary, previousSummary }: { currentMetrics: ExerciseMetrics[]; summary: ReturnType<typeof calculateWeeklySummary>; previousSummary: ReturnType<typeof calculateWeeklySummary> }) {
+function ComparisonScreen({
+  exercises,
+  metrics,
+  currentWeek,
+  selectedDay,
+  setSelectedDay,
+  loadDemoData,
+  isBusy,
+}: {
+  exercises: ExerciseTemplate[];
+  metrics: ExerciseMetrics[];
+  currentWeek: number;
+  selectedDay: string;
+  setSelectedDay: (day: string) => void;
+  loadDemoData: () => void;
+  isBusy: boolean;
+}) {
+  const routineDays = getRoutineDays(exercises);
+  const activeDay = routineDays.includes(selectedDay) ? selectedDay : routineDays[0];
+  const dayExercises = exercises.filter((exercise) => (exercise.day ?? "Lunes") === activeDay);
+  const dayExerciseIds = new Set(dayExercises.map((exercise) => exercise.id));
+  const dayMetrics = metrics.filter((entry) => dayExerciseIds.has(entry.exerciseId));
+  const currentMetrics = dayMetrics.filter((entry) => entry.week === currentWeek);
+  const summary = calculateWeeklySummary(dayMetrics, currentWeek);
+  const routineName = dayExercises[0]?.routine ?? activeDay;
+  const title = currentWeek > 1
+    ? "Rutina registrada vs semana " + currentWeek + " vs semana " + (currentWeek - 1)
+    : "Rutina registrada vs semana 1";
+
   return (
     <section className="screen">
-      <div className="segmented wide">
-        <button className="tab active">Semana {summary.week}</button>
-        <button className="tab">vs</button>
-        <button className="tab">Semana {previousSummary.week}</button>
+      <div className="card wide comparison-hero">
+        <p className="eyebrow">Comparación semanal</p>
+        <h3>{title}</h3>
+        <p className="eyebrow">{activeDay} | {routineName}</p>
+        <div className="comparison-chip-row">
+          <span className="compare-chip active">Rutina registrada</span>
+          <span className="compare-chip">vs</span>
+          <span className="compare-chip active">Semana {currentWeek}</span>
+          {currentWeek > 1 ? <span className="compare-chip">Semana {currentWeek - 1}</span> : null}
+        </div>
+        <button className="button secondary" type="button" onClick={loadDemoData} disabled={isBusy}>
+          {isBusy ? "Cargando..." : "Cargar datos de prueba"}
+        </button>
       </div>
+
+      <div className="card wide">
+        <div className="section-heading">
+          <div>
+            <h3>Selecciona rutina o día</h3>
+            <p className="eyebrow">Cambia entre tus días registrados para revisar el progreso.</p>
+          </div>
+        </div>
+        <div className="routine-day-pills">
+          {routineDays.map((day) => (
+            <button
+              key={day}
+              className={`routine-day-pill ${day === activeDay ? "active" : ""}`}
+              type="button"
+              onClick={() => setSelectedDay(day)}
+            >
+              {day}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <MetricGrid summary={summary} />
       <div className="card wide">
-        <h3>Ejercicios</h3>
+        <h3>Ejercicios comparados</h3>
         <div className="exercise-list">
-          {currentMetrics.map((entry) => <ExerciseRow key={entry.id} entry={entry} showVolume />)}
+          {currentMetrics.length > 0
+            ? currentMetrics.map((entry) => <ExerciseRow key={entry.id} entry={entry} showVolume />)
+            : dayExercises.map((exercise) => (
+              <div className="plan-row" key={exercise.id}>
+                <strong>{exercise.name}</strong>
+                <span>{exercise.targetSets} series</span>
+                <span>{exercise.targetReps} reps</span>
+                <span>{exercise.baseWeight} kg</span>
+              </div>
+            ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ComparisonScreenV2({
+  exercises,
+  metrics,
+  currentWeek,
+  selectedDay,
+  setSelectedDay,
+  loadDemoData,
+  isBusy,
+}: {
+  exercises: ExerciseTemplate[];
+  metrics: ExerciseMetrics[];
+  currentWeek: number;
+  selectedDay: string;
+  setSelectedDay: (day: string) => void;
+  loadDemoData: () => void;
+  isBusy: boolean;
+}) {
+  const [activeView, setActiveView] = useState<"plan" | "week">("plan");
+  const [activeWeek, setActiveWeek] = useState(currentWeek);
+  const [selectedExerciseId, setSelectedExerciseId] = useState("");
+  const [isExercisePickerOpen, setIsExercisePickerOpen] = useState(false);
+  const routineDays = setupDays;
+  const activeDay = routineDays.includes(selectedDay) ? selectedDay : routineDays[0];
+  const dayExercises = exercises.filter((exercise) => (exercise.day ?? "Lunes") === activeDay);
+  const dayExerciseIds = new Set(dayExercises.map((exercise) => exercise.id));
+  const dayMetrics = dedupeMetricsByWeekAndExercise(metrics.filter((entry) => dayExerciseIds.has(entry.exerciseId)));
+  const weekNumbers = getWeekNumbers(dayMetrics);
+  const selectedWeek = activeView === "week" ? activeWeek : 0;
+  const currentMetrics = dayMetrics.filter((entry) => entry.week === selectedWeek);
+  const targetSummary = calculateTargetSummary(dayExercises);
+  const routineName = dayExercises[0]?.routine ?? activeDay;
+  const comparisonWeeks = weekNumbers.length > 0 ? weekNumbers : [1];
+  const title = `Rutina registrada vs ${comparisonWeeks.map((week) => `semana ${week} ${activeDay}`).join(" vs ")}`;
+  const visibleMetrics = activeView === "plan" ? [] : currentMetrics;
+  const listTitle = activeView === "plan" ? "Rutina registrada" : `Semana ${selectedWeek}`;
+  const selectedExercise = dayExercises.find((exercise) => exercise.id === selectedExerciseId) ?? dayExercises[0];
+  const selectedHistory = selectedExercise
+    ? dayMetrics.filter((entry) => entry.exerciseId === selectedExercise.id).sort((a, b) => a.week - b.week)
+    : [];
+  const latestExerciseEntry = selectedHistory.at(-1);
+  const exerciseObservation = selectedExercise
+    ? buildExerciseObservation(selectedExercise, selectedHistory)
+    : "Selecciona una rutina con ejercicios para ver su evolución.";
+  const chartData = selectedHistory.map((entry) => ({
+    semana: `S${entry.week}`,
+    volumen: entry.volumeTotal,
+  }));
+
+  useEffect(() => {
+    if (!selectedExerciseId || !dayExercises.some((exercise) => exercise.id === selectedExerciseId)) {
+      setSelectedExerciseId(dayExercises[0]?.id ?? "");
+      setIsExercisePickerOpen(false);
+    }
+  }, [dayExercises, selectedExerciseId]);
+
+  return (
+    <section className="screen">
+      <div className="card wide">
+        <div className="section-heading">
+          <div>
+            <h3>Selecciona rutina o dia</h3>
+            <p className="eyebrow">Cambia entre tus dias registrados para revisar el progreso.</p>
+          </div>
+        </div>
+        <div className="routine-day-pills">
+          {routineDays.map((day) => {
+            const hasRoutine = exercises.some((exercise) => (exercise.day ?? "Lunes") === day);
+            return (
+              <button
+                key={day}
+                className={`routine-day-pill ${day === activeDay ? "active" : ""} ${hasRoutine ? "configured" : ""}`}
+                type="button"
+                disabled={!hasRoutine}
+                onClick={() => {
+                  if (!hasRoutine) return;
+                  setSelectedDay(day);
+                  setActiveView("plan");
+                  setIsExercisePickerOpen(false);
+                }}
+              >
+                {day}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card wide comparison-hero">
+        <p className="eyebrow">Comparacion semanal</p>
+        <h3>{title}</h3>
+        <p className="eyebrow">{activeDay} | {routineName}</p>
+        <div className="comparison-chip-row">
+          <button className={`compare-chip ${activeView === "plan" ? "active" : ""}`} type="button" onClick={() => setActiveView("plan")}>Rutina registrada</button>
+          <span className="compare-chip">vs</span>
+          {weekNumbers.map((week, index) => (
+            <button
+              key={week}
+              className={`compare-chip ${activeView === "week" && activeWeek === week ? "active" : ""}`}
+              type="button"
+              onClick={() => {
+                setActiveWeek(week);
+                setActiveView("week");
+              }}
+            >
+              Semana {week}
+            </button>
+          ))}
+        </div>
+        {activeView === "plan" ? (
+          <div className="metric-grid">
+            <div className="metric"><span>Volumen objetivo</span><strong>{formatKg(targetSummary.volume)}</strong></div>
+            <div className="metric"><span>Total reps objetivo</span><strong>{targetSummary.reps}</strong></div>
+            <div className="metric"><span>Ejercicios</span><strong>{targetSummary.exerciseCount}</strong></div>
+          </div>
+        ) : (
+          <MetricGrid summary={calculateWeeklySummary(dayMetrics, selectedWeek)} />
+        )}
+        <button className="button secondary" type="button" onClick={loadDemoData} disabled={isBusy}>
+          {isBusy ? "Cargando..." : "Cargar datos de prueba"}
+        </button>
+      </div>
+
+      <div className="card wide">
+        <h3>Ejercicios comparados | {listTitle}</h3>
+        <div className="exercise-list">
+          {activeView !== "plan" && visibleMetrics.length > 0
+            ? visibleMetrics.map((entry) => <ExerciseRow key={entry.id} entry={entry} showVolume />)
+            : dayExercises.map((exercise) => (
+              <div className="plan-row" key={exercise.id}>
+                <strong>{exercise.name}</strong>
+                <span>{exercise.targetSets} series</span>
+                <span>{exercise.targetReps} reps</span>
+                <span>{exercise.baseWeight} kg</span>
+              </div>
+            ))}
+        </div>
+      </div>
+
+      <div className="card wide exercise-week-card">
+        <div className="section-heading">
+          <div>
+            <h3>Comparar ejercicio por semana</h3>
+            <p className="eyebrow">Selecciona un ejercicio para ver cómo cambia semana a semana.</p>
+          </div>
+        </div>
+
+        <div className="custom-select">
+          <button className="custom-select-trigger" type="button" onClick={() => setIsExercisePickerOpen((value) => !value)}>
+            <span>{selectedExercise?.name ?? "Selecciona ejercicio"}</span>
+            <ChevronDown size={17} />
+          </button>
+          {isExercisePickerOpen ? (
+            <div className="custom-select-menu">
+              {dayExercises.map((exercise) => (
+                <button
+                  key={exercise.id}
+                  className={`custom-select-option ${exercise.id === selectedExercise?.id ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setSelectedExerciseId(exercise.id);
+                    setIsExercisePickerOpen(false);
+                  }}
+                >
+                  {exercise.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="exercise-focus-card">
+          <div>
+            <p className="eyebrow">Ejercicio seleccionado</p>
+            <h3>{selectedExercise?.name ?? "Sin ejercicio"}</h3>
+            <p>{exerciseObservation}</p>
+          </div>
+          {latestExerciseEntry ? (
+            <div className="focus-metrics">
+              <span>{latestExerciseEntry.weight} kg</span>
+              <span>{latestExerciseEntry.totalReps} reps</span>
+              <span>{formatKg(latestExerciseEntry.volumeTotal)}</span>
+            </div>
+          ) : null}
+        </div>
+
+        <div>
+          <h3>Evolución semanal del volumen</h3>
+          <p className="eyebrow">El gráfico muestra el volumen total de este ejercicio en cada semana: peso por repeticiones realizadas.</p>
+          <div className="chart-wrap">
+            <ResponsiveContainer>
+              <ReLineChart data={chartData}>
+                <CartesianGrid stroke="rgba(255,255,255,.08)" />
+                <XAxis dataKey="semana" stroke="#9CA8B8" />
+                <YAxis stroke="#9CA8B8" />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Line type="monotone" dataKey="volumen" stroke="#3C7AFF" strokeWidth={3} dot={{ r: 4 }} />
+              </ReLineChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
     </section>
@@ -1338,18 +1827,18 @@ function MetricGrid({ summary }: { summary: ReturnType<typeof calculateWeeklySum
       <div className="metric">
         <span>Ejercicios</span>
         <strong>{summary.exerciseCount}</strong>
-        <TrendValue value={summary.objectivesOk} />
+        <TrendValue value={summary.exerciseDifference} />
       </div>
     </div>
   );
 }
 
 function TrendValue({ value, suffix = "" }: { value: number; suffix?: string }) {
-  const isPositive = value >= 0;
-  const Icon = isPositive ? ArrowUp : ArrowDown;
+  const tone = value > 0 ? "positive" : value < 0 ? "danger" : "neutral";
+  const Icon = value > 0 ? ArrowUp : value < 0 ? ArrowDown : ArrowRight;
 
   return (
-    <span className={`trend ${isPositive ? "positive" : "danger"}`}>
+    <span className={`trend ${tone}`}>
       <Icon size={12} strokeWidth={3} />
       {formatSigned(value)}
       {suffix}
@@ -1358,23 +1847,55 @@ function TrendValue({ value, suffix = "" }: { value: number; suffix?: string }) 
 }
 
 function ExerciseRow({ entry, showVolume = false }: { entry: ExerciseMetrics; showVolume?: boolean }) {
+  const tone = getObjectiveTone(entry.objectiveStatus);
   return (
-    <div className="exercise-row">
+    <div className={`exercise-row ${tone}`}>
       <div>
         <strong>{entry.exerciseName}</strong>
-        <p className="eyebrow">
-          {entry.weight}kg · {formatSigned(entry.repsDifference)} reps · {formatSigned(entry.kgDifference)} kg
-          {showVolume ? ` · ${formatSigned(entry.volumePercentage)}% volumen` : ""}
-        </p>
+        <div className="exercise-progress">
+          <DeltaValue value={entry.weight} suffix="kg" neutralWhenZero={false} />
+          <DeltaValue value={entry.repsDifference} suffix="reps" />
+          <DeltaValue value={entry.kgDifference} suffix="kg" />
+          {showVolume ? <DeltaValue value={entry.volumePercentage} suffix="% volumen" /> : null}
+        </div>
       </div>
-      <StatusBadge status={entry.objectiveStatus} />
+      <div className="status-stack">
+        <StatusBadge status={entry.objectiveStatus} />
+        <ChangeBadge value={entry.kgDifference} positive="Subimos kg" negative="Bajamos kg" neutral="Mismo kg" />
+        <ChangeBadge value={entry.repsDifference} positive="Subimos reps" negative="Bajamos reps" neutral="Mismas reps" />
+      </div>
     </div>
   );
 }
 
+function DeltaValue({ value, suffix, neutralWhenZero = true }: { value: number; suffix: string; neutralWhenZero?: boolean }) {
+  const tone = value > 0 ? "positive" : value < 0 ? "danger" : neutralWhenZero ? "neutral" : "positive";
+  const Icon = value > 0 ? ArrowUp : value < 0 ? ArrowDown : ArrowRight;
+
+  return (
+    <span className={`delta-value ${tone}`}>
+      <Icon size={12} strokeWidth={3} />
+      {neutralWhenZero ? formatSigned(value) : value}
+      {suffix ? ` ${suffix}` : ""}
+    </span>
+  );
+}
+
 function StatusBadge({ status }: { status: ObjectiveStatus }) {
-  const className = status === "Cumplimos" ? "ok" : status === "No cumplimos" ? "fail" : "keep";
+  const className = getObjectiveTone(status);
   return <span className={`badge ${className}`}>{status}</span>;
+}
+
+function ChangeBadge({ value, positive, negative, neutral }: { value: number; positive: string; negative: string; neutral: string }) {
+  const className = value > 0 ? "ok" : value < 0 ? "fail" : "keep";
+  const label = value > 0 ? positive : value < 0 ? negative : neutral;
+  return <span className={`badge mini ${className}`}>{label}</span>;
+}
+
+function getObjectiveTone(status: ObjectiveStatus) {
+  if (status === "Cumplimos") return "ok";
+  if (status === "No cumplimos") return "fail";
+  return "keep";
 }
 
 function ProgressLine({ label, value }: { label: string; value: number }) {
@@ -1436,6 +1957,33 @@ function createSetupByDay(): Record<string, SetupDayState> {
   return Object.fromEntries(setupDays.map((day) => [day, createSetupDayState()]));
 }
 
+function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<string, SetupDayState> {
+  const byDay = createSetupByDay();
+
+  for (const exercise of exercises) {
+    const day = exercise.day && setupDays.includes(exercise.day) ? exercise.day : "Lunes";
+    const current = byDay[day];
+    const isEmpty = current.rows.every((row) => !row.name.trim());
+
+    byDay[day] = {
+      routineName: current.routineName || exercise.routine || day,
+      rows: [
+        ...(isEmpty ? [] : current.rows),
+        {
+          id: exercise.id,
+          sourceExerciseId: exercise.id,
+          name: exercise.name,
+          sets: exercise.targetSets,
+          reps: exercise.targetReps,
+          weight: exercise.baseWeight,
+        },
+      ],
+    };
+  }
+
+  return byDay;
+}
+
 function updateSetupDay(
   current: Record<string, SetupDayState>,
   day: string,
@@ -1466,6 +2014,28 @@ function createExerciseDraft(exercise: ExerciseTemplate): ExerciseDraft {
   };
 }
 
+function createDemoWeekTwoReps(exercise: ExerciseTemplate) {
+  const reps = Array.from({ length: exercise.targetSets }, () => exercise.targetReps);
+  const name = removeAccents(exercise.name.toLowerCase());
+
+  if (name.includes("pecho") || name.includes("press")) {
+    reps[0] = reps[0] + 1;
+  }
+
+  if (name.includes("triceps") || name.includes("peso muerto")) {
+    return reps.map((value) => Math.max(1, value - 2));
+  }
+
+  return reps;
+}
+
+function createDemoWeekTwoWeight(exercise: ExerciseTemplate) {
+  const name = removeAccents(exercise.name.toLowerCase());
+  if (name.includes("triceps")) return exercise.baseWeight + 10;
+  if (name.includes("peso muerto")) return exercise.baseWeight + 10;
+  return exercise.baseWeight;
+}
+
 function calculateTargetSummary(exercises: ExerciseTemplate[]) {
   return exercises.reduce(
     (summary, exercise) => {
@@ -1490,8 +2060,55 @@ function getVisibleTrainingDay(exercises: ExerciseTemplate[], current: string) {
   return exercises.find((exercise) => exercise.day)?.day ?? current;
 }
 
+function getRoutineDays(exercises: ExerciseTemplate[]) {
+  const days = setupDays.filter((day) => exercises.some((exercise) => (exercise.day ?? "Lunes") === day));
+  return days.length > 0 ? days : ["Lunes"];
+}
+
+function dedupeMetricsByWeekAndExercise(metrics: ExerciseMetrics[]) {
+  const byWeekAndExercise = new Map<string, ExerciseMetrics>();
+  for (const entry of metrics) {
+    byWeekAndExercise.set(`${entry.week}:${entry.exerciseId}`, entry);
+  }
+  return Array.from(byWeekAndExercise.values());
+}
+
+function getWeekNumbers(metrics: ExerciseMetrics[]) {
+  return Array.from(new Set(metrics.map((entry) => entry.week))).sort((a, b) => b - a);
+}
+
+function buildExerciseObservation(exercise: ExerciseTemplate, history: ExerciseMetrics[]) {
+  if (history.length === 0) {
+    return `Aún no hay semanas registradas para ${exercise.name}. Cuando entrenes este ejercicio, verás aquí si subiste peso, repeticiones o volumen.`;
+  }
+
+  const latest = history.at(-1)!;
+  const previous = history.at(-2);
+  const repsDelta = previous ? latest.totalReps - previous.totalReps : latest.repsDifference;
+  const kgDelta = previous ? latest.weight - previous.weight : latest.kgDifference;
+  const volumeDelta = previous ? latest.volumeTotal - previous.volumeTotal : latest.volumeDifference;
+  const parts: string[] = [];
+
+  if (kgDelta > 0) parts.push(`subiste ${formatKg(kgDelta)}`);
+  if (kgDelta < 0) parts.push(`bajaste ${formatKg(Math.abs(kgDelta))}`);
+  if (kgDelta === 0) parts.push("mantuviste el mismo peso");
+
+  if (repsDelta > 0) parts.push(`sumaste ${repsDelta} repeticiones`);
+  if (repsDelta < 0) parts.push(`hiciste ${Math.abs(repsDelta)} repeticiones menos`);
+  if (repsDelta === 0) parts.push("repetiste la misma cantidad de reps");
+
+  const direction = volumeDelta > 0 ? "El volumen subió" : volumeDelta < 0 ? "El volumen bajó" : "El volumen se mantuvo";
+  return `En la última semana ${parts.join(" y ")}. ${direction}.`;
+}
+
 function removeAccents(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function readSetupNumber(value: string) {
+  if (value.trim() === "") return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function screenLabel(screen: Screen) {
@@ -1500,7 +2117,7 @@ function screenLabel(screen: Screen) {
     registro: "Registro",
     dashboard: "Panel principal",
     entrenamiento: "Entrenamiento",
-    comparacion: "Comparación",
+    comparacion: "Comparación semanal",
     historial: "Historial",
     analitica: "Analítica",
     perfil: "Perfil",
