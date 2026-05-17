@@ -64,13 +64,12 @@ type Screen =
   | "entrenamiento"
   | "comparacion"
   | "historial"
-  | "analitica"
   | "perfil"
   | "graficos"
   | "resumen"
   | "inteligente";
 
-const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "comparacion", "analitica", "perfil", "graficos", "resumen", "inteligente"];
+const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "comparacion", "perfil", "graficos", "resumen", "inteligente"];
 const routines: RoutineName[] = ["Pecho Hombro Tríceps", "Espalda Bíceps Abdomen", "Piernas"];
 const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
@@ -93,6 +92,11 @@ interface ExerciseDraft {
   rir: string;
   reps: number[];
   registered: boolean;
+}
+
+interface AnalyticsSnapshot {
+  score: number;
+  factors: Array<[string, number]>;
 }
 
 export function OrganizatechApp() {
@@ -723,7 +727,6 @@ export function OrganizatechApp() {
       {screen === "historial" && (
         <HistoryScreen exercises={exercises} selectedExerciseId={selectedExerciseId} setSelectedExerciseId={setSelectedExerciseId} history={selectedHistory} />
       )}
-      {screen === "analitica" && <AnalyticsScreen summary={summary} currentMetrics={currentMetrics} />}
       {screen === "perfil" && <ProfileScreen name={sessionName} summary={summary} dataSource={dataSource} refreshData={refreshData} resetLocal={handleResetLocal} />}
       {screen === "graficos" && <ChartsScreen metrics={metrics} currentMetrics={currentMetrics} />}
       {screen === "resumen" && <WeeklySummaryScreen summary={summary} currentMetrics={currentMetrics} />}
@@ -813,6 +816,7 @@ function DashboardScreen({
   const todayLabel = new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date());
   const registeredTraining = currentMetrics[0]?.routine ?? exercises[0]?.routine ?? "Pecho Hombro Tríceps";
   const routinePreview = currentMetrics.filter((entry) => entry.routine === registeredTraining);
+  const analytics = buildAnalytics(summary, currentMetrics);
 
   if (!hasRoutinePlan) {
     return <EmptyDashboard startRegistration={startRegistration} />;
@@ -882,6 +886,7 @@ function DashboardScreen({
           Editar rutina semanal
         </button>
       </div>
+      <DashboardAnalytics summary={summary} analytics={analytics} />
     </section>
   );
 }
@@ -900,6 +905,27 @@ function EmptyDashboard({ startRegistration }: { startRegistration: () => void }
         Empecemos a registrar
       </button>
     </section>
+  );
+}
+
+function DashboardAnalytics({ summary, analytics }: { summary: ReturnType<typeof calculateWeeklySummary>; analytics: AnalyticsSnapshot }) {
+  return (
+    <div className="card wide dashboard-analytics">
+      <div className="analytics-score-row">
+        <div className="score compact-score"><div><strong>{analytics.score}</strong><span>/100</span></div></div>
+        <div>
+          <p className="eyebrow">Analitica integrada</p>
+          <h3>{analytics.score >= 80 ? "Progreso solido" : analytics.score >= 60 ? "Buen avance" : "Necesita atencion"}</h3>
+          <p className={summary.volumePercentage >= 0 ? "positive" : "danger"}>
+            {formatSigned(summary.volumePercentage)}% volumen semanal
+          </p>
+        </div>
+      </div>
+      <div>
+        <h3>Factores de rendimiento</h3>
+        {analytics.factors.map(([label, value]) => <ProgressLine key={String(label)} label={String(label)} value={Number(value)} />)}
+      </div>
+    </div>
   );
 }
 
@@ -1663,14 +1689,16 @@ function HistoryScreen({ exercises, selectedExerciseId, setSelectedExerciseId, h
   );
 }
 
-function AnalyticsScreen({ summary, currentMetrics }: { summary: ReturnType<typeof calculateWeeklySummary>; currentMetrics: ExerciseMetrics[] }) {
+function buildAnalytics(summary: ReturnType<typeof calculateWeeklySummary>, currentMetrics: ExerciseMetrics[]): AnalyticsSnapshot {
   const score = Math.min(100, Math.max(0, Math.round(72 + summary.complianceRate * 0.18 + Math.max(summary.volumePercentage, 0) * 0.5)));
-  const factors = [
+  const factors: Array<[string, number]> = [
     ["Volumen", Math.min(100, 82 + summary.volumePercentage)],
     ["Repeticiones", Math.min(100, 78 + summary.repsDifference)],
     ["Carga", currentMetrics.filter((entry) => entry.kgDifference > 0).length * 20],
     ["Consistencia", summary.complianceRate],
   ];
+  return { score, factors };
+  /*
   return (
     <section className="screen">
       <div className="card wide">
@@ -1683,6 +1711,7 @@ function AnalyticsScreen({ summary, currentMetrics }: { summary: ReturnType<type
       </div>
     </section>
   );
+  */
 }
 
 function ProfileScreen({ name, summary, dataSource, refreshData, resetLocal }: { name: string; summary: ReturnType<typeof calculateWeeklySummary>; dataSource: DataSource; refreshData: () => void; resetLocal: () => void }) {
@@ -2132,7 +2161,6 @@ function screenLabel(screen: Screen) {
     entrenamiento: "Entrenamiento",
     comparacion: "Comparación semanal",
     historial: "Historial",
-    analitica: "Analítica",
     perfil: "Perfil",
     graficos: "Gráficos",
     resumen: "Resumen",
