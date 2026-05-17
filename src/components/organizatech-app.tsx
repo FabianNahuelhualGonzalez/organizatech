@@ -69,7 +69,7 @@ type Screen =
   | "resumen"
   | "inteligente";
 
-const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "comparacion", "perfil", "graficos", "resumen", "inteligente"];
+const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "comparacion", "graficos", "resumen", "inteligente"];
 const routines: RoutineName[] = ["Pecho Hombro Tríceps", "Espalda Bíceps Abdomen", "Piernas"];
 const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
@@ -629,7 +629,9 @@ export function OrganizatechApp() {
                     <p className="eyebrow">Bienvenido</p>
                     <h3>{sessionName}</h3>
                   </div>
-                  <span className="badge keep">{dataSource === "supabase" ? "Supabase" : "Local"}</span>
+                  <button className="profile-shortcut" type="button" role="menuitem" onClick={() => navigateTo("perfil")}>
+                    Mi perfil
+                  </button>
                 </div>
                 <div className="menu-grid">
                   {menuScreens.map((item) => (

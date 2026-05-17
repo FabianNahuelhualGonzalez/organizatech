@@ -1047,6 +1047,22 @@ h3 {
   font-size: 16px;
 }
 
+.profile-shortcut {
+  min-height: 30px;
+  border: 1px solid rgba(60, 122, 255, 0.7);
+  border-radius: 999px;
+  color: white;
+  background: rgba(60, 122, 255, 0.18);
+  padding: 0 12px;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.profile-shortcut:hover {
+  background: rgba(60, 122, 255, 0.3);
+}
+
 .menu-grid {
   display: grid;
   gap: 0;
