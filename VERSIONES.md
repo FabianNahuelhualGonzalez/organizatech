@@ -52,6 +52,8 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
   - Descripcion breve del objetivo seleccionado.
   - Duracion.
   - Dias de entrenamiento.
+- Se elimino el selector superior duplicado de dia de entrenamiento.
+- Los dias del bloque de planificacion ahora agregan el dia al plan y seleccionan el dia que se esta configurando.
 - Se agrego configuracion editable de ciclos:
   - Macrociclo: objetivo principal y duracion de 6 a 11 meses.
   - Mesociclo: objetivo, duracion de 3 a 6 semanas y dias de entrenamiento.

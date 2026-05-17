@@ -1085,10 +1085,9 @@ function InitialTrainingScreen({
   const durationValue = getCycleDurationValue(trainingPlan);
 
   function toggleTrainingDay(item: string) {
-    const nextDays = plannedDays.includes(item)
-      ? plannedDays.filter((current) => current !== item)
-      : [...plannedDays, item];
-    updateTrainingPlan({ trainingDays: nextDays.length > 0 ? nextDays : [item] });
+    const nextDays = plannedDays.includes(item) ? plannedDays : [...plannedDays, item];
+    updateTrainingPlan({ trainingDays: nextDays });
+    setDay(item);
   }
 
   function updateCycleObjective(value: string) {
@@ -1119,22 +1118,6 @@ function InitialTrainingScreen({
           </button>
         </div>
       )}
-      <div className="setup-card">
-        <h3>Selecciona día de entrenamiento</h3>
-        <div className="day-grid">
-          {setupDays.map((item) => (
-            <button
-              key={item}
-              className={`day-pill ${day === item ? "active" : ""} ${configuredDays.includes(item) ? "configured" : ""} ${plannedDays.includes(item) ? "planned" : ""}`}
-              onClick={() => setDay(item)}
-              disabled={!plannedDays.includes(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-      </div>
-
       <div className="setup-card training-cycles-card">
         <div className="setup-section-heading">
           <p className="eyebrow">Planificación deportiva</p>
@@ -1182,7 +1165,7 @@ function InitialTrainingScreen({
             <div className="cycle-chip-grid days">
               {setupDays.map((item) => (
                 <button
-                  className={`cycle-chip ${plannedDays.includes(item) ? "active" : ""}`}
+                  className={`cycle-chip ${plannedDays.includes(item) ? "active" : ""} ${day === item ? "current" : ""} ${configuredDays.includes(item) ? "configured" : ""}`}
                   key={item}
                   type="button"
                   onClick={() => toggleTrainingDay(item)}

@@ -393,6 +393,14 @@ h3 {
   background: #02ef3f;
 }
 
+.cycle-chip.current {
+  box-shadow: 0 0 0 2px rgba(60, 122, 255, 0.42);
+}
+
+.cycle-chip.configured:not(.current) {
+  border-color: rgba(116, 223, 113, 0.58);
+}
+
 .day-grid {
   display: flex;
   flex-wrap: wrap;
