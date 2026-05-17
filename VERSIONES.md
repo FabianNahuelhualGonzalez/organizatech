@@ -33,7 +33,10 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 ## Menu principal
 
 - Se movieron las secciones al menu lateral.
-- Se agregaron secciones principales: Panel principal, Entrenamiento, Comparacion semanal, Analitica, Perfil, Graficos, Resumen y Analisis inteligente.
+- Se agregaron secciones principales iniciales: Panel principal, Entrenamiento, Comparacion semanal, Analitica, Perfil, Graficos, Resumen y Analisis inteligente.
+- Se eliminaron Graficos y Resumen como secciones independientes porque no seran utilizadas.
+- Se elimino Analisis inteligente como seccion independiente del menu.
+- El menu lateral queda enfocado en Panel principal, Entrenamiento y Comparacion semanal.
 - Se elimino Historial como seccion independiente del menu.
 - Se rescato la informacion util de Historial y se integro dentro de Comparacion semanal.
 
@@ -76,6 +79,8 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
   - Si es Miercoles, muestra rutina de Miercoles.
   - El panel ya no arrastra la ultima rutina visitada por el usuario.
 - Se corrigio el caso donde el panel mostraba "jalon" aunque correspondia otro dia.
+- Se integro Analisis inteligente directamente en el panel principal.
+- El bloque de Analisis inteligente aparece entre los primeros bloques del dashboard para darle prioridad visual.
 
 ## Logica de progreso
 
@@ -128,7 +133,7 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
   - grafico de evolucion semanal del volumen.
 - Se elimino el uso de badges en el detalle individual del ejercicio para reducir ruido visual.
 
-## Graficos y analitica
+## Graficos, resumen y analitica
 
 - Se agregaron graficos con Recharts.
 - Se creo vista de evolucion de repeticiones.
@@ -136,6 +141,9 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 - Se agrego analitica de progreso.
 - Se agrego resumen semanal.
 - Se agrego analisis inteligente automatico con insights de carga, volumen, consistencia y fatiga.
+- Posteriormente se eliminaron Graficos y Resumen como pantallas independientes.
+- La analitica se integro al panel principal.
+- El analisis inteligente se movio al panel principal como bloque prioritario.
 
 ## Supabase y PostgreSQL
 

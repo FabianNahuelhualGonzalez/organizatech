@@ -1257,6 +1257,31 @@ h3 {
   gap: 14px;
 }
 
+.dashboard-smart-card {
+  border-color: rgba(60, 122, 255, 0.42);
+  background:
+    linear-gradient(135deg, rgba(60, 122, 255, 0.16), rgba(116, 223, 113, 0.06)),
+    var(--panel);
+  box-shadow: 0 18px 44px rgba(60, 122, 255, 0.12);
+}
+
+.smart-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.smart-card-header svg {
+  flex: 0 0 auto;
+  color: var(--primary);
+}
+
+.smart-insight-row {
+  background: rgba(5, 16, 30, 0.46);
+}
+
 .analytics-score-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

@@ -26,14 +26,9 @@ import {
   UserPlus,
 } from "lucide-react";
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
   Line,
   LineChart as ReLineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -64,12 +59,9 @@ type Screen =
   | "entrenamiento"
   | "comparacion"
   | "historial"
-  | "perfil"
-  | "graficos"
-  | "resumen"
-  | "inteligente";
+  | "perfil";
 
-const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "comparacion", "graficos", "resumen", "inteligente"];
+const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "comparacion"];
 const routines: RoutineName[] = ["Pecho Hombro Tríceps", "Espalda Bíceps Abdomen", "Piernas"];
 const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
@@ -293,7 +285,7 @@ export function OrganizatechApp() {
       });
       setEntries((current) => [...current, saved]);
       setStatusMessage("Entrenamiento guardado.");
-      setScreen("resumen");
+      setScreen("dashboard");
     } catch (error) {
       setStatusMessage(readError(error));
     } finally {
@@ -603,7 +595,7 @@ export function OrganizatechApp() {
           <h1>Organizatech</h1>
           <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${dataSource === "supabase" ? "Supabase" : "Demo local"}` : "Sin registro de entrenamiento"}</p>
         </div>
-        <button className="icon-button" aria-label="Notificaciones" onClick={() => setScreen("inteligente")}>
+        <button className="icon-button" aria-label="Ver alertas del panel principal" onClick={() => setScreen("dashboard")}>
           <Bell size={18} />
         </button>
       </header>
@@ -670,6 +662,7 @@ export function OrganizatechApp() {
           dayExercises={dashboardExercises}
           summary={summary}
           currentMetrics={dashboardCurrentMetrics}
+          insights={insights}
           startRegistration={() => setScreen("entrenamiento")}
           goToRoutine={() => openRoutineDay(dashboardDay)}
           editRoutine={() => openRoutineEditor(dashboardDay)}
@@ -730,9 +723,6 @@ export function OrganizatechApp() {
         <HistoryScreen exercises={exercises} selectedExerciseId={selectedExerciseId} setSelectedExerciseId={setSelectedExerciseId} history={selectedHistory} />
       )}
       {screen === "perfil" && <ProfileScreen name={sessionName} summary={summary} dataSource={dataSource} refreshData={refreshData} resetLocal={handleResetLocal} />}
-      {screen === "graficos" && <ChartsScreen metrics={metrics} currentMetrics={currentMetrics} />}
-      {screen === "resumen" && <WeeklySummaryScreen summary={summary} currentMetrics={currentMetrics} />}
-      {screen === "inteligente" && <SmartScreen insights={insights} />}
 
     </main>
   );
@@ -797,6 +787,7 @@ function DashboardScreen({
   dayExercises,
   summary,
   currentMetrics,
+  insights,
   startRegistration,
   goToRoutine,
   editRoutine,
@@ -810,6 +801,7 @@ function DashboardScreen({
   dayExercises: ExerciseTemplate[];
   summary: ReturnType<typeof calculateWeeklySummary>;
   currentMetrics: ExerciseMetrics[];
+  insights: ReturnType<typeof generateSmartInsights>;
   startRegistration: () => void;
   goToRoutine: () => void;
   editRoutine: () => void;
@@ -875,9 +867,10 @@ function DashboardScreen({
           </ResponsiveContainer>
         </div>
       </div>
+      <DashboardSmartInsights insights={insights} />
       <MetricGrid summary={summary} />
       <div className="card wide">
-        <h3>Entrenamiento de hoy {todayLabel} | {registeredTraining} | Resumen</h3>
+        <h3>Entrenamiento de hoy {todayLabel} | {registeredTraining}</h3>
         <div className="exercise-list">
           {routinePreview.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)}
         </div>
@@ -890,6 +883,35 @@ function DashboardScreen({
       </div>
       <DashboardAnalytics summary={summary} analytics={analytics} />
     </section>
+  );
+}
+
+function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {
+  const visibleInsights = insights.slice(0, 3);
+
+  return (
+    <div className="card wide dashboard-smart-card">
+      <div className="smart-card-header">
+        <div>
+          <p className="eyebrow">Análisis inteligente</p>
+          <h3>Alertas para tu entrenamiento</h3>
+        </div>
+        <Sparkles size={19} />
+      </div>
+      <div className="insight-list">
+        {visibleInsights.map((insight) => (
+          <div className="insight-row smart-insight-row" key={insight.id}>
+            <div>
+              <strong>{insight.title}</strong>
+              <p className="eyebrow">{insight.detail}</p>
+            </div>
+            <span className={`badge ${insight.tone === "positivo" ? "ok" : insight.tone === "riesgo" ? "fail" : "keep"}`}>
+              {insight.tone}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1751,103 +1773,6 @@ function ProfileScreen({ name, summary, dataSource, refreshData, resetLocal }: {
   );
 }
 
-function ChartsScreen({ metrics, currentMetrics }: { metrics: ExerciseMetrics[]; currentMetrics: ExerciseMetrics[] }) {
-  const lastWeek = Math.max(4, ...metrics.map((entry) => entry.week));
-  const weekly = Array.from({ length: lastWeek }, (_, index) => index + 1).map((week) => ({
-    semana: `S${week}`,
-    reps: metrics.filter((entry) => entry.week === week).reduce((total, entry) => total + entry.totalReps, 0),
-    volumen: metrics.filter((entry) => entry.week === week).reduce((total, entry) => total + entry.volumeTotal, 0),
-  }));
-  return (
-    <section className="screen">
-      <div className="card wide">
-        <h3>Evolución de repeticiones totales</h3>
-        <div className="chart-wrap">
-          <ResponsiveContainer>
-            <ReLineChart data={weekly}>
-              <CartesianGrid stroke="rgba(255,255,255,.08)" />
-              <XAxis dataKey="semana" stroke="#9CA8B8" />
-              <YAxis stroke="#9CA8B8" />
-              <Tooltip contentStyle={tooltipStyle} />
-              <Line type="monotone" dataKey="reps" stroke="#3C7AFF" strokeWidth={3} />
-            </ReLineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-      <div className="card wide">
-        <h3>Reps por ejercicio</h3>
-        <div className="chart-wrap">
-          <ResponsiveContainer>
-            <BarChart data={currentMetrics.map((entry) => ({ name: entry.exerciseName, reps: entry.totalReps }))} layout="vertical">
-              <XAxis type="number" hide />
-              <YAxis type="category" dataKey="name" stroke="#9CA8B8" width={110} />
-              <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="reps" fill="#3C7AFF" radius={[0, 6, 6, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function WeeklySummaryScreen({ summary, currentMetrics }: { summary: ReturnType<typeof calculateWeeklySummary>; currentMetrics: ExerciseMetrics[] }) {
-  const pieData = [
-    { name: "Cumplimos", value: summary.objectivesOk, color: "#74DF71" },
-    { name: "Mantenemos", value: summary.objectivesMaintained, color: "#FFBF4D" },
-    { name: "No cumplimos", value: summary.objectivesFailed, color: "#FF5D69" },
-  ];
-  return (
-    <section className="screen">
-      <MetricGrid summary={summary} />
-      <div className="card wide">
-        <h3>Cumplimiento de objetivos</h3>
-        <ProgressLine label={`${summary.objectivesOk} de ${summary.exerciseCount} objetivos cumplidos`} value={summary.complianceRate} />
-      </div>
-      <div className="card wide">
-        <h3>Ejercicios</h3>
-        <div className="chart-wrap">
-          <ResponsiveContainer>
-            <PieChart>
-              <Pie data={pieData} innerRadius={46} outerRadius={78} dataKey="value">
-                {pieData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
-              </Pie>
-              <Tooltip contentStyle={tooltipStyle} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="exercise-list">
-          {currentMetrics.map((entry) => <ExerciseRow key={entry.id} entry={entry} />)}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function SmartScreen({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {
-  return (
-    <section className="screen">
-      <div className="card wide">
-        <h2><Sparkles size={18} /> Análisis inteligente</h2>
-        <div className="insight-list">
-          {insights.map((insight) => (
-            <div className="insight-row" key={insight.id}>
-              <div>
-                <strong>{insight.title}</strong>
-                <p className="eyebrow">{insight.detail}</p>
-              </div>
-              <span className={`badge ${insight.tone === "positivo" ? "ok" : insight.tone === "riesgo" ? "fail" : "keep"}`}>
-                {insight.tone}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <button className="button wide">Ver recomendaciones</button>
-    </section>
-  );
-}
-
 function MetricGrid({ summary }: { summary: ReturnType<typeof calculateWeeklySummary> }) {
   return (
     <div className="metric-grid wide">
@@ -2164,9 +2089,6 @@ function screenLabel(screen: Screen) {
     comparacion: "Comparación semanal",
     historial: "Historial",
     perfil: "Perfil",
-    graficos: "Gráficos",
-    resumen: "Resumen",
-    inteligente: "Análisis inteligente",
   };
   return labels[screen];
 }
