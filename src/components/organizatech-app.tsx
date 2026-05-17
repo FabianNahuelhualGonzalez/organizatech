@@ -145,10 +145,16 @@ export function OrganizatechApp() {
   const hasRoutinePlan = exercises.length > 0;
   const routineDays = getRoutineDays(exercises);
   const visibleDay = getVisibleTrainingDay(exercises, activeRoutineDay);
+  const dashboardDay = getCalendarTrainingDay(exercises);
   const dayExercises = exercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay);
+  const dashboardExercises = exercises.filter((exercise) => (exercise.day ?? dashboardDay) === dashboardDay);
   const visibleRoutine = dayExercises[0]?.routine ?? setupByDay[visibleDay]?.routineName ?? visibleDay;
+  const dashboardRoutine = dashboardExercises[0]?.routine ?? setupByDay[dashboardDay]?.routineName ?? dashboardDay;
   const targetSummary = calculateTargetSummary(dayExercises);
+  const dashboardTargetSummary = calculateTargetSummary(dashboardExercises);
   const currentMetrics = metrics.filter((entry) => entry.week === currentWeek);
+  const dashboardExerciseIds = new Set(dashboardExercises.map((exercise) => exercise.id));
+  const dashboardCurrentMetrics = currentMetrics.filter((entry) => dashboardExerciseIds.has(entry.exerciseId));
   const previousSummary = calculateWeeklySummary(metrics, Math.max(1, currentWeek - 1));
   const summary = calculateWeeklySummary(metrics, currentWeek);
   const insights = generateSmartInsights(summary, currentMetrics);
@@ -652,15 +658,15 @@ export function OrganizatechApp() {
           exercises={exercises}
           hasTrainingEntries={hasTrainingEntries}
           hasRoutinePlan={hasRoutinePlan}
-          day={visibleDay}
-          routine={visibleRoutine}
-          targetSummary={targetSummary}
-          dayExercises={dayExercises}
+          day={dashboardDay}
+          routine={dashboardRoutine}
+          targetSummary={dashboardTargetSummary}
+          dayExercises={dashboardExercises}
           summary={summary}
-          currentMetrics={currentMetrics}
+          currentMetrics={dashboardCurrentMetrics}
           startRegistration={() => setScreen("entrenamiento")}
-          goToRoutine={() => openRoutineDay(visibleDay)}
-          editRoutine={() => openRoutineEditor(visibleDay)}
+          goToRoutine={() => openRoutineDay(dashboardDay)}
+          editRoutine={() => openRoutineEditor(dashboardDay)}
         />
       )}
       {screen === "entrenamiento" && (!hasRoutinePlan || isEditingRoutinePlan) && (
@@ -2058,6 +2064,13 @@ function getVisibleTrainingDay(exercises: ExerciseTemplate[], current: string) {
   if (normalizedToday && exercises.some((exercise) => exercise.day === normalizedToday)) return normalizedToday;
 
   return exercises.find((exercise) => exercise.day)?.day ?? current;
+}
+
+function getCalendarTrainingDay(exercises: ExerciseTemplate[]) {
+  const today = new Intl.DateTimeFormat("es-CL", { weekday: "long" }).format(new Date());
+  const normalizedToday = setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(today.toLowerCase()));
+  if (normalizedToday) return normalizedToday;
+  return getVisibleTrainingDay(exercises, "Lunes");
 }
 
 function getRoutineDays(exercises: ExerciseTemplate[]) {
