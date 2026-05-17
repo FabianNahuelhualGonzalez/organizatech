@@ -43,6 +43,20 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 ## Creacion y edicion de rutinas
 
 - Se creo flujo inicial para registrar rutina si no existen entrenamientos.
+- Se incorporo la seccion Ciclos de Entrenamiento al crear o editar rutinas.
+- Se agregaron conceptos de Macrociclo, Mesociclo, Microciclo y Sesion de entrenamiento.
+- Se reemplazaron las tarjetas informativas por un flujo guiado con combobox:
+  - Seleccion del ciclo de entrenamiento.
+  - Descripcion breve del ciclo seleccionado.
+  - Objetivo principal.
+  - Descripcion breve del objetivo seleccionado.
+  - Duracion.
+  - Dias de entrenamiento.
+- Se agrego configuracion editable de ciclos:
+  - Macrociclo: objetivo principal y duracion de 6 a 11 meses.
+  - Mesociclo: objetivo, duracion de 3 a 6 semanas y dias de entrenamiento.
+  - Microciclo: enfoque semanal.
+  - Sesion: foco del entrenamiento del dia.
 - Se permite seleccionar dia de entrenamiento: Lunes a Domingo.
 - Cada dia mantiene su propia rutina y ejercicios sin sobrescribir otros dias.
 - Se corrigio el problema donde al cargar Martes se sobrescribia Lunes.

@@ -204,6 +204,195 @@ h3 {
   font-size: 12px;
 }
 
+.setup-section-heading {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  text-align: center;
+}
+
+.setup-section-heading h3 {
+  font-size: 14px;
+}
+
+.training-cycles-card {
+  background:
+    linear-gradient(135deg, rgba(60, 122, 255, 0.13), rgba(2, 239, 63, 0.04)),
+    rgba(16, 27, 39, 0.74);
+}
+
+.cycle-flow-card {
+  display: grid;
+  gap: 13px;
+  border: 1px solid rgba(60, 122, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(5, 16, 30, 0.38);
+  padding: 12px;
+}
+
+.cycle-select-field {
+  display: grid;
+  gap: 7px;
+}
+
+.cycle-select-field > span {
+  color: #dce7ff;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.cycle-select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(220, 231, 255, 0.18);
+  border-radius: 8px;
+  color: white;
+  background: #081422;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.cycle-select:focus {
+  border-color: rgba(60, 122, 255, 0.85);
+  outline: 2px solid rgba(60, 122, 255, 0.22);
+}
+
+.cycle-description {
+  border: 1px solid rgba(116, 223, 113, 0.22);
+  border-radius: 8px;
+  background: rgba(116, 223, 113, 0.06);
+  padding: 10px;
+}
+
+.cycle-description strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.cycle-description p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.objective-description {
+  border-color: rgba(60, 122, 255, 0.24);
+  background: rgba(60, 122, 255, 0.08);
+}
+
+.training-cycle-grid {
+  display: grid;
+  gap: 9px;
+}
+
+.training-cycle-item {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(5, 16, 30, 0.38);
+  padding: 10px;
+}
+
+.training-cycle-item.active {
+  border-color: rgba(60, 122, 255, 0.72);
+  background: rgba(21, 53, 105, 0.34);
+}
+
+.training-cycle-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 10px;
+  align-items: center;
+}
+
+.training-cycle-main strong {
+  display: block;
+  font-size: 12px;
+}
+
+.training-cycle-main p,
+.cycle-help-text {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.cycle-help-button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgba(60, 122, 255, 0.52);
+  border-radius: 8px;
+  color: #dce7ff;
+  background: rgba(60, 122, 255, 0.13);
+}
+
+.cycle-help-button[aria-expanded="true"] {
+  color: white;
+  background: var(--primary);
+}
+
+.cycle-help-text {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 8px;
+}
+
+.cycle-controls {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 10px;
+}
+
+.cycle-field {
+  display: grid;
+  gap: 7px;
+}
+
+.cycle-field > span {
+  color: #dce7ff;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.cycle-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.cycle-chip-grid.compact .cycle-chip {
+  min-width: 72px;
+}
+
+.cycle-chip-grid.days .cycle-chip {
+  min-width: 78px;
+}
+
+.cycle-chip {
+  min-height: 28px;
+  border: 1px solid rgba(220, 231, 255, 0.18);
+  border-radius: 999px;
+  color: #dce7ff;
+  background: rgba(220, 231, 255, 0.08);
+  padding: 0 11px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.cycle-chip.active {
+  border-color: rgba(2, 239, 63, 0.75);
+  color: white;
+  background: #02ef3f;
+}
+
 .day-grid {
   display: flex;
   flex-wrap: wrap;
@@ -231,6 +420,19 @@ h3 {
   border: 1px solid rgba(116, 223, 113, 0.5);
   color: var(--green);
   background: rgba(116, 223, 113, 0.1);
+}
+
+.day-pill.planned:not(.active):not(.configured) {
+  border: 1px solid rgba(60, 122, 255, 0.45);
+  color: #dce7ff;
+  background: rgba(60, 122, 255, 0.12);
+}
+
+.day-pill:disabled {
+  color: rgba(220, 231, 255, 0.38);
+  background: rgba(220, 231, 255, 0.08);
+  cursor: not-allowed;
+  opacity: 0.75;
 }
 
 .routine-editor-intro {

@@ -64,6 +64,61 @@ type Screen =
 const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "comparacion"];
 const routines: RoutineName[] = ["Pecho Hombro Tríceps", "Espalda Bíceps Abdomen", "Piernas"];
 const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
+const trainingCycles = [
+  {
+    id: "macro",
+    title: "Macrociclo",
+    summary: "Plan grande del objetivo principal.",
+    detail:
+      "Es la estructura más grande de planificación. Generalmente abarca entre 6 y 11 meses y se enfoca en el objetivo deportivo principal o la forma física deseada.",
+  },
+  {
+    id: "meso",
+    title: "Mesociclo",
+    summary: "Bloques de 3 a 6 semanas.",
+    detail:
+      "Son bloques intermedios de entrenamiento. Cada mesociclo trabaja un objetivo específico como fuerza, hipertrofia, potencia, resistencia, descarga o definición.",
+  },
+  {
+    id: "micro",
+    title: "Microciclo",
+    summary: "Organización semanal del entrenamiento.",
+    detail:
+      "Representa la planificación semanal. Ordena la distribución de cargas, descansos y tipos de entrenamiento durante la semana.",
+  },
+  {
+    id: "session",
+    title: "Sesión de entrenamiento",
+    summary: "El entrenamiento de un día específico.",
+    detail:
+      "Es la unidad más pequeña del sistema. Contiene ejercicios, series, repeticiones, pesos, intensidad y métricas asociadas a ese día.",
+  },
+] as const;
+type TrainingCycleId = (typeof trainingCycles)[number]["id"];
+const macroObjectives = ["Fuerza", "Hipertrofia", "Recomposición", "Definición", "Rendimiento", "Salud"];
+const mesoObjectives = ["Fuerza", "Hipertrofia", "Potencia", "Resistencia", "Descarga", "Definición"];
+const microFocusOptions = ["Progresión", "Mantenimiento", "Descarga", "Técnica"];
+const sessionFocusOptions = ["Técnica", "Volumen", "Intensidad", "Control/RIR"];
+const objectiveDescriptions: Record<string, string> = {
+  Fuerza: "Busca aumentar la capacidad de levantar más carga. Prioriza ejercicios base, descansos más amplios y progresión controlada de peso.",
+  Hipertrofia: "Enfocada en aumentar masa muscular. Combina volumen, tensión mecánica y progresión de repeticiones o carga.",
+  Recomposición: "Busca mejorar la composición corporal: ganar o mantener músculo mientras se reduce grasa de forma gradual.",
+  Definición: "Orientada a mantener músculo mientras baja el porcentaje de grasa. Suele combinar fuerza, volumen moderado y control de fatiga.",
+  Rendimiento: "Busca mejorar desempeño físico general o deportivo. Puede mezclar fuerza, potencia, resistencia y técnica según el objetivo.",
+  Salud: "Prioriza adherencia, movilidad, control técnico y constancia para mejorar bienestar físico sin sobrecargar al usuario.",
+  Potencia: "Trabaja la capacidad de aplicar fuerza rápido. Usa movimientos explosivos, técnica cuidada y descansos suficientes.",
+  Resistencia: "Mejora la capacidad de sostener esfuerzo por más tiempo. Suele usar más repeticiones, menor carga relativa y descansos controlados.",
+  Descarga: "Reduce volumen o intensidad para recuperar fatiga acumulada y preparar al cuerpo para volver a progresar.",
+  Progresión: "Semana enfocada en avanzar: subir carga, sumar repeticiones o mejorar volumen sin perder técnica.",
+  Mantenimiento: "Semana para conservar rendimiento y consolidar técnica sin buscar aumentos agresivos de carga.",
+  Técnica: "Prioriza ejecución, control del movimiento y calidad de cada repetición por sobre subir peso.",
+  Volumen: "Sesión enfocada en acumular trabajo total mediante series y repeticiones suficientes.",
+  Intensidad: "Sesión orientada a trabajar con cargas exigentes o esfuerzo alto, cuidando descansos y técnica.",
+  "Control/RIR": "Sesión enfocada en regular el esfuerzo usando RIR para saber cuántas repeticiones quedan en reserva.",
+};
+const macroDurations = [6, 7, 8, 9, 10, 11];
+const mesoDurations = [3, 4, 5, 6];
 
 interface SetupExerciseRow {
   id: string;
@@ -77,6 +132,19 @@ interface SetupExerciseRow {
 interface SetupDayState {
   routineName: string;
   rows: SetupExerciseRow[];
+}
+
+interface TrainingPlan {
+  cycleType: TrainingCycleId;
+  macroObjective: string;
+  macroDurationMonths: number;
+  mesoObjective: string;
+  mesoDurationWeeks: number;
+  microDurationWeeks: number;
+  sessionDurationDays: number;
+  trainingDays: string[];
+  microFocus: string;
+  sessionFocus: string;
 }
 
 interface ExerciseDraft {
@@ -110,6 +178,7 @@ export function OrganizatechApp() {
   const [isTopbarHidden, setIsTopbarHidden] = useState(false);
   const [setupDay, setSetupDay] = useState("Lunes");
   const [setupByDay, setSetupByDay] = useState<Record<string, SetupDayState>>(() => createSetupByDay());
+  const [trainingPlan, setTrainingPlan] = useState<TrainingPlan>(() => loadTrainingPlan());
   const [activeRoutineDay, setActiveRoutineDay] = useState("Lunes");
   const [comparisonDay, setComparisonDay] = useState("Lunes");
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
@@ -134,6 +203,10 @@ export function OrganizatechApp() {
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  useEffect(() => {
+    saveTrainingPlan(trainingPlan);
+  }, [trainingPlan]);
 
   const metrics = useMemo(() => calculateWeeklyComparison(entries), [entries]);
   const currentWeek = Math.max(1, ...entries.map((entry) => entry.week));
@@ -185,6 +258,7 @@ export function OrganizatechApp() {
       setSelectedExerciseId((current) => current || next.exercises[0]?.id || "");
       setActiveRoutineDay((current) => getVisibleTrainingDay(next.exercises, current));
       setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
+      setTrainingPlan((current) => mergeTrainingPlanWithExercises(current, next.exercises));
       setStatusMessage(next.source === "supabase" ? "Datos sincronizados con Supabase." : "Datos guardados en este dispositivo.");
     } catch (error) {
       setStatusMessage(readError(error));
@@ -328,6 +402,18 @@ export function OrganizatechApp() {
     setSetupByDay((current) =>
       updateSetupDay(current, setupDay, (state) => ({ ...state, routineName: value })),
     );
+  }
+
+  function updateTrainingPlan(patch: Partial<TrainingPlan>) {
+    setTrainingPlan((current) => {
+      const next = { ...current, ...patch };
+      if (patch.trainingDays) {
+        const days = patch.trainingDays.length > 0 ? patch.trainingDays : [setupDay];
+        next.trainingDays = days;
+        if (!days.includes(setupDay)) setSetupDay(days[0]);
+      }
+      return next;
+    });
   }
 
   function addSetupRow() {
@@ -679,6 +765,8 @@ export function OrganizatechApp() {
           addRow={addSetupRow}
           removeRow={removeSetupRow}
           saveRoutine={saveInitialRoutine}
+          trainingPlan={trainingPlan}
+          updateTrainingPlan={updateTrainingPlan}
           message={statusMessage}
           isBusy={isBusy}
           isEditing={hasRoutinePlan || isEditingRoutinePlan}
@@ -963,6 +1051,8 @@ function InitialTrainingScreen({
   addRow,
   removeRow,
   saveRoutine,
+  trainingPlan,
+  updateTrainingPlan,
   message,
   isBusy,
   isEditing,
@@ -978,12 +1068,44 @@ function InitialTrainingScreen({
   addRow: () => void;
   removeRow: (id: string) => void;
   saveRoutine: () => void;
+  trainingPlan: TrainingPlan;
+  updateTrainingPlan: (patch: Partial<TrainingPlan>) => void;
   message: string;
   isBusy: boolean;
   isEditing: boolean;
   configuredDays: string[];
   cancelEditing: () => void;
 }) {
+  const plannedDays = trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [day];
+  const selectedCycle = trainingCycles.find((cycle) => cycle.id === trainingPlan.cycleType) ?? trainingCycles[0];
+  const objectiveOptions = getCycleObjectiveOptions(trainingPlan.cycleType);
+  const durationOptions = getCycleDurationOptions(trainingPlan.cycleType);
+  const objectiveValue = getCycleObjectiveValue(trainingPlan);
+  const objectiveDescription = objectiveDescriptions[objectiveValue] ?? "Este objetivo define cómo Organizatech ordenará la intención principal del bloque.";
+  const durationValue = getCycleDurationValue(trainingPlan);
+
+  function toggleTrainingDay(item: string) {
+    const nextDays = plannedDays.includes(item)
+      ? plannedDays.filter((current) => current !== item)
+      : [...plannedDays, item];
+    updateTrainingPlan({ trainingDays: nextDays.length > 0 ? nextDays : [item] });
+  }
+
+  function updateCycleObjective(value: string) {
+    if (trainingPlan.cycleType === "macro") updateTrainingPlan({ macroObjective: value });
+    if (trainingPlan.cycleType === "meso") updateTrainingPlan({ mesoObjective: value });
+    if (trainingPlan.cycleType === "micro") updateTrainingPlan({ microFocus: value });
+    if (trainingPlan.cycleType === "session") updateTrainingPlan({ sessionFocus: value });
+  }
+
+  function updateCycleDuration(value: string) {
+    const numericValue = Number(value);
+    if (trainingPlan.cycleType === "macro") updateTrainingPlan({ macroDurationMonths: numericValue });
+    if (trainingPlan.cycleType === "meso") updateTrainingPlan({ mesoDurationWeeks: numericValue });
+    if (trainingPlan.cycleType === "micro") updateTrainingPlan({ microDurationWeeks: numericValue });
+    if (trainingPlan.cycleType === "session") updateTrainingPlan({ sessionDurationDays: numericValue });
+  }
+
   return (
     <section className="setup-screen">
       {isEditing && (
@@ -1003,12 +1125,73 @@ function InitialTrainingScreen({
           {setupDays.map((item) => (
             <button
               key={item}
-              className={`day-pill ${day === item ? "active" : ""} ${configuredDays.includes(item) ? "configured" : ""}`}
+              className={`day-pill ${day === item ? "active" : ""} ${configuredDays.includes(item) ? "configured" : ""} ${plannedDays.includes(item) ? "planned" : ""}`}
               onClick={() => setDay(item)}
+              disabled={!plannedDays.includes(item)}
             >
               {item}
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className="setup-card training-cycles-card">
+        <div className="setup-section-heading">
+          <p className="eyebrow">Planificación deportiva</p>
+          <h3>Selecciona tu ciclo de entrenamiento</h3>
+        </div>
+        <div className="cycle-flow-card">
+          <label className="cycle-select-field">
+            <span>Ciclo de entrenamiento</span>
+            <select
+              className="cycle-select"
+              value={trainingPlan.cycleType}
+              onChange={(event) => updateTrainingPlan({ cycleType: event.target.value as TrainingCycleId })}
+            >
+              {trainingCycles.map((cycle) => (
+                <option key={cycle.id} value={cycle.id}>{cycle.title}</option>
+              ))}
+            </select>
+          </label>
+          <div className="cycle-description">
+            <strong>{selectedCycle.title}</strong>
+            <p>{selectedCycle.detail}</p>
+          </div>
+          <label className="cycle-select-field">
+            <span>¿Cuál es el objetivo principal?</span>
+            <select className="cycle-select" value={objectiveValue} onChange={(event) => updateCycleObjective(event.target.value)}>
+              {objectiveOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </label>
+          <div className="cycle-description objective-description">
+            <strong>{objectiveValue}</strong>
+            <p>{objectiveDescription}</p>
+          </div>
+          <label className="cycle-select-field">
+            <span>Duración</span>
+            <select className="cycle-select" value={durationValue} onChange={(event) => updateCycleDuration(event.target.value)}>
+              {durationOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="cycle-select-field">
+            <span>Selecciona días de entrenamiento</span>
+            <div className="cycle-chip-grid days">
+              {setupDays.map((item) => (
+                <button
+                  className={`cycle-chip ${plannedDays.includes(item) ? "active" : ""}`}
+                  key={item}
+                  type="button"
+                  onClick={() => toggleTrainingDay(item)}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1917,6 +2100,94 @@ function createSetupDayState(): SetupDayState {
 
 function createSetupByDay(): Record<string, SetupDayState> {
   return Object.fromEntries(setupDays.map((day) => [day, createSetupDayState()]));
+}
+
+function createDefaultTrainingPlan(): TrainingPlan {
+  return {
+    cycleType: "meso",
+    macroObjective: "Hipertrofia",
+    macroDurationMonths: 6,
+    mesoObjective: "Hipertrofia",
+    mesoDurationWeeks: 4,
+    microDurationWeeks: 1,
+    sessionDurationDays: 1,
+    trainingDays: ["Lunes"],
+    microFocus: "Progresión",
+    sessionFocus: "Técnica",
+  };
+}
+
+function loadTrainingPlan(): TrainingPlan {
+  if (typeof window === "undefined") return createDefaultTrainingPlan();
+
+  try {
+    const saved = window.localStorage.getItem(LOCAL_TRAINING_PLAN_KEY);
+    if (!saved) return createDefaultTrainingPlan();
+    const parsed = JSON.parse(saved) as Partial<TrainingPlan>;
+    const fallback = createDefaultTrainingPlan();
+    const trainingDays = Array.isArray(parsed.trainingDays)
+      ? parsed.trainingDays.filter((day) => setupDays.includes(day))
+      : fallback.trainingDays;
+
+    return {
+      cycleType: isTrainingCycleId(parsed.cycleType) ? parsed.cycleType : fallback.cycleType,
+      macroObjective: parsed.macroObjective || fallback.macroObjective,
+      macroDurationMonths: macroDurations.includes(Number(parsed.macroDurationMonths)) ? Number(parsed.macroDurationMonths) : fallback.macroDurationMonths,
+      mesoObjective: parsed.mesoObjective || fallback.mesoObjective,
+      mesoDurationWeeks: mesoDurations.includes(Number(parsed.mesoDurationWeeks)) ? Number(parsed.mesoDurationWeeks) : fallback.mesoDurationWeeks,
+      microDurationWeeks: Number(parsed.microDurationWeeks) === 1 ? 1 : fallback.microDurationWeeks,
+      sessionDurationDays: Number(parsed.sessionDurationDays) === 1 ? 1 : fallback.sessionDurationDays,
+      trainingDays: trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
+      microFocus: parsed.microFocus || fallback.microFocus,
+      sessionFocus: parsed.sessionFocus || fallback.sessionFocus,
+    };
+  } catch {
+    return createDefaultTrainingPlan();
+  }
+}
+
+function saveTrainingPlan(plan: TrainingPlan) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LOCAL_TRAINING_PLAN_KEY, JSON.stringify(plan));
+}
+
+function mergeTrainingPlanWithExercises(plan: TrainingPlan, exercises: ExerciseTemplate[]) {
+  const routineDays = getRoutineDays(exercises);
+  if (routineDays.length === 0) return plan;
+  const mergedDays = Array.from(new Set([...plan.trainingDays, ...routineDays])).filter((day) => setupDays.includes(day));
+  return { ...plan, trainingDays: mergedDays.length > 0 ? mergedDays : plan.trainingDays };
+}
+
+function isTrainingCycleId(value: unknown): value is TrainingCycleId {
+  return typeof value === "string" && trainingCycles.some((cycle) => cycle.id === value);
+}
+
+function getCycleObjectiveOptions(cycleType: TrainingCycleId) {
+  if (cycleType === "macro") return macroObjectives;
+  if (cycleType === "meso") return mesoObjectives;
+  if (cycleType === "micro") return microFocusOptions;
+  return sessionFocusOptions;
+}
+
+function getCycleDurationOptions(cycleType: TrainingCycleId) {
+  if (cycleType === "macro") return macroDurations.map((value) => ({ value, label: `${value} meses` }));
+  if (cycleType === "meso") return mesoDurations.map((value) => ({ value, label: `${value} semanas` }));
+  if (cycleType === "micro") return [{ value: 1, label: "1 semana" }];
+  return [{ value: 1, label: "1 día" }];
+}
+
+function getCycleObjectiveValue(plan: TrainingPlan) {
+  if (plan.cycleType === "macro") return plan.macroObjective;
+  if (plan.cycleType === "meso") return plan.mesoObjective;
+  if (plan.cycleType === "micro") return plan.microFocus;
+  return plan.sessionFocus;
+}
+
+function getCycleDurationValue(plan: TrainingPlan) {
+  if (plan.cycleType === "macro") return plan.macroDurationMonths;
+  if (plan.cycleType === "meso") return plan.mesoDurationWeeks;
+  if (plan.cycleType === "micro") return plan.microDurationWeeks;
+  return plan.sessionDurationDays;
 }
 
 function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<string, SetupDayState> {
