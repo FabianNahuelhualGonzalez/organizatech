@@ -116,6 +116,7 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 - Se corrigio la fecha del carrusel semanal: al pasar de Lunes a Martes tambien cambia del 18-05 al 19-05, y asi con el resto de la semana.
 - Se elimino el boton Editar rutina semanal del panel principal para dejarlo mas limpio.
 - Se creo la seccion Registro de entrenamiento en el menu lateral para crear o modificar rutinas.
+- Se reemplazaron las flechas grandes del carrusel del panel principal por scroll horizontal con indicadores de posicion debajo de Ir a rutina.
 - En entorno local se desactiva y limpia el service worker para evitar pantallas rotas por chunks antiguos durante el desarrollo.
 
 ## Logica de progreso

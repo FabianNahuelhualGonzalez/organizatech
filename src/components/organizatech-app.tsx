@@ -966,9 +966,6 @@ function DashboardScreen({
   const registeredTraining = currentMetrics[0]?.routine ?? dayExercises[0]?.routine ?? routine;
   const routinePreview = currentMetrics.filter((entry) => entry.routine === registeredTraining);
   const analytics = buildAnalytics(summary, currentMetrics);
-  const currentDayIndex = Math.max(0, weekDays.indexOf(day));
-  const previousDay = weekDays[(currentDayIndex - 1 + weekDays.length) % weekDays.length] ?? day;
-  const nextDay = weekDays[(currentDayIndex + 1) % weekDays.length] ?? day;
 
   if (!hasRoutinePlan) {
     return <EmptyDashboard startRegistration={startRegistration} />;
@@ -983,8 +980,6 @@ function DashboardScreen({
             calendarDay={calendarDay}
             weekDays={weekDays}
             routineDays={routineDays}
-            previousDay={previousDay}
-            nextDay={nextDay}
             switchDay={switchDay}
             compact
           />
@@ -1017,6 +1012,7 @@ function DashboardScreen({
               <button className="button secondary" style={{ width: "100%", marginTop: 12 }} onClick={goToRoutine}>
                 Ir a rutina
               </button>
+              <DashboardDayDots day={day} weekDays={weekDays} switchDay={switchDay} />
             </>
           ) : null}
         </div>
@@ -1048,8 +1044,6 @@ function DashboardScreen({
           calendarDay={calendarDay}
           weekDays={weekDays}
           routineDays={routineDays}
-          previousDay={previousDay}
-          nextDay={nextDay}
           switchDay={switchDay}
           compact
         />
@@ -1071,6 +1065,7 @@ function DashboardScreen({
             <button className="button secondary" style={{ width: "100%", marginTop: 12 }} onClick={goToRoutine}>
               Ir a rutina
             </button>
+            <DashboardDayDots day={day} weekDays={weekDays} switchDay={switchDay} />
           </>
         ) : (
           <p className="eyebrow">No hay rutina registrada para {day}. Puedes agregarla desde Registro de entrenamiento.</p>
@@ -1086,8 +1081,6 @@ function DashboardDayCarousel({
   calendarDay,
   weekDays,
   routineDays,
-  previousDay,
-  nextDay,
   switchDay,
   compact = false,
 }: {
@@ -1095,16 +1088,11 @@ function DashboardDayCarousel({
   calendarDay: string;
   weekDays: string[];
   routineDays: string[];
-  previousDay: string;
-  nextDay: string;
   switchDay: (day: string) => void;
   compact?: boolean;
 }) {
   return (
     <div className={`day-switcher-card dashboard-day-switcher ${compact ? "compact" : "card wide"}`}>
-      <button className="icon-button" type="button" aria-label="Día anterior" onClick={() => switchDay(previousDay)}>
-        <ChevronLeft size={19} />
-      </button>
       <div className="routine-day-pills">
         {weekDays.map((item) => {
           const hasRoutine = routineDays.includes(item);
@@ -1121,9 +1109,22 @@ function DashboardDayCarousel({
           );
         })}
       </div>
-      <button className="icon-button" type="button" aria-label="Día siguiente" onClick={() => switchDay(nextDay)}>
-        <ChevronRight size={19} />
-      </button>
+    </div>
+  );
+}
+
+function DashboardDayDots({ day, weekDays, switchDay }: { day: string; weekDays: string[]; switchDay: (day: string) => void }) {
+  return (
+    <div className="dashboard-day-dots" aria-label="Posición semanal">
+      {weekDays.map((item) => (
+        <button
+          key={item}
+          className={`dashboard-day-dot ${item === day ? "active" : ""}`}
+          type="button"
+          aria-label={`Ver ${item}`}
+          onClick={() => switchDay(item)}
+        />
+      ))}
     </div>
   );
 }

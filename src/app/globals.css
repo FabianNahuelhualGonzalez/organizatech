@@ -742,10 +742,10 @@ h3 {
 
 .day-switcher-card {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) 38px;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
-  padding: 10px;
+  padding: 8px;
 }
 
 .dashboard-day-switcher.compact {
@@ -760,9 +760,10 @@ h3 {
   min-width: 0;
   gap: 8px;
   overflow-x: auto;
-  padding-bottom: 2px;
+  padding: 0 2px 4px;
   scrollbar-color: rgba(220, 231, 255, 0.35) transparent;
   scrollbar-width: thin;
+  scroll-snap-type: x mandatory;
 }
 
 .routine-day-pills::-webkit-scrollbar {
@@ -789,6 +790,28 @@ h3 {
   padding: 0 12px;
   font-size: 11px;
   font-weight: 900;
+  scroll-snap-align: center;
+}
+
+.dashboard-day-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding-top: 9px;
+}
+
+.dashboard-day-dot {
+  width: 7px;
+  height: 7px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(220, 231, 255, 0.28);
+  padding: 0;
+}
+
+.dashboard-day-dot.active {
+  width: 18px;
+  background: #02ef3f;
 }
 
 .routine-day-pill.active {
