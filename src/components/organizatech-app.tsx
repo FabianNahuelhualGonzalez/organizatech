@@ -1209,17 +1209,18 @@ function CycleManagementScreen({
   const metrics = calculateWeeklyComparison(entries);
   const summary = calculateWeeklySummary(metrics, Math.max(1, ...entries.map((entry) => entry.week)));
   const cycleTitle = getCycleTitle(trainingPlan);
+  const weeksRegistered = Math.max(1, ...entries.map((entry) => entry.week));
 
   return (
     <section className="screen">
       <div className="card wide cycle-management-card">
         <p className="eyebrow">Ciclo activo</p>
         <h2>Ciclo {cycleNumber} · {cycleTitle}</h2>
-        <p className="eyebrow">Este es el ciclo que actualmente alimenta el panel principal y las comparaciones semanales.</p>
-        <div className="metric-grid">
-          <div className="metric"><span>Dias con rutina</span><strong>{getRoutineDays(exercises).length}</strong></div>
-          <div className="metric"><span>Ejercicios</span><strong>{targetSummary.exerciseCount}</strong></div>
-          <div className="metric"><span>Semanas registradas</span><strong>{Math.max(1, ...entries.map((entry) => entry.week))}</strong></div>
+        <p className="eyebrow">{getCycleDurationLabel(trainingPlan)} Â· {getRoutineDays(exercises).length} dias Â· {targetSummary.exerciseCount} ejercicios</p>
+        <div className="cycle-summary-line">
+          <div><span>Volumen registrado</span><strong>{formatKg(summary.volumeTotal)}</strong></div>
+          <div><span>Reps registradas</span><strong>{summary.totalReps}</strong></div>
+          <div><span>Semanas</span><strong>{weeksRegistered}</strong></div>
         </div>
         <button className="button secondary" type="button" onClick={editCurrentCycle}>
           <Pencil size={16} />
@@ -1229,22 +1230,12 @@ function CycleManagementScreen({
 
       <div className="card wide new-cycle-card">
         <p className="eyebrow">Crear nuevo ciclo de entrenamiento</p>
-        <h3>Si finalizaste tu ciclo de entrenamiento y quieres iniciar uno nuevo, aprieta aqui.</h3>
-        <p className="eyebrow">Guardaremos un resumen del ciclo actual en Historial ciclo de entrenamiento antes de liberar la creacion del siguiente ciclo.</p>
+        <h3>Finalizaremos tu ciclo actual y guardaremos su resumen en Historial ciclo de entrenamiento para que puedas revisarlo cuando quieras.</h3>
         <button className="start-button compact" type="button" onClick={requestNewCycle}>
           Crear nuevo ciclo de entrenamiento
         </button>
       </div>
 
-      <div className="card wide">
-        <h3>Resumen del ciclo actual</h3>
-        <div className="history-list">
-          <div className="history-row"><span>Objetivo principal</span><strong>{getCycleObjectiveValue(trainingPlan)}</strong></div>
-          <div className="history-row"><span>Duracion planificada</span><strong>{getCycleDurationLabel(trainingPlan)}</strong></div>
-          <div className="history-row"><span>Volumen de trabajo registrado</span><strong>{formatKg(summary.volumeTotal)}</strong></div>
-          <div className="history-row"><span>Total reps registradas</span><strong>{summary.totalReps}</strong></div>
-        </div>
-      </div>
     </section>
   );
 }

@@ -1706,6 +1706,30 @@ h3 {
   gap: 12px;
 }
 
+.cycle-summary-line {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cycle-summary-line > div {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px;
+}
+
+.cycle-summary-line span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.cycle-summary-line strong {
+  font-size: 14px;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

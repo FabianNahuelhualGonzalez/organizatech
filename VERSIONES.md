@@ -45,6 +45,8 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 - Se creo flujo inicial para registrar rutina si no existen entrenamientos.
 - Se agrego gestion de ciclo activo dentro de Registro de entrenamiento.
 - Si ya existe un ciclo registrado, Registro de entrenamiento muestra resumen del ciclo actual y acceso a Crear nuevo ciclo de entrenamiento.
+- Se compacto el resumen del ciclo activo en una sola tarjeta con duracion, dias, ejercicios, volumen, reps y semanas.
+- Se simplifico el texto de Crear nuevo ciclo de entrenamiento para reducir ruido visual.
 - Al crear un nuevo ciclo se muestra un popup de confirmacion; si el usuario acepta, se finaliza el ciclo actual y se guarda en Historial ciclo de entrenamiento.
 - Se agrego la seccion Historial ciclo de entrenamiento en el menu lateral para listar Ciclo 1, Ciclo 2, Ciclo 3, etc.
 - Se incorporo la seccion Ciclos de Entrenamiento al crear o editar rutinas.
