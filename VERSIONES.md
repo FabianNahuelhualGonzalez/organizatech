@@ -118,6 +118,7 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 - Se creo la seccion Registro de entrenamiento en el menu lateral para crear o modificar rutinas.
 - Se reemplazaron las flechas grandes del carrusel del panel principal por scroll horizontal con indicadores de posicion debajo de Ir a rutina.
 - El carrusel del panel principal ahora muestra solo los dias con rutina registrada; si hay 2 dias muestra 2 posiciones, si hay 3 muestra 3 y como maximo 7.
+- Se elimino la fila de chips de dias del panel principal y se dejo la navegacion semanal solo con puntos de posicion.
 - En entorno local se desactiva y limpia el service worker para evitar pantallas rotas por chunks antiguos durante el desarrollo.
 
 ## Logica de progreso

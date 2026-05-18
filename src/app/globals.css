@@ -748,13 +748,6 @@ h3 {
   padding: 8px;
 }
 
-.dashboard-day-switcher.compact {
-  border: 1px solid rgba(220, 231, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(5, 16, 30, 0.42);
-  margin-bottom: 4px;
-}
-
 .routine-day-pills {
   display: flex;
   min-width: 0;

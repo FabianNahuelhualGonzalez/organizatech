@@ -38,6 +38,7 @@ Este documento resume las peticiones realizadas durante el desarrollo de Organiz
 - Se retiro Editar rutina semanal del panel principal.
 - Se cambio el carrusel del panel principal a scroll horizontal con puntos de posicion bajo Ir a rutina.
 - Se hizo dinamico el carrusel del panel principal para mostrar solo los dias que tienen rutina registrada.
+- Se elimino la fila de chips de dias del panel principal para evitar duplicar informacion con los puntos.
 - Se ajusto el entorno local para limpiar service workers y evitar fallas de chunks antiguos en localhost.
 
 ## 2026-05-14 - Rutinas por dia

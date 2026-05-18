@@ -980,14 +980,6 @@ function DashboardScreen({
     return (
       <section className="screen">
         <div className="card wide routine-summary-card">
-          <DashboardDayCarousel
-            day={day}
-            calendarDay={calendarDay}
-            weekDays={weekDays}
-            routineDays={routineDays}
-            switchDay={switchDay}
-            compact
-          />
           <p className="eyebrow">{hasTodayRoutine ? routine : "Sin rutina para hoy"}</p>
           <h3>{hasTodayRoutine ? `${titlePrefix} ${trainingDateLabel} | ${day}` : `Entrenamiento ${trainingDateLabel} | ${day}: no registra entrenamientos`}</h3>
           {hasTodayRoutine ? (
@@ -1044,14 +1036,6 @@ function DashboardScreen({
       <DashboardSmartInsights insights={insights} />
       <MetricGrid summary={summary} />
       <div className="card wide">
-        <DashboardDayCarousel
-          day={day}
-          calendarDay={calendarDay}
-          weekDays={weekDays}
-          routineDays={routineDays}
-          switchDay={switchDay}
-          compact
-        />
         <h3>{hasTodayRoutine ? `${titlePrefix} ${trainingDateLabel} | ${day}` : `Entrenamiento ${trainingDateLabel} | ${day}: no registra entrenamientos`}</h3>
         {hasTodayRoutine ? (
           <>
@@ -1078,43 +1062,6 @@ function DashboardScreen({
       </div>
       <DashboardAnalytics summary={summary} analytics={analytics} />
     </section>
-  );
-}
-
-function DashboardDayCarousel({
-  day,
-  calendarDay,
-  weekDays,
-  routineDays,
-  switchDay,
-  compact = false,
-}: {
-  day: string;
-  calendarDay: string;
-  weekDays: string[];
-  routineDays: string[];
-  switchDay: (day: string) => void;
-  compact?: boolean;
-}) {
-  return (
-    <div className={`day-switcher-card dashboard-day-switcher ${compact ? "compact" : "card wide"}`}>
-      <div className="routine-day-pills">
-        {weekDays.map((item) => {
-          const hasRoutine = routineDays.includes(item);
-          const isToday = item === calendarDay;
-          return (
-            <button
-              key={item}
-              className={`routine-day-pill ${item === day ? "active" : ""} ${hasRoutine ? "configured" : ""} ${isToday ? "today" : ""}`}
-              type="button"
-              onClick={() => switchDay(item)}
-            >
-              {item}
-            </button>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
