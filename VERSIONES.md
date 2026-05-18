@@ -1,6 +1,6 @@
 # Organizatech - Documento de versiones y modificaciones
 
-Fecha de documento: 2026-05-16
+Fecha de documento: 2026-05-17
 
 ## Version actual
 
@@ -54,6 +54,14 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
   - Dias de entrenamiento.
 - Se elimino el selector superior duplicado de dia de entrenamiento.
 - Los dias del bloque de planificacion ahora agregan el dia al plan y seleccionan el dia que se esta configurando.
+- Se agrego flujo guiado para configurar rutinas por dia:
+  - Progreso de dias completados.
+  - Selector de dias planificados.
+  - Guardar y continuar al siguiente dia.
+  - Finalizar registro de rutina al completar el ultimo dia.
+- Se elimino la opcion de copiar rutina desde otro dia para simplificar el flujo.
+- Se agrego check-in previo al entrenamiento con motivacion, hidratacion, sueño y energia fisica.
+- Se permite omitir el check-in y se registra internamente como usuario no quiso registrar.
 - Se agrego configuracion editable de ciclos:
   - Macrociclo: objetivo principal y duracion de 6 a 11 meses.
   - Mesociclo: objetivo, duracion de 3 a 6 semanas y dias de entrenamiento.
@@ -81,6 +89,11 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 - Cada ejercicio muestra orden, nombre, series, reps, kg objetivo y estado.
 - Se agrego registro de series ejercicio por ejercicio.
 - El boton Registrar serie registra el ejercicio actual completo.
+- Se eliminaron valores predeterminados del registro de series para que el usuario escriba lo realizado.
+- Se elimino el selector de ejercicio del registro de series; el ejercicio activo se elige desde Ejercicios a realizar.
+- Se agrego ayuda contextual para explicar RIR.
+- Se hizo dinamico el numero de casillas de series segun las series objetivo registradas en la rutina.
+- Se corrigio el caso donde un ejercicio de 5 series mostraba solo 4 casillas de registro.
 - Al completar todos los ejercicios se habilita Guardar entrenamiento.
 - Se guardan registros por semana para permitir comparacion futura.
 

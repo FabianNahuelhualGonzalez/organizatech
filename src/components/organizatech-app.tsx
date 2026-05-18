@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Database,
   Dumbbell,
+  HelpCircle,
   Lock,
   LogOut,
   Mail,
@@ -148,10 +149,18 @@ interface TrainingPlan {
 }
 
 interface ExerciseDraft {
-  weight: number;
+  weight: number | "";
   rir: string;
-  reps: number[];
+  reps: Array<number | "">;
   registered: boolean;
+}
+
+interface TrainingReadiness {
+  motivation?: number;
+  hydration?: number;
+  sleep?: number;
+  energy?: number;
+  skipped: boolean;
 }
 
 interface AnalyticsSnapshot {
@@ -183,6 +192,7 @@ export function OrganizatechApp() {
   const [comparisonDay, setComparisonDay] = useState("Lunes");
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
   const [exerciseDrafts, setExerciseDrafts] = useState<Record<string, ExerciseDraft>>({});
+  const [readiness, setReadiness] = useState<TrainingReadiness | null>(null);
 
   useEffect(() => {
     void refreshData();
@@ -443,7 +453,13 @@ export function OrganizatechApp() {
     const dayState = setupByDay[setupDay] ?? createSetupDayState();
     const routineName = dayState.routineName.trim() || setupDay;
     const validRows = dayState.rows.filter((row) => row.name.trim());
-    const shouldStayInEditor = hasRoutinePlan || isEditingRoutinePlan;
+    const plannedDays = trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [setupDay];
+    const completedDays = getConfiguredSetupDays({
+      ...setupByDay,
+      [setupDay]: { routineName, rows: validRows },
+    });
+    const nextIncompleteDay = plannedDays.find((day) => day !== setupDay && !completedDays.includes(day));
+    const allPlannedDaysComplete = plannedDays.every((day) => completedDays.includes(day));
 
     if (validRows.length === 0) {
       setStatusMessage("Agrega al menos un ejercicio para crear la rutina.");
@@ -482,13 +498,17 @@ export function OrganizatechApp() {
         },
       }));
       const successMessage = `Rutina de ${setupDay} guardada.`;
-      setStatusMessage(shouldStayInEditor ? successMessage : "Rutina inicial registrada.");
+      setStatusMessage(nextIncompleteDay ? `${successMessage} Ahora configura ${nextIncompleteDay}.` : "Registro de rutina finalizado.");
       setRoutineNotice(successMessage);
-      if (shouldStayInEditor) {
-        setIsEditingRoutinePlan(false);
+      if (!allPlannedDaysComplete && nextIncompleteDay) {
+        setIsEditingRoutinePlan(true);
+        setSetupDay(nextIncompleteDay);
         setScreen("entrenamiento");
       } else {
-        setScreen("dashboard");
+        setIsEditingRoutinePlan(false);
+        setActiveRoutineDay(setupDay);
+        setReadiness(null);
+        setScreen("entrenamiento");
       }
     } catch (error) {
       setStatusMessage(readError(error));
@@ -535,7 +555,12 @@ export function OrganizatechApp() {
   function registerCurrentExercise() {
     const exercise = dayExercises[activeExerciseIndex];
     if (!exercise) return;
-    const draft = exerciseDrafts[exercise.id] ?? createExerciseDraft(exercise);
+    const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
+    const requiredReps = draft.reps.slice(0, exercise.targetSets);
+    if (draft.weight === "" || requiredReps.some((value) => value === "")) {
+      setStatusMessage("Completa peso y series antes de registrar el ejercicio.");
+      return;
+    }
     updateExerciseDraft(exercise, { ...draft, registered: true });
     setActiveExerciseIndex((index) => Math.min(index + 1, Math.max(0, dayExercises.length - 1)));
   }
@@ -551,7 +576,7 @@ export function OrganizatechApp() {
     try {
       const savedEntries: ExerciseEntry[] = [];
       for (const exercise of validExercises) {
-        const draft = exerciseDrafts[exercise.id] ?? createExerciseDraft(exercise);
+        const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
         const previous = metrics.filter((entry) => entry.exerciseId === exercise.id).at(-1);
         const saved = await saveTrainingEntry({
           id: crypto.randomUUID(),
@@ -562,11 +587,11 @@ export function OrganizatechApp() {
           date: new Date().toISOString().slice(0, 10),
           targetSets: exercise.targetSets,
           targetReps: exercise.targetReps,
-          weight: draft.weight,
+          weight: Number(draft.weight) || 0,
           previousWeight: previous?.weight ?? exercise.baseWeight,
-          reps: draft.reps.slice(0, exercise.targetSets),
+          reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
           rir: draft.rir,
-          notes: `Entrenamiento ${visibleDay}: ${exercise.routine}`,
+          notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
         });
         savedEntries.push(saved);
       }
@@ -578,6 +603,7 @@ export function OrganizatechApp() {
         return next;
       });
       setStatusMessage("Entrenamiento guardado.");
+      setReadiness(null);
       setScreen("dashboard");
     } catch (error) {
       setStatusMessage(readError(error));
@@ -770,14 +796,20 @@ export function OrganizatechApp() {
           message={statusMessage}
           isBusy={isBusy}
           isEditing={hasRoutinePlan || isEditingRoutinePlan}
-          configuredDays={setupDays.filter((day) => setupByDay[day]?.rows.some((row) => row.name.trim()))}
+          configuredDays={getConfiguredSetupDays(setupByDay)}
           cancelEditing={() => {
             setIsEditingRoutinePlan(false);
             setScreen(hasRoutinePlan ? "entrenamiento" : "dashboard");
           }}
         />
       )}
-      {screen === "entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && (
+      {screen === "entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && !readiness && (
+        <TrainingReadinessScreen
+          onSubmit={(value) => setReadiness({ ...value, skipped: false })}
+          onSkip={() => setReadiness({ skipped: true })}
+        />
+      )}
+      {screen === "entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && readiness && (
         <GuidedTrainingScreen
           day={visibleDay}
           routine={visibleRoutine}
@@ -885,7 +917,7 @@ function DashboardScreen({
   hasRoutinePlan: boolean;
   day: string;
   routine: string;
-  targetSummary: { volume: number; reps: number; exerciseCount: number };
+  targetSummary: { totalWeight: number; volume: number; reps: number; exerciseCount: number };
   dayExercises: ExerciseTemplate[];
   summary: ReturnType<typeof calculateWeeklySummary>;
   currentMetrics: ExerciseMetrics[];
@@ -911,7 +943,7 @@ function DashboardScreen({
           <p className="eyebrow">{routine}</p>
           <h3>Entrenamiento del día {day}</h3>
           <div className="metric-grid">
-            <div className="metric"><span>Volumen total entrenamiento</span><strong>{formatKg(targetSummary.volume)}</strong></div>
+            <div className="metric"><span>KG totales de la rutina</span><strong>{formatKg(targetSummary.totalWeight)}</strong></div>
             <div className="metric"><span>Total reps</span><strong>{targetSummary.reps}</strong></div>
             <div className="metric"><span>Ejercicios total entrenamiento</span><strong>{targetSummary.exerciseCount}</strong></div>
           </div>
@@ -1077,6 +1109,10 @@ function InitialTrainingScreen({
   cancelEditing: () => void;
 }) {
   const plannedDays = trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [day];
+  const completedPlannedDays = plannedDays.filter((item) => configuredDays.includes(item));
+  const currentStep = Math.max(1, plannedDays.indexOf(day) + 1);
+  const remainingDays = plannedDays.filter((item) => item !== day && !configuredDays.includes(item));
+  const isLastPendingDay = remainingDays.length === 0;
   const selectedCycle = trainingCycles.find((cycle) => cycle.id === trainingPlan.cycleType) ?? trainingCycles[0];
   const objectiveOptions = getCycleObjectiveOptions(trainingPlan.cycleType);
   const durationOptions = getCycleDurationOptions(trainingPlan.cycleType);
@@ -1085,9 +1121,15 @@ function InitialTrainingScreen({
   const durationValue = getCycleDurationValue(trainingPlan);
 
   function toggleTrainingDay(item: string) {
-    const nextDays = plannedDays.includes(item) ? plannedDays : [...plannedDays, item];
+    const isSelected = plannedDays.includes(item);
+    const nextDays = isSelected && plannedDays.length > 1
+      ? plannedDays.filter((current) => current !== item)
+      : isSelected
+        ? plannedDays
+        : [...plannedDays, item];
+
     updateTrainingPlan({ trainingDays: nextDays });
-    setDay(item);
+    setDay(nextDays.includes(item) ? item : nextDays[0]);
   }
 
   function updateCycleObjective(value: string) {
@@ -1178,18 +1220,50 @@ function InitialTrainingScreen({
         </div>
       </div>
 
-      <div className="setup-card">
-        <h3>Nombra tu rutina del día {day}</h3>
+      <div className="setup-card routine-day-builder-card">
+        <div className="setup-section-heading">
+          <p className="eyebrow">Configura tus rutinas por día</p>
+          <h3>Rutina {currentStep} de {plannedDays.length} · {day}</h3>
+        </div>
+        <div className="routine-build-progress">
+          <span>{completedPlannedDays.length} de {plannedDays.length} días completados</span>
+          <div className="mini-progress-track">
+            <div className="mini-progress-fill" style={{ width: `${Math.round((completedPlannedDays.length / plannedDays.length) * 100)}%` }} />
+          </div>
+        </div>
+        <div className="routine-build-days">
+          {plannedDays.map((item) => (
+            <button
+              className={`routine-build-day ${item === day ? "current" : ""} ${configuredDays.includes(item) ? "done" : ""}`}
+              key={item}
+              type="button"
+              onClick={() => setDay(item)}
+            >
+              <strong>{item}</strong>
+              <span>{configuredDays.includes(item) ? "Listo" : item === day ? "Actual" : "Pendiente"}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="setup-card routine-name-card">
+        <div className="setup-section-heading">
+          <p className="eyebrow">Rutina del día {day}</p>
+          <h3>Nombre de la rutina</h3>
+        </div>
         <input
           className="setup-name-input"
-          placeholder="Ingrese nombre"
+          placeholder="Ej: Empuje, Jalón, Piernas"
           value={routineName}
           onChange={(event) => setRoutineName(event.target.value)}
         />
       </div>
 
-      <div className="setup-card">
-        <h3>Ingrese ejercicios</h3>
+      <div className="setup-card exercise-builder-card">
+        <div className="setup-section-heading">
+          <p className="eyebrow">Rutina del día {day}</p>
+          <h3>Ejercicios a programar</h3>
+        </div>
         <div className="setup-table">
           <div className="setup-table-head">
             <span>Nombre ejercicio</span>
@@ -1203,7 +1277,7 @@ function InitialTrainingScreen({
               <input placeholder={`Ejercicio ${index + 1}`} value={row.name} onChange={(event) => updateRow(row.id, "name", event.target.value)} />
               <input type="number" min={1} placeholder="Series" value={row.sets || ""} onChange={(event) => updateRow(row.id, "sets", event.target.value)} />
               <input type="number" min={1} placeholder="Reps" value={row.reps || ""} onChange={(event) => updateRow(row.id, "reps", event.target.value)} />
-              <input type="number" min={0} placeholder="Kg" value={String(row.weight)} onChange={(event) => updateRow(row.id, "weight", event.target.value)} />
+              <input type="number" min={0} placeholder="Kg" value={row.weight || ""} onChange={(event) => updateRow(row.id, "weight", event.target.value)} />
               <button className="row-delete" aria-label="Eliminar ejercicio" onClick={() => removeRow(row.id)}>
                 <Trash2 size={13} />
               </button>
@@ -1213,10 +1287,72 @@ function InitialTrainingScreen({
         <div className="setup-actions">
           <button className="small-green-button" onClick={addRow}>Agregar más</button>
           <button className="start-button compact" onClick={saveRoutine} disabled={isBusy}>
-            {isBusy ? "Guardando..." : isEditing ? `Guardar ${day}` : "Guardar rutina"}
+            {isBusy ? "Guardando..." : isLastPendingDay ? "Finalizar registro de rutina" : "Guardar y continuar"}
           </button>
         </div>
         <p className="setup-message">{message}</p>
+      </div>
+    </section>
+  );
+}
+
+function TrainingReadinessScreen({
+  onSubmit,
+  onSkip,
+}: {
+  onSubmit: (value: Omit<TrainingReadiness, "skipped">) => void;
+  onSkip: () => void;
+}) {
+  const [values, setValues] = useState({
+    motivation: 4,
+    hydration: 4,
+    sleep: 4,
+    energy: 4,
+  });
+  const questions = [
+    { key: "motivation", label: "Motivación", detail: "Qué tantas ganas tienes de entrenar hoy." },
+    { key: "hydration", label: "Hidratación", detail: "Qué tan bien hidratado sientes tu cuerpo." },
+    { key: "sleep", label: "Sueño", detail: "Qué tan reparador fue tu descanso." },
+    { key: "energy", label: "Energía física", detail: "Qué tan preparado te sientes para rendir." },
+  ] as const;
+
+  return (
+    <section className="screen">
+      <div className="card wide readiness-card">
+        <div className="setup-section-heading">
+          <p className="eyebrow">Antes de empezar</p>
+          <h3>¿Cómo llegas hoy?</h3>
+        </div>
+        <div className="readiness-list">
+          {questions.map((question) => (
+            <div className="readiness-row" key={question.key}>
+              <div>
+                <strong>{question.label}</strong>
+                <p>{question.detail}</p>
+              </div>
+              <div className="readiness-scale" role="group" aria-label={question.label}>
+                {Array.from({ length: 7 }, (_, index) => index + 1).map((score) => (
+                  <button
+                    className={values[question.key] === score ? "active" : ""}
+                    key={score}
+                    type="button"
+                    onClick={() => setValues((current) => ({ ...current, [question.key]: score }))}
+                  >
+                    {score}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="two-cols">
+          <button className="button secondary" type="button" onClick={onSkip}>
+            Omitir por hoy
+          </button>
+          <button className="button" type="button" onClick={() => onSubmit(values)}>
+            Empezar entrenamiento
+          </button>
+        </div>
       </div>
     </section>
   );
@@ -1380,7 +1516,7 @@ function GuidedTrainingScreen({
   day: string;
   routine: string;
   exercises: ExerciseTemplate[];
-  targetSummary: { volume: number; reps: number; exerciseCount: number };
+  targetSummary: { totalWeight: number; volume: number; reps: number; exerciseCount: number };
   activeIndex: number;
   setActiveIndex: (value: number) => void;
   drafts: Record<string, ExerciseDraft>;
@@ -1393,8 +1529,9 @@ function GuidedTrainingScreen({
   notice: string;
   isBusy: boolean;
 }) {
+  const [isRirHelpOpen, setIsRirHelpOpen] = useState(false);
   const activeExercise = exercises[activeIndex] ?? exercises[0];
-  const draft = activeExercise ? (drafts[activeExercise.id] ?? createExerciseDraft(activeExercise)) : null;
+  const draft = activeExercise ? normalizeExerciseDraft(activeExercise, drafts[activeExercise.id]) : null;
   const completedCount = exercises.filter((exercise) => drafts[exercise.id]?.registered).length;
   const allRegistered = exercises.length > 0 && completedCount === exercises.length;
   const currentDayIndex = Math.max(0, routineDays.indexOf(day));
@@ -1410,9 +1547,9 @@ function GuidedTrainingScreen({
         date: new Date().toISOString().slice(0, 10),
         targetSets: activeExercise.targetSets,
         targetReps: activeExercise.targetReps,
-        weight: draft.weight,
+        weight: Number(draft.weight) || 0,
         previousWeight: activeExercise.baseWeight,
-        reps: draft.reps,
+        reps: draft.reps.map((value) => Number(value) || 0),
         rir: draft.rir,
       })
     : null;
@@ -1456,7 +1593,7 @@ function GuidedTrainingScreen({
         {notice ? <div className="notice-banner">{notice}</div> : null}
         <p className="eyebrow">Ejercicio {activeIndex + 1} de {exercises.length} · {completedCount} registrados</p>
         <div className="metric-grid">
-          <div className="metric"><span>Volumen total entrenamiento</span><strong>{formatKg(targetSummary.volume)}</strong></div>
+          <div className="metric"><span>KG totales de la rutina</span><strong>{formatKg(targetSummary.totalWeight)}</strong></div>
           <div className="metric"><span>Total reps</span><strong>{targetSummary.reps}</strong></div>
           <div className="metric"><span>Ejercicios total</span><strong>{targetSummary.exerciseCount}</strong></div>
         </div>
@@ -1499,34 +1636,49 @@ function GuidedTrainingScreen({
       </div>
 
       <div className="card wide form-grid">
-        <h3>Registro de series</h3>
-        <label className="field">
-          <span>Ejercicio</span>
-          <select value={activeExercise.id} onChange={(event) => setActiveIndex(Math.max(0, exercises.findIndex((exercise) => exercise.id === event.target.value)))}>
-            {exercises.map((exercise) => (
-              <option key={exercise.id} value={exercise.id}>{exercise.name}</option>
-            ))}
-          </select>
-        </label>
+        <h3>Registro de series · {activeExercise.name}</h3>
         <div className="two-cols">
-          <TextNumber label="Peso" value={draft.weight} onChange={(value) => updateDraft(activeExercise, { weight: value })} />
           <label className="field">
-            <span>RIR</span>
-            <input value={draft.rir} onChange={(event) => updateDraft(activeExercise, { rir: event.target.value })} />
+            <span>Peso</span>
+            <input
+              type="number"
+              min={0}
+              placeholder={`${activeExercise.baseWeight} kg objetivo`}
+              value={draft.weight}
+              onChange={(event) => updateDraft(activeExercise, { weight: readOptionalNumber(event.target.value) })}
+            />
+          </label>
+          <label className="field rir-field">
+            <span className="field-label-with-help">
+              RIR
+              <button className="inline-help-button" type="button" onClick={() => setIsRirHelpOpen((value) => !value)} aria-label="Explicar RIR">
+                <HelpCircle size={14} />
+              </button>
+            </span>
+            <input placeholder="Ej: RIR 1-2" value={draft.rir} onChange={(event) => updateDraft(activeExercise, { rir: event.target.value })} />
+            {isRirHelpOpen ? (
+              <span className="field-help-popover" role="dialog">
+                RIR significa repeticiones en reserva: cuántas repeticiones crees que aún podrías hacer al terminar una serie.
+              </span>
+            ) : null}
           </label>
         </div>
         <div className="two-cols">
           {draft.reps.map((reps, index) => (
-            <TextNumber
-              key={index}
-              label={`Serie ${index + 1}`}
-              value={reps}
-              onChange={(value) => {
+            <label className="field" key={index}>
+              <span>Serie {index + 1}</span>
+              <input
+                type="number"
+                min={0}
+                placeholder={`${activeExercise.targetReps} reps objetivo`}
+                value={reps}
+                onChange={(event) => {
                 const next = [...draft.reps];
-                next[index] = value;
+                next[index] = readOptionalNumber(event.target.value);
                 updateDraft(activeExercise, { reps: next });
               }}
-            />
+              />
+            </label>
           ))}
         </div>
         <ExerciseRow entry={preview} />
@@ -1981,7 +2133,7 @@ function ExerciseRow({ entry, showVolume = false }: { entry: ExerciseMetrics; sh
       <div>
         <strong>{entry.exerciseName}</strong>
         <div className="exercise-progress">
-          <DeltaValue value={entry.weight} suffix="kg" neutralWhenZero={false} />
+          <WeightValue value={entry.weight} label="kg actual" />
           <DeltaValue value={entry.repsDifference} suffix="reps" />
           <DeltaValue value={entry.kgDifference} suffix="kg" />
           {showVolume ? <DeltaValue value={entry.volumePercentage} suffix="% volumen" /> : null}
@@ -1994,6 +2146,10 @@ function ExerciseRow({ entry, showVolume = false }: { entry: ExerciseMetrics; sh
       </div>
     </div>
   );
+}
+
+function WeightValue({ value, label }: { value: number; label: string }) {
+  return <span className="current-weight-value">{label}: {value} kg</span>;
 }
 
 function DeltaValue({ value, suffix, neutralWhenZero = true }: { value: number; suffix: string; neutralWhenZero?: boolean }) {
@@ -2083,6 +2239,10 @@ function createSetupDayState(): SetupDayState {
 
 function createSetupByDay(): Record<string, SetupDayState> {
   return Object.fromEntries(setupDays.map((day) => [day, createSetupDayState()]));
+}
+
+function getConfiguredSetupDays(setupByDay: Record<string, SetupDayState>) {
+  return setupDays.filter((day) => setupByDay[day]?.rows.some((row) => row.name.trim()));
 }
 
 function createDefaultTrainingPlan(): TrainingPlan {
@@ -2215,18 +2375,29 @@ function createSetupRow(): SetupExerciseRow {
   return {
     id: crypto.randomUUID(),
     name: "",
-    sets: 4,
-    reps: 10,
+    sets: 0,
+    reps: 0,
     weight: 0,
   };
 }
 
 function createExerciseDraft(exercise: ExerciseTemplate): ExerciseDraft {
   return {
-    weight: exercise.baseWeight,
-    rir: "RIR 1-2",
-    reps: Array.from({ length: exercise.targetSets }, () => exercise.targetReps),
+    weight: "",
+    rir: "",
+    reps: Array.from({ length: exercise.targetSets }, () => ""),
     registered: false,
+  };
+}
+
+function normalizeExerciseDraft(exercise: ExerciseTemplate, draft?: ExerciseDraft): ExerciseDraft {
+  const fallback = createExerciseDraft(exercise);
+  if (!draft) return fallback;
+
+  return {
+    ...fallback,
+    ...draft,
+    reps: Array.from({ length: exercise.targetSets }, (_, index) => draft.reps[index] ?? ""),
   };
 }
 
@@ -2257,12 +2428,13 @@ function calculateTargetSummary(exercises: ExerciseTemplate[]) {
     (summary, exercise) => {
       const reps = exercise.targetSets * exercise.targetReps;
       return {
+        totalWeight: summary.totalWeight + exercise.baseWeight,
         volume: summary.volume + reps * exercise.baseWeight,
         reps: summary.reps + reps,
         exerciseCount: summary.exerciseCount + 1,
       };
     },
-    { volume: 0, reps: 0, exerciseCount: 0 },
+    { totalWeight: 0, volume: 0, reps: 0, exerciseCount: 0 },
   );
 }
 
@@ -2334,6 +2506,12 @@ function readSetupNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function readOptionalNumber(value: string): number | "" {
+  if (value.trim() === "") return "";
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : "";
+}
+
 function screenLabel(screen: Screen) {
   const labels: Record<Screen, string> = {
     login: "Iniciar sesión",
@@ -2359,6 +2537,12 @@ function readError(error: unknown) {
 
 function formatKg(value: number) {
   return `${Math.round(value).toLocaleString("es-CL")} kg`;
+}
+
+function formatReadinessNote(value: TrainingReadiness | null) {
+  if (!value) return "Check-in no registrado.";
+  if (value.skipped) return "Check-in omitido: usuario no quiso registrar.";
+  return `Check-in: motivacion ${value.motivation}/7, hidratacion ${value.hydration}/7, sueño ${value.sleep}/7, energia ${value.energy}/7.`;
 }
 
 const tooltipStyle = {
