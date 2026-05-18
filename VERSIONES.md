@@ -110,6 +110,10 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 - Se corrigio el caso donde el panel mostraba "jalon" aunque correspondia otro dia.
 - Se integro Analisis inteligente directamente en el panel principal.
 - El bloque de Analisis inteligente aparece entre los primeros bloques del dashboard para darle prioridad visual.
+- Se agrego un carrusel semanal en el panel principal para recorrer Lunes a Domingo con flechas.
+- Los dias con rutina quedan marcados y el dia calendario actual queda destacado.
+- Se corrigio la deteccion del dia inicial del panel para que siempre parta desde el dia calendario real.
+- En entorno local se desactiva y limpia el service worker para evitar pantallas rotas por chunks antiguos durante el desarrollo.
 
 ## Logica de progreso
 

@@ -748,6 +748,12 @@ h3 {
   padding: 10px;
 }
 
+.dashboard-day-switcher {
+  position: sticky;
+  top: 64px;
+  z-index: 8;
+}
+
 .routine-day-pills {
   display: flex;
   min-width: 0;
@@ -784,6 +790,10 @@ h3 {
   border-color: rgba(116, 223, 113, 0.5);
   color: var(--green);
   background: rgba(116, 223, 113, 0.1);
+}
+
+.routine-day-pill.today:not(.active) {
+  box-shadow: inset 0 0 0 1px rgba(60, 122, 255, 0.45);
 }
 
 .routine-day-pill:disabled {

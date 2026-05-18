@@ -189,6 +189,7 @@ export function OrganizatechApp() {
   const [setupByDay, setSetupByDay] = useState<Record<string, SetupDayState>>(() => createSetupByDay());
   const [trainingPlan, setTrainingPlan] = useState<TrainingPlan>(() => loadTrainingPlan());
   const [activeRoutineDay, setActiveRoutineDay] = useState("Lunes");
+  const [dashboardDayOverride, setDashboardDayOverride] = useState("");
   const [comparisonDay, setComparisonDay] = useState("Lunes");
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
   const [exerciseDrafts, setExerciseDrafts] = useState<Record<string, ExerciseDraft>>({});
@@ -197,7 +198,16 @@ export function OrganizatechApp() {
   useEffect(() => {
     void refreshData();
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      if (isLocalhost) {
+        navigator.serviceWorker.getRegistrations()
+          .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+          .then(() => caches.keys())
+          .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+          .catch(() => undefined);
+      } else {
+        navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+      }
     }
   }, []);
 
@@ -224,7 +234,8 @@ export function OrganizatechApp() {
   const hasRoutinePlan = exercises.length > 0;
   const routineDays = getRoutineDays(exercises);
   const visibleDay = getVisibleTrainingDay(exercises, activeRoutineDay);
-  const dashboardDay = getCalendarTrainingDay(exercises);
+  const calendarDashboardDay = getCalendarTrainingDay();
+  const dashboardDay = setupDays.includes(dashboardDayOverride) ? dashboardDayOverride : calendarDashboardDay;
   const dayExercises = exercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay);
   const dashboardExercises = exercises.filter((exercise) => (exercise.day ?? dashboardDay) === dashboardDay);
   const visibleRoutine = dayExercises[0]?.routine ?? setupByDay[visibleDay]?.routineName ?? visibleDay;
@@ -769,6 +780,9 @@ export function OrganizatechApp() {
           hasTrainingEntries={hasTrainingEntries}
           hasRoutinePlan={hasRoutinePlan}
           day={dashboardDay}
+          weekDays={setupDays}
+          routineDays={routineDays}
+          calendarDay={calendarDashboardDay}
           routine={dashboardRoutine}
           targetSummary={dashboardTargetSummary}
           dayExercises={dashboardExercises}
@@ -778,6 +792,7 @@ export function OrganizatechApp() {
           startRegistration={() => setScreen("entrenamiento")}
           goToRoutine={() => openRoutineDay(dashboardDay)}
           editRoutine={() => openRoutineEditor(dashboardDay)}
+          switchDay={setDashboardDayOverride}
         />
       )}
       {screen === "entrenamiento" && (!hasRoutinePlan || isEditingRoutinePlan) && (
@@ -902,6 +917,9 @@ function DashboardScreen({
   hasTrainingEntries,
   hasRoutinePlan,
   day,
+  weekDays,
+  routineDays,
+  calendarDay,
   routine,
   targetSummary,
   dayExercises,
@@ -911,11 +929,15 @@ function DashboardScreen({
   startRegistration,
   goToRoutine,
   editRoutine,
+  switchDay,
 }: {
   exercises: ExerciseTemplate[];
   hasTrainingEntries: boolean;
   hasRoutinePlan: boolean;
   day: string;
+  weekDays: string[];
+  routineDays: string[];
+  calendarDay: string;
   routine: string;
   targetSummary: { totalWeight: number; volume: number; reps: number; exerciseCount: number };
   dayExercises: ExerciseTemplate[];
@@ -925,6 +947,7 @@ function DashboardScreen({
   startRegistration: () => void;
   goToRoutine: () => void;
   editRoutine: () => void;
+  switchDay: (day: string) => void;
 }) {
   const chartData = currentMetrics.map((entry) => ({ name: entry.exerciseName, volumen: entry.volumeTotal }));
   const todayLabel = new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date());
@@ -932,6 +955,9 @@ function DashboardScreen({
   const registeredTraining = currentMetrics[0]?.routine ?? dayExercises[0]?.routine ?? routine;
   const routinePreview = currentMetrics.filter((entry) => entry.routine === registeredTraining);
   const analytics = buildAnalytics(summary, currentMetrics);
+  const currentDayIndex = Math.max(0, weekDays.indexOf(day));
+  const previousDay = weekDays[(currentDayIndex - 1 + weekDays.length) % weekDays.length] ?? day;
+  const nextDay = weekDays[(currentDayIndex + 1) % weekDays.length] ?? day;
 
   if (!hasRoutinePlan) {
     return <EmptyDashboard startRegistration={startRegistration} />;
@@ -940,6 +966,15 @@ function DashboardScreen({
   if (!hasTrainingEntries) {
     return (
       <section className="screen">
+        <DashboardDayCarousel
+          day={day}
+          calendarDay={calendarDay}
+          weekDays={weekDays}
+          routineDays={routineDays}
+          previousDay={previousDay}
+          nextDay={nextDay}
+          switchDay={switchDay}
+        />
         <div className="card wide routine-summary-card">
           <p className="eyebrow">{hasTodayRoutine ? routine : "Sin rutina para hoy"}</p>
           <h3>{hasTodayRoutine ? `Entrenamiento del día ${day}` : `Entrenamiento hoy ${day}: no registra entrenamientos`}</h3>
@@ -982,6 +1017,15 @@ function DashboardScreen({
 
   return (
     <section className="screen">
+      <DashboardDayCarousel
+        day={day}
+        calendarDay={calendarDay}
+        weekDays={weekDays}
+        routineDays={routineDays}
+        previousDay={previousDay}
+        nextDay={nextDay}
+        switchDay={switchDay}
+      />
       <div className="card wide">
         <p className="small-label">Vista progreso semanal</p>
         <strong className={summary.volumePercentage >= 0 ? "positive" : "danger"} style={{ fontSize: 38 }}>
@@ -1003,7 +1047,16 @@ function DashboardScreen({
         {hasTodayRoutine ? (
           <>
             <div className="exercise-list">
-              {routinePreview.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)}
+              {routinePreview.length > 0
+                ? routinePreview.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)
+                : dayExercises.slice(0, 4).map((exercise) => (
+                  <div className="plan-row" key={exercise.id}>
+                    <strong>{exercise.name}</strong>
+                    <span>{exercise.targetSets} series</span>
+                    <span>{exercise.targetReps} reps</span>
+                    <span>{exercise.baseWeight} kg</span>
+                  </div>
+                ))}
             </div>
             <button className="button secondary" style={{ width: "100%", marginTop: 12 }} onClick={goToRoutine}>
               Ir a rutina
@@ -1018,6 +1071,51 @@ function DashboardScreen({
       </div>
       <DashboardAnalytics summary={summary} analytics={analytics} />
     </section>
+  );
+}
+
+function DashboardDayCarousel({
+  day,
+  calendarDay,
+  weekDays,
+  routineDays,
+  previousDay,
+  nextDay,
+  switchDay,
+}: {
+  day: string;
+  calendarDay: string;
+  weekDays: string[];
+  routineDays: string[];
+  previousDay: string;
+  nextDay: string;
+  switchDay: (day: string) => void;
+}) {
+  return (
+    <div className="card wide day-switcher-card dashboard-day-switcher">
+      <button className="icon-button" type="button" aria-label="Día anterior" onClick={() => switchDay(previousDay)}>
+        <ChevronLeft size={19} />
+      </button>
+      <div className="routine-day-pills">
+        {weekDays.map((item) => {
+          const hasRoutine = routineDays.includes(item);
+          const isToday = item === calendarDay;
+          return (
+            <button
+              key={item}
+              className={`routine-day-pill ${item === day ? "active" : ""} ${hasRoutine ? "configured" : ""} ${isToday ? "today" : ""}`}
+              type="button"
+              onClick={() => switchDay(item)}
+            >
+              {item}
+            </button>
+          );
+        })}
+      </div>
+      <button className="icon-button" type="button" aria-label="Día siguiente" onClick={() => switchDay(nextDay)}>
+        <ChevronRight size={19} />
+      </button>
+    </div>
   );
 }
 
@@ -2463,11 +2561,10 @@ function getVisibleTrainingDay(exercises: ExerciseTemplate[], current: string) {
   return exercises.find((exercise) => exercise.day)?.day ?? current;
 }
 
-function getCalendarTrainingDay(exercises: ExerciseTemplate[]) {
+function getCalendarTrainingDay() {
   const today = new Intl.DateTimeFormat("es-CL", { weekday: "long" }).format(new Date());
   const normalizedToday = setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(today.toLowerCase()));
-  if (normalizedToday) return normalizedToday;
-  return getVisibleTrainingDay(exercises, "Lunes");
+  return normalizedToday ?? "Lunes";
 }
 
 function getRoutineDays(exercises: ExerciseTemplate[]) {
