@@ -1730,6 +1730,58 @@ h3 {
   font-size: 14px;
 }
 
+.motivation-summary-card {
+  display: grid;
+  gap: 8px;
+  border-color: rgba(116, 223, 113, 0.28);
+  background:
+    linear-gradient(135deg, rgba(116, 223, 113, 0.1), rgba(60, 122, 255, 0.08)),
+    var(--panel);
+}
+
+.motivation-summary-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.section-back-row {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.section-back-button {
+  min-height: 34px;
+  padding-inline: 12px;
+}
+
+.cycle-detail-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.cycle-detail-grid > div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px;
+}
+
+.cycle-detail-grid h3 {
+  margin-bottom: 6px;
+}
+
+.cycle-detail-grid p,
+.cycle-detail-grid ul {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.cycle-detail-grid ul {
+  padding-left: 16px;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

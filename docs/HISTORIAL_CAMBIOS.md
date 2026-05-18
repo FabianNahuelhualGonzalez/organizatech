@@ -40,6 +40,8 @@ Este documento resume las peticiones realizadas durante el desarrollo de Organiz
 - Se hizo dinamico el carrusel del panel principal para mostrar solo los dias que tienen rutina registrada.
 - Se elimino la fila de chips de dias del panel principal para evitar duplicar informacion con los puntos.
 - Se ajusto el entorno local para limpiar service workers y evitar fallas de chunks antiguos en localhost.
+- Se agrego resumen motivacional al panel principal.
+- Se agrego boton Volver con flecha en secciones internas.
 
 ## 2026-05-14 - Rutinas por dia
 
@@ -86,6 +88,8 @@ Este documento resume las peticiones realizadas durante el desarrollo de Organiz
 - Se agrego accion Crear nuevo ciclo de entrenamiento dentro de Registro de entrenamiento cuando ya existe un ciclo activo.
 - Se agrego popup de confirmacion antes de finalizar el ciclo actual.
 - Se compacto la vista de ciclo activo y se simplifico el texto para crear un nuevo ciclo.
+- Se agrego resumen detallado de ciclo finalizado: fechas, mejoras, estancamientos, animo y sugerencias.
+- Se corrigieron caracteres raros en textos visibles del registro de entrenamiento.
 - Se incorporaron Macrociclo, Mesociclo, Microciclo y Sesion de entrenamiento.
 - Se reemplazaron tarjetas informativas por flujo guiado con combobox.
 - Se agrego descripcion breve del ciclo seleccionado.

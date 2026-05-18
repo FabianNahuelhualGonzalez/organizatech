@@ -834,6 +834,15 @@ export function OrganizatechApp() {
         </>
       )}
 
+      {screen !== "dashboard" && (
+        <div className="section-back-row">
+          <button className="button secondary section-back-button" type="button" onClick={() => navigateTo("dashboard")}>
+            <ChevronLeft size={17} />
+            Volver
+          </button>
+        </div>
+      )}
+
       {screen === "dashboard" && (
         <DashboardScreen
           exercises={exercises}
@@ -849,6 +858,7 @@ export function OrganizatechApp() {
           summary={summary}
           currentMetrics={dashboardCurrentMetrics}
           insights={insights}
+          currentWeek={currentWeek}
           startRegistration={() => navigateTo("registro-entrenamiento")}
           goToRoutine={() => openRoutineDay(dashboardDay)}
           switchDay={setDashboardDayOverride}
@@ -1005,6 +1015,7 @@ function DashboardScreen({
   summary,
   currentMetrics,
   insights,
+  currentWeek,
   startRegistration,
   goToRoutine,
   switchDay,
@@ -1022,6 +1033,7 @@ function DashboardScreen({
   summary: ReturnType<typeof calculateWeeklySummary>;
   currentMetrics: ExerciseMetrics[];
   insights: ReturnType<typeof generateSmartInsights>;
+  currentWeek: number;
   startRegistration: () => void;
   goToRoutine: () => void;
   switchDay: (day: string) => void;
@@ -1097,6 +1109,7 @@ function DashboardScreen({
         </div>
       </div>
       <DashboardSmartInsights insights={insights} />
+      <DashboardMotivationSummary summary={summary} currentWeek={currentWeek} routineDays={routineDays} />
       <MetricGrid summary={summary} />
       <div className="card wide">
         <h3>{hasTodayRoutine ? `${titlePrefix} ${trainingDateLabel} | ${day}` : `Entrenamiento ${trainingDateLabel} | ${day}: no registra entrenamientos`}</h3>
@@ -1173,6 +1186,33 @@ function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof gene
   );
 }
 
+function DashboardMotivationSummary({
+  summary,
+  currentWeek,
+  routineDays,
+}: {
+  summary: ReturnType<typeof calculateWeeklySummary>;
+  currentWeek: number;
+  routineDays: string[];
+}) {
+  const volumeTone = summary.volumePercentage > 0 ? "positive" : summary.volumePercentage < 0 ? "danger" : "neutral";
+  const message = summary.totalReps > 0
+    ? `Semana ${currentWeek}: llevas ${summary.totalReps} reps y ${formatKg(summary.volumeTotal)} de volumen de trabajo. Sigue registrando con calma; la constancia esta construyendo tu progreso.`
+    : `Tienes ${routineDays.length} dias planificados esta semana. Cuando registres tu entrenamiento, Organizatech ira mostrando tu progreso real.`;
+
+  return (
+    <div className="card wide motivation-summary-card">
+      <p className="eyebrow">Resumen motivacional</p>
+      <h3>{summary.volumePercentage >= 0 ? "Buen ritmo de trabajo" : "Semana para ajustar"}</h3>
+      <p>{message}</p>
+      <span className={`trend ${volumeTone}`}>
+        {summary.volumePercentage >= 0 ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />}
+        {formatSigned(summary.volumePercentage)}% volumen
+      </span>
+    </div>
+  );
+}
+
 function EmptyDashboard({ startRegistration }: { startRegistration: () => void }) {
   return (
     <section className="empty-dashboard">
@@ -1215,8 +1255,8 @@ function CycleManagementScreen({
     <section className="screen">
       <div className="card wide cycle-management-card">
         <p className="eyebrow">Ciclo activo</p>
-        <h2>Ciclo {cycleNumber} · {cycleTitle}</h2>
-        <p className="eyebrow">{getCycleDurationLabel(trainingPlan)} Â· {getRoutineDays(exercises).length} dias Â· {targetSummary.exerciseCount} ejercicios</p>
+        <h2>Ciclo {cycleNumber} - {cycleTitle}</h2>
+        <p className="eyebrow">{getCycleDurationLabel(trainingPlan)} - {getRoutineDays(exercises).length} dias - {targetSummary.exerciseCount} ejercicios</p>
         <div className="cycle-summary-line">
           <div><span>Volumen registrado</span><strong>{formatKg(summary.volumeTotal)}</strong></div>
           <div><span>Reps registradas</span><strong>{summary.totalReps}</strong></div>
@@ -1266,26 +1306,52 @@ function CycleHistoryScreen({ history }: { history: TrainingCycleSnapshot[] }) {
       {history.length === 0 ? (
         <div className="card wide">
           <h3>Aun no hay ciclos finalizados</h3>
-          <p className="eyebrow">Cuando cierres tu ciclo activo, aparecerá aqui como Ciclo 1, Ciclo 2, Ciclo 3 y asi sucesivamente.</p>
+          <p className="eyebrow">Cuando cierres tu ciclo activo, aparecera aqui como Ciclo 1, Ciclo 2, Ciclo 3 y asi sucesivamente.</p>
         </div>
       ) : (
         history.map((cycle) => {
           const metrics = calculateWeeklyComparison(cycle.entries);
           const summary = calculateWeeklySummary(metrics, Math.max(1, ...cycle.entries.map((entry) => entry.week)));
+          const progress = summarizeCycleProgress(cycle);
+          const moodSummary = summarizeCycleMood(cycle.entries);
+          const suggestions = createCycleSuggestions(progress, moodSummary);
           return (
             <div className="card wide cycle-history-card" key={cycle.id}>
               <div className="section-heading">
                 <div>
-                  <p className="eyebrow">{new Intl.DateTimeFormat("es-CL").format(new Date(cycle.endedAt))}</p>
+                  <p className="eyebrow">Ciclo de entrenamiento finalizado</p>
                   <h3>{cycle.name}</h3>
                 </div>
+              </div>
+              <div className="history-list">
+                <div className="history-row"><span>Ciclo de entrenamiento</span><strong>{getCycleTitle(cycle.plan)}</strong></div>
+                <div className="history-row"><span>Inicio y finalizacion</span><strong>{formatDate(cycle.createdAt)} - {formatDate(cycle.endedAt)}</strong></div>
               </div>
               <div className="metric-grid">
                 <div className="metric"><span>Dias</span><strong>{getRoutineDays(cycle.exercises).length}</strong></div>
                 <div className="metric"><span>Ejercicios</span><strong>{cycle.exercises.length}</strong></div>
                 <div className="metric"><span>Volumen</span><strong>{formatKg(summary.volumeTotal)}</strong></div>
               </div>
-              <p className="eyebrow">{getCycleTitle(cycle.plan)} · {getCycleDurationLabel(cycle.plan)}</p>
+              <div className="cycle-detail-grid">
+                <div>
+                  <h3>Subieron reps o peso</h3>
+                  <p>{progress.improved.length > 0 ? progress.improved.join(", ") : "Aun no hay ejercicios con mejora clara."}</p>
+                </div>
+                <div>
+                  <h3>Estancados</h3>
+                  <p>{progress.stagnant.length > 0 ? progress.stagnant.join(", ") : "No detectamos estancamientos relevantes."}</p>
+                </div>
+                <div>
+                  <h3>Estado de animo</h3>
+                  <p>{moodSummary.message}</p>
+                </div>
+                <div>
+                  <h3>Sugerencias</h3>
+                  <ul>
+                    {suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}
+                  </ul>
+                </div>
+              </div>
             </div>
           );
         })
@@ -2612,6 +2678,83 @@ function getCycleTitle(plan: TrainingPlan) {
 function getCycleDurationLabel(plan: TrainingPlan) {
   const unit = plan.cycleType === "macro" ? "meses" : plan.cycleType === "session" ? "dia" : "semanas";
   return `${getCycleDurationValue(plan)} ${unit}`;
+}
+
+function summarizeCycleProgress(cycle: TrainingCycleSnapshot) {
+  const byExercise = new Map<string, ExerciseMetrics[]>();
+  for (const entry of calculateWeeklyComparison(cycle.entries)) {
+    const list = byExercise.get(entry.exerciseId) ?? [];
+    list.push(entry);
+    byExercise.set(entry.exerciseId, list);
+  }
+
+  const improved: string[] = [];
+  const stagnant: string[] = [];
+
+  for (const values of byExercise.values()) {
+    const sorted = values.sort((a, b) => a.week - b.week);
+    const first = sorted[0];
+    const latest = sorted.at(-1);
+    if (!first || !latest) continue;
+
+    const kgDelta = latest.weight - first.weight;
+    const repsDelta = latest.totalReps - first.totalReps;
+    if (kgDelta > 0 || repsDelta > 0) {
+      improved.push(`${latest.exerciseName} (${kgDelta > 0 ? `+${kgDelta} kg` : ""}${kgDelta > 0 && repsDelta > 0 ? ", " : ""}${repsDelta > 0 ? `+${repsDelta} reps` : ""})`);
+    } else if (kgDelta === 0 && repsDelta === 0) {
+      stagnant.push(latest.exerciseName);
+    }
+  }
+
+  return { improved, stagnant };
+}
+
+function summarizeCycleMood(entries: ExerciseEntry[]) {
+  const values = entries
+    .map((entry) => parseReadiness(entry.notes))
+    .filter((value): value is Required<Omit<TrainingReadiness, "skipped">> => Boolean(value));
+
+  if (values.length === 0) {
+    return { score: 0, message: "No hay suficientes check-ins para resumir el estado de animo de este ciclo." };
+  }
+
+  const average = values.reduce((total, value) => total + value.motivation + value.hydration + value.sleep + value.energy, 0) / (values.length * 4);
+  const rounded = Math.round(average * 10) / 10;
+  const message = rounded >= 5.5
+    ? `Animo estable y favorable: promedio ${rounded}/7. Buen contexto para progresar.`
+    : rounded >= 4
+      ? `Animo medio: promedio ${rounded}/7. Conviene cuidar descanso e hidratacion.`
+      : `Animo bajo: promedio ${rounded}/7. Para el proximo ciclo prioriza recuperacion y cargas manejables.`;
+
+  return { score: rounded, message };
+}
+
+function parseReadiness(notes: string | undefined) {
+  if (!notes || notes.includes("omitido")) return null;
+  const match = notes.match(/motivacion (\d+)\/7, hidratacion (\d+)\/7, sueño (\d+)\/7, energia (\d+)\/7/i);
+  if (!match) return null;
+  return {
+    motivation: Number(match[1]),
+    hydration: Number(match[2]),
+    sleep: Number(match[3]),
+    energy: Number(match[4]),
+  };
+}
+
+function createCycleSuggestions(progress: ReturnType<typeof summarizeCycleProgress>, mood: ReturnType<typeof summarizeCycleMood>) {
+  const suggestions = [
+    progress.stagnant.length > 0
+      ? "Revisa los ejercicios estancados y prueba subir reps antes de aumentar peso."
+      : "Mantén la progresion gradual: pequeños avances sostenidos ganan ciclos completos.",
+    mood.score > 0 && mood.score < 4
+      ? "Planifica una primera semana mas liviana para recuperar energia y adherencia."
+      : "Mantén el check-in antes de entrenar para ajustar intensidad segun tu estado real.",
+  ];
+  return suggestions;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value));
 }
 
 function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<string, SetupDayState> {

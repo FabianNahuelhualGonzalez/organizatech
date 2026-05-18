@@ -29,6 +29,7 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 - Se hizo scrollable el menu lateral.
 - Se dejo el lado externo del menu transparente para ver la app detras.
 - Se ajusto el topbar para ocultarse al bajar y reaparecer al hacer scroll hacia arriba.
+- Se agrego boton Volver con flecha en secciones internas para mejorar la navegacion.
 
 ## Menu principal
 
@@ -47,6 +48,8 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 - Si ya existe un ciclo registrado, Registro de entrenamiento muestra resumen del ciclo actual y acceso a Crear nuevo ciclo de entrenamiento.
 - Se compacto el resumen del ciclo activo en una sola tarjeta con duracion, dias, ejercicios, volumen, reps y semanas.
 - Se simplifico el texto de Crear nuevo ciclo de entrenamiento para reducir ruido visual.
+- Se amplio Historial ciclo de entrenamiento con fecha de inicio/finalizacion, ejercicios que subieron reps o peso, ejercicios estancados, resumen de animo y dos sugerencias.
+- Se corrigieron textos con caracteres raros en descripciones del registro de entrenamiento.
 - Al crear un nuevo ciclo se muestra un popup de confirmacion; si el usuario acepta, se finaliza el ciclo actual y se guarda en Historial ciclo de entrenamiento.
 - Se agrego la seccion Historial ciclo de entrenamiento en el menu lateral para listar Ciclo 1, Ciclo 2, Ciclo 3, etc.
 - Se incorporo la seccion Ciclos de Entrenamiento al crear o editar rutinas.
@@ -105,6 +108,7 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 
 ## Panel principal
 
+- Se agrego un resumen motivacional en el panel principal con lectura breve del avance semanal.
 - Se renombro el grafico principal como Vista progreso semanal.
 - Se eliminaron mensajes tecnicos como "Datos guardados en este dispositivo" de la vista principal.
 - Se ajustaron tarjetas de volumen, reps y ejercicios para verse mas compactas.

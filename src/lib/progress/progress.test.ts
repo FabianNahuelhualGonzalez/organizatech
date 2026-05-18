@@ -29,7 +29,7 @@ const maintained = calculateExerciseMetrics({
   id: "2",
   exerciseId: "crossover",
   exerciseName: "Inclinado crossover",
-  routine: "Pecho Hombro TrÃ­ceps",
+  routine: "Pecho Hombro Tríceps",
   week: 1,
   date: "2026-05-13",
   targetSets: 4,
