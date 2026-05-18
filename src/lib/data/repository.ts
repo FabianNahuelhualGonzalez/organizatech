@@ -135,6 +135,10 @@ export function resetLocalData() {
   saveLocalData(exerciseTemplates, demoEntries);
 }
 
+export function replaceLocalData(exercises: ExerciseTemplate[], entries: ExerciseEntry[]) {
+  saveLocalData(exercises, entries);
+}
+
 function loadLocalData(): AppData {
   if (typeof window === "undefined") {
     return { exercises: exerciseTemplates, entries: demoEntries, source: "local" };

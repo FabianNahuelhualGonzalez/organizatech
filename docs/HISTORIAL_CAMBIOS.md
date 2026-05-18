@@ -82,6 +82,9 @@ Este documento resume las peticiones realizadas durante el desarrollo de Organiz
 ## 2026-05-16 - Ciclos de entrenamiento
 
 - Se agrego seccion Ciclos de Entrenamiento.
+- Se agrego seccion Historial ciclo de entrenamiento para guardar ciclos finalizados.
+- Se agrego accion Crear nuevo ciclo de entrenamiento dentro de Registro de entrenamiento cuando ya existe un ciclo activo.
+- Se agrego popup de confirmacion antes de finalizar el ciclo actual.
 - Se incorporaron Macrociclo, Mesociclo, Microciclo y Sesion de entrenamiento.
 - Se reemplazaron tarjetas informativas por flujo guiado con combobox.
 - Se agrego descripcion breve del ciclo seleccionado.

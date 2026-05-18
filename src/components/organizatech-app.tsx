@@ -38,6 +38,7 @@ import {
 import {
   deleteExercise,
   loadAppData,
+  replaceLocalData,
   resetLocalData,
   saveExercise,
   saveTrainingEntry,
@@ -60,13 +61,15 @@ type Screen =
   | "entrenamiento"
   | "registro-entrenamiento"
   | "comparacion"
+  | "historial-ciclos"
   | "historial"
   | "perfil";
 
-const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "registro-entrenamiento", "comparacion"];
+const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "registro-entrenamiento", "historial-ciclos", "comparacion"];
 const routines: RoutineName[] = ["Pecho Hombro Tríceps", "Espalda Bíceps Abdomen", "Piernas"];
 const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
+const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
 const trainingCycles = [
   {
     id: "macro",
@@ -169,6 +172,16 @@ interface AnalyticsSnapshot {
   factors: Array<[string, number]>;
 }
 
+interface TrainingCycleSnapshot {
+  id: string;
+  name: string;
+  createdAt: string;
+  endedAt: string;
+  plan: TrainingPlan;
+  exercises: ExerciseTemplate[];
+  entries: ExerciseEntry[];
+}
+
 export function OrganizatechApp() {
   const [screen, setScreen] = useState<Screen>("login");
   const [sessionName, setSessionName] = useState("Fabian");
@@ -195,6 +208,8 @@ export function OrganizatechApp() {
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
   const [exerciseDrafts, setExerciseDrafts] = useState<Record<string, ExerciseDraft>>({});
   const [readiness, setReadiness] = useState<TrainingReadiness | null>(null);
+  const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>(() => loadCycleHistory());
+  const [isNewCycleConfirmOpen, setIsNewCycleConfirmOpen] = useState(false);
 
   useEffect(() => {
     void refreshData();
@@ -403,7 +418,7 @@ export function OrganizatechApp() {
     if (nextScreen === "registro-entrenamiento") {
       setSetupByDay(createSetupByDayFromExercises(exercises));
       setSetupDay(getVisibleTrainingDay(exercises, activeRoutineDay));
-      setIsEditingRoutinePlan(true);
+      setIsEditingRoutinePlan(!hasRoutinePlan);
     } else if (nextScreen !== "entrenamiento") {
       setIsEditingRoutinePlan(false);
     }
@@ -564,6 +579,32 @@ export function OrganizatechApp() {
     setScreen("entrenamiento");
   }
 
+  async function startNewTrainingCycle() {
+    const snapshot = createTrainingCycleSnapshot(cycleHistory.length + 1, trainingPlan, exercises, entries);
+    const nextHistory = [...cycleHistory, snapshot];
+    setCycleHistory(nextHistory);
+    saveCycleHistory(nextHistory);
+
+    const nextPlan = createDefaultTrainingPlan();
+    replaceLocalData([], []);
+    setExercises([]);
+    setEntries([]);
+    setSetupByDay(createSetupByDay());
+    setSetupDay("Lunes");
+    setTrainingPlan(nextPlan);
+    saveTrainingPlan(nextPlan);
+    setSelectedExerciseId("");
+    setActiveRoutineDay("Lunes");
+    setDashboardDayOverride("");
+    setComparisonDay("Lunes");
+    setExerciseDrafts({});
+    setReadiness(null);
+    setIsEditingRoutinePlan(true);
+    setIsNewCycleConfirmOpen(false);
+    setStatusMessage("Ciclo actual finalizado. Ya puedes crear un nuevo ciclo de entrenamiento.");
+    setScreen("registro-entrenamiento");
+  }
+
   function updateExerciseDraft(exercise: ExerciseTemplate, patch: Partial<ExerciseDraft>) {
     setExerciseDrafts((current) => ({
       ...current,
@@ -713,7 +754,12 @@ export function OrganizatechApp() {
 
   const menuScreens = hasTrainingEntries
     ? primaryScreens
-    : primaryScreens.filter((item) => item === "dashboard" || item === "entrenamiento" || item === "registro-entrenamiento");
+    : primaryScreens.filter((item) =>
+      item === "dashboard" ||
+      item === "entrenamiento" ||
+      item === "registro-entrenamiento" ||
+      (item === "historial-ciclos" && cycleHistory.length > 0)
+    );
 
   return (
     <main className="app-shell">
@@ -808,7 +854,7 @@ export function OrganizatechApp() {
           switchDay={setDashboardDayOverride}
         />
       )}
-      {screen === "registro-entrenamiento" && (
+      {screen === "registro-entrenamiento" && (!hasRoutinePlan || isEditingRoutinePlan) && (
         <InitialTrainingScreen
           day={setupDay}
           setDay={setSetupDay}
@@ -829,6 +875,16 @@ export function OrganizatechApp() {
             setIsEditingRoutinePlan(false);
             setScreen(hasRoutinePlan ? "entrenamiento" : "dashboard");
           }}
+        />
+      )}
+      {screen === "registro-entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && (
+        <CycleManagementScreen
+          trainingPlan={trainingPlan}
+          exercises={exercises}
+          entries={entries}
+          cycleNumber={cycleHistory.length + 1}
+          editCurrentCycle={() => openRoutineEditor(visibleDay)}
+          requestNewCycle={() => setIsNewCycleConfirmOpen(true)}
         />
       )}
       {screen === "entrenamiento" && !hasRoutinePlan && (
@@ -870,10 +926,17 @@ export function OrganizatechApp() {
           isBusy={isBusy}
         />
       )}
+      {screen === "historial-ciclos" && <CycleHistoryScreen history={cycleHistory} />}
       {screen === "historial" && (
         <HistoryScreen exercises={exercises} selectedExerciseId={selectedExerciseId} setSelectedExerciseId={setSelectedExerciseId} history={selectedHistory} />
       )}
       {screen === "perfil" && <ProfileScreen name={sessionName} summary={summary} dataSource={dataSource} refreshData={refreshData} resetLocal={handleResetLocal} />}
+      {isNewCycleConfirmOpen && (
+        <ConfirmNewCycleModal
+          onCancel={() => setIsNewCycleConfirmOpen(false)}
+          onConfirm={() => void startNewTrainingCycle()}
+        />
+      )}
 
     </main>
   );
@@ -1123,6 +1186,119 @@ function EmptyDashboard({ startRegistration }: { startRegistration: () => void }
       <button className="start-button" onClick={startRegistration}>
         Empecemos a registrar
       </button>
+    </section>
+  );
+}
+
+function CycleManagementScreen({
+  trainingPlan,
+  exercises,
+  entries,
+  cycleNumber,
+  editCurrentCycle,
+  requestNewCycle,
+}: {
+  trainingPlan: TrainingPlan;
+  exercises: ExerciseTemplate[];
+  entries: ExerciseEntry[];
+  cycleNumber: number;
+  editCurrentCycle: () => void;
+  requestNewCycle: () => void;
+}) {
+  const targetSummary = calculateTargetSummary(exercises);
+  const metrics = calculateWeeklyComparison(entries);
+  const summary = calculateWeeklySummary(metrics, Math.max(1, ...entries.map((entry) => entry.week)));
+  const cycleTitle = getCycleTitle(trainingPlan);
+
+  return (
+    <section className="screen">
+      <div className="card wide cycle-management-card">
+        <p className="eyebrow">Ciclo activo</p>
+        <h2>Ciclo {cycleNumber} · {cycleTitle}</h2>
+        <p className="eyebrow">Este es el ciclo que actualmente alimenta el panel principal y las comparaciones semanales.</p>
+        <div className="metric-grid">
+          <div className="metric"><span>Dias con rutina</span><strong>{getRoutineDays(exercises).length}</strong></div>
+          <div className="metric"><span>Ejercicios</span><strong>{targetSummary.exerciseCount}</strong></div>
+          <div className="metric"><span>Semanas registradas</span><strong>{Math.max(1, ...entries.map((entry) => entry.week))}</strong></div>
+        </div>
+        <button className="button secondary" type="button" onClick={editCurrentCycle}>
+          <Pencil size={16} />
+          Modificar ciclo actual
+        </button>
+      </div>
+
+      <div className="card wide new-cycle-card">
+        <p className="eyebrow">Crear nuevo ciclo de entrenamiento</p>
+        <h3>Si finalizaste tu ciclo de entrenamiento y quieres iniciar uno nuevo, aprieta aqui.</h3>
+        <p className="eyebrow">Guardaremos un resumen del ciclo actual en Historial ciclo de entrenamiento antes de liberar la creacion del siguiente ciclo.</p>
+        <button className="start-button compact" type="button" onClick={requestNewCycle}>
+          Crear nuevo ciclo de entrenamiento
+        </button>
+      </div>
+
+      <div className="card wide">
+        <h3>Resumen del ciclo actual</h3>
+        <div className="history-list">
+          <div className="history-row"><span>Objetivo principal</span><strong>{getCycleObjectiveValue(trainingPlan)}</strong></div>
+          <div className="history-row"><span>Duracion planificada</span><strong>{getCycleDurationLabel(trainingPlan)}</strong></div>
+          <div className="history-row"><span>Volumen de trabajo registrado</span><strong>{formatKg(summary.volumeTotal)}</strong></div>
+          <div className="history-row"><span>Total reps registradas</span><strong>{summary.totalReps}</strong></div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ConfirmNewCycleModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirmar nuevo ciclo">
+      <div className="card confirm-modal">
+        <h2>¿Estas seguro?</h2>
+        <p>Si decides crear un nuevo ciclo de entrenamiento, finalizaremos el ciclo actual que tienes registrado.</p>
+        <div className="modal-actions">
+          <button className="button danger-solid" type="button" onClick={onCancel}>No</button>
+          <button className="button success-solid" type="button" onClick={onConfirm}>Si</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CycleHistoryScreen({ history }: { history: TrainingCycleSnapshot[] }) {
+  return (
+    <section className="screen">
+      <div className="card wide">
+        <p className="eyebrow">Historial ciclo de entrenamiento</p>
+        <h2>Ciclos finalizados</h2>
+        <p className="eyebrow">Aqui iremos guardando los ciclos que cierres para revisar su resumen antes de iniciar uno nuevo.</p>
+      </div>
+      {history.length === 0 ? (
+        <div className="card wide">
+          <h3>Aun no hay ciclos finalizados</h3>
+          <p className="eyebrow">Cuando cierres tu ciclo activo, aparecerá aqui como Ciclo 1, Ciclo 2, Ciclo 3 y asi sucesivamente.</p>
+        </div>
+      ) : (
+        history.map((cycle) => {
+          const metrics = calculateWeeklyComparison(cycle.entries);
+          const summary = calculateWeeklySummary(metrics, Math.max(1, ...cycle.entries.map((entry) => entry.week)));
+          return (
+            <div className="card wide cycle-history-card" key={cycle.id}>
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">{new Intl.DateTimeFormat("es-CL").format(new Date(cycle.endedAt))}</p>
+                  <h3>{cycle.name}</h3>
+                </div>
+              </div>
+              <div className="metric-grid">
+                <div className="metric"><span>Dias</span><strong>{getRoutineDays(cycle.exercises).length}</strong></div>
+                <div className="metric"><span>Ejercicios</span><strong>{cycle.exercises.length}</strong></div>
+                <div className="metric"><span>Volumen</span><strong>{formatKg(summary.volumeTotal)}</strong></div>
+              </div>
+              <p className="eyebrow">{getCycleTitle(cycle.plan)} · {getCycleDurationLabel(cycle.plan)}</p>
+            </div>
+          );
+        })
+      )}
     </section>
   );
 }
@@ -2369,6 +2545,35 @@ function saveTrainingPlan(plan: TrainingPlan) {
   window.localStorage.setItem(LOCAL_TRAINING_PLAN_KEY, JSON.stringify(plan));
 }
 
+function loadCycleHistory(): TrainingCycleSnapshot[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const saved = window.localStorage.getItem(LOCAL_CYCLE_HISTORY_KEY);
+    return saved ? (JSON.parse(saved) as TrainingCycleSnapshot[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCycleHistory(history: TrainingCycleSnapshot[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LOCAL_CYCLE_HISTORY_KEY, JSON.stringify(history));
+}
+
+function createTrainingCycleSnapshot(index: number, plan: TrainingPlan, exercises: ExerciseTemplate[], entries: ExerciseEntry[]): TrainingCycleSnapshot {
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    name: `Ciclo ${index}`,
+    createdAt: entries[0]?.date ?? now,
+    endedAt: now,
+    plan,
+    exercises,
+    entries,
+  };
+}
+
 function mergeTrainingPlanWithExercises(plan: TrainingPlan, exercises: ExerciseTemplate[]) {
   const routineDays = getRoutineDays(exercises);
   if (routineDays.length === 0) return plan;
@@ -2406,6 +2611,16 @@ function getCycleDurationValue(plan: TrainingPlan) {
   if (plan.cycleType === "meso") return plan.mesoDurationWeeks;
   if (plan.cycleType === "micro") return plan.microDurationWeeks;
   return plan.sessionDurationDays;
+}
+
+function getCycleTitle(plan: TrainingPlan) {
+  const cycle = trainingCycles.find((item) => item.id === plan.cycleType);
+  return `${cycle?.title ?? "Ciclo"} · ${getCycleObjectiveValue(plan)}`;
+}
+
+function getCycleDurationLabel(plan: TrainingPlan) {
+  const unit = plan.cycleType === "macro" ? "meses" : plan.cycleType === "session" ? "dia" : "semanas";
+  return `${getCycleDurationValue(plan)} ${unit}`;
 }
 
 function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<string, SetupDayState> {
@@ -2604,6 +2819,7 @@ function screenLabel(screen: Screen) {
     dashboard: "Panel principal",
     entrenamiento: "Entrenamiento",
     "registro-entrenamiento": "Registro de entrenamiento",
+    "historial-ciclos": "Historial ciclo de entrenamiento",
     comparacion: "Comparación semanal",
     historial: "Historial",
     perfil: "Perfil",

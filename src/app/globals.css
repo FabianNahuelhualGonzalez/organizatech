@@ -1699,6 +1699,49 @@ h3 {
   gap: 14px;
 }
 
+.cycle-management-card,
+.new-cycle-card,
+.cycle-history-card {
+  display: grid;
+  gap: 12px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(1, 7, 13, 0.72);
+  padding: 18px;
+}
+
+.confirm-modal {
+  width: min(100%, 380px);
+  display: grid;
+  gap: 12px;
+}
+
+.confirm-modal p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.success-solid {
+  background: #02ef3f;
+}
+
+.danger-solid {
+  background: linear-gradient(180deg, #ff5b6b, #c92944);
+}
+
 .dashboard-smart-card {
   border-color: rgba(60, 122, 255, 0.42);
   background:
