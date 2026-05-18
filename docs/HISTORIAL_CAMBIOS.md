@@ -119,6 +119,9 @@ Este documento resume las peticiones realizadas durante el desarrollo de Organiz
   - cuadriceps 100 kg;
   - KG totales de la rutina: 200 kg.
 - Se mantiene volumen real para calculos internos y comparaciones.
+- Se aplico la misma logica de KG totales de la rutina en dashboard, entrenamiento guiado y comparacion semanal cuando la metrica corresponde a carga objetivo de rutina.
+- Se dejo el volumen de trabajo etiquetado aparte como peso por repeticiones realizadas.
+- Se actualizo el texto visible de metricas y graficos para separar "KG totales de la rutina" de "Volumen de trabajo".
 - Se separo el peso actual de las diferencias:
   - kg actual;
   - diferencia de reps;

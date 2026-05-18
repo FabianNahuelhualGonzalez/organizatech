@@ -928,7 +928,8 @@ function DashboardScreen({
 }) {
   const chartData = currentMetrics.map((entry) => ({ name: entry.exerciseName, volumen: entry.volumeTotal }));
   const todayLabel = new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date());
-  const registeredTraining = currentMetrics[0]?.routine ?? exercises[0]?.routine ?? "Pecho Hombro Tríceps";
+  const hasTodayRoutine = dayExercises.length > 0;
+  const registeredTraining = currentMetrics[0]?.routine ?? dayExercises[0]?.routine ?? routine;
   const routinePreview = currentMetrics.filter((entry) => entry.routine === registeredTraining);
   const analytics = buildAnalytics(summary, currentMetrics);
 
@@ -940,29 +941,37 @@ function DashboardScreen({
     return (
       <section className="screen">
         <div className="card wide routine-summary-card">
-          <p className="eyebrow">{routine}</p>
-          <h3>Entrenamiento del día {day}</h3>
-          <div className="metric-grid">
-            <div className="metric"><span>KG totales de la rutina</span><strong>{formatKg(targetSummary.totalWeight)}</strong></div>
-            <div className="metric"><span>Total reps</span><strong>{targetSummary.reps}</strong></div>
-            <div className="metric"><span>Ejercicios total entrenamiento</span><strong>{targetSummary.exerciseCount}</strong></div>
-          </div>
+          <p className="eyebrow">{hasTodayRoutine ? routine : "Sin rutina para hoy"}</p>
+          <h3>{hasTodayRoutine ? `Entrenamiento del día ${day}` : `Entrenamiento hoy ${day}: no registra entrenamientos`}</h3>
+          {hasTodayRoutine ? (
+            <div className="metric-grid">
+              <div className="metric"><span>KG totales de la rutina</span><strong>{formatKg(targetSummary.totalWeight)}</strong></div>
+              <div className="metric"><span>Total reps</span><strong>{targetSummary.reps}</strong></div>
+              <div className="metric"><span>Ejercicios total entrenamiento</span><strong>{targetSummary.exerciseCount}</strong></div>
+            </div>
+          ) : (
+            <p className="eyebrow">Agrega una rutina para {day} desde la edición semanal.</p>
+          )}
         </div>
         <div className="card wide">
-          <h3>Ejercicios a realizar · {day}</h3>
-          <div className="plan-list">
-            {dayExercises.map((exercise) => (
-              <div className="plan-row" key={exercise.id}>
-                <strong>{exercise.name}</strong>
-                <span>{exercise.targetSets} series</span>
-                <span>{exercise.targetReps} reps</span>
-                <span>{exercise.baseWeight} kg</span>
+          {hasTodayRoutine ? (
+            <>
+              <h3>Ejercicios a realizar · {day}</h3>
+              <div className="plan-list">
+                {dayExercises.map((exercise) => (
+                  <div className="plan-row" key={exercise.id}>
+                    <strong>{exercise.name}</strong>
+                    <span>{exercise.targetSets} series</span>
+                    <span>{exercise.targetReps} reps</span>
+                    <span>{exercise.baseWeight} kg</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <button className="button secondary" style={{ width: "100%", marginTop: 12 }} onClick={goToRoutine}>
-            Ir a rutina
-          </button>
+              <button className="button secondary" style={{ width: "100%", marginTop: 12 }} onClick={goToRoutine}>
+                Ir a rutina
+              </button>
+            </>
+          ) : null}
           <button className="button secondary" style={{ width: "100%", marginTop: 8 }} onClick={editRoutine}>
             Editar rutina semanal
           </button>
@@ -990,13 +999,19 @@ function DashboardScreen({
       <DashboardSmartInsights insights={insights} />
       <MetricGrid summary={summary} />
       <div className="card wide">
-        <h3>Entrenamiento de hoy {todayLabel} | {registeredTraining}</h3>
-        <div className="exercise-list">
-          {routinePreview.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)}
-        </div>
-        <button className="button secondary" style={{ width: "100%", marginTop: 12 }} onClick={goToRoutine}>
-          Ir a rutina
-        </button>
+        <h3>{hasTodayRoutine ? `Entrenamiento de hoy ${todayLabel} | ${registeredTraining}` : `Entrenamiento hoy ${day}: no registra entrenamientos`}</h3>
+        {hasTodayRoutine ? (
+          <>
+            <div className="exercise-list">
+              {routinePreview.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)}
+            </div>
+            <button className="button secondary" style={{ width: "100%", marginTop: 12 }} onClick={goToRoutine}>
+              Ir a rutina
+            </button>
+          </>
+        ) : (
+          <p className="eyebrow">No hay rutina registrada para {day}. Puedes agregarla editando la rutina semanal.</p>
+        )}
         <button className="button secondary" style={{ width: "100%", marginTop: 8 }} onClick={editRoutine}>
           Editar rutina semanal
         </button>
@@ -1402,7 +1417,7 @@ function TrainingScreen({
         <h2>Nuevo entrenamiento</h2>
         <p className="eyebrow"><CalendarDays size={13} /> Semana {previewEntry.week}</p>
         <div className="metric-grid">
-          <div className="metric"><span>Volumen total</span><strong>{formatKg(previewEntry.volumeTotal)}</strong></div>
+          <div className="metric"><span>Volumen de trabajo</span><strong>{formatKg(previewEntry.volumeTotal)}</strong></div>
           <div className="metric"><span>Total reps</span><strong>{previewEntry.totalReps}</strong></div>
           <div className="metric"><span>Objetivo</span><strong>{previewEntry.targetTotalReps}</strong></div>
         </div>
@@ -1894,7 +1909,7 @@ function ComparisonScreenV2({
         </div>
         {activeView === "plan" ? (
           <div className="metric-grid">
-            <div className="metric"><span>Volumen objetivo</span><strong>{formatKg(targetSummary.volume)}</strong></div>
+            <div className="metric"><span>KG totales de la rutina</span><strong>{formatKg(targetSummary.totalWeight)}</strong></div>
             <div className="metric"><span>Total reps objetivo</span><strong>{targetSummary.reps}</strong></div>
             <div className="metric"><span>Ejercicios</span><strong>{targetSummary.exerciseCount}</strong></div>
           </div>
@@ -1962,15 +1977,15 @@ function ComparisonScreenV2({
           </div>
           {latestExerciseEntry ? (
             <div className="focus-metrics">
-              <span>{latestExerciseEntry.weight} kg</span>
-              <span>{latestExerciseEntry.totalReps} reps</span>
-              <span>{formatKg(latestExerciseEntry.volumeTotal)}</span>
+              <span>kg actual: {latestExerciseEntry.weight} kg</span>
+              <span>reps: {latestExerciseEntry.totalReps}</span>
+              <span>volumen: {formatKg(latestExerciseEntry.volumeTotal)}</span>
             </div>
           ) : null}
         </div>
 
         <div>
-          <h3>Evolución semanal del volumen</h3>
+          <h3>Evolución semanal del volumen de trabajo</h3>
           <p className="eyebrow">El gráfico muestra el volumen total de este ejercicio en cada semana: peso por repeticiones realizadas.</p>
           <div className="chart-wrap">
             <ResponsiveContainer>
@@ -2095,7 +2110,7 @@ function MetricGrid({ summary }: { summary: ReturnType<typeof calculateWeeklySum
   return (
     <div className="metric-grid wide">
       <div className="metric">
-        <span>Volumen total</span>
+        <span>Volumen de trabajo</span>
         <strong>{formatKg(summary.volumeTotal)}</strong>
         <TrendValue value={summary.volumePercentage} suffix="%" />
       </div>

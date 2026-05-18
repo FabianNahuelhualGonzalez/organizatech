@@ -160,6 +160,9 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
   - selector de ejercicio.
   - observacion clara del progreso.
   - grafico de evolucion semanal del volumen.
+- Se corrigio la metrica objetivo de comparacion para usar KG totales de la rutina, sumando el peso objetivo una vez por ejercicio.
+- Se dejo el volumen de trabajo separado y etiquetado como peso por repeticiones.
+- Se renombro el volumen semanal y los previews de registro a "Volumen de trabajo" para no confundirlo con los KG totales de la rutina.
 - Se elimino el uso de badges en el detalle individual del ejercicio para reducir ruido visual.
 
 ## Graficos, resumen y analitica
