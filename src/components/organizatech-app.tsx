@@ -58,11 +58,12 @@ type Screen =
   | "registro"
   | "dashboard"
   | "entrenamiento"
+  | "registro-entrenamiento"
   | "comparacion"
   | "historial"
   | "perfil";
 
-const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "comparacion"];
+const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "registro-entrenamiento", "comparacion"];
 const routines: RoutineName[] = ["Pecho Hombro Tríceps", "Espalda Bíceps Abdomen", "Piernas"];
 const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
@@ -394,7 +395,13 @@ export function OrganizatechApp() {
   }
 
   function navigateTo(nextScreen: Screen) {
-    if (nextScreen !== "entrenamiento") setIsEditingRoutinePlan(false);
+    if (nextScreen === "registro-entrenamiento") {
+      setSetupByDay(createSetupByDayFromExercises(exercises));
+      setSetupDay(getVisibleTrainingDay(exercises, activeRoutineDay));
+      setIsEditingRoutinePlan(true);
+    } else if (nextScreen !== "entrenamiento") {
+      setIsEditingRoutinePlan(false);
+    }
     setScreen(nextScreen);
     setIsMenuOpen(false);
   }
@@ -457,7 +464,7 @@ export function OrganizatechApp() {
     setSetupDay(day);
     setIsEditingRoutinePlan(true);
     setIsMenuOpen(false);
-    setScreen("entrenamiento");
+    setScreen("registro-entrenamiento");
   }
 
   async function saveInitialRoutine() {
@@ -514,7 +521,7 @@ export function OrganizatechApp() {
       if (!allPlannedDaysComplete && nextIncompleteDay) {
         setIsEditingRoutinePlan(true);
         setSetupDay(nextIncompleteDay);
-        setScreen("entrenamiento");
+        setScreen("registro-entrenamiento");
       } else {
         setIsEditingRoutinePlan(false);
         setActiveRoutineDay(setupDay);
@@ -699,7 +706,9 @@ export function OrganizatechApp() {
     );
   }
 
-  const menuScreens = hasTrainingEntries ? primaryScreens : primaryScreens.filter((item) => item === "dashboard" || item === "entrenamiento");
+  const menuScreens = hasTrainingEntries
+    ? primaryScreens
+    : primaryScreens.filter((item) => item === "dashboard" || item === "entrenamiento" || item === "registro-entrenamiento");
 
   return (
     <main className="app-shell">
@@ -789,13 +798,12 @@ export function OrganizatechApp() {
           summary={summary}
           currentMetrics={dashboardCurrentMetrics}
           insights={insights}
-          startRegistration={() => setScreen("entrenamiento")}
+          startRegistration={() => navigateTo("registro-entrenamiento")}
           goToRoutine={() => openRoutineDay(dashboardDay)}
-          editRoutine={() => openRoutineEditor(dashboardDay)}
           switchDay={setDashboardDayOverride}
         />
       )}
-      {screen === "entrenamiento" && (!hasRoutinePlan || isEditingRoutinePlan) && (
+      {screen === "registro-entrenamiento" && (
         <InitialTrainingScreen
           day={setupDay}
           setDay={setSetupDay}
@@ -817,6 +825,9 @@ export function OrganizatechApp() {
             setScreen(hasRoutinePlan ? "entrenamiento" : "dashboard");
           }}
         />
+      )}
+      {screen === "entrenamiento" && !hasRoutinePlan && (
+        <EmptyDashboard startRegistration={() => navigateTo("registro-entrenamiento")} />
       )}
       {screen === "entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && !readiness && (
         <TrainingReadinessScreen
@@ -928,7 +939,6 @@ function DashboardScreen({
   insights,
   startRegistration,
   goToRoutine,
-  editRoutine,
   switchDay,
 }: {
   exercises: ExerciseTemplate[];
@@ -946,11 +956,12 @@ function DashboardScreen({
   insights: ReturnType<typeof generateSmartInsights>;
   startRegistration: () => void;
   goToRoutine: () => void;
-  editRoutine: () => void;
   switchDay: (day: string) => void;
 }) {
   const chartData = currentMetrics.map((entry) => ({ name: entry.exerciseName, volumen: entry.volumeTotal }));
-  const todayLabel = new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date());
+  const trainingDate = getDateForWeekday(day, calendarDay);
+  const trainingDateLabel = new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(trainingDate);
+  const titlePrefix = day === calendarDay ? "Entrenamiento de hoy" : "Entrenamiento";
   const hasTodayRoutine = dayExercises.length > 0;
   const registeredTraining = currentMetrics[0]?.routine ?? dayExercises[0]?.routine ?? routine;
   const routinePreview = currentMetrics.filter((entry) => entry.routine === registeredTraining);
@@ -966,18 +977,19 @@ function DashboardScreen({
   if (!hasTrainingEntries) {
     return (
       <section className="screen">
-        <DashboardDayCarousel
-          day={day}
-          calendarDay={calendarDay}
-          weekDays={weekDays}
-          routineDays={routineDays}
-          previousDay={previousDay}
-          nextDay={nextDay}
-          switchDay={switchDay}
-        />
         <div className="card wide routine-summary-card">
+          <DashboardDayCarousel
+            day={day}
+            calendarDay={calendarDay}
+            weekDays={weekDays}
+            routineDays={routineDays}
+            previousDay={previousDay}
+            nextDay={nextDay}
+            switchDay={switchDay}
+            compact
+          />
           <p className="eyebrow">{hasTodayRoutine ? routine : "Sin rutina para hoy"}</p>
-          <h3>{hasTodayRoutine ? `Entrenamiento del día ${day}` : `Entrenamiento hoy ${day}: no registra entrenamientos`}</h3>
+          <h3>{hasTodayRoutine ? `${titlePrefix} ${trainingDateLabel} | ${day}` : `Entrenamiento ${trainingDateLabel} | ${day}: no registra entrenamientos`}</h3>
           {hasTodayRoutine ? (
             <div className="metric-grid">
               <div className="metric"><span>KG totales de la rutina</span><strong>{formatKg(targetSummary.totalWeight)}</strong></div>
@@ -985,7 +997,7 @@ function DashboardScreen({
               <div className="metric"><span>Ejercicios total entrenamiento</span><strong>{targetSummary.exerciseCount}</strong></div>
             </div>
           ) : (
-            <p className="eyebrow">Agrega una rutina para {day} desde la edición semanal.</p>
+            <p className="eyebrow">Agrega una rutina para {day} desde Registro de entrenamiento.</p>
           )}
         </div>
         <div className="card wide">
@@ -1007,9 +1019,6 @@ function DashboardScreen({
               </button>
             </>
           ) : null}
-          <button className="button secondary" style={{ width: "100%", marginTop: 8 }} onClick={editRoutine}>
-            Editar rutina semanal
-          </button>
         </div>
       </section>
     );
@@ -1017,15 +1026,6 @@ function DashboardScreen({
 
   return (
     <section className="screen">
-      <DashboardDayCarousel
-        day={day}
-        calendarDay={calendarDay}
-        weekDays={weekDays}
-        routineDays={routineDays}
-        previousDay={previousDay}
-        nextDay={nextDay}
-        switchDay={switchDay}
-      />
       <div className="card wide">
         <p className="small-label">Vista progreso semanal</p>
         <strong className={summary.volumePercentage >= 0 ? "positive" : "danger"} style={{ fontSize: 38 }}>
@@ -1043,7 +1043,17 @@ function DashboardScreen({
       <DashboardSmartInsights insights={insights} />
       <MetricGrid summary={summary} />
       <div className="card wide">
-        <h3>{hasTodayRoutine ? `Entrenamiento de hoy ${todayLabel} | ${registeredTraining}` : `Entrenamiento hoy ${day}: no registra entrenamientos`}</h3>
+        <DashboardDayCarousel
+          day={day}
+          calendarDay={calendarDay}
+          weekDays={weekDays}
+          routineDays={routineDays}
+          previousDay={previousDay}
+          nextDay={nextDay}
+          switchDay={switchDay}
+          compact
+        />
+        <h3>{hasTodayRoutine ? `${titlePrefix} ${trainingDateLabel} | ${day}` : `Entrenamiento ${trainingDateLabel} | ${day}: no registra entrenamientos`}</h3>
         {hasTodayRoutine ? (
           <>
             <div className="exercise-list">
@@ -1063,11 +1073,8 @@ function DashboardScreen({
             </button>
           </>
         ) : (
-          <p className="eyebrow">No hay rutina registrada para {day}. Puedes agregarla editando la rutina semanal.</p>
+          <p className="eyebrow">No hay rutina registrada para {day}. Puedes agregarla desde Registro de entrenamiento.</p>
         )}
-        <button className="button secondary" style={{ width: "100%", marginTop: 8 }} onClick={editRoutine}>
-          Editar rutina semanal
-        </button>
       </div>
       <DashboardAnalytics summary={summary} analytics={analytics} />
     </section>
@@ -1082,6 +1089,7 @@ function DashboardDayCarousel({
   previousDay,
   nextDay,
   switchDay,
+  compact = false,
 }: {
   day: string;
   calendarDay: string;
@@ -1090,9 +1098,10 @@ function DashboardDayCarousel({
   previousDay: string;
   nextDay: string;
   switchDay: (day: string) => void;
+  compact?: boolean;
 }) {
   return (
-    <div className="card wide day-switcher-card dashboard-day-switcher">
+    <div className={`day-switcher-card dashboard-day-switcher ${compact ? "compact" : "card wide"}`}>
       <button className="icon-button" type="button" aria-label="Día anterior" onClick={() => switchDay(previousDay)}>
         <ChevronLeft size={19} />
       </button>
@@ -2567,6 +2576,17 @@ function getCalendarTrainingDay() {
   return normalizedToday ?? "Lunes";
 }
 
+function getDateForWeekday(day: string, calendarDay: string) {
+  const today = new Date();
+  const currentIndex = setupDays.indexOf(calendarDay);
+  const targetIndex = setupDays.indexOf(day);
+  if (currentIndex < 0 || targetIndex < 0) return today;
+
+  const target = new Date(today);
+  target.setDate(today.getDate() + targetIndex - currentIndex);
+  return target;
+}
+
 function getRoutineDays(exercises: ExerciseTemplate[]) {
   const days = setupDays.filter((day) => exercises.some((exercise) => (exercise.day ?? "Lunes") === day));
   return days.length > 0 ? days : ["Lunes"];
@@ -2630,6 +2650,7 @@ function screenLabel(screen: Screen) {
     registro: "Registro",
     dashboard: "Panel principal",
     entrenamiento: "Entrenamiento",
+    "registro-entrenamiento": "Registro de entrenamiento",
     comparacion: "Comparación semanal",
     historial: "Historial",
     perfil: "Perfil",

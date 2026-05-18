@@ -748,10 +748,11 @@ h3 {
   padding: 10px;
 }
 
-.dashboard-day-switcher {
-  position: sticky;
-  top: 64px;
-  z-index: 8;
+.dashboard-day-switcher.compact {
+  border: 1px solid rgba(220, 231, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(5, 16, 30, 0.42);
+  margin-bottom: 4px;
 }
 
 .routine-day-pills {
@@ -760,11 +761,21 @@ h3 {
   gap: 8px;
   overflow-x: auto;
   padding-bottom: 2px;
-  scrollbar-width: none;
+  scrollbar-color: rgba(220, 231, 255, 0.35) transparent;
+  scrollbar-width: thin;
 }
 
 .routine-day-pills::-webkit-scrollbar {
-  display: none;
+  height: 5px;
+}
+
+.routine-day-pills::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(220, 231, 255, 0.35);
+}
+
+.routine-day-pills::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .routine-day-pill {

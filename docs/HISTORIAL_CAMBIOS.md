@@ -33,6 +33,9 @@ Este documento resume las peticiones realizadas durante el desarrollo de Organiz
 - Se movio Analisis inteligente al panel principal como bloque prioritario.
 - Se eliminaron Graficos y Resumen como secciones independientes.
 - Se agrego carrusel semanal en el panel principal para navegar Lunes a Domingo.
+- Se corrigio la fecha mostrada al cambiar de dia en el carrusel semanal.
+- Se creo la seccion Registro de entrenamiento para centralizar creacion y edicion de rutinas.
+- Se retiro Editar rutina semanal del panel principal.
 - Se ajusto el entorno local para limpiar service workers y evitar fallas de chunks antiguos en localhost.
 
 ## 2026-05-14 - Rutinas por dia
