@@ -234,9 +234,14 @@ export function OrganizatechApp() {
   const hasTrainingEntries = entries.length > 0;
   const hasRoutinePlan = exercises.length > 0;
   const routineDays = getRoutineDays(exercises);
+  const dashboardCarouselDays = hasRoutinePlan ? routineDays : setupDays;
   const visibleDay = getVisibleTrainingDay(exercises, activeRoutineDay);
   const calendarDashboardDay = getCalendarTrainingDay();
-  const dashboardDay = setupDays.includes(dashboardDayOverride) ? dashboardDayOverride : calendarDashboardDay;
+  const dashboardDay = dashboardCarouselDays.includes(dashboardDayOverride)
+    ? dashboardDayOverride
+    : dashboardCarouselDays.includes(calendarDashboardDay)
+      ? calendarDashboardDay
+      : dashboardCarouselDays[0] ?? calendarDashboardDay;
   const dayExercises = exercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay);
   const dashboardExercises = exercises.filter((exercise) => (exercise.day ?? dashboardDay) === dashboardDay);
   const visibleRoutine = dayExercises[0]?.routine ?? setupByDay[visibleDay]?.routineName ?? visibleDay;
@@ -789,7 +794,7 @@ export function OrganizatechApp() {
           hasTrainingEntries={hasTrainingEntries}
           hasRoutinePlan={hasRoutinePlan}
           day={dashboardDay}
-          weekDays={setupDays}
+          weekDays={dashboardCarouselDays}
           routineDays={routineDays}
           calendarDay={calendarDashboardDay}
           routine={dashboardRoutine}
