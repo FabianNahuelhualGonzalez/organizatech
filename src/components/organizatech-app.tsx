@@ -1748,6 +1748,7 @@ function InitialTrainingScreen({
   const objectiveValue = getCycleObjectiveValue(trainingPlan);
   const objectiveDescription = objectiveDescriptions[objectiveValue] ?? "Este objetivo define cómo Organizatech ordenará la intención principal del bloque.";
   const durationValue = getCycleDurationValue(trainingPlan);
+  const visibleMessage = message === "Datos guardados en este dispositivo." ? "" : message;
 
   function toggleTrainingDay(item: string) {
     const isSelected = plannedDays.includes(item);
@@ -1908,7 +1909,7 @@ function InitialTrainingScreen({
             {isBusy ? "Guardando..." : isLastPendingDay ? "Finalizar registro de rutina" : "Guardar y continuar"}
           </button>
         </div>
-        <p className="setup-message">{message}</p>
+        {visibleMessage ? <p className="setup-message">{visibleMessage}</p> : null}
       </div>
     </section>
   );

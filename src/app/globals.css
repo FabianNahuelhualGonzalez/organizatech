@@ -2763,6 +2763,7 @@ h3 {
 }
 
 .success-modal {
+  width: min(92vw, 360px);
   justify-items: center;
   text-align: center;
   border-color: rgba(116, 223, 113, 0.48);
@@ -2773,14 +2774,31 @@ h3 {
 
 .success-icon {
   display: grid;
-  width: 48px;
-  height: 48px;
+  width: clamp(42px, 12vw, 50px);
+  height: clamp(42px, 12vw, 50px);
   place-items: center;
   border: 1px solid rgba(116, 223, 113, 0.62);
   border-radius: 999px;
   color: white;
   background: rgba(2, 239, 63, 0.18);
   box-shadow: 0 0 0 8px rgba(2, 239, 63, 0.06);
+}
+
+.success-modal h3 {
+  margin: 0;
+  font-size: clamp(16px, 4.8vw, 20px);
+}
+
+.success-modal p {
+  max-width: 28ch;
+  font-size: clamp(12px, 3.4vw, 14px);
+}
+
+.success-modal .success-solid {
+  width: min(100%, 180px);
+  min-height: 44px;
+  border-radius: 10px;
+  padding: 0 22px;
 }
 
 .modal-actions {
