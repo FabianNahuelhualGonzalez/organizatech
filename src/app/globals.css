@@ -3091,7 +3091,7 @@ h3 {
 
 .exercise-preview-carousel {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   margin: -2px 0 0;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -3108,9 +3108,16 @@ h3 {
 
 .exercise-preview-slide {
   display: grid;
-  flex: 0 0 min(92%, 340px);
+  flex: 0 0 calc(100% - 2px);
   min-width: 0;
   scroll-snap-align: start;
+}
+
+.exercise-preview-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .exercise-preview-slide .plan-row {

@@ -1271,29 +1271,38 @@ function DashboardScreen({
             </button>
           ) : null}
         </div>
-        <div className="card wide routine-summary-card">
-          <p className="eyebrow">{hasTodayRoutine ? routine : "Sin rutina para hoy"}</p>
-          <h3>{hasTodayRoutine ? `${titlePrefix} ${trainingDateLabel} | ${day}` : `Entrenamiento ${trainingDateLabel} | ${day}: no registra entrenamientos`}</h3>
-          {hasTodayRoutine ? (
-            <RoutineMetricGrid targetSummary={targetSummary} exerciseLabel="Ejercicios total" />
-          ) : (
-            <p className="eyebrow">Agrega una rutina para {day} desde Registro de entrenamiento.</p>
-          )}
-        </div>
-        <div className="card wide">
-          {hasTodayRoutine ? (
-            <>
-              <h3>Ejercicios a realizar · {day}</h3>
-              <div className="exercise-preview-carousel" ref={exerciseCarouselRef} onScroll={handleExerciseCarouselScroll}>
-                {dayExercises.map((exercise) => (
-                  <article className="exercise-preview-slide" key={exercise.id}>
-                    <ProgrammedExerciseCard exercise={exercise} />
-                  </article>
-                ))}
-              </div>
-              <IndexDots activeIndex={activeExercisePreviewIndex} count={dayExercises.length} />
-            </>
-          ) : null}
+        <div className="card wide dashboard-training-card">
+          <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
+            {carouselDays.map((item) => {
+              const itemData = getDashboardDayData(item);
+              const itemSummary = calculateTargetSummary(itemData.exercises);
+
+              return (
+                <article className="dashboard-training-slide" key={item}>
+                  <p className="eyebrow">{itemData.exercises[0]?.routine ?? item}</p>
+                  <h3>{itemData.title}</h3>
+                  {itemData.hasRoutine ? (
+                    <>
+                      <RoutineMetricGrid targetSummary={itemSummary} exerciseLabel="Ejercicios total" />
+                      <div className="exercise-preview-section">
+                        <h3>Ejercicios a realizar · {item}</h3>
+                        <div className="exercise-preview-carousel">
+                          {itemData.exercises.map((exercise) => (
+                            <article className="exercise-preview-slide" key={exercise.id}>
+                              <ProgrammedExerciseCard exercise={exercise} />
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+          <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
         </div>
       </section>
     );
