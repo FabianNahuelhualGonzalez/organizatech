@@ -2119,10 +2119,6 @@ h3 {
   line-height: 1.55;
 }
 
-.dashboard-empty-days {
-  padding-bottom: 2px;
-}
-
 .dashboard-training-card h3 {
   margin: 0;
   font-size: clamp(16px, 4.8vw, 20px);
@@ -3091,6 +3087,34 @@ h3 {
 
 .dashboard-training-carousel::-webkit-scrollbar {
   display: none;
+}
+
+.exercise-preview-carousel {
+  display: flex;
+  gap: 10px;
+  margin: -2px 0 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 2px 0 3px;
+  scroll-behavior: smooth;
+  scroll-padding-inline: 0;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.exercise-preview-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+.exercise-preview-slide {
+  display: grid;
+  flex: 0 0 min(92%, 340px);
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.exercise-preview-slide .plan-row {
+  height: 100%;
 }
 
 .dashboard-training-slide {

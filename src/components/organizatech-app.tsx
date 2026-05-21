@@ -1164,8 +1164,10 @@ function DashboardScreen({
   const routinePreview = currentMetrics.filter((entry) => entry.routine === registeredTraining);
   const analytics = buildAnalytics(summary, currentMetrics);
   const carouselRef = useRef<HTMLDivElement | null>(null);
+  const exerciseCarouselRef = useRef<HTMLDivElement | null>(null);
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
+  const [activeExercisePreviewIndex, setActiveExercisePreviewIndex] = useState(0);
   const carouselDays = useMemo(() => hasRoutinePlan ? weekDays : [day], [hasRoutinePlan, weekDays, day]);
   const allWeekMetrics = useMemo(
     () => calculateWeeklyComparison(entries).filter((entry) => entry.week === currentWeek),
@@ -1182,6 +1184,11 @@ function DashboardScreen({
       container.scrollTo({ left: slide.offsetLeft - container.offsetLeft, behavior: "smooth" });
     }
   }, [day, carouselDays]);
+
+  useEffect(() => {
+    setActiveExercisePreviewIndex(0);
+    exerciseCarouselRef.current?.scrollTo({ left: 0, behavior: "smooth" });
+  }, [day, dayExercises.length]);
 
   function getDashboardDayData(item: string) {
     const date = getDateForWeekday(item, calendarDay);
@@ -1228,6 +1235,25 @@ function DashboardScreen({
     }
   }
 
+  function handleExerciseCarouselScroll(event: UIEvent<HTMLDivElement>) {
+    const container = event.currentTarget;
+    const children = Array.from(container.children) as HTMLElement[];
+    const center = container.scrollLeft + container.clientWidth / 2;
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    children.forEach((child, index) => {
+      const childCenter = child.offsetLeft + child.offsetWidth / 2;
+      const distance = Math.abs(childCenter - center);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+
+    setActiveExercisePreviewIndex(nearestIndex);
+  }
+
   if (!hasRoutinePlan) {
     return <EmptyDashboard startRegistration={startRegistration} />;
   }
@@ -1239,23 +1265,9 @@ function DashboardScreen({
           <p className="eyebrow">Rutina creada</p>
           <h3>Aún no registras progreso</h3>
           <p>Ya tienes tu planificación lista. Para comenzar a medir avances, inicia el entrenamiento del día y registra tus series.</p>
-          {routineDays.length > 1 ? (
-            <div className="routine-day-pills dashboard-empty-days">
-              {routineDays.map((item) => (
-                <button
-                  className={`routine-day-pill ${item === day ? "active" : "configured"}`}
-                  key={item}
-                  type="button"
-                  onClick={() => switchDay(item)}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-          ) : null}
           {hasTodayRoutine ? (
             <button className="button dashboard-routine-button" onClick={goToRoutine}>
-              Iniciar entrenamiento
+              Ir a rutina de entrenamiento
             </button>
           ) : null}
         </div>
@@ -1272,12 +1284,14 @@ function DashboardScreen({
           {hasTodayRoutine ? (
             <>
               <h3>Ejercicios a realizar · {day}</h3>
-              <div className="plan-list">
+              <div className="exercise-preview-carousel" ref={exerciseCarouselRef} onScroll={handleExerciseCarouselScroll}>
                 {dayExercises.map((exercise) => (
-                  <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
+                  <article className="exercise-preview-slide" key={exercise.id}>
+                    <ProgrammedExerciseCard exercise={exercise} />
+                  </article>
                 ))}
               </div>
-              <DashboardDayDots day={day} weekDays={weekDays} />
+              <IndexDots activeIndex={activeExercisePreviewIndex} count={dayExercises.length} />
             </>
           ) : null}
         </div>
@@ -1334,21 +1348,24 @@ function DashboardScreen({
     </section>
   );
 }
-
 function DashboardDayDots({ day, weekDays }: { day: string; weekDays: string[] }) {
+  const activeIndex = Math.max(0, weekDays.indexOf(day));
+  return <IndexDots activeIndex={activeIndex} count={weekDays.length} />;
+}
+
+function IndexDots({ activeIndex, count }: { activeIndex: number; count: number }) {
   return (
-    <div className="dashboard-day-dots" aria-label="Posición semanal">
-      {weekDays.map((item) => (
+    <div className="dashboard-day-dots" aria-label="Posición del carrusel">
+      {Array.from({ length: count }).map((_, index) => (
         <span
-          key={item}
-          className={`dashboard-day-dot ${item === day ? "active" : ""}`}
-          aria-label={item === day ? `${item} activo` : item}
+          key={index}
+          className={`dashboard-day-dot ${index === activeIndex ? "active" : ""}`}
+          aria-hidden="true"
         />
       ))}
     </div>
   );
 }
-
 function WeeklyProgressSvg({ value }: { value: number }) {
   const [activeIndex, setActiveIndex] = useState(6);
   const clampedValue = Math.max(-4, Math.min(4, value));
