@@ -1,0 +1,39 @@
+flowchart TD
+  A["Usuario entra a Registro de entrenamiento"] --> B{"Ya existe rutina activa?"}
+  B -->|"No"| C["Crear rutina desde cero"]
+  B -->|"Si"| D["Ciclo activo"]
+
+  D --> E["Mostrar resumen del ciclo activo"]
+  E --> F["Modificar ciclo actual"]
+  E --> G["Crear nuevo ciclo de entrenamiento"]
+  G --> H{"Confirmar cierre del ciclo actual?"}
+  H -->|"No"| D
+  H -->|"Si"| I["Guardar snapshot en Historial ciclo de entrenamiento"]
+  I --> C
+
+  C --> J["Selecciona tu ciclo de entrenamiento"]
+  J --> J1["Macrociclo"]
+  J --> J2["Mesociclo"]
+  J --> J3["Microciclo"]
+  J --> J4["Sesion de entrenamiento"]
+
+  J1 --> K["Seleccionar objetivo principal"]
+  J2 --> K
+  J3 --> K
+  J4 --> K
+
+  K --> L["Mostrar descripcion del objetivo seleccionado"]
+  L --> M["Seleccionar duracion"]
+  M --> N["Seleccionar dias de entrenamiento"]
+  N --> O["Configurar rutinas por dia"]
+
+  O --> P["Rutina 1 de N: nombre de rutina del dia"]
+  P --> Q["Ejercicios a programar: nombre, series, reps, kg"]
+  Q --> R{"Guardar y continuar"}
+  R --> S{"Faltan dias seleccionados?"}
+  S -->|"Si"| T["Avanzar al siguiente dia pendiente"]
+  T --> P
+  S -->|"No"| U["Finalizar registro de rutina"]
+  U --> V["Popup Registro exitoso"]
+  V --> W["OK"]
+  W --> X["Panel principal / Entrenamiento"]

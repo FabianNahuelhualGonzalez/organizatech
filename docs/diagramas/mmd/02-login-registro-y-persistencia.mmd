@@ -1,0 +1,22 @@
+flowchart TD
+  A["Pantalla Login"] --> B["Usuario ingresa correo y contrasena"]
+  B --> C{"Supabase configurado?"}
+  C -->|"Si"| D["Intentar autenticacion Supabase"]
+  C -->|"No"| E["Modo demo local"]
+
+  D --> F{"Autenticacion OK?"}
+  F -->|"Si"| G["Guardar sesion / nombre usuario"]
+  F -->|"No"| H["Mostrar error y seguir en Login"]
+  E --> G
+
+  I["Pantalla Registro"] --> J["Usuario crea cuenta"]
+  J --> K{"Supabase configurado?"}
+  K -->|"Si"| L["Crear usuario Supabase"]
+  K -->|"No"| M["Crear sesion demo local"]
+  L --> N{"Registro OK?"}
+  N -->|"Si"| G
+  N -->|"No"| I
+  M --> G
+
+  G --> O["Cargar ejercicios, entradas, plan y ciclos"]
+  O --> P["Panel principal"]

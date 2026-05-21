@@ -1,0 +1,36 @@
+flowchart TD
+  A["Panel principal"] --> B["Metricas superiores"]
+  B --> B1["Volumen de trabajo"]
+  B --> B2["Total reps"]
+  B --> B3["Ejercicios"]
+
+  A --> C["Vista progreso semanal"]
+  C --> C1["Porcentaje vs semana anterior"]
+  C --> C2["Linea semanal"]
+
+  A --> D["Entrenamiento del dia"]
+  D --> E{"El dia actual tiene rutina?"}
+  E -->|"Si"| F["Mostrar rutina del dia actual"]
+  E -->|"No"| G["Mostrar no registra entrenamientos"]
+  F --> H["Mostrar ejercicios y estado"]
+  H --> I["Ir a rutina"]
+  G --> J["Editar rutina semanal desde seccion entrenamiento/registro"]
+
+  A --> K["Analisis inteligente"]
+  K --> K1["Carga estable o aumento de carga"]
+  K --> K2["Volumen semanal subio o bajo"]
+  K --> K3["Cumplimiento por mejorar o consistencia solida"]
+  K --> K4["Riesgo de fatiga o sin caidas criticas"]
+  K --> K5["Ejercicio con mayor progreso"]
+
+  A --> L["Resumen de motivacion IA"]
+  L --> L1["Lee formularios de motivacion"]
+  L --> L2["Detecta motivacion, hidratacion, sueno y energia"]
+  L --> L3["Sugiere entrenar con control o ajustar exigencia"]
+
+  A --> M["Analitica integrada"]
+  M --> M1["Score total /100"]
+  M --> M2["40% cumplimiento ejercicios"]
+  M --> M3["25% repeticiones logradas"]
+  M --> M4["20% carga mantenida/subida"]
+  M --> M5["15% volumen vs objetivo o semana anterior"]

@@ -1,0 +1,36 @@
+flowchart TD
+  A["Ciclo activo"] --> B["Resumen breve"]
+  B --> B1["Ciclo numero"]
+  B --> B2["Tipo de ciclo"]
+  B --> B3["Objetivo"]
+  B --> B4["Dias con rutina"]
+  B --> B5["Ejercicios"]
+  B --> B6["Semanas registradas"]
+
+  A --> C["Modificar ciclo actual"]
+  A --> D["Crear nuevo ciclo de entrenamiento"]
+  D --> E{"Estas seguro?"}
+  E -->|"No"| A
+  E -->|"Si"| F["Finalizar ciclo actual"]
+  F --> G["Crear snapshot"]
+  G --> G1["Plan del ciclo"]
+  G --> G2["Ejercicios programados"]
+  G --> G3["Entrenamientos registrados"]
+  G --> G4["Estado de animo"]
+  G --> G5["Sugerencias"]
+  G --> H["Guardar en historial ciclo de entrenamiento"]
+  H --> I["Crear nuevo ciclo desde cero"]
+
+  J["Historial ciclo de entrenamiento"] --> K["Hero Ciclos finalizados"]
+  K --> L{"Hay ciclos cerrados?"}
+  L -->|"No"| M["Mostrar estado vacio"]
+  L -->|"Si"| N["Lista tipo FAQ / acordeon"]
+  N --> O["Resumen ciclo 1 · Mesociclo · Objetivo"]
+  O --> P{"Usuario toca resumen"}
+  P -->|"Abrir"| Q["Desplegar detalle del ciclo"]
+  P -->|"Cerrar"| R["Ocultar detalle"]
+  Q --> Q1["Metricas: dias, ejercicios, volumen"]
+  Q --> Q2["Subieron reps o peso"]
+  Q --> Q3["Estancados"]
+  Q --> Q4["Estado de animo"]
+  Q --> Q5["Sugerencias"]

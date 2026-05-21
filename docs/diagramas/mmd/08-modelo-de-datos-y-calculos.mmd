@@ -1,0 +1,50 @@
+flowchart LR
+  A["TrainingPlan"] --> A1["Tipo ciclo"]
+  A --> A2["Objetivo"]
+  A --> A3["Duracion"]
+  A --> A4["Dias de entrenamiento"]
+
+  B["ExerciseTemplate"] --> B1["Rutina base"]
+  B --> B2["Dia"]
+  B --> B3["Ejercicio"]
+  B --> B4["Series objetivo"]
+  B --> B5["Reps objetivo"]
+  B --> B6["Peso base"]
+
+  C["TrainingReadiness"] --> C1["Motivacion"]
+  C --> C2["Hidratacion"]
+  C --> C3["Sueno"]
+  C --> C4["Energia"]
+  C --> C5["Omitido"]
+
+  D["ExerciseEntry"] --> D1["Ejercicio registrado"]
+  D --> D2["Semana"]
+  D --> D3["Fecha"]
+  D --> D4["Peso usado"]
+  D --> D5["Reps por serie"]
+  D --> D6["Notas con formulario de motivacion"]
+
+  E["ExerciseMetrics"] --> E1["Total reps"]
+  E --> E2["Diferencia reps"]
+  E --> E3["Diferencia kg"]
+  E --> E4["Volumen"]
+  E --> E5["Porcentaje volumen"]
+  E --> E6["Estado objetivo"]
+
+  F["WeeklySummary"] --> F1["Volumen semanal"]
+  F --> F2["Total reps semanal"]
+  F --> F3["Ejercicios semana"]
+  F --> F4["Cumplimiento"]
+
+  G["TrainingCycleSnapshot"] --> G1["Plan cerrado"]
+  G --> G2["Ejercicios del ciclo"]
+  G --> G3["Entradas del ciclo"]
+  G --> G4["Resumen historial"]
+
+  B --> D
+  C --> D
+  D --> E
+  E --> F
+  A --> G
+  B --> G
+  D --> G

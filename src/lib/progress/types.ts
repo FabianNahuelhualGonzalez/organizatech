@@ -64,3 +64,36 @@ export interface SmartInsight {
   title: string;
   detail: string;
 }
+
+export type ExerciseTrend =
+  | "Mejora"
+  | "Mantenimiento"
+  | "Retroceso"
+  | "Información insuficiente";
+
+export interface ExerciseHistoryPoint {
+  date: string;
+  weekLabel?: string;
+  weight: number;
+  totalReps: number;
+  volumeTotal: number;
+}
+
+export interface ExerciseComparisonSummary {
+  exerciseName: string;
+  firstWeight: number;
+  firstDate: string;
+  firstTotalReps: number;
+  firstVolumeTotal: number;
+  latestWeight: number;
+  latestDate: string;
+  latestTotalReps: number;
+  latestVolumeTotal: number;
+  weightGain: number;
+  bestWeight: number;
+  bestWeightDate: string;
+  totalRecords: number;
+  trend: ExerciseTrend;
+  insight: string;
+  history: ExerciseHistoryPoint[];
+}

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Limpiar Organizatech</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: #07111f;
+        color: #f7fbff;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      main {
+        width: min(420px, 100%);
+        border: 1px solid rgba(90, 122, 160, 0.45);
+        border-radius: 12px;
+        background: #101d2d;
+        padding: 22px;
+      }
+
+      p {
+        color: #b9d5f0;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Preparando Organizatech</h1>
+      <p>Estamos limpiando archivos antiguos del navegador. En unos segundos volverás a la app.</p>
+    </main>
+    <script>
+      async function cleanAndReturn() {
+        if ("serviceWorker" in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map((registration) => registration.unregister()));
+        }
+
+        if ("caches" in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((key) => caches.delete(key)));
+        }
+
+        window.location.replace("/");
+      }
+
+      cleanAndReturn().catch(() => window.location.replace("/"));
+    </script>
+  </body>
+</html>

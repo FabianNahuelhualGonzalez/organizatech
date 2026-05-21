@@ -1,0 +1,27 @@
+flowchart TD
+  A["Usuario entra a Comparacion semanal"] --> B["Selecciona rutina o dia"]
+  B --> C{"Dia seleccionado tiene rutina?"}
+  C -->|"No"| D["Dia bloqueado / sin datos comparables"]
+  C -->|"Si"| E["Comparacion por mismo dia"]
+
+  E --> F["Lunes compara solo con lunes"]
+  E --> G["Martes compara solo con martes"]
+  E --> H["Miercoles compara solo con miercoles"]
+  E --> I["Y asi hasta domingo"]
+
+  E --> J{"Semana actual"}
+  J -->|"Semana 1"| K["Rutina registrada vs Semana 1"]
+  J -->|"Semana 2"| L["Rutina registrada vs Semana 2 vs Semana 1"]
+  J -->|"Semana 3 o mas"| M["Rutina registrada vs Semana actual vs semanas previas"]
+
+  K --> N["Ejercicios comparados"]
+  L --> N
+  M --> N
+  N --> O["Mostrar kg, reps, kg delta y volumen"]
+  O --> P["Badges: Cumplimos / Mismo kg / Subimos reps / Bajamos reps"]
+
+  N --> Q["Comparar ejercicio por semana"]
+  Q --> R["Selector visual de ejercicio"]
+  R --> S["Detalle del ejercicio seleccionado"]
+  S --> T["Observacion clara"]
+  S --> U["Grafico semanal del volumen"]

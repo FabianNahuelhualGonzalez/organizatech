@@ -40,7 +40,28 @@ Este documento resume las peticiones realizadas durante el desarrollo de Organiz
 - Se hizo dinamico el carrusel del panel principal para mostrar solo los dias que tienen rutina registrada.
 - Se elimino la fila de chips de dias del panel principal para evitar duplicar informacion con los puntos.
 - Se ajusto el entorno local para limpiar service workers y evitar fallas de chunks antiguos en localhost.
-- Se agrego resumen motivacional al panel principal.
+- Se agrego resumen motivacional IA al panel principal, basado en motivacion, hidratacion, sueño y energia del formulario de motivacion.
+- Se agrego icono IA, conclusion automatica, promedios y sugerencia practica.
+- Se agrego limpieza de cache para pruebas desde celular y se desactiva service worker en IP local para evitar errores de chunks antiguos.
+- Se agregaron cabeceras no-store para prevenir cache persistente durante pruebas por IP local.
+- Se agrego fallback para generar IDs cuando crypto.randomUUID no esta disponible en navegador movil por IP local.
+- Se cambio Agregar mas a un boton amarillo para separar visualmente acciones secundarias.
+- Se agrego popup de registro exitoso al finalizar la rutina y redireccion al panel principal despues de OK.
+- Se corrigio responsive del selector de dias de entrenamiento para evitar flechas apiladas.
+- Se agrego pantalla inicial de Entrenamiento con resumen del dia y boton Iniciar entrenamiento.
+- Se reordeno el flujo: Entrenamiento -> Iniciar entrenamiento -> formulario de motivacion de animo -> rutina guiada.
+- Se movio Editar rutina a icono de lapiz en el encabezado del resumen.
+- Se centro el boton Iniciar entrenamiento.
+- Se transformo el formulario de animo a sliders interactivos con escala 1 a 7.
+- Se actualizo la navegacion Volver para retroceder por pasos reales antes de regresar al panel principal.
+- Se compacto el Estado previo IA para alinearlo visualmente con Alertas de entrenamiento inteligente.
+- Se cambio la formula de Analitica integrada a ponderacion por cumplimiento, repeticiones, carga y volumen.
+- Se agrego ayuda contextual para explicar los porcentajes usados en Analitica integrada.
+- Se ajusto Volver segun matriz de navegacion: formulario de motivacion, rutina guiada, editar rutina, comparacion e historial.
+- Se reordeno la informacion del panel principal segun prioridad de lectura solicitada.
+- Se cambio Estado previo IA por Resumen de motivacion IA.
+- Se elimino el encabezado duplicado del editor de rutina semanal.
+- Se rediseño Historial ciclo de entrenamiento para mejorar lectura, jerarquia visual y experiencia mobile-first.
 - Se agrego boton Volver con flecha en secciones internas.
 
 ## 2026-05-14 - Rutinas por dia
@@ -113,10 +134,10 @@ Este documento resume las peticiones realizadas durante el desarrollo de Organiz
   - Finalizar registro de rutina.
 - Se corrigio el bug donde guardar Lunes enviaba directamente al entrenamiento aunque faltaran otros dias.
 - Si faltan dias, la app permanece en creacion de rutina y avanza al siguiente dia pendiente.
-- Solo al completar todos los dias seleccionados se pasa al check-in previo al entrenamiento.
+- Solo al completar todos los dias seleccionados se pasa al formulario de motivacion previo al entrenamiento.
 - Se elimino la opcion de copiar rutina desde otro dia para simplificar.
 
-## 2026-05-17 - Check-in previo al entrenamiento
+## 2026-05-17 - Formulario de motivacion previo al entrenamiento
 
 - Se agrego pantalla previa antes del entrenamiento.
 - Preguntas:
@@ -144,6 +165,14 @@ Este documento resume las peticiones realizadas durante el desarrollo de Organiz
   - diferencia de kg.
 - Se evito mostrar progreso falso cuando el usuario iguala el peso objetivo.
 
+## 2026-05-19 - Historial ciclo de entrenamiento
+
+- Se rediseño Historial ciclo de entrenamiento con una pantalla estilo resumen premium.
+- Se agrego hero de ciclos finalizados con contador total.
+- Se mejoro la tarjeta de ciclo finalizado con periodo, metricas principales e iconos.
+- Se reorganizo el resumen en cuatro bloques: mejoras, estancamientos, estado de animo y sugerencias.
+- Se mantuvo la estetica oscura de Organizatech y se reforzo la lectura visual con colores por tipo de informacion.
+
 ## Verificaciones realizadas
 
 Durante el desarrollo se ejecuto regularmente:
@@ -156,7 +185,7 @@ npm run build
 
 ## Pendientes sugeridos
 
-- Persistir check-in en tablas dedicadas de Supabase.
+- Persistir formulario de motivacion en tablas dedicadas de Supabase.
 - Agregar pruebas end-to-end del flujo completo de rutina.
 - Definir autenticacion real con Supabase Auth.
 - Agregar borrado seguro o archivo de rutinas.

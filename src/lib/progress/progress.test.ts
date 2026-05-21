@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { calculateExerciseMetrics, calculateObjectiveStatus, calculateWeeklySummary } from "./calculations";
+import { buildExerciseComparisonSummary } from "./exercise-history";
 
 assert.equal(calculateObjectiveStatus(2, 0), "Cumplimos", "clasifica Cumplimos si suben repeticiones");
 
@@ -43,4 +44,48 @@ const firstWeekSummary = calculateWeeklySummary([result, maintained], 4);
 assert.equal(firstWeekSummary.repsDifference, 2, "compara reps contra objetivo cuando no hay semana anterior");
 assert.equal(firstWeekSummary.exerciseDifference, 0, "no cuenta objetivos cumplidos como ejercicios nuevos");
 
+const improvedHistory = buildExerciseComparisonSummary([
+  makeHistoryMetric("sentadilla-1", 1, "2026-03-12", 100, [12]),
+  makeHistoryMetric("sentadilla-2", 5, "2026-05-18", 150, [6]),
+]);
+assert.equal(improvedHistory?.weightGain, 50, "calcula ganancia total de peso");
+assert.equal(improvedHistory?.trend, "Mejora", "detecta mejora cuando sube el peso");
+assert.match(improvedHistory?.insight ?? "", /mejora clara|mejora sostenida/i, "contextualiza reps menores con más carga");
+
+const maintainedHistory = buildExerciseComparisonSummary([
+  makeHistoryMetric("press-1", 1, "2026-03-12", 100, [10]),
+  makeHistoryMetric("press-2", 2, "2026-03-19", 100, [10]),
+]);
+assert.equal(maintainedHistory?.weightGain, 0, "calcula peso mantenido");
+assert.equal(maintainedHistory?.trend, "Mantenimiento", "detecta mantenimiento");
+
+const regressionHistory = buildExerciseComparisonSummary([
+  makeHistoryMetric("deadlift-1", 1, "2026-03-12", 120, [10]),
+  makeHistoryMetric("deadlift-2", 2, "2026-03-19", 100, [10]),
+]);
+assert.equal(regressionHistory?.weightGain, -20, "calcula retroceso de peso");
+assert.equal(regressionHistory?.trend, "Retroceso", "detecta retroceso");
+
+const singleHistory = buildExerciseComparisonSummary([
+  makeHistoryMetric("row-1", 1, "2026-03-12", 100, [12]),
+]);
+assert.equal(singleHistory?.weightGain, 0, "un solo registro no tiene ganancia");
+assert.equal(singleHistory?.trend, "Información insuficiente", "un solo registro no fuerza tendencia");
+
 console.log("Pruebas de progreso OK");
+
+function makeHistoryMetric(id: string, week: number, date: string, weight: number, reps: number[]) {
+  return calculateExerciseMetrics({
+    id,
+    exerciseId: id.split("-")[0],
+    exerciseName: "Sentadilla",
+    routine: "Piernas",
+    week,
+    date,
+    targetSets: reps.length,
+    targetReps: 10,
+    weight,
+    previousWeight: weight,
+    reps,
+  });
+}

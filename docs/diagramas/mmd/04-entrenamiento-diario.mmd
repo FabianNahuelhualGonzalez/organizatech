@@ -1,0 +1,43 @@
+flowchart TD
+  A["Usuario entra a Entrenamiento"] --> B{"Existe rutina registrada?"}
+  B -->|"No"| C["Mostrar acceso para crear rutina"]
+  C --> D["Registro de entrenamiento"]
+
+  B -->|"Si"| E["Pantalla inicio de entrenamiento"]
+  E --> F["Resumen del dia seleccionado"]
+  F --> G["KG totales de la rutina"]
+  F --> H["Total reps objetivo"]
+  F --> I["Ejercicios total"]
+  F --> J["Boton editar rutina semanal"]
+  F --> K["Boton iniciar entrenamiento"]
+
+  K --> L["Formulario de motivacion"]
+  L --> M["Motivacion 1 a 7"]
+  L --> N["Hidratacion 1 a 7"]
+  L --> O["Sueno 1 a 7"]
+  L --> P["Energia fisica 1 a 7"]
+  L --> Q{"Empezar u omitir por hoy"}
+
+  Q -->|"Empezar"| R["Guardar formulario de motivacion"]
+  Q -->|"Omitir"| S["Registrar internamente: usuario no quiso registrar"]
+  R --> T["Rutina guiada del dia"]
+  S --> T
+
+  T --> U["Ejercicios a realizar"]
+  U --> V["Usuario toca ejercicio activo"]
+  V --> W["Registro de series"]
+  W --> X["Objetivo de tu rutina: kg y reps base"]
+  W --> Y["Nuevo registro: peso usado y reps por serie"]
+  Y --> Z["Calcular resultado contra objetivo"]
+  Z --> AA{"Resultado del ejercicio"}
+  AA -->|"Supera reps o kg"| AB["Cumplimos / Subimos kg o reps"]
+  AA -->|"Iguala objetivo"| AC["Mantenemos esfuerzo / Mismo kg / Mismas reps"]
+  AA -->|"Baja reps o kg"| AD["No cumplimos / Bajamos kg o reps"]
+  AB --> AE["Registrar serie"]
+  AC --> AE
+  AD --> AE
+  AE --> AF{"Todos los ejercicios registrados?"}
+  AF -->|"No"| U
+  AF -->|"Si"| AG["Guardar entrenamiento"]
+  AG --> AH["Crear entradas de entrenamiento"]
+  AH --> AI["Panel principal"]

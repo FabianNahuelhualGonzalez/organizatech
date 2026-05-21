@@ -1,0 +1,79 @@
+flowchart TD
+  A["Abrir Organizatech"] --> B{"Sesion activa?"}
+  B -->|"No"| C["Login / Registro"]
+  C --> D{"Autenticacion o demo OK?"}
+  D -->|"No"| C
+  D -->|"Si"| E["Cargar datos locales o Supabase"]
+  B -->|"Si"| E
+
+  E --> F["Panel principal"]
+  F --> F1["Metricas: volumen, reps, ejercicios"]
+  F --> F2["Vista progreso semanal"]
+  F --> F3["Entrenamiento del dia calendario"]
+  F --> F4["Analisis inteligente"]
+  F --> F5["Resumen de motivacion IA"]
+  F --> F6["Analitica integrada"]
+
+  F --> G["Menu hamburguesa"]
+  G --> H["Entrenamiento"]
+  G --> I["Registro de entrenamiento"]
+  G --> J["Comparacion semanal"]
+  G --> K["Historial ciclo de entrenamiento"]
+  G --> L["Mi perfil"]
+  G --> M["Cerrar sesion"]
+  M --> C
+
+  H --> H1{"Hay rutina activa?"}
+  H1 -->|"No"| I
+  H1 -->|"Si"| H2["Inicio entrenamiento"]
+  H2 --> H3["Iniciar entrenamiento"]
+  H3 --> H4["Formulario de motivacion"]
+  H4 --> H5{"Completa u omite?"}
+  H5 -->|"Completa"| H6["Guardar estado motivacional"]
+  H5 -->|"Omite"| H7["Registrar omision"]
+  H6 --> H8["Rutina guiada"]
+  H7 --> H8
+  H8 --> H9["Seleccionar ejercicio"]
+  H9 --> H10["Registrar peso y reps por serie"]
+  H10 --> H11["Calcular reps, kg, volumen y estado"]
+  H11 --> H12{"Quedan ejercicios?"}
+  H12 -->|"Si"| H9
+  H12 -->|"No"| H13["Guardar entrenamiento"]
+  H13 --> E
+
+  I --> I1{"Hay ciclo activo con rutina?"}
+  I1 -->|"No"| I2["Crear plan deportivo"]
+  I1 -->|"Si"| I3["Ciclo activo"]
+  I3 --> I4["Modificar ciclo actual"]
+  I3 --> I5["Crear nuevo ciclo"]
+  I5 --> I6{"Confirmar cierre?"}
+  I6 -->|"No"| I3
+  I6 -->|"Si"| I7["Snapshot a historial"]
+  I7 --> I2
+  I4 --> I2
+  I2 --> I8["Seleccionar ciclo, objetivo, duracion y dias"]
+  I8 --> I9["Configurar rutina por dia"]
+  I9 --> I10["Nombre rutina y ejercicios"]
+  I10 --> I11{"Faltan dias?"}
+  I11 -->|"Si"| I9
+  I11 -->|"No"| I12["Finalizar registro de rutina"]
+  I12 --> F
+
+  J --> J1["Seleccionar dia/rutina"]
+  J1 --> J2{"Dia tiene rutina?"}
+  J2 -->|"No"| J3["Dia no comparable"]
+  J2 -->|"Si"| J4["Comparar mismo dia entre semanas"]
+  J4 --> J5["Rutina registrada vs semanas"]
+  J5 --> J6["Ejercicios comparados"]
+  J6 --> J7["Comparar ejercicio por semana"]
+  J7 --> J8["Grafico volumen semanal"]
+
+  K --> K1["Ciclos finalizados"]
+  K1 --> K2{"Hay snapshots?"}
+  K2 -->|"No"| K3["Estado vacio"]
+  K2 -->|"Si"| K4["Acordeon de ciclos"]
+  K4 --> K5{"Usuario abre resumen ciclo?"}
+  K5 -->|"Si"| K6["Mostrar metricas, mejoras, estancados, animo y sugerencias"]
+  K5 -->|"No"| K4
+
+  L --> L1["Perfil demo/local o cuenta conectada"]

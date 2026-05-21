@@ -1,0 +1,32 @@
+flowchart TD
+  A["Usuario abre Organizatech"] --> B{"Tiene sesion activa?"}
+  B -->|"No"| C["Login"]
+  B -->|"Quiere registrarse"| D["Registro de cuenta"]
+  C --> E{"Login correcto?"}
+  D --> F{"Registro correcto?"}
+  E -->|"Si"| G["Panel principal"]
+  F -->|"Si"| G
+  E -->|"No"| C
+  F -->|"No"| D
+
+  G --> H["Menu hamburguesa"]
+  H --> G
+  H --> I["Entrenamiento"]
+  H --> J["Registro de entrenamiento"]
+  H --> K["Comparacion semanal"]
+  H --> L["Historial ciclo de entrenamiento"]
+  H --> M["Mi perfil"]
+  H --> N["Cerrar sesion"]
+
+  I --> O{"Existe rutina registrada?"}
+  O -->|"No"| J
+  O -->|"Si"| P["Inicio de entrenamiento"]
+
+  J --> Q{"Existe ciclo activo con rutina?"}
+  Q -->|"No"| R["Crear rutina desde cero"]
+  Q -->|"Si"| S["Ciclo activo / modificar ciclo actual / crear nuevo ciclo"]
+
+  K --> T["Comparar rutina base y semanas por dia"]
+  L --> U["Ver ciclos finalizados como acordeon"]
+  M --> V["Datos de perfil local / cuenta"]
+  N --> C

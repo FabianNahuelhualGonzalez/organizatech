@@ -69,8 +69,8 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
   - Guardar y continuar al siguiente dia.
   - Finalizar registro de rutina al completar el ultimo dia.
 - Se elimino la opcion de copiar rutina desde otro dia para simplificar el flujo.
-- Se agrego check-in previo al entrenamiento con motivacion, hidratacion, sueño y energia fisica.
-- Se permite omitir el check-in y se registra internamente como usuario no quiso registrar.
+- Se agrego formulario de motivacion previo al entrenamiento con motivacion, hidratacion, sueño y energia fisica.
+- Se permite omitir el formulario de motivacion y se registra internamente como usuario no quiso registrar.
 - Se agrego configuracion editable de ciclos:
   - Macrociclo: objetivo principal y duracion de 6 a 11 meses.
   - Mesociclo: objetivo, duracion de 3 a 6 semanas y dias de entrenamiento.
@@ -108,7 +108,28 @@ Organizatech es una PWA mobile-first construida con Next.js, TypeScript, Supabas
 
 ## Panel principal
 
-- Se agrego un resumen motivacional en el panel principal con lectura breve del avance semanal.
+- Se agrego un resumen motivacional IA en el panel principal basado en formulario de motivacion: motivacion, hidratacion, sueño y energia.
+- El resumen IA muestra conclusion, promedios y sugerencia practica segun el estado declarado por el usuario.
+- Se ajusto el comportamiento local por IP para desactivar service worker en red privada y evitar chunks antiguos al probar desde celular.
+- Se agregaron cabeceras no-store en el entorno local para evitar que el celular cargue archivos antiguos.
+- Se reemplazo crypto.randomUUID por un generador compatible con fallback para navegadores moviles en IP local.
+- Se cambio el boton Agregar mas a color amarillo para diferenciarlo de la accion principal.
+- Al finalizar el registro de rutina se muestra popup de exito y al confirmar redirige al panel principal.
+- Se corrigio el responsive del selector de dias en Entrenamiento para que flechas y dias permanezcan en una sola fila.
+- Se agrego pantalla previa en Entrenamiento con boton Iniciar entrenamiento antes del formulario de animo.
+- El formulario de motivacion de animo ahora aparece solo despues de que el usuario decide iniciar el entrenamiento.
+- Se movio Editar rutina a un boton iconico con lapiz en el encabezado del entrenamiento.
+- Se centro el boton Iniciar entrenamiento.
+- El formulario de motivacion de animo cambio de botones numericos a sliders 1-7 con indicador visible.
+- Se ajusto el boton Volver para respetar pasos internos: rutina guiada, formulario de motivacion, inicio de entrenamiento y recien panel principal.
+- Se simplifico Estado previo IA para verse como alertas compactas y reducir saturacion visual.
+- Se actualizo Analitica integrada con formula ponderada: 40% cumplimiento, 25% repeticiones, 20% carga y 15% volumen.
+- Se agrego icono de ayuda en Analitica integrada para explicar la formula del puntaje.
+- Se refinó Volver: desde rutina guiada vuelve al panel; desde formulario de animo vuelve a inicio de entrenamiento; desde editar rutina vuelve a su origen.
+- Se reordeno el panel principal: metricas, vista progreso semanal, entrenamiento del dia, analisis inteligente, resumen de motivacion IA y analitica integrada.
+- Se renombro Estado previo IA a Resumen de motivacion IA.
+- Se elimino el encabezado duplicado "Rutina semanal / Agrega o modifica tus dias de entrenamiento" del editor de rutina.
+- Se rediseño Historial ciclo de entrenamiento con hero, metricas compactas y tarjetas modernas de resultados.
 - Se renombro el grafico principal como Vista progreso semanal.
 - Se eliminaron mensajes tecnicos como "Datos guardados en este dispositivo" de la vista principal.
 - Se ajustaron tarjetas de volumen, reps y ejercicios para verse mas compactas.
@@ -212,6 +233,14 @@ Se validaron los cambios principales con:
 - `npm run test`
 - `npm run typecheck`
 - `npm run build`
+
+## 2026-05-19 - Historial de ciclos
+
+- Se rediseño la seccion Historial ciclo de entrenamiento con una vista mas visual y resumida.
+- Se agrego una tarjeta principal de ciclos finalizados con contador.
+- Cada ciclo finalizado muestra fecha, dias con rutina, ejercicios y volumen registrado.
+- Se separaron los resultados en tarjetas de lectura rapida: subieron reps o peso, estancados, estado de animo y sugerencias.
+- Se agregaron iconos y colores por estado para que el usuario entienda el resumen sin sobrepensar.
 
 ## Pendientes sugeridos
 
