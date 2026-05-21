@@ -2104,6 +2104,25 @@ h3 {
   overflow: hidden;
 }
 
+.dashboard-empty-progress {
+  display: grid;
+  gap: 12px;
+  border-color: rgba(116, 223, 113, 0.36);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(116, 223, 113, 0.12), transparent 42%),
+    linear-gradient(180deg, rgba(18, 32, 50, 0.96), rgba(8, 19, 34, 0.96));
+}
+
+.dashboard-empty-progress p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.dashboard-empty-days {
+  padding-bottom: 2px;
+}
+
 .dashboard-training-card h3 {
   margin: 0;
   font-size: clamp(16px, 4.8vw, 20px);

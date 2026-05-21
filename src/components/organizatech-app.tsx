@@ -589,6 +589,7 @@ export function OrganizatechApp() {
     const completedDays = getConfiguredSetupDays(nextSetupByDay);
     const nextIncompleteDay = plannedDays.find((day) => day !== setupDay && !completedDays.includes(day));
     const allPlannedDaysComplete = plannedDays.every((day) => completedDays.includes(day));
+    const daysToPersist = plannedDays.filter((day) => nextSetupByDay[day]?.rows.some((row) => row.name.trim()));
 
     if (validRows.length === 0) {
       setStatusMessage("Agrega al menos un ejercicio para crear la rutina.");
@@ -599,19 +600,25 @@ export function OrganizatechApp() {
     setIsBusy(true);
     try {
       let firstExerciseId = "";
-      for (const row of validRows) {
-        const exercise = await saveExercise({
-          id: row.sourceExerciseId ?? row.id,
-          routine: routineName,
-          day: setupDay,
-          name: row.name.trim(),
-          targetSets: Math.max(1, row.sets || 1),
-          targetReps: Math.max(1, row.reps || 1),
-          baseWeight: Math.max(0, row.weight || 0),
-          notes: `Rutina creada para ${setupDay}.`,
-        });
+      for (const dayToPersist of daysToPersist) {
+        const state = nextSetupByDay[dayToPersist] ?? createSetupDayState();
+        const currentRoutineName = state.routineName.trim() || dayToPersist;
+        const rowsToPersist = state.rows.filter((row) => row.name.trim());
 
-        if (!firstExerciseId) firstExerciseId = exercise.id;
+        for (const row of rowsToPersist) {
+          const exercise = await saveExercise({
+            id: row.sourceExerciseId ?? row.id,
+            routine: currentRoutineName,
+            day: dayToPersist,
+            name: row.name.trim(),
+            targetSets: Math.max(1, row.sets || 1),
+            targetReps: Math.max(1, row.reps || 1),
+            baseWeight: Math.max(0, row.weight || 0),
+            notes: `Rutina creada para ${dayToPersist}.`,
+          });
+
+          if (!firstExerciseId) firstExerciseId = exercise.id;
+        }
       }
 
       await refreshData();
@@ -1228,6 +1235,30 @@ function DashboardScreen({
   if (!hasTrainingEntries) {
     return (
       <section className="screen">
+        <div className="card wide dashboard-empty-progress">
+          <p className="eyebrow">Rutina creada</p>
+          <h3>Aún no registras progreso</h3>
+          <p>Ya tienes tu planificación lista. Para comenzar a medir avances, inicia el entrenamiento del día y registra tus series.</p>
+          {routineDays.length > 1 ? (
+            <div className="routine-day-pills dashboard-empty-days">
+              {routineDays.map((item) => (
+                <button
+                  className={`routine-day-pill ${item === day ? "active" : "configured"}`}
+                  key={item}
+                  type="button"
+                  onClick={() => switchDay(item)}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {hasTodayRoutine ? (
+            <button className="button dashboard-routine-button" onClick={goToRoutine}>
+              Iniciar entrenamiento
+            </button>
+          ) : null}
+        </div>
         <div className="card wide routine-summary-card">
           <p className="eyebrow">{hasTodayRoutine ? routine : "Sin rutina para hoy"}</p>
           <h3>{hasTodayRoutine ? `${titlePrefix} ${trainingDateLabel} | ${day}` : `Entrenamiento ${trainingDateLabel} | ${day}: no registra entrenamientos`}</h3>
@@ -1246,9 +1277,6 @@ function DashboardScreen({
                   <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
                 ))}
               </div>
-              <button className="button secondary" style={{ width: "100%", marginTop: 12 }} onClick={goToRoutine}>
-                Ir a rutina
-              </button>
               <DashboardDayDots day={day} weekDays={weekDays} />
             </>
           ) : null}
