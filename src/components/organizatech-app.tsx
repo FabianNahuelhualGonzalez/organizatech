@@ -2148,21 +2148,20 @@ function TrainingStartScreen({
   editRoutine: () => void;
   startTraining: () => void;
 }) {
-  const currentDayIndex = Math.max(0, routineDays.indexOf(day));
-  const previousDay = routineDays[(currentDayIndex - 1 + routineDays.length) % routineDays.length] ?? day;
-  const nextDay = routineDays[(currentDayIndex + 1) % routineDays.length] ?? day;
-
   return (
     <section className="screen">
       <div className="card wide day-switcher-card">
-        <button className="icon-button" type="button" aria-label="Rutina anterior" onClick={() => switchDay(previousDay)} disabled={routineDays.length <= 1}>
-          <ChevronLeft size={19} />
-        </button>
+        <div className="section-heading">
+          <div>
+            <h3>Selecciona rutina o día</h3>
+            <p className="eyebrow">Cambia entre tus días registrados para iniciar el entrenamiento.</p>
+          </div>
+        </div>
         <div className="routine-day-pills">
           {routineDays.map((item) => (
             <button
               key={item}
-              className={`routine-day-pill ${item === day ? "active" : ""}`}
+              className={`routine-day-pill configured ${item === day ? "active" : ""}`}
               type="button"
               onClick={() => switchDay(item)}
             >
@@ -2170,9 +2169,6 @@ function TrainingStartScreen({
             </button>
           ))}
         </div>
-        <button className="icon-button" type="button" aria-label="Rutina siguiente" onClick={() => switchDay(nextDay)} disabled={routineDays.length <= 1}>
-          <ChevronRight size={19} />
-        </button>
       </div>
 
       <div className="card wide training-start-card">
@@ -2242,9 +2238,6 @@ function GuidedTrainingScreen({
   const draft = activeExercise ? normalizeExerciseDraft(activeExercise, drafts[activeExercise.id]) : null;
   const completedCount = exercises.filter((exercise) => drafts[exercise.id]?.registered).length;
   const allRegistered = exercises.length > 0 && completedCount === exercises.length;
-  const currentDayIndex = Math.max(0, routineDays.indexOf(day));
-  const previousDay = routineDays[(currentDayIndex - 1 + routineDays.length) % routineDays.length] ?? day;
-  const nextDay = routineDays[(currentDayIndex + 1) % routineDays.length] ?? day;
   const preview = activeExercise && draft
     ? calculateExerciseMetrics({
         id: `preview-${activeExercise.id}`,
@@ -2275,14 +2268,17 @@ function GuidedTrainingScreen({
   return (
     <section className="screen">
       <div className="card wide day-switcher-card">
-        <button className="icon-button" type="button" aria-label="Rutina anterior" onClick={() => switchDay(previousDay)} disabled={routineDays.length <= 1}>
-          <ChevronLeft size={19} />
-        </button>
+        <div className="section-heading">
+          <div>
+            <h3>Selecciona rutina o día</h3>
+            <p className="eyebrow">Cambia entre tus días registrados para seguir entrenando.</p>
+          </div>
+        </div>
         <div className="routine-day-pills">
           {routineDays.map((item) => (
             <button
               key={item}
-              className={`routine-day-pill ${item === day ? "active" : ""}`}
+              className={`routine-day-pill configured ${item === day ? "active" : ""}`}
               type="button"
               onClick={() => switchDay(item)}
             >
@@ -2290,9 +2286,6 @@ function GuidedTrainingScreen({
             </button>
           ))}
         </div>
-        <button className="icon-button" type="button" aria-label="Rutina siguiente" onClick={() => switchDay(nextDay)} disabled={routineDays.length <= 1}>
-          <ChevronRight size={19} />
-        </button>
       </div>
 
       <div className="card wide routine-summary-card">
@@ -2524,7 +2517,7 @@ function ComparisonScreenV2({
   const [activeWeek, setActiveWeek] = useState(currentWeek);
   const [selectedExerciseId, setSelectedExerciseId] = useState("");
   const [isExercisePickerOpen, setIsExercisePickerOpen] = useState(false);
-  const routineDays = setupDays;
+  const routineDays = getRoutineDays(exercises);
   const activeDay = routineDays.includes(selectedDay) ? selectedDay : routineDays[0];
   const dayExercises = exercises.filter((exercise) => (exercise.day ?? "Lunes") === activeDay);
   const dayExerciseIds = new Set(dayExercises.map((exercise) => exercise.id));
@@ -2568,25 +2561,20 @@ function ComparisonScreenV2({
           </div>
         </div>
         <div className="routine-day-pills">
-          {routineDays.map((day) => {
-            const hasRoutine = exercises.some((exercise) => (exercise.day ?? "Lunes") === day);
-            return (
-              <button
-                key={day}
-                className={`routine-day-pill ${day === activeDay ? "active" : ""} ${hasRoutine ? "configured" : ""}`}
-                type="button"
-                disabled={!hasRoutine}
-                onClick={() => {
-                  if (!hasRoutine) return;
-                  setSelectedDay(day);
-                  setActiveView("plan");
-                  setIsExercisePickerOpen(false);
-                }}
-              >
-                {day}
-              </button>
-            );
-          })}
+          {routineDays.map((day) => (
+            <button
+              key={day}
+              className={`routine-day-pill configured ${day === activeDay ? "active" : ""}`}
+              type="button"
+              onClick={() => {
+                setSelectedDay(day);
+                setActiveView("plan");
+                setIsExercisePickerOpen(false);
+              }}
+            >
+              {day}
+            </button>
+          ))}
         </div>
       </div>
 
