@@ -293,84 +293,6 @@ h3 {
   background: rgba(60, 122, 255, 0.08);
 }
 
-.training-cycle-grid {
-  display: grid;
-  gap: 9px;
-}
-
-.training-cycle-item {
-  display: grid;
-  gap: 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(5, 16, 30, 0.38);
-  padding: 10px;
-}
-
-.training-cycle-item.active {
-  border-color: rgba(60, 122, 255, 0.72);
-  background: rgba(21, 53, 105, 0.34);
-}
-
-.training-cycle-main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 30px;
-  gap: 10px;
-  align-items: center;
-}
-
-.training-cycle-main strong {
-  display: block;
-  font-size: 12px;
-}
-
-.training-cycle-main p,
-.cycle-help-text {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.55;
-}
-
-.cycle-help-button {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border: 1px solid rgba(60, 122, 255, 0.52);
-  border-radius: 8px;
-  color: #dce7ff;
-  background: rgba(60, 122, 255, 0.13);
-}
-
-.cycle-help-button[aria-expanded="true"] {
-  color: white;
-  background: var(--primary);
-}
-
-.cycle-help-text {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding-top: 8px;
-}
-
-.cycle-controls {
-  display: grid;
-  gap: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding-top: 10px;
-}
-
-.cycle-field {
-  display: grid;
-  gap: 7px;
-}
-
-.cycle-field > span {
-  color: #dce7ff;
-  font-size: 10px;
-  font-weight: 900;
-}
-
 .cycle-chip-grid {
   display: flex;
   flex-wrap: wrap;
@@ -408,61 +330,6 @@ h3 {
 
 .cycle-chip.configured:not(.current) {
   border-color: rgba(116, 223, 113, 0.58);
-}
-
-.day-grid {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 9px 12px;
-}
-
-.day-pill {
-  min-width: 84px;
-  min-height: 26px;
-  border: 0;
-  border-radius: 999px;
-  color: #0f1826;
-  background: #dce7ff;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.day-pill.active {
-  color: white;
-  background: #02ef3f;
-}
-
-.day-pill.configured:not(.active) {
-  border: 1px solid rgba(116, 223, 113, 0.5);
-  color: var(--green);
-  background: rgba(116, 223, 113, 0.1);
-}
-
-.day-pill.planned:not(.active):not(.configured) {
-  border: 1px solid rgba(60, 122, 255, 0.45);
-  color: #dce7ff;
-  background: rgba(60, 122, 255, 0.12);
-}
-
-.day-pill:disabled {
-  color: rgba(220, 231, 255, 0.38);
-  background: rgba(220, 231, 255, 0.08);
-  cursor: not-allowed;
-  opacity: 0.75;
-}
-
-.routine-editor-intro {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.compact-button {
-  min-height: 34px;
-  padding: 0 14px;
-  font-size: 11px;
 }
 
 .routine-name-card,
@@ -1066,15 +933,6 @@ h3 {
   line-height: 1.5;
 }
 
-.focus-metrics {
-  display: grid;
-  gap: 6px;
-  justify-items: end;
-  color: var(--green);
-  font-size: 10px;
-  font-weight: 900;
-}
-
 .exercise-history-summary,
 .exercise-best-card,
 .exercise-history-chart,
@@ -1216,11 +1074,6 @@ h3 {
   font-weight: 800;
 }
 
-.plan-list {
-  display: grid;
-  gap: 8px;
-}
-
 .plan-row {
   display: grid;
   min-width: 0;
@@ -1284,36 +1137,6 @@ h3 {
   padding: 0 10px;
   font-size: clamp(10px, 2.8vw, 12px);
   font-weight: 900;
-}
-
-.routine-tabs {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-}
-
-.routine-tab {
-  flex: 0 0 auto;
-  min-height: 34px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 0 11px;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.routine-tab.active {
-  border-color: rgba(60, 122, 255, 0.9);
-  color: white;
-  background: rgba(60, 122, 255, 0.22);
-}
-
-.routine-tab.done {
-  border-color: rgba(116, 223, 113, 0.8);
-  color: var(--green);
 }
 
 .section-heading {
@@ -1814,10 +1637,6 @@ h3 {
   background: rgba(60, 122, 255, 0.18);
 }
 
-.danger-button {
-  color: var(--red);
-}
-
 .field {
   display: grid;
   gap: 6px;
@@ -1855,27 +1674,6 @@ h3 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-}
-
-.row-actions {
-  display: grid;
-  grid-template-columns: 1fr repeat(3, 38px);
-  gap: 8px;
-  align-items: center;
-}
-
-.tabs,
-.segmented {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  scrollbar-width: none;
-}
-
-.tabs::-webkit-scrollbar,
-.segmented::-webkit-scrollbar {
-  display: none;
 }
 
 .tab {
@@ -2679,45 +2477,11 @@ h3 {
   line-height: 1.55;
 }
 
-.readiness-ai-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-}
-
-.readiness-ai-grid > div {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(7, 16, 29, 0.45);
-  padding: 9px;
-}
-
-.readiness-ai-grid span,
-.readiness-ai-grid strong {
-  display: block;
-}
-
-.readiness-ai-grid span {
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.readiness-ai-grid strong {
-  margin-top: 4px;
-  font-size: 17px;
-}
-
 .ai-suggestion {
   border: 1px solid rgba(60, 122, 255, 0.2);
   border-radius: 9px;
   background: rgba(5, 16, 30, 0.42);
   padding: 12px;
-}
-
-@media (max-width: 520px) {
-  .readiness-ai-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 .section-back-row {
@@ -2728,33 +2492,6 @@ h3 {
 .section-back-button {
   min-height: 34px;
   padding-inline: 12px;
-}
-
-.cycle-detail-grid {
-  display: grid;
-  gap: 8px;
-}
-
-.cycle-detail-grid > div {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.035);
-  padding: 10px;
-}
-
-.cycle-detail-grid h3 {
-  margin-bottom: 6px;
-}
-
-.cycle-detail-grid p,
-.cycle-detail-grid ul {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.cycle-detail-grid ul {
-  padding-left: 16px;
 }
 
 .modal-backdrop {
@@ -3354,10 +3091,6 @@ h3 {
     grid-template-columns: 1fr;
   }
 
-  .focus-metrics {
-    justify-items: start;
-  }
-
   .analytics-score-row {
     grid-template-columns: 1fr;
     justify-items: stretch;
@@ -3385,15 +3118,6 @@ h3 {
   .setup-row input {
     padding: 0 6px;
     font-size: 10px;
-  }
-
-  .day-pill {
-    min-width: 76px;
-  }
-
-  .routine-editor-intro {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .day-switcher-card {
