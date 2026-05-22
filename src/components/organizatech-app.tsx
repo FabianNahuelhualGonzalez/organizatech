@@ -11,7 +11,6 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronLeft,
-  ChevronRight,
   Database,
   Dumbbell,
   HelpCircle,
@@ -20,7 +19,6 @@ import {
   Mail,
   Minus,
   Pencil,
-  Plus,
   Save,
   Settings,
   Smile,
@@ -40,7 +38,6 @@ import {
   YAxis,
 } from "recharts";
 import {
-  deleteExercise,
   loadAppData,
   replaceLocalData,
   resetLocalData,
@@ -56,7 +53,7 @@ import {
   generateSmartInsights,
 } from "@/lib/progress/calculations";
 import { buildExerciseComparisonSummary, getExerciseHistory } from "@/lib/progress/exercise-history";
-import type { ExerciseComparisonSummary, ExerciseEntry, ExerciseMetrics, ExerciseTemplate, ObjectiveStatus, RoutineName } from "@/lib/progress/types";
+import type { ExerciseComparisonSummary, ExerciseEntry, ExerciseMetrics, ExerciseTemplate, ObjectiveStatus } from "@/lib/progress/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type Screen =
@@ -67,11 +64,9 @@ type Screen =
   | "registro-entrenamiento"
   | "comparacion"
   | "historial-ciclos"
-  | "historial"
   | "perfil";
 
 const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "registro-entrenamiento", "historial-ciclos", "comparacion"];
-const routines: RoutineName[] = ["Pecho Hombro Tríceps", "Espalda Bíceps Abdomen", "Piernas"];
 const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
 const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
@@ -196,11 +191,6 @@ export function OrganizatechApp() {
   const [isBusy, setIsBusy] = useState(false);
   const [exercises, setExercises] = useState<ExerciseTemplate[]>([]);
   const [entries, setEntries] = useState<ExerciseEntry[]>([]);
-  const [selectedExerciseId, setSelectedExerciseId] = useState("");
-  const [editingExercise, setEditingExercise] = useState<ExerciseTemplate | null>(null);
-  const [formReps, setFormReps] = useState([12, 11, 10, 9]);
-  const [formWeight, setFormWeight] = useState(90);
-  const [formRir, setFormRir] = useState("RIR 1-2");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isEditingRoutinePlan, setIsEditingRoutinePlan] = useState(false);
   const [routineNotice, setRoutineNotice] = useState("");
@@ -262,6 +252,7 @@ export function OrganizatechApp() {
 
   const metrics = useMemo(() => calculateWeeklyComparison(entries), [entries]);
   const currentWeek = Math.max(1, ...entries.map((entry) => entry.week));
+  const nextWeek = entries.length > 0 ? currentWeek + 1 : 1;
   const hasTrainingEntries = entries.length > 0;
   const hasRoutinePlan = exercises.length > 0;
   const routineDays = getRoutineDays(exercises);
@@ -278,33 +269,11 @@ export function OrganizatechApp() {
   const visibleRoutine = dayExercises[0]?.routine ?? setupByDay[visibleDay]?.routineName ?? visibleDay;
   const dashboardRoutine = dashboardExercises[0]?.routine ?? setupByDay[dashboardDay]?.routineName ?? dashboardDay;
   const targetSummary = calculateTargetSummary(dayExercises);
-  const dashboardTargetSummary = calculateTargetSummary(dashboardExercises);
   const currentMetrics = metrics.filter((entry) => entry.week === currentWeek);
   const dashboardExerciseIds = new Set(dashboardExercises.map((exercise) => exercise.id));
   const dashboardCurrentMetrics = currentMetrics.filter((entry) => dashboardExerciseIds.has(entry.exerciseId));
-  const previousSummary = calculateWeeklySummary(metrics, Math.max(1, currentWeek - 1));
   const summary = calculateWeeklySummary(metrics, currentWeek);
   const insights = generateSmartInsights(summary, currentMetrics);
-  const selectedExercise = exercises.find((exercise) => exercise.id === selectedExerciseId) ?? exercises[0];
-  const selectedHistory = selectedExercise ? metrics.filter((entry) => entry.exerciseId === selectedExercise.id) : [];
-  const nextWeek = entries.length > 0 ? currentWeek + 1 : 1;
-  const previewEntry = selectedExercise
-    ? calculateExerciseMetrics({
-        id: "preview",
-        exerciseId: selectedExercise.id,
-        exerciseName: selectedExercise.name,
-        routine: selectedExercise.routine,
-        week: nextWeek,
-        date: new Date().toISOString().slice(0, 10),
-        targetSets: selectedExercise.targetSets,
-        targetReps: selectedExercise.targetReps,
-        weight: formWeight,
-        previousWeight: selectedHistory.at(-1)?.weight ?? selectedExercise.baseWeight,
-        reps: formReps.slice(0, selectedExercise.targetSets),
-        notes: selectedExercise.notes,
-        rir: formRir,
-      })
-    : null;
 
   async function refreshData() {
     setIsBusy(true);
@@ -313,7 +282,6 @@ export function OrganizatechApp() {
       setExercises(next.exercises);
       setEntries(next.entries);
       setDataSource(next.source);
-      setSelectedExerciseId((current) => current || next.exercises[0]?.id || "");
       setActiveRoutineDay((current) => getVisibleTrainingDay(next.exercises, current));
       setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
       setTrainingPlan((current) => mergeTrainingPlanWithExercises(current, next.exercises));
@@ -355,74 +323,6 @@ export function OrganizatechApp() {
     await refreshData();
     setIsBusy(false);
     setScreen("dashboard");
-  }
-
-  async function handleSaveExercise(formData: FormData) {
-    const exercise: ExerciseTemplate = {
-      id: String(formData.get("id") || createId()),
-      name: String(formData.get("name") || "").trim(),
-      routine: String(formData.get("routine") || routines[0]) as RoutineName,
-      targetSets: Number(formData.get("targetSets") || 4),
-      targetReps: Number(formData.get("targetReps") || 10),
-      baseWeight: Number(formData.get("baseWeight") || 0),
-      sideWeight: optionalNumber(formData.get("sideWeight")),
-      notes: String(formData.get("notes") || "").trim() || undefined,
-    };
-
-    if (!exercise.name) {
-      setStatusMessage("El nombre del ejercicio es obligatorio.");
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const saved = await saveExercise(exercise);
-      await refreshData();
-      setSelectedExerciseId(saved.id);
-      setEditingExercise(null);
-      setStatusMessage("Ejercicio guardado.");
-    } catch (error) {
-      setStatusMessage(readError(error));
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
-  async function handleDeleteExercise(exerciseId: string) {
-    const exercise = exercises.find((item) => item.id === exerciseId);
-    if (!exercise) return;
-    if (!window.confirm(`¿Eliminar ${exercise.name} y su historial?`)) return;
-
-    setIsBusy(true);
-    try {
-      await deleteExercise(exerciseId);
-      await refreshData();
-      setStatusMessage("Ejercicio eliminado.");
-    } catch (error) {
-      setStatusMessage(readError(error));
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
-  async function handleSaveTraining() {
-    if (!previewEntry) return;
-    setIsBusy(true);
-    try {
-      const saved = await saveTrainingEntry({
-        ...previewEntry,
-        id: createId(),
-        week: nextWeek,
-        date: new Date().toISOString().slice(0, 10),
-      });
-      setEntries((current) => [...current, saved]);
-      setStatusMessage("Entrenamiento guardado.");
-      setScreen("dashboard");
-    } catch (error) {
-      setStatusMessage(readError(error));
-    } finally {
-      setIsBusy(false);
-    }
   }
 
   function handleResetLocal() {
@@ -502,13 +402,6 @@ export function OrganizatechApp() {
     setScreen("dashboard");
     setScreenHistory([]);
     setIsMenuOpen(false);
-  }
-
-  function selectExerciseForTraining(exerciseId: string) {
-    const exercise = exercises.find((item) => item.id === exerciseId);
-    setSelectedExerciseId(exerciseId);
-    setFormWeight(exercise?.baseWeight ?? formWeight);
-    setFormReps(Array.from({ length: exercise?.targetSets ?? 4 }, () => exercise?.targetReps ?? 10));
   }
 
   function updateSetupRow(id: string, field: keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId">, value: string) {
@@ -599,14 +492,13 @@ export function OrganizatechApp() {
     setSetupByDay(nextSetupByDay);
     setIsBusy(true);
     try {
-      let firstExerciseId = "";
       for (const dayToPersist of daysToPersist) {
         const state = nextSetupByDay[dayToPersist] ?? createSetupDayState();
         const currentRoutineName = state.routineName.trim() || dayToPersist;
         const rowsToPersist = state.rows.filter((row) => row.name.trim());
 
         for (const row of rowsToPersist) {
-          const exercise = await saveExercise({
+          await saveExercise({
             id: row.sourceExerciseId ?? row.id,
             routine: currentRoutineName,
             day: dayToPersist,
@@ -616,13 +508,10 @@ export function OrganizatechApp() {
             baseWeight: Math.max(0, row.weight || 0),
             notes: `Rutina creada para ${dayToPersist}.`,
           });
-
-          if (!firstExerciseId) firstExerciseId = exercise.id;
         }
       }
 
       await refreshData();
-      if (firstExerciseId) setSelectedExerciseId(firstExerciseId);
       setActiveRoutineDay(setupDay);
       setSetupByDay(nextSetupByDay);
       const successMessage = `Rutina de ${setupDay} guardada.`;
@@ -661,7 +550,6 @@ export function OrganizatechApp() {
   }
 
   function openRoutineDay(day: string, keepTrainingStarted = false) {
-    const firstExercise = exercises.find((exercise) => (exercise.day ?? day) === day);
     setActiveRoutineDay(day);
     setActiveExerciseIndex(0);
     setRoutineNotice("");
@@ -669,7 +557,6 @@ export function OrganizatechApp() {
       setHasStartedTraining(false);
       setReadiness(null);
     }
-    if (firstExercise) selectExerciseForTraining(firstExercise.id);
     setScreen("entrenamiento");
   }
 
@@ -687,7 +574,6 @@ export function OrganizatechApp() {
     setSetupDay("Lunes");
     setTrainingPlan(nextPlan);
     saveTrainingPlan(nextPlan);
-    setSelectedExerciseId("");
     setActiveRoutineDay("Lunes");
     setDashboardDayOverride("");
     setComparisonDay("Lunes");
@@ -948,7 +834,6 @@ export function OrganizatechApp() {
           routineDays={routineDays}
           calendarDay={calendarDashboardDay}
           routine={dashboardRoutine}
-          targetSummary={dashboardTargetSummary}
           dayExercises={dashboardExercises}
           summary={summary}
           currentMetrics={dashboardCurrentMetrics}
@@ -975,12 +860,7 @@ export function OrganizatechApp() {
           updateTrainingPlan={updateTrainingPlan}
           message={statusMessage}
           isBusy={isBusy}
-          isEditing={hasRoutinePlan || isEditingRoutinePlan}
           configuredDays={getConfiguredSetupDays(setupByDay)}
-          cancelEditing={() => {
-            setIsEditingRoutinePlan(false);
-            setScreen(hasRoutinePlan ? "entrenamiento" : "dashboard");
-          }}
         />
       )}
       {screen === "registro-entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && (
@@ -1045,9 +925,6 @@ export function OrganizatechApp() {
         />
       )}
       {screen === "historial-ciclos" && <CycleHistoryScreen history={cycleHistory} />}
-      {screen === "historial" && (
-        <HistoryScreen exercises={exercises} selectedExerciseId={selectedExerciseId} setSelectedExerciseId={setSelectedExerciseId} history={selectedHistory} />
-      )}
       {screen === "perfil" && <ProfileScreen name={sessionName} summary={summary} dataSource={dataSource} refreshData={refreshData} resetLocal={handleResetLocal} />}
       {isNewCycleConfirmOpen && (
         <ConfirmNewCycleModal
@@ -1126,7 +1003,6 @@ function DashboardScreen({
   routineDays,
   calendarDay,
   routine,
-  targetSummary,
   dayExercises,
   summary,
   currentMetrics,
@@ -1145,7 +1021,6 @@ function DashboardScreen({
   routineDays: string[];
   calendarDay: string;
   routine: string;
-  targetSummary: { totalWeight: number; volume: number; reps: number; exerciseCount: number };
   dayExercises: ExerciseTemplate[];
   summary: ReturnType<typeof calculateWeeklySummary>;
   currentMetrics: ExerciseMetrics[];
@@ -1156,18 +1031,11 @@ function DashboardScreen({
   goToRoutine: () => void;
   switchDay: (day: string) => void;
 }) {
-  const trainingDate = getDateForWeekday(day, calendarDay);
-  const trainingDateLabel = new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(trainingDate);
-  const titlePrefix = day === calendarDay ? "Entrenamiento de hoy" : "Entrenamiento";
   const hasTodayRoutine = dayExercises.length > 0;
-  const registeredTraining = currentMetrics[0]?.routine ?? dayExercises[0]?.routine ?? routine;
-  const routinePreview = currentMetrics.filter((entry) => entry.routine === registeredTraining);
   const analytics = buildAnalytics(summary, currentMetrics);
   const carouselRef = useRef<HTMLDivElement | null>(null);
-  const exerciseCarouselRef = useRef<HTMLDivElement | null>(null);
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
-  const [activeExercisePreviewIndex, setActiveExercisePreviewIndex] = useState(0);
   const carouselDays = useMemo(() => hasRoutinePlan ? weekDays : [day], [hasRoutinePlan, weekDays, day]);
   const allWeekMetrics = useMemo(
     () => calculateWeeklyComparison(entries).filter((entry) => entry.week === currentWeek),
@@ -1184,11 +1052,6 @@ function DashboardScreen({
       container.scrollTo({ left: slide.offsetLeft - container.offsetLeft, behavior: "smooth" });
     }
   }, [day, carouselDays]);
-
-  useEffect(() => {
-    setActiveExercisePreviewIndex(0);
-    exerciseCarouselRef.current?.scrollTo({ left: 0, behavior: "smooth" });
-  }, [day, dayExercises.length]);
 
   function getDashboardDayData(item: string) {
     const date = getDateForWeekday(item, calendarDay);
@@ -1233,25 +1096,6 @@ function DashboardScreen({
       setActiveCarouselDay(nextDay);
       switchDay(nextDay);
     }
-  }
-
-  function handleExerciseCarouselScroll(event: UIEvent<HTMLDivElement>) {
-    const container = event.currentTarget;
-    const children = Array.from(container.children) as HTMLElement[];
-    const center = container.scrollLeft + container.clientWidth / 2;
-    let nearestIndex = 0;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-
-    children.forEach((child, index) => {
-      const childCenter = child.offsetLeft + child.offsetWidth / 2;
-      const distance = Math.abs(childCenter - center);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestIndex = index;
-      }
-    });
-
-    setActiveExercisePreviewIndex(nearestIndex);
   }
 
   if (!hasRoutinePlan) {
@@ -1770,9 +1614,7 @@ function InitialTrainingScreen({
   updateTrainingPlan,
   message,
   isBusy,
-  isEditing,
   configuredDays,
-  cancelEditing,
 }: {
   day: string;
   setDay: (value: string) => void;
@@ -1787,9 +1629,7 @@ function InitialTrainingScreen({
   updateTrainingPlan: (patch: Partial<TrainingPlan>) => void;
   message: string;
   isBusy: boolean;
-  isEditing: boolean;
   configuredDays: string[];
-  cancelEditing: () => void;
 }) {
   const plannedDays = trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [day];
   const completedPlannedDays = plannedDays.filter((item) => configuredDays.includes(item));
@@ -2035,97 +1875,6 @@ function TrainingReadinessScreen({
         </div>
       </div>
     </section>
-  );
-}
-
-function TrainingScreen({
-  exercises,
-  selectedExerciseId,
-  setSelectedExerciseId,
-  formReps,
-  setFormReps,
-  formWeight,
-  setFormWeight,
-  formRir,
-  setFormRir,
-  previewEntry,
-  editingExercise,
-  setEditingExercise,
-  saveTraining,
-  saveExercise,
-  deleteExercise,
-  isBusy,
-}: {
-  exercises: ExerciseTemplate[];
-  selectedExerciseId: string;
-  setSelectedExerciseId: (value: string) => void;
-  formReps: number[];
-  setFormReps: (value: number[]) => void;
-  formWeight: number;
-  setFormWeight: (value: number) => void;
-  formRir: string;
-  setFormRir: (value: string) => void;
-  previewEntry: ExerciseMetrics;
-  editingExercise: ExerciseTemplate | null;
-  setEditingExercise: (exercise: ExerciseTemplate | null) => void;
-  saveTraining: () => void;
-  saveExercise: (data: FormData) => void;
-  deleteExercise: (exerciseId: string) => void;
-  isBusy: boolean;
-}) {
-  const selected = exercises.find((exercise) => exercise.id === selectedExerciseId) ?? exercises[0];
-  const draft = editingExercise ?? selected;
-
-  return (
-    <section className="screen">
-      <div className="card wide">
-        <h2>Nuevo entrenamiento</h2>
-        <p className="eyebrow"><CalendarDays size={13} /> Semana {previewEntry.week}</p>
-        <div className="metric-grid">
-          <div className="metric"><span>Volumen de trabajo</span><strong>{formatKg(previewEntry.volumeTotal)}</strong></div>
-          <div className="metric"><span>Total reps</span><strong>{previewEntry.totalReps}</strong></div>
-          <div className="metric"><span>Objetivo</span><strong>{previewEntry.targetTotalReps}</strong></div>
-        </div>
-      </div>
-
-      <div className="card wide form-grid">
-        <div className="section-heading">
-          <div>
-            <h3>Registro de series</h3>
-            <p className="eyebrow">{selected.name}</p>
-          </div>
-        </div>
-        <label className="field">
-          <span>Peso</span>
-          <input type="number" min={0} value={formWeight} onChange={(event) => setFormWeight(Number(event.target.value) || 0)} />
-        </label>
-        <div className="two-cols">
-          {formReps.map((reps, index) => (
-            <label className="field" key={index}>
-              <span>Serie {index + 1}</span>
-              <input
-                type="number"
-                min={0}
-                value={reps}
-                onChange={(event) => {
-                  const next = [...formReps];
-                  next[index] = Number(event.target.value) || 0;
-                  setFormReps(next);
-                }}
-              />
-            </label>
-          ))}
-        </div>
-        <label className="field">
-          <span>RIR</span>
-          <input placeholder="RIR 1-2" value={formRir} onChange={(event) => setFormRir(event.target.value)} />
-        </label>
-        <ExerciseRow entry={previewEntry} />
-        <button className="button" onClick={saveTraining} disabled={isBusy}>
-          <Save size={17} />
-          Guardar entrenamiento
-        </button>
-      </div>    </section>
   );
 }
 
@@ -2414,88 +2163,6 @@ function SeriesResult({ entry }: { entry: ExerciseMetrics }) {
     </div>
   );
 }
-function ComparisonScreen({
-  exercises,
-  metrics,
-  currentWeek,
-  selectedDay,
-  setSelectedDay,
-  loadDemoData,
-  isBusy,
-}: {
-  exercises: ExerciseTemplate[];
-  metrics: ExerciseMetrics[];
-  currentWeek: number;
-  selectedDay: string;
-  setSelectedDay: (day: string) => void;
-  loadDemoData: () => void;
-  isBusy: boolean;
-}) {
-  const routineDays = getRoutineDays(exercises);
-  const activeDay = routineDays.includes(selectedDay) ? selectedDay : routineDays[0];
-  const dayExercises = exercises.filter((exercise) => (exercise.day ?? "Lunes") === activeDay);
-  const dayExerciseIds = new Set(dayExercises.map((exercise) => exercise.id));
-  const dayMetrics = metrics.filter((entry) => dayExerciseIds.has(entry.exerciseId));
-  const currentMetrics = dayMetrics.filter((entry) => entry.week === currentWeek);
-  const summary = calculateWeeklySummary(dayMetrics, currentWeek);
-  const routineName = dayExercises[0]?.routine ?? activeDay;
-  const title = currentWeek > 1
-    ? "Rutina registrada vs semana " + currentWeek + " vs semana " + (currentWeek - 1)
-    : "Rutina registrada vs semana 1";
-
-  return (
-    <section className="screen">
-      <div className="card wide comparison-hero">
-        <p className="eyebrow">Comparación semanal</p>
-        <h3>{title}</h3>
-        <p className="eyebrow">{activeDay} | {routineName}</p>
-        <div className="comparison-chip-row">
-          <span className="compare-chip active">Rutina registrada</span>
-          <span className="compare-chip">vs</span>
-          <span className="compare-chip active">Semana {currentWeek}</span>
-          {currentWeek > 1 ? <span className="compare-chip">Semana {currentWeek - 1}</span> : null}
-        </div>
-        <button className="button secondary" type="button" onClick={loadDemoData} disabled={isBusy}>
-          {isBusy ? "Cargando..." : "Cargar datos de prueba"}
-        </button>
-      </div>
-
-      <div className="card wide">
-        <div className="section-heading">
-          <div>
-            <h3>Selecciona rutina o día</h3>
-            <p className="eyebrow">Cambia entre tus días registrados para revisar el progreso.</p>
-          </div>
-        </div>
-        <div className="routine-day-pills">
-          {routineDays.map((day) => (
-            <button
-              key={day}
-              className={`routine-day-pill ${day === activeDay ? "active" : ""}`}
-              type="button"
-              onClick={() => setSelectedDay(day)}
-            >
-              {day}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <MetricGrid summary={summary} />
-      <div className="card wide">
-        <h3>Ejercicios comparados</h3>
-        <div className="exercise-list">
-          {currentMetrics.length > 0
-            ? currentMetrics.map((entry) => <ExerciseRow key={entry.id} entry={entry} showVolume />)
-            : dayExercises.map((exercise) => (
-              <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
-            ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function ComparisonScreenV2({
   exercises,
   metrics,
@@ -2593,7 +2260,7 @@ function ComparisonScreenV2({
         <div className="comparison-chip-row">
           <button className={`compare-chip ${activeView === "plan" ? "active" : ""}`} type="button" onClick={() => setActiveView("plan")}>Rutina registrada</button>
           <span className="compare-chip">vs</span>
-          {weekNumbers.map((week, index) => (
+          {weekNumbers.map((week) => (
             <button
               key={week}
               className={`compare-chip ${activeView === "week" && activeWeek === week ? "active" : ""}`}
@@ -2766,48 +2433,6 @@ function getTrendTone(trend: ExerciseComparisonSummary["trend"]) {
   if (trend === "Mejora") return "ok";
   if (trend === "Retroceso") return "fail";
   return "keep";
-}
-
-function HistoryScreen({ exercises, selectedExerciseId, setSelectedExerciseId, history }: { exercises: ExerciseTemplate[]; selectedExerciseId: string; setSelectedExerciseId: (value: string) => void; history: ExerciseMetrics[] }) {
-  const current = history.at(-1);
-  return (
-    <section className="screen">
-      <div className="card wide form-grid">
-        <label className="field">
-          <span>Ejercicio</span>
-          <select value={selectedExerciseId} onChange={(event) => setSelectedExerciseId(event.target.value)}>
-            {exercises.map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.name}</option>)}
-          </select>
-        </label>
-        {current ? <ExerciseRow entry={current} showVolume /> : <p className="eyebrow">Aún no hay historial para este ejercicio.</p>}
-      </div>
-      <div className="card wide">
-        <h3>Evolución de rendimiento</h3>
-        <div className="chart-wrap">
-          <ResponsiveContainer>
-            <ReLineChart data={history.map((entry) => ({ semana: `S${entry.week}`, peso: entry.weight, volumen: entry.volumeTotal }))}>
-              <CartesianGrid stroke="rgba(255,255,255,.08)" />
-              <XAxis dataKey="semana" stroke="#9CA8B8" />
-              <YAxis stroke="#9CA8B8" />
-              <Tooltip contentStyle={tooltipStyle} />
-              <Line type="monotone" dataKey="peso" stroke="#3C7AFF" strokeWidth={3} />
-            </ReLineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-      <div className="card wide">
-        <h3>Historial de entrenamientos</h3>
-        <div className="history-list">
-          {history.map((entry) => (
-            <div className="history-row" key={entry.id}>
-              <span>Semana {entry.week}</span>
-              <strong>{entry.weight} kg · {entry.reps.join(" / ")}</strong>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
 }
 
 function buildAnalytics(summary: ReturnType<typeof calculateWeeklySummary>, currentMetrics: ExerciseMetrics[]): AnalyticsSnapshot {
@@ -3622,7 +3247,6 @@ function screenLabel(screen: Screen) {
     "registro-entrenamiento": "Registro de entrenamiento",
     "historial-ciclos": "Historial ciclo de entrenamiento",
     comparacion: "Comparación semanal",
-    historial: "Historial",
     perfil: "Perfil",
   };
   return labels[screen];
