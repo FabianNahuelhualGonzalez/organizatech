@@ -2523,12 +2523,14 @@ function ComparisonScreenV2({
   const dayExerciseIds = new Set(dayExercises.map((exercise) => exercise.id));
   const dayMetrics = dedupeMetricsByWeekAndExercise(metrics.filter((entry) => dayExerciseIds.has(entry.exerciseId)));
   const weekNumbers = getWeekNumbers(dayMetrics);
-  const selectedWeek = activeView === "week" ? activeWeek : 0;
+  const selectedWeek = activeView === "week" ? getSafeSelectedWeek(weekNumbers, activeWeek, currentWeek) : 0;
   const currentMetrics = dayMetrics.filter((entry) => entry.week === selectedWeek);
   const targetSummary = calculateTargetSummary(dayExercises);
   const routineName = dayExercises[0]?.routine ?? activeDay;
-  const comparisonWeeks = weekNumbers.length > 0 ? weekNumbers : [1];
-  const title = `Rutina registrada vs ${comparisonWeeks.map((week) => `semana ${week} ${activeDay}`).join(" vs ")}`;
+  const comparisonContext = getWeeklyComparisonContext(dayMetrics, selectedWeek, activeDay);
+  const title = activeView === "plan"
+    ? `Rutina registrada ${activeDay}`
+    : comparisonContext.title;
   const visibleMetrics = activeView === "plan" ? [] : currentMetrics;
   const listTitle = activeView === "plan"
     ? `Listado de rutina registrada día ${activeDay} | ${routineName}`
@@ -2550,6 +2552,12 @@ function ComparisonScreenV2({
       setIsExercisePickerOpen(false);
     }
   }, [allComparableExercises, selectedExerciseId]);
+
+  useEffect(() => {
+    if (activeView === "week" && weekNumbers.length > 0 && !weekNumbers.includes(activeWeek)) {
+      setActiveWeek(weekNumbers[0]);
+    }
+  }, [activeView, activeWeek, weekNumbers]);
 
   return (
     <section className="screen">
@@ -2599,6 +2607,7 @@ function ComparisonScreenV2({
             </button>
           ))}
         </div>
+        {activeView === "week" ? <p className="eyebrow comparison-reference-note">{comparisonContext.detail}</p> : null}
         {activeView === "plan" ? (
           <RoutineMetricGrid targetSummary={targetSummary} exerciseLabel="Ejercicios" />
         ) : (
@@ -3529,6 +3538,39 @@ function dedupeMetricsByWeekAndExercise(metrics: ExerciseMetrics[]) {
 
 function getWeekNumbers(metrics: ExerciseMetrics[]) {
   return Array.from(new Set(metrics.map((entry) => entry.week))).sort((a, b) => b - a);
+}
+
+function getSafeSelectedWeek(weekNumbers: number[], activeWeek: number, currentWeek: number) {
+  if (weekNumbers.includes(activeWeek)) return activeWeek;
+  return weekNumbers[0] ?? currentWeek;
+}
+
+function getWeeklyComparisonContext(metrics: ExerciseMetrics[], week: number, day: string) {
+  const weeks = Array.from(new Set(metrics.map((entry) => entry.week))).sort((a, b) => a - b);
+  const hasExactPreviousWeek = weeks.includes(week - 1);
+  const latestPreviousWeek = [...weeks].reverse().find((candidate) => candidate < week);
+
+  if (week <= 1 || !latestPreviousWeek) {
+    return {
+      title: `Rutina registrada vs Semana ${week} | ${day}`,
+      detail: `Semana ${week} se compara contra la rutina registrada de ${day}.`,
+      referenceWeek: null,
+    };
+  }
+
+  if (hasExactPreviousWeek) {
+    return {
+      title: `Semana ${latestPreviousWeek} vs Semana ${week} | ${day}`,
+      detail: `Semana ${week} se compara contra Semana ${latestPreviousWeek}, solo con ejercicios de ${day}.`,
+      referenceWeek: latestPreviousWeek,
+    };
+  }
+
+  return {
+    title: `Último registro disponible vs Semana ${week} | ${day}`,
+    detail: `No hay Semana ${week - 1} registrada para ${day}; se compara contra Semana ${latestPreviousWeek}.`,
+    referenceWeek: latestPreviousWeek,
+  };
 }
 
 function buildExerciseObservation(exercise: ExerciseTemplate, history: ExerciseMetrics[]) {

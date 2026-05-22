@@ -982,6 +982,11 @@ h3 {
   background: var(--primary);
 }
 
+.comparison-reference-note {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .exercise-week-card {
   display: grid;
   gap: 14px;
