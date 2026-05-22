@@ -2683,32 +2683,12 @@ function TextField({ name, label, defaultValue = "", type = "text" }: { name: st
   );
 }
 
-function TextNumber({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <input type="number" value={value} onChange={(event) => onChange(Number(event.target.value))} />
-    </label>
-  );
-}
-
 function createId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
 
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function newExercise(): ExerciseTemplate {
-  return {
-    id: createId(),
-    routine: "Pecho Hombro Tríceps",
-    name: "",
-    targetSets: 4,
-    targetReps: 10,
-    baseWeight: 0,
-  };
 }
 
 function createSetupRows(): SetupExerciseRow[] {
@@ -3198,30 +3178,6 @@ function getWeeklyComparisonContext(metrics: ExerciseMetrics[], week: number, da
   };
 }
 
-function buildExerciseObservation(exercise: ExerciseTemplate, history: ExerciseMetrics[]) {
-  if (history.length === 0) {
-    return `Aún no hay semanas registradas para ${exercise.name}. Cuando entrenes este ejercicio, verás aquí si subiste peso, repeticiones o volumen.`;
-  }
-
-  const latest = history.at(-1)!;
-  const previous = history.at(-2);
-  const repsDelta = previous ? latest.totalReps - previous.totalReps : latest.repsDifference;
-  const kgDelta = previous ? latest.weight - previous.weight : latest.kgDifference;
-  const volumeDelta = previous ? latest.volumeTotal - previous.volumeTotal : latest.volumeDifference;
-  const parts: string[] = [];
-
-  if (kgDelta > 0) parts.push(`subiste ${formatKg(kgDelta)}`);
-  if (kgDelta < 0) parts.push(`bajaste ${formatKg(Math.abs(kgDelta))}`);
-  if (kgDelta === 0) parts.push("mantuviste el mismo peso");
-
-  if (repsDelta > 0) parts.push(`sumaste ${repsDelta} repeticiones`);
-  if (repsDelta < 0) parts.push(`hiciste ${Math.abs(repsDelta)} repeticiones menos`);
-  if (repsDelta === 0) parts.push("repetiste la misma cantidad de reps");
-
-  const direction = volumeDelta > 0 ? "El volumen subió" : volumeDelta < 0 ? "El volumen bajó" : "El volumen se mantuvo";
-  return `En la última semana ${parts.join(" y ")}. ${direction}.`;
-}
-
 function removeAccents(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
@@ -3250,12 +3206,6 @@ function screenLabel(screen: Screen) {
     perfil: "Perfil",
   };
   return labels[screen];
-}
-
-function optionalNumber(value: FormDataEntryValue | null) {
-  const raw = String(value ?? "");
-  if (!raw.trim()) return undefined;
-  return Number(raw);
 }
 
 function readError(error: unknown) {

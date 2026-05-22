@@ -265,66 +265,6 @@ async function fetchEntries(userId: string): Promise<ExerciseEntry[]> {
   });
 }
 
-async function seedSupabaseData(userId: string) {
-  const routineIds = new Map<RoutineName, string>();
-  for (const routine of [...new Set(exerciseTemplates.map((exercise) => exercise.routine))]) {
-    routineIds.set(routine, await upsertRoutine(userId, routine));
-  }
-
-  const exerciseIdMap = new Map<string, string>();
-  for (const exercise of exerciseTemplates) {
-    const routineId = routineIds.get(exercise.routine);
-    if (!routineId) continue;
-    const { data, error } = await getSupabaseBrowserClient()!
-      .from("exercises")
-      .insert({
-        user_id: userId,
-        routine_id: routineId,
-        name: exercise.name,
-        target_sets: exercise.targetSets,
-        target_reps: exercise.targetReps,
-        base_weight: exercise.baseWeight,
-        side_weight: exercise.sideWeight ?? null,
-        notes: exercise.notes ?? null,
-      })
-      .select("id")
-      .single();
-
-    if (error) throw error;
-    exerciseIdMap.set(exercise.id, data.id);
-  }
-
-  for (const entry of demoEntries) {
-    const exerciseId = exerciseIdMap.get(entry.exerciseId);
-    if (!exerciseId) continue;
-    const { data: session, error: sessionError } = await getSupabaseBrowserClient()!
-      .from("training_sessions")
-      .insert({
-        user_id: userId,
-        week_number: entry.week,
-        trained_at: entry.date,
-        notes: entry.notes ?? null,
-      })
-      .select("id")
-      .single();
-
-    if (sessionError) throw sessionError;
-
-    const { error } = await getSupabaseBrowserClient()!.from("exercise_entries").insert({
-      user_id: userId,
-      session_id: session.id,
-      exercise_id: exerciseId,
-      weight: entry.weight,
-      previous_weight: entry.previousWeight,
-      reps: entry.reps,
-      rir: entry.rir ?? null,
-      notes: entry.notes ?? null,
-    });
-
-    if (error) throw error;
-  }
-}
-
 function readRoutineName(value: string | undefined): RoutineName {
   return value?.trim() || "Pecho Hombro Tríceps";
 }
