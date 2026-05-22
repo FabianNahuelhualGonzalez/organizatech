@@ -194,6 +194,12 @@ export function OrganizatechApp() {
   const [screen, setScreen] = useState<Screen>("login");
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
   const [sessionName, setSessionName] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [registerName, setRegisterName] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState("");
   const [statusMessage, setStatusMessage] = useState("Validando sesión...");
   const [dataSource, setDataSource] = useState<DataSource>("local");
   const [dataMode, setDataMode] = useState<DataMode>("demo");
@@ -397,10 +403,10 @@ export function OrganizatechApp() {
   }
 
   async function handleAuth(mode: "login" | "registro", formData: FormData) {
-    const name = String(formData.get("name") || "").trim();
-    const email = String(formData.get("email") || "").trim();
-    const password = String(formData.get("password") || "");
-    const confirm = String(formData.get("confirm") || "");
+    const name = String(formData.get("register-name") || "").trim();
+    const email = String(formData.get(mode === "registro" ? "register-email" : "login-email") || "").trim();
+    const password = String(formData.get(mode === "registro" ? "register-password" : "login-password") || "");
+    const confirm = String(formData.get("register-confirm-password") || "");
     const supabase = getSupabaseBrowserClient();
     if (mode === "registro" && !name) {
       setStatusMessage("Ingresa tu nombre para crear la cuenta.");
@@ -438,6 +444,7 @@ export function OrganizatechApp() {
       setStatusMessage(getMissingSupabaseMessage());
       await refreshData("demo");
       setStatusMessage(getMissingSupabaseMessage());
+      clearAuthForms();
       setScreen("dashboard");
       return;
     }
@@ -464,12 +471,14 @@ export function OrganizatechApp() {
 
       if (!session && mode === "registro") {
         setStatusMessage("Cuenta creada. Revisa tu correo para confirmar el acceso antes de iniciar sesión.");
+        clearAuthForms();
         setScreen("login");
         return;
       }
 
       setStatusMessage("Sesión iniciada con Supabase.");
       await refreshData("supabase");
+      clearAuthForms();
       setScreen("dashboard");
     } catch (error) {
       setStatusMessage(translateAuthError(error));
@@ -886,6 +895,21 @@ export function OrganizatechApp() {
     }
   }
 
+  function clearAuthForms() {
+    setLoginEmail("");
+    setLoginPassword("");
+    setRegisterName("");
+    setRegisterEmail("");
+    setRegisterPassword("");
+    setRegisterConfirmPassword("");
+  }
+
+  function switchAuthScreen(nextScreen: "login" | "registro") {
+    clearAuthForms();
+    setStatusMessage("");
+    setScreen(nextScreen);
+  }
+
   if (isAuthLoading) {
     return (
       <main className="app-shell">
@@ -911,7 +935,25 @@ export function OrganizatechApp() {
   if (screen === "login") {
     return (
       <main className="app-shell">
-        <AuthScreen mode="login" message={statusMessage} isBusy={isBusy} onSubmit={(data) => handleAuth("login", data)} onSwitch={() => setScreen("registro")} />
+        <AuthScreen
+          mode="login"
+          message={statusMessage}
+          isBusy={isBusy}
+          loginEmail={loginEmail}
+          loginPassword={loginPassword}
+          registerName={registerName}
+          registerEmail={registerEmail}
+          registerPassword={registerPassword}
+          registerConfirmPassword={registerConfirmPassword}
+          onLoginEmailChange={setLoginEmail}
+          onLoginPasswordChange={setLoginPassword}
+          onRegisterNameChange={setRegisterName}
+          onRegisterEmailChange={setRegisterEmail}
+          onRegisterPasswordChange={setRegisterPassword}
+          onRegisterConfirmPasswordChange={setRegisterConfirmPassword}
+          onSubmit={(data) => handleAuth("login", data)}
+          onSwitch={() => switchAuthScreen("registro")}
+        />
       </main>
     );
   }
@@ -919,7 +961,25 @@ export function OrganizatechApp() {
   if (screen === "registro") {
     return (
       <main className="app-shell">
-        <AuthScreen mode="registro" message={statusMessage} isBusy={isBusy} onSubmit={(data) => handleAuth("registro", data)} onSwitch={() => setScreen("login")} />
+        <AuthScreen
+          mode="registro"
+          message={statusMessage}
+          isBusy={isBusy}
+          loginEmail={loginEmail}
+          loginPassword={loginPassword}
+          registerName={registerName}
+          registerEmail={registerEmail}
+          registerPassword={registerPassword}
+          registerConfirmPassword={registerConfirmPassword}
+          onLoginEmailChange={setLoginEmail}
+          onLoginPasswordChange={setLoginPassword}
+          onRegisterNameChange={setRegisterName}
+          onRegisterEmailChange={setRegisterEmail}
+          onRegisterPasswordChange={setRegisterPassword}
+          onRegisterConfirmPasswordChange={setRegisterConfirmPassword}
+          onSubmit={(data) => handleAuth("registro", data)}
+          onSwitch={() => switchAuthScreen("login")}
+        />
       </main>
     );
   }
@@ -1140,12 +1200,36 @@ function AuthScreen({
   mode,
   message,
   isBusy,
+  loginEmail,
+  loginPassword,
+  registerName,
+  registerEmail,
+  registerPassword,
+  registerConfirmPassword,
+  onLoginEmailChange,
+  onLoginPasswordChange,
+  onRegisterNameChange,
+  onRegisterEmailChange,
+  onRegisterPasswordChange,
+  onRegisterConfirmPasswordChange,
   onSubmit,
   onSwitch,
 }: {
   mode: "login" | "registro";
   message: string;
   isBusy: boolean;
+  loginEmail: string;
+  loginPassword: string;
+  registerName: string;
+  registerEmail: string;
+  registerPassword: string;
+  registerConfirmPassword: string;
+  onLoginEmailChange: (value: string) => void;
+  onLoginPasswordChange: (value: string) => void;
+  onRegisterNameChange: (value: string) => void;
+  onRegisterEmailChange: (value: string) => void;
+  onRegisterPasswordChange: (value: string) => void;
+  onRegisterConfirmPasswordChange: (value: string) => void;
   onSubmit: (data: FormData) => void;
   onSwitch: () => void;
 }) {
@@ -1161,12 +1245,21 @@ function AuthScreen({
           <p className="eyebrow">Evoluciona tu rendimiento.</p>
         </div>
       </div>
-      <form className="card form-grid" action={onSubmit}>
+      <form className="card form-grid" action={onSubmit} autoComplete={isRegister ? "off" : "on"} key={mode}>
         <h2>{isRegister ? "Crea tu cuenta" : "Iniciar sesión"}</h2>
-        {isRegister && <TextField name="name" label="Nombre" placeholder="Ej: Fabian" required />}
-        <TextField name="email" label="Correo electrónico" placeholder="tu@email.com" type="email" required />
-        <TextField name="password" label="Contraseña" placeholder={isRegister ? "Crea una contraseña" : "Ingresa tu contraseña"} type="password" required />
-        {isRegister && <TextField name="confirm" label="Confirmar contraseña" placeholder="Repite tu contraseña" type="password" required />}
+        {isRegister ? (
+          <>
+            <TextField name="register-name" label="Nombre" placeholder="Ej: Fabian" autoComplete="name" value={registerName} onChange={onRegisterNameChange} required />
+            <TextField name="register-email" label="Correo electrónico" placeholder="tu@email.com" type="email" autoComplete="email" value={registerEmail} onChange={onRegisterEmailChange} required />
+            <TextField name="register-password" label="Contraseña" placeholder="Crea una contraseña" type="password" autoComplete="new-password" value={registerPassword} onChange={onRegisterPasswordChange} required />
+            <TextField name="register-confirm-password" label="Confirmar contraseña" placeholder="Repite tu contraseña" type="password" autoComplete="new-password" value={registerConfirmPassword} onChange={onRegisterConfirmPasswordChange} required />
+          </>
+        ) : (
+          <>
+            <TextField name="login-email" label="Correo electrónico" placeholder="tu@email.com" type="email" autoComplete="username" value={loginEmail} onChange={onLoginEmailChange} required />
+            <TextField name="login-password" label="Contraseña" placeholder="Ingresa tu contraseña" type="password" autoComplete="current-password" value={loginPassword} onChange={onLoginPasswordChange} required />
+          </>
+        )}
         <p className="eyebrow">{message}</p>
         <button className="button" type="submit" disabled={isBusy}>
           {isRegister ? <UserPlus size={17} /> : <Lock size={17} />}
@@ -2868,20 +2961,34 @@ function ProgressLine({ label, value }: { label: string; value: number }) {
 function TextField({
   name,
   label,
+  value,
+  onChange,
   placeholder = "",
   type = "text",
+  autoComplete,
   required = false,
 }: {
   name: string;
   label: string;
+  value: string;
+  onChange: (value: string) => void;
   placeholder?: string;
   type?: string;
+  autoComplete?: string;
   required?: boolean;
 }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <input name={name} type={type} placeholder={placeholder} required={required} />
+      <input
+        name={name}
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        required={required}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </label>
   );
 }
