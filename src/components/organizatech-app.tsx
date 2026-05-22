@@ -242,11 +242,11 @@ export function OrganizatechApp() {
 
         applySessionState(authState);
         if (authState.session) {
-          setStatusMessage("Sesión recuperada con Supabase.");
+          setStatusMessage("");
           await refreshData(authState.dataMode);
           if (isMounted) setScreen("dashboard");
         } else {
-          setStatusMessage(authState.isConfigured ? "Inicia sesión para sincronizar tus datos con Supabase." : getMissingSupabaseMessage());
+          setStatusMessage(authState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
         }
       } catch (error) {
         if (isMounted) setStatusMessage(translateAuthError(error));
@@ -269,13 +269,13 @@ export function OrganizatechApp() {
 
       applySessionState(nextState);
       if (event === "SIGNED_IN") {
-        setStatusMessage("Sesión iniciada con Supabase.");
+        setStatusMessage("");
         void refreshData(nextState.dataMode).then(() => {
           if (isMounted) setScreen("dashboard");
         });
       }
       if (event === "TOKEN_REFRESHED") {
-        setStatusMessage("Sesión Supabase actualizada.");
+        setStatusMessage("");
       }
       if (event === "SIGNED_OUT") {
         clearUserSessionState("Sesión cerrada correctamente.");
@@ -350,7 +350,7 @@ export function OrganizatechApp() {
   const summary = calculateWeeklySummary(metrics, currentWeek);
   const insights = generateSmartInsights(summary, currentMetrics);
   const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
-  const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Supabase" : isSupabaseConfiguredState ? "Supabase listo" : "Demo local";
+  const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
 
   function applySessionState(authState: SupabaseSessionState) {
     setIsSupabaseConfiguredState(authState.isConfigured);
@@ -386,7 +386,7 @@ export function OrganizatechApp() {
       setActiveRoutineDay((current) => getVisibleTrainingDay(next.exercises, current));
       setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
       setTrainingPlan((current) => mergeTrainingPlanWithExercises(current, next.exercises));
-      setStatusMessage(next.source === "supabase" ? "Datos sincronizados con Supabase." : "Datos guardados en este dispositivo.");
+      setStatusMessage(next.source === "supabase" ? "Progreso actualizado." : "Modo de prueba activo.");
     } catch (error) {
       handlePersistenceError(error);
     } finally {
@@ -409,7 +409,7 @@ export function OrganizatechApp() {
     const confirm = String(formData.get("register-confirm-password") || "");
     const supabase = getSupabaseBrowserClient();
     if (mode === "registro" && !name) {
-      setStatusMessage("Ingresa tu nombre para crear la cuenta.");
+      setStatusMessage("Ingresa tu nombre.");
       return;
     }
 
@@ -424,7 +424,17 @@ export function OrganizatechApp() {
     }
 
     if (!password) {
-      setStatusMessage("Ingresa tu contrase\u00f1a.");
+      setStatusMessage(mode === "registro" ? "Crea una contrase\u00f1a." : "Ingresa tu contrase\u00f1a.");
+      return;
+    }
+
+    if (mode === "registro" && password.length < 8) {
+      setStatusMessage("La contrase\u00f1a debe tener al menos 8 caracteres.");
+      return;
+    }
+
+    if (mode === "registro" && (!/[a-zA-Z]/.test(password) || !/\d/.test(password))) {
+      setStatusMessage("La contrase\u00f1a debe incluir letras y n\u00fameros.");
       return;
     }
 
@@ -461,6 +471,13 @@ export function OrganizatechApp() {
         return;
       }
 
+      const existingRegisteredUser =
+        mode === "registro" && Array.isArray(result.data.user?.identities) && result.data.user.identities.length === 0;
+      if (existingRegisteredUser) {
+        setStatusMessage("Este correo ya está registrado. Intenta iniciar sesión.");
+        return;
+      }
+
       const session = result.data.session;
       applySessionState({
         isConfigured: true,
@@ -470,13 +487,13 @@ export function OrganizatechApp() {
       });
 
       if (!session && mode === "registro") {
-        setStatusMessage("Cuenta creada. Revisa tu correo para confirmar el acceso antes de iniciar sesión.");
+        setStatusMessage("Cuenta creada. Revisa tu correo para confirmar el registro.");
         clearAuthForms();
         setScreen("login");
         return;
       }
 
-      setStatusMessage("Sesión iniciada con Supabase.");
+      setStatusMessage("");
       await refreshData("supabase");
       clearAuthForms();
       setScreen("dashboard");
@@ -489,7 +506,7 @@ export function OrganizatechApp() {
 
   function handleResetLocal() {
     if (dataMode === "supabase") {
-      setStatusMessage("No se puede restaurar demo mientras usas una sesión Supabase.");
+      setStatusMessage("No se puede realizar esta acción durante tu sesión actual.");
       return;
     }
     resetLocalData();
@@ -729,7 +746,7 @@ export function OrganizatechApp() {
 
   async function startNewTrainingCycle() {
     if (dataMode === "supabase") {
-      setStatusMessage("El cierre de ciclos con persistencia Supabase se habilitará en el siguiente paso.");
+      setStatusMessage("Esta acción estará disponible en el siguiente paso.");
       setIsNewCycleConfirmOpen(false);
       return;
     }
@@ -1263,7 +1280,7 @@ function AuthScreen({
         <p className="eyebrow">{message}</p>
         <button className="button" type="submit" disabled={isBusy}>
           {isRegister ? <UserPlus size={17} /> : <Lock size={17} />}
-          {isBusy ? "Procesando..." : isRegister ? "Crear cuenta" : "Iniciar sesión"}
+          {isBusy ? (isRegister ? "Creando cuenta..." : "Iniciando sesión...") : isRegister ? "Crear cuenta" : "Iniciar sesión"}
         </button>
         <div className="socials">
           <button className="button secondary" type="button" aria-label="Google">G</button>
@@ -1926,7 +1943,7 @@ function InitialTrainingScreen({
   const objectiveValue = getCycleObjectiveValue(trainingPlan);
   const objectiveDescription = objectiveDescriptions[objectiveValue] ?? "Este objetivo define cómo Organizatech ordenará la intención principal del bloque.";
   const durationValue = getCycleDurationValue(trainingPlan);
-  const visibleMessage = message === "Datos guardados en este dispositivo." ? "" : message;
+  const visibleMessage = message === "Modo de prueba activo." || message === "Progreso actualizado." ? "" : message;
 
   function toggleTrainingDay(item: string) {
     const isSelected = plannedDays.includes(item);
@@ -2779,7 +2796,7 @@ function ProfileScreen({ name, summary, dataSource, refreshData, resetLocal }: {
       <div className="card wide">
         <h3>Datos</h3>
         <div className="two-cols">
-          <button className="button secondary" type="button" onClick={refreshData}><Database size={17} /> Sincronizar</button>
+          <button className="button secondary" type="button" onClick={refreshData}><Database size={17} /> Actualizar</button>
           <button className="button secondary" type="button" onClick={resetLocal}>Restaurar demo</button>
         </div>
       </div>

@@ -163,11 +163,11 @@ async function getRepositoryAuth(mode: RepositoryMode) {
 }
 
 function createSessionRequiredError() {
-  return new Error("Debes iniciar sesión para guardar tus datos.");
+  return new Error("Debes iniciar sesión para continuar.");
 }
 
 function createSessionExpiredError() {
-  return new Error("Tu sesión expiró. Inicia sesión nuevamente para continuar.");
+  return new Error("Tu sesión expiró. Inicia sesión nuevamente.");
 }
 
 function loadLocalData(): AppData {
@@ -204,7 +204,7 @@ async function ensureProfile(userId: string, email: string) {
 
 async function upsertRoutine(userId: string, routine: RoutineName) {
   const supabase = getSupabaseBrowserClient();
-  if (!supabase) throw new Error("Supabase no configurado.");
+  if (!supabase) throw new Error("No pudimos completar la acción. Intenta nuevamente.");
 
   const existing = await supabase
     .from("routines")

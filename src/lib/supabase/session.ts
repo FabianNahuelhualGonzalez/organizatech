@@ -40,10 +40,10 @@ export function getMissingSupabaseMessage() {
   if (isSupabaseConfigured()) return "";
 
   if (process.env.NODE_ENV === "production") {
-    return "Supabase no está configurado. La app no puede guardar datos reales en producción.";
+    return "No pudimos iniciar la app correctamente. Intenta nuevamente más tarde.";
   }
 
-  return "Modo demo/local activo. Configura Supabase para usar autenticación y persistencia real.";
+  return "Modo de prueba activo.";
 }
 
 export function getSessionDisplayName(user: User | null, fallback = "Usuario") {
