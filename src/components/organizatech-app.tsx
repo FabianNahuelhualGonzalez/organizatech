@@ -54,7 +54,7 @@ import {
 } from "@/lib/progress/calculations";
 import { buildExerciseComparisonSummary, getExerciseHistory } from "@/lib/progress/exercise-history";
 import type { ExerciseComparisonSummary, ExerciseEntry, ExerciseMetrics, ExerciseTemplate, ObjectiveStatus } from "@/lib/progress/types";
-import { translateAuthError } from "@/lib/supabase/auth-errors";
+import { isSessionExpiredError, translateAuthError, translatePersistenceError } from "@/lib/supabase/auth-errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   getInitialSupabaseSession,
@@ -237,7 +237,7 @@ export function OrganizatechApp() {
         applySessionState(authState);
         if (authState.session) {
           setStatusMessage("Sesión recuperada con Supabase.");
-          await refreshData();
+          await refreshData(authState.dataMode);
           if (isMounted) setScreen("dashboard");
         } else {
           setStatusMessage(authState.isConfigured ? "Inicia sesión para sincronizar tus datos con Supabase." : getMissingSupabaseMessage());
@@ -264,7 +264,7 @@ export function OrganizatechApp() {
       applySessionState(nextState);
       if (event === "SIGNED_IN") {
         setStatusMessage("Sesión iniciada con Supabase.");
-        void refreshData().then(() => {
+        void refreshData(nextState.dataMode).then(() => {
           if (isMounted) setScreen("dashboard");
         });
       }
@@ -370,10 +370,10 @@ export function OrganizatechApp() {
     setScreen("login");
   }
 
-  async function refreshData() {
+  async function refreshData(mode = dataMode) {
     setIsBusy(true);
     try {
-      const next = await loadAppData();
+      const next = await loadAppData(mode);
       setExercises(next.exercises);
       setEntries(next.entries);
       setDataSource(next.source);
@@ -382,9 +382,17 @@ export function OrganizatechApp() {
       setTrainingPlan((current) => mergeTrainingPlanWithExercises(current, next.exercises));
       setStatusMessage(next.source === "supabase" ? "Datos sincronizados con Supabase." : "Datos guardados en este dispositivo.");
     } catch (error) {
-      setStatusMessage(readError(error));
+      handlePersistenceError(error);
     } finally {
       setIsBusy(false);
+    }
+  }
+
+  function handlePersistenceError(error: unknown) {
+    const message = translatePersistenceError(error);
+    setStatusMessage(message);
+    if (dataMode === "supabase" && (isSessionExpiredError(error) || message.includes("iniciar sesión"))) {
+      clearUserSessionState(message);
     }
   }
 
@@ -404,7 +412,7 @@ export function OrganizatechApp() {
     if (!supabase) {
       setDataMode("demo");
       setStatusMessage(getMissingSupabaseMessage());
-      await refreshData();
+      await refreshData("demo");
       setStatusMessage(getMissingSupabaseMessage());
       setScreen("dashboard");
       return;
@@ -437,7 +445,7 @@ export function OrganizatechApp() {
       }
 
       setStatusMessage("Sesión iniciada con Supabase.");
-      await refreshData();
+      await refreshData("supabase");
       setScreen("dashboard");
     } catch (error) {
       setStatusMessage(translateAuthError(error));
@@ -447,8 +455,12 @@ export function OrganizatechApp() {
   }
 
   function handleResetLocal() {
+    if (dataMode === "supabase") {
+      setStatusMessage("No se puede restaurar demo mientras usas una sesión Supabase.");
+      return;
+    }
     resetLocalData();
-    void refreshData();
+    void refreshData("demo");
   }
 
   function navigateTo(nextScreen: Screen) {
@@ -628,11 +640,11 @@ export function OrganizatechApp() {
             targetReps: Math.max(1, row.reps || 1),
             baseWeight: Math.max(0, row.weight || 0),
             notes: `Rutina creada para ${dayToPersist}.`,
-          });
+          }, dataMode);
         }
       }
 
-      await refreshData();
+      await refreshData(dataMode);
       setActiveRoutineDay(setupDay);
       setSetupByDay(nextSetupByDay);
       const successMessage = `Rutina de ${setupDay} guardada.`;
@@ -649,7 +661,7 @@ export function OrganizatechApp() {
         setIsRoutineSuccessOpen(true);
       }
     } catch (error) {
-      setStatusMessage(readError(error));
+      handlePersistenceError(error);
     } finally {
       setIsBusy(false);
     }
@@ -683,6 +695,12 @@ export function OrganizatechApp() {
   }
 
   async function startNewTrainingCycle() {
+    if (dataMode === "supabase") {
+      setStatusMessage("El cierre de ciclos con persistencia Supabase se habilitará en el siguiente paso.");
+      setIsNewCycleConfirmOpen(false);
+      return;
+    }
+
     const snapshot = createTrainingCycleSnapshot(cycleHistory.length + 1, trainingPlan, exercises, entries);
     const nextHistory = [...cycleHistory, snapshot];
     setCycleHistory(nextHistory);
@@ -758,7 +776,7 @@ export function OrganizatechApp() {
           reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
           rir: draft.rir,
           notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
-        });
+        }, dataMode);
         savedEntries.push(saved);
       }
 
@@ -773,13 +791,18 @@ export function OrganizatechApp() {
       setHasStartedTraining(false);
       setScreen("dashboard");
     } catch (error) {
-      setStatusMessage(readError(error));
+      handlePersistenceError(error);
     } finally {
       setIsBusy(false);
     }
   }
 
   async function loadComparisonDemoData() {
+    if (dataMode === "supabase") {
+      setStatusMessage("Los datos de prueba solo están disponibles en modo demo/local.");
+      return;
+    }
+
     if (exercises.length === 0) {
       setStatusMessage("Crea una rutina antes de cargar datos de prueba.");
       return;
@@ -809,7 +832,7 @@ export function OrganizatechApp() {
           reps: weekOneReps,
           rir: "RIR 1-2",
           notes: `Datos demo semana 1: ${exercise.day ?? "Lunes"}.`,
-        });
+        }, dataMode);
 
         const weekTwo = await saveTrainingEntry({
           id: createId(),
@@ -825,7 +848,7 @@ export function OrganizatechApp() {
           reps: weekTwoReps,
           rir: "RIR 1-2",
           notes: `Datos demo semana 2: ${exercise.day ?? "Lunes"}.`,
-        });
+        }, dataMode);
 
         savedEntries.push(weekOne, weekTwo);
       }
@@ -833,7 +856,7 @@ export function OrganizatechApp() {
       setEntries((current) => [...current, ...savedEntries]);
       setStatusMessage("Datos de prueba cargados para comparar semana 2 vs semana 1.");
     } catch (error) {
-      setStatusMessage(readError(error));
+      handlePersistenceError(error);
     } finally {
       setIsBusy(false);
     }
@@ -3350,10 +3373,6 @@ function screenLabel(screen: Screen) {
     perfil: "Perfil",
   };
   return labels[screen];
-}
-
-function readError(error: unknown) {
-  return error instanceof Error ? error.message : "Ocurrió un error inesperado.";
 }
 
 function formatKg(value: number) {

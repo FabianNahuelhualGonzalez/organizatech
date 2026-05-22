@@ -3,6 +3,7 @@ import type { ExerciseEntry, ExerciseTemplate, RoutineName } from "@/lib/progres
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export type DataSource = "local" | "supabase";
+export type RepositoryMode = "demo" | "supabase";
 
 export interface AppData {
   exercises: ExerciseTemplate[];
@@ -13,14 +14,19 @@ export interface AppData {
 const LOCAL_EXERCISES_KEY = "organizatech:exercises";
 const LOCAL_ENTRIES_KEY = "organizatech:entries";
 
-export async function loadAppData(): Promise<AppData> {
-  const supabase = getSupabaseBrowserClient();
-  if (!supabase) return loadLocalData();
+export async function loadAppData(mode: RepositoryMode = "demo"): Promise<AppData> {
+  if (mode === "demo") return loadLocalData();
 
-  const { data: userData } = await supabase.auth.getUser();
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) {
+    throw createSessionRequiredError();
+  }
+
+  const { data: userData, error } = await supabase.auth.getUser();
+  if (error) throw createSessionExpiredError();
   const user = userData.user;
   const userId = user?.id;
-  if (!userId) return loadLocalData();
+  if (!userId) throw createSessionRequiredError();
 
   await ensureProfile(userId, user.email ?? "");
   const exercises = await fetchExercises(userId);
@@ -28,12 +34,10 @@ export async function loadAppData(): Promise<AppData> {
   return { exercises, entries, source: "supabase" };
 }
 
-export async function saveExercise(exercise: ExerciseTemplate): Promise<ExerciseTemplate> {
-  const supabase = getSupabaseBrowserClient();
-  const { data: userData } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
-  const userId = userData.user?.id;
+export async function saveExercise(exercise: ExerciseTemplate, mode: RepositoryMode = "demo"): Promise<ExerciseTemplate> {
+  const auth = await getRepositoryAuth(mode);
 
-  if (!supabase || !userId) {
+  if (auth.mode === "demo") {
     const local = loadLocalData();
     const exists = local.exercises.some((item) => item.id === exercise.id);
     const exercises = exists
@@ -43,6 +47,7 @@ export async function saveExercise(exercise: ExerciseTemplate): Promise<Exercise
     return exercise;
   }
 
+  const { supabase, userId } = auth;
   const routineId = await upsertRoutine(userId, exercise.routine);
   const payload = {
     id: exercise.id,
@@ -68,12 +73,10 @@ export async function saveExercise(exercise: ExerciseTemplate): Promise<Exercise
   return { ...exercise, id: data!.id };
 }
 
-export async function deleteExercise(exerciseId: string): Promise<void> {
-  const supabase = getSupabaseBrowserClient();
-  const { data: userData } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
-  const userId = userData.user?.id;
+export async function deleteExercise(exerciseId: string, mode: RepositoryMode = "demo"): Promise<void> {
+  const auth = await getRepositoryAuth(mode);
 
-  if (!supabase || !userId) {
+  if (auth.mode === "demo") {
     const local = loadLocalData();
     saveLocalData(
       local.exercises.filter((exercise) => exercise.id !== exerciseId),
@@ -82,22 +85,22 @@ export async function deleteExercise(exerciseId: string): Promise<void> {
     return;
   }
 
+  const { supabase, userId } = auth;
   const { error } = await supabase.from("exercises").delete().eq("id", exerciseId).eq("user_id", userId);
   if (error) throw error;
 }
 
-export async function saveTrainingEntry(entry: ExerciseEntry): Promise<ExerciseEntry> {
-  const supabase = getSupabaseBrowserClient();
-  const { data: userData } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
-  const userId = userData.user?.id;
+export async function saveTrainingEntry(entry: ExerciseEntry, mode: RepositoryMode = "demo"): Promise<ExerciseEntry> {
+  const auth = await getRepositoryAuth(mode);
 
-  if (!supabase || !userId) {
+  if (auth.mode === "demo") {
     const local = loadLocalData();
     const entries = [...local.entries, entry];
     saveLocalData(local.exercises, entries);
     return entry;
   }
 
+  const { supabase, userId } = auth;
   const { data: session, error: sessionError } = await supabase
     .from("training_sessions")
     .insert({
@@ -139,6 +142,34 @@ export function replaceLocalData(exercises: ExerciseTemplate[], entries: Exercis
   saveLocalData(exercises, entries);
 }
 
+async function getRepositoryAuth(mode: RepositoryMode) {
+  if (mode === "demo") return { mode: "demo" as const };
+
+  const supabase = getSupabaseBrowserClient();
+
+  if (!supabase) {
+    throw createSessionRequiredError();
+  }
+
+  const { data: userData, error } = await supabase.auth.getUser();
+  if (error) throw createSessionExpiredError();
+  const userId = userData.user?.id;
+
+  if (!userId) {
+    throw createSessionRequiredError();
+  }
+
+  return { mode: "supabase" as const, supabase, userId };
+}
+
+function createSessionRequiredError() {
+  return new Error("Debes iniciar sesión para guardar tus datos.");
+}
+
+function createSessionExpiredError() {
+  return new Error("Tu sesión expiró. Inicia sesión nuevamente para continuar.");
+}
+
 function loadLocalData(): AppData {
   if (typeof window === "undefined") {
     return { exercises: exerciseTemplates, entries: demoEntries, source: "local" };
@@ -163,11 +194,12 @@ async function ensureProfile(userId: string, email: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return;
 
-  await supabase.from("profiles").upsert({
+  const { error } = await supabase.from("profiles").upsert({
     id: userId,
     email,
     display_name: email.split("@")[0] || "Usuario",
   });
+  if (error) throw error;
 }
 
 async function upsertRoutine(userId: string, routine: RoutineName) {
