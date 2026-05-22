@@ -4,7 +4,7 @@ create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   display_name text not null,
   email text not null,
-  current_streak integer not null default 0,
+  current_streak integer not null default 0 check (current_streak >= 0),
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
@@ -24,8 +24,8 @@ create table public.exercises (
   name text not null,
   target_sets integer not null check (target_sets > 0),
   target_reps integer not null check (target_reps > 0),
-  base_weight numeric(7,2) not null default 0,
-  side_weight numeric(7,2),
+  base_weight numeric(7,2) not null default 0 check (base_weight >= 0),
+  side_weight numeric(7,2) check (side_weight is null or side_weight >= 0),
   day text,
   notes text,
   updated_at timestamptz not null default now(),
@@ -47,9 +47,9 @@ create table public.exercise_entries (
   user_id uuid not null references auth.users(id) on delete cascade,
   session_id uuid not null references public.training_sessions(id) on delete cascade,
   exercise_id uuid not null references public.exercises(id) on delete cascade,
-  weight numeric(7,2) not null default 0,
-  previous_weight numeric(7,2) not null default 0,
-  reps integer[] not null,
+  weight numeric(7,2) not null default 0 check (weight >= 0),
+  previous_weight numeric(7,2) not null default 0 check (previous_weight >= 0),
+  reps integer[] not null check (coalesce(array_length(reps, 1), 0) > 0),
   rir text,
   notes text,
   updated_at timestamptz not null default now(),
@@ -100,6 +100,7 @@ begin
     coalesce(new.email, '')
   )
   on conflict (id) do nothing;
+
   return new;
 end;
 $$;
@@ -115,16 +116,70 @@ alter table public.training_sessions enable row level security;
 alter table public.exercise_entries enable row level security;
 
 create policy "profiles own rows" on public.profiles
-  for all using (auth.uid() = id) with check (auth.uid() = id);
+  for all
+  using (auth.uid() = id)
+  with check (auth.uid() = id);
 
 create policy "routines own rows" on public.routines
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 create policy "exercises own rows" on public.exercises
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for all
+  using (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.routines r
+      where r.id = routine_id
+        and r.user_id = auth.uid()
+    )
+  )
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.routines r
+      where r.id = routine_id
+        and r.user_id = auth.uid()
+    )
+  );
 
 create policy "sessions own rows" on public.training_sessions
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 create policy "entries own rows" on public.exercise_entries
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for all
+  using (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.training_sessions s
+      where s.id = session_id
+        and s.user_id = auth.uid()
+    )
+    and exists (
+      select 1
+      from public.exercises e
+      where e.id = exercise_id
+        and e.user_id = auth.uid()
+    )
+  )
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.training_sessions s
+      where s.id = session_id
+        and s.user_id = auth.uid()
+    )
+    and exists (
+      select 1
+      from public.exercises e
+      where e.id = exercise_id
+        and e.user_id = auth.uid()
+    )
+  );
