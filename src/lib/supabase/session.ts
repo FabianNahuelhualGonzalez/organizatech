@@ -46,7 +46,7 @@ export function getMissingSupabaseMessage() {
   return "Modo demo/local activo. Configura Supabase para usar autenticación y persistencia real.";
 }
 
-export function getSessionDisplayName(user: User | null, fallback = "Fabian") {
+export function getSessionDisplayName(user: User | null, fallback = "Usuario") {
   if (!user) return fallback;
   const metadataName = user.user_metadata?.display_name;
   if (typeof metadataName === "string" && metadataName.trim()) return metadataName.trim();

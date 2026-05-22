@@ -193,7 +193,7 @@ interface TrainingCycleSnapshot {
 export function OrganizatechApp() {
   const [screen, setScreen] = useState<Screen>("login");
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
-  const [sessionName, setSessionName] = useState("Fabian");
+  const [sessionName, setSessionName] = useState("");
   const [statusMessage, setStatusMessage] = useState("Validando sesión...");
   const [dataSource, setDataSource] = useState<DataSource>("local");
   const [dataMode, setDataMode] = useState<DataMode>("demo");
@@ -397,12 +397,35 @@ export function OrganizatechApp() {
   }
 
   async function handleAuth(mode: "login" | "registro", formData: FormData) {
-    const name = String(formData.get("name") || "Fabian");
-    const email = String(formData.get("email") || "");
+    const name = String(formData.get("name") || "").trim();
+    const email = String(formData.get("email") || "").trim();
     const password = String(formData.get("password") || "");
     const confirm = String(formData.get("confirm") || "");
     const supabase = getSupabaseBrowserClient();
-    setSessionName(name || email.split("@")[0] || "Fabian");
+    if (mode === "registro" && !name) {
+      setStatusMessage("Ingresa tu nombre para crear la cuenta.");
+      return;
+    }
+
+    if (!email) {
+      setStatusMessage("Ingresa tu correo electr\u00f3nico.");
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setStatusMessage("Ingresa un correo electr\u00f3nico v\u00e1lido.");
+      return;
+    }
+
+    if (!password) {
+      setStatusMessage("Ingresa tu contrase\u00f1a.");
+      return;
+    }
+
+    if (mode === "registro" && !confirm) {
+      setStatusMessage("Confirma tu contrase\u00f1a.");
+      return;
+    }
 
     if (mode === "registro" && password !== confirm) {
       setStatusMessage("Las contraseñas no coinciden.");
@@ -410,6 +433,7 @@ export function OrganizatechApp() {
     }
 
     if (!supabase) {
+      setSessionName(name || email.split("@")[0] || "Usuario");
       setDataMode("demo");
       setStatusMessage(getMissingSupabaseMessage());
       await refreshData("demo");
@@ -1139,10 +1163,10 @@ function AuthScreen({
       </div>
       <form className="card form-grid" action={onSubmit}>
         <h2>{isRegister ? "Crea tu cuenta" : "Iniciar sesión"}</h2>
-        {isRegister && <TextField name="name" label="Nombre" defaultValue="Fabian" />}
-        <TextField name="email" label="Correo electrónico" defaultValue="tu@email.com" type="email" />
-        <TextField name="password" label="Contraseña" defaultValue="organizatech" type="password" />
-        {isRegister && <TextField name="confirm" label="Confirmar contraseña" defaultValue="organizatech" type="password" />}
+        {isRegister && <TextField name="name" label="Nombre" placeholder="Ej: Fabian" required />}
+        <TextField name="email" label="Correo electrónico" placeholder="tu@email.com" type="email" required />
+        <TextField name="password" label="Contraseña" placeholder={isRegister ? "Crea una contraseña" : "Ingresa tu contraseña"} type="password" required />
+        {isRegister && <TextField name="confirm" label="Confirmar contraseña" placeholder="Repite tu contraseña" type="password" required />}
         <p className="eyebrow">{message}</p>
         <button className="button" type="submit" disabled={isBusy}>
           {isRegister ? <UserPlus size={17} /> : <Lock size={17} />}
@@ -2841,11 +2865,23 @@ function ProgressLine({ label, value }: { label: string; value: number }) {
   );
 }
 
-function TextField({ name, label, defaultValue = "", type = "text" }: { name: string; label: string; defaultValue?: string; type?: string }) {
+function TextField({
+  name,
+  label,
+  placeholder = "",
+  type = "text",
+  required = false,
+}: {
+  name: string;
+  label: string;
+  placeholder?: string;
+  type?: string;
+  required?: boolean;
+}) {
   return (
     <label className="field">
       <span>{label}</span>
-      <input name={name} type={type} defaultValue={defaultValue} />
+      <input name={name} type={type} placeholder={placeholder} required={required} />
     </label>
   );
 }
