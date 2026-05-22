@@ -1,0 +1,24 @@
+export function translateAuthError(error: unknown) {
+  const message = readAuthErrorMessage(error).toLowerCase();
+
+  if (!message) return "Ocurrió un problema al autenticar. Intenta nuevamente.";
+  if (message.includes("invalid login credentials")) return "Correo o contraseña incorrectos.";
+  if (message.includes("email not confirmed")) return "Debes confirmar tu correo antes de iniciar sesión.";
+  if (message.includes("user already registered") || message.includes("already registered")) {
+    return "Este correo ya está registrado.";
+  }
+  if (message.includes("password should be at least") || message.includes("password")) {
+    return "La contraseña no cumple con el mínimo requerido.";
+  }
+  if (message.includes("fetch") || message.includes("network") || message.includes("failed to fetch")) {
+    return "No pudimos conectar con el servidor. Intenta nuevamente.";
+  }
+
+  return "Ocurrió un problema al autenticar. Intenta nuevamente.";
+}
+
+function readAuthErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) return String(error.message);
+  return String(error ?? "");
+}

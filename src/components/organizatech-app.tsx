@@ -54,7 +54,15 @@ import {
 } from "@/lib/progress/calculations";
 import { buildExerciseComparisonSummary, getExerciseHistory } from "@/lib/progress/exercise-history";
 import type { ExerciseComparisonSummary, ExerciseEntry, ExerciseMetrics, ExerciseTemplate, ObjectiveStatus } from "@/lib/progress/types";
+import { translateAuthError } from "@/lib/supabase/auth-errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import {
+  getInitialSupabaseSession,
+  getMissingSupabaseMessage,
+  getSessionDisplayName,
+  type DataMode,
+  type SupabaseSessionState,
+} from "@/lib/supabase/session";
 
 type Screen =
   | "login"
@@ -186,8 +194,13 @@ export function OrganizatechApp() {
   const [screen, setScreen] = useState<Screen>("login");
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
   const [sessionName, setSessionName] = useState("Fabian");
-  const [statusMessage, setStatusMessage] = useState("Modo demo activo. Conecta Supabase para persistencia real.");
+  const [statusMessage, setStatusMessage] = useState("Validando sesión...");
   const [dataSource, setDataSource] = useState<DataSource>("local");
+  const [dataMode, setDataMode] = useState<DataMode>("demo");
+  const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
+  const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
+  const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
   const [exercises, setExercises] = useState<ExerciseTemplate[]>([]);
   const [entries, setEntries] = useState<ExerciseEntry[]>([]);
@@ -211,7 +224,58 @@ export function OrganizatechApp() {
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
 
   useEffect(() => {
-    void refreshData();
+    let isMounted = true;
+    const supabase = getSupabaseBrowserClient();
+
+    async function bootstrapSession() {
+      setIsAuthLoading(true);
+      setStatusMessage("Validando sesión...");
+      try {
+        const authState = await getInitialSupabaseSession();
+        if (!isMounted) return;
+
+        applySessionState(authState);
+        if (authState.session) {
+          setStatusMessage("Sesión recuperada con Supabase.");
+          await refreshData();
+          if (isMounted) setScreen("dashboard");
+        } else {
+          setStatusMessage(authState.isConfigured ? "Inicia sesión para sincronizar tus datos con Supabase." : getMissingSupabaseMessage());
+        }
+      } catch (error) {
+        if (isMounted) setStatusMessage(translateAuthError(error));
+      } finally {
+        if (isMounted) setIsAuthLoading(false);
+      }
+    }
+
+    void bootstrapSession();
+
+    const authSubscription = supabase?.auth.onAuthStateChange((event, session) => {
+      if (!isMounted) return;
+
+      const nextState: SupabaseSessionState = {
+        isConfigured: true,
+        dataMode: session ? "supabase" : "demo",
+        session,
+        user: session?.user ?? null,
+      };
+
+      applySessionState(nextState);
+      if (event === "SIGNED_IN") {
+        setStatusMessage("Sesión iniciada con Supabase.");
+        void refreshData().then(() => {
+          if (isMounted) setScreen("dashboard");
+        });
+      }
+      if (event === "TOKEN_REFRESHED") {
+        setStatusMessage("Sesión Supabase actualizada.");
+      }
+      if (event === "SIGNED_OUT") {
+        clearUserSessionState("Sesión cerrada correctamente.");
+      }
+    }).data.subscription;
+
     if ("serviceWorker" in navigator) {
       const hostname = window.location.hostname;
       const isLocalPreview =
@@ -231,6 +295,11 @@ export function OrganizatechApp() {
         navigator.serviceWorker.register("/sw.js").catch(() => undefined);
       }
     }
+
+    return () => {
+      isMounted = false;
+      authSubscription?.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -274,6 +343,32 @@ export function OrganizatechApp() {
   const dashboardCurrentMetrics = currentMetrics.filter((entry) => dashboardExerciseIds.has(entry.exerciseId));
   const summary = calculateWeeklySummary(metrics, currentWeek);
   const insights = generateSmartInsights(summary, currentMetrics);
+  const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
+  const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Supabase" : isSupabaseConfiguredState ? "Supabase listo" : "Demo local";
+
+  function applySessionState(authState: SupabaseSessionState) {
+    setIsSupabaseConfiguredState(authState.isConfigured);
+    setDataMode(authState.dataMode);
+    setSupabaseSession(authState.session);
+    setSupabaseUser(authState.user);
+    if (authState.user) setSessionName(getSessionDisplayName(authState.user));
+  }
+
+  function clearUserSessionState(message: string) {
+    setSupabaseSession(null);
+    setSupabaseUser(null);
+    setDataMode("demo");
+    setDataSource("local");
+    setExercises([]);
+    setEntries([]);
+    setExerciseDrafts({});
+    setReadiness(null);
+    setHasStartedTraining(false);
+    setScreenHistory([]);
+    setIsMenuOpen(false);
+    setStatusMessage(message);
+    setScreen("login");
+  }
 
   async function refreshData() {
     setIsBusy(true);
@@ -297,32 +392,58 @@ export function OrganizatechApp() {
     const name = String(formData.get("name") || "Fabian");
     const email = String(formData.get("email") || "");
     const password = String(formData.get("password") || "");
+    const confirm = String(formData.get("confirm") || "");
     const supabase = getSupabaseBrowserClient();
     setSessionName(name || email.split("@")[0] || "Fabian");
 
+    if (mode === "registro" && password !== confirm) {
+      setStatusMessage("Las contraseñas no coinciden.");
+      return;
+    }
+
     if (!supabase) {
-      setStatusMessage("Sesión demo iniciada. Agrega variables de Supabase para autenticación real.");
+      setDataMode("demo");
+      setStatusMessage(getMissingSupabaseMessage());
       await refreshData();
+      setStatusMessage(getMissingSupabaseMessage());
       setScreen("dashboard");
       return;
     }
 
     setIsBusy(true);
-    const result =
-      mode === "registro"
-        ? await supabase.auth.signUp({ email, password, options: { data: { display_name: name } } })
-        : await supabase.auth.signInWithPassword({ email, password });
+    try {
+      const result =
+        mode === "registro"
+          ? await supabase.auth.signUp({ email, password, options: { data: { display_name: name } } })
+          : await supabase.auth.signInWithPassword({ email, password });
 
-    if (result.error) {
-      setStatusMessage(result.error.message);
+      if (result.error) {
+        setStatusMessage(translateAuthError(result.error));
+        return;
+      }
+
+      const session = result.data.session;
+      applySessionState({
+        isConfigured: true,
+        dataMode: session ? "supabase" : "demo",
+        session,
+        user: session?.user ?? result.data.user ?? null,
+      });
+
+      if (!session && mode === "registro") {
+        setStatusMessage("Cuenta creada. Revisa tu correo para confirmar el acceso antes de iniciar sesión.");
+        setScreen("login");
+        return;
+      }
+
+      setStatusMessage("Sesión iniciada con Supabase.");
+      await refreshData();
+      setScreen("dashboard");
+    } catch (error) {
+      setStatusMessage(translateAuthError(error));
+    } finally {
       setIsBusy(false);
-      return;
     }
-
-    setStatusMessage("Sesión iniciada con Supabase.");
-    await refreshData();
-    setIsBusy(false);
-    setScreen("dashboard");
   }
 
   function handleResetLocal() {
@@ -538,12 +659,13 @@ export function OrganizatechApp() {
     setIsBusy(true);
     try {
       const supabase = getSupabaseBrowserClient();
-      if (supabase) await supabase.auth.signOut();
-      setIsMenuOpen(false);
-      setScreen("login");
-      setStatusMessage("Sesión cerrada correctamente.");
+      if (supabase) {
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
+      }
+      clearUserSessionState("Sesión cerrada correctamente.");
     } catch (error) {
-      setStatusMessage(readError(error));
+      setStatusMessage(translateAuthError(error));
     } finally {
       setIsBusy(false);
     }
@@ -717,6 +839,28 @@ export function OrganizatechApp() {
     }
   }
 
+  if (isAuthLoading) {
+    return (
+      <main className="app-shell">
+        <section className="login-shell">
+          <div className="login-logo">
+            <div className="brand-mark">
+              <Dumbbell size={28} />
+            </div>
+            <div>
+              <h1>Organizatech</h1>
+              <p className="eyebrow">Validando sesión...</p>
+            </div>
+          </div>
+          <div className="card wide">
+            <h2>Validando sesión...</h2>
+            <p className="eyebrow">Estamos revisando si ya tienes una sesión activa.</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   if (screen === "login") {
     return (
       <main className="app-shell">
@@ -757,7 +901,7 @@ export function OrganizatechApp() {
         </button>
         <div>
           <h1>Organizatech</h1>
-          <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${dataSource === "supabase" ? "Supabase" : "Demo local"}` : "Sin registro de entrenamiento"}</p>
+          <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}</p>
         </div>
         <button className="icon-button" aria-label="Ver alertas del panel principal" onClick={() => setScreen("dashboard")}>
           <Bell size={18} />
