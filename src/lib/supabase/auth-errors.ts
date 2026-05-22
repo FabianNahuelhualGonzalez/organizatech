@@ -13,6 +13,9 @@ export function translateAuthError(error: unknown) {
   if (message.includes("user already registered") || message.includes("already registered")) {
     return "Este correo ya está registrado. Intenta iniciar sesión.";
   }
+  if (message.includes("rate limit") || message.includes("over_email_send_rate_limit")) {
+    return "Se alcanzó el límite de intentos por ahora. Espera unos minutos e intenta nuevamente.";
+  }
   if (message.includes("password should be at least") || message.includes("password")) {
     return "La contraseña debe tener al menos 8 caracteres.";
   }
