@@ -10,7 +10,7 @@ export function isSupabaseConfigured() {
 }
 
 export function getSupabaseBrowserClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) return null;
@@ -24,4 +24,9 @@ export function getSupabaseBrowserClient() {
   }
 
   return browserClient;
+}
+
+function normalizeSupabaseUrl(url: string | undefined) {
+  if (!url) return url;
+  return url.trim().replace(/\/(?:rest|auth)\/v1\/?$/, "");
 }
