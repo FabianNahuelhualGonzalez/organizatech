@@ -2709,7 +2709,7 @@ function ProfileScreen({ name, summary, dataSource, refreshData, resetLocal }: {
           <div className="brand-mark"><User size={22} /></div>
           <div>
             <h2>{name}</h2>
-            <p className="eyebrow">{dataSource === "supabase" ? "Cuenta conectada" : "Perfil demo local"}</p>
+            <p className="eyebrow">{dataSource === "supabase" ? "Cuenta conectada" : "Cuenta local"}</p>
           </div>
           <button className="icon-button" aria-label="Configuración" style={{ marginLeft: "auto" }}><Settings size={17} /></button>
         </div>
@@ -2723,7 +2723,9 @@ function ProfileScreen({ name, summary, dataSource, refreshData, resetLocal }: {
         <h3>Datos</h3>
         <div className="two-cols">
           <button className="button secondary" type="button" onClick={refreshData}><Database size={17} /> Actualizar</button>
-          <button className="button secondary" type="button" onClick={resetLocal}>Restaurar demo</button>
+          {dataSource !== "supabase" && (
+            <button className="button secondary" type="button" onClick={resetLocal}>Reiniciar perfil local</button>
+          )}
         </div>
       </div>
       <div className="card wide">
