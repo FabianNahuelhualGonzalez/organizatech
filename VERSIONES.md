@@ -238,6 +238,7 @@ Se validaron los cambios principales con:
 
 - Se ajusto la configuracion local de Git del repositorio para alinear los commits con la cuenta usada en GitHub y Vercel.
 - Se dejo un commit documental minimo para activar un nuevo despliegue desde Vercel sin modificar la logica de la aplicacion.
+- Se corrige configuracion de autor Git para despliegue en Vercel.
 
 ## 2026-05-19 - Historial de ciclos
 
