@@ -234,6 +234,11 @@ Se validaron los cambios principales con:
 - `npm run typecheck`
 - `npm run build`
 
+## 2026-05-23 - Preparacion de despliegue
+
+- Se ajusto la configuracion local de Git del repositorio para alinear los commits con la cuenta usada en GitHub y Vercel.
+- Se dejo un commit documental minimo para activar un nuevo despliegue desde Vercel sin modificar la logica de la aplicacion.
+
 ## 2026-05-19 - Historial de ciclos
 
 - Se rediseño la seccion Historial ciclo de entrenamiento con una vista mas visual y resumida.
