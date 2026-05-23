@@ -1665,6 +1665,38 @@ h3 {
   resize: vertical;
 }
 
+.password-input-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.password-input-wrap input {
+  padding-right: 52px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.password-toggle:hover,
+.password-toggle:focus-visible {
+  color: var(--text);
+  background: rgba(60, 122, 255, 0.12);
+  outline: none;
+}
+
 .form-grid {
   display: grid;
   gap: 12px;

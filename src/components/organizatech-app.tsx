@@ -13,6 +13,8 @@ import {
   ChevronLeft,
   Database,
   Dumbbell,
+  Eye,
+  EyeOff,
   HelpCircle,
   Lock,
   LogOut,
@@ -1184,6 +1186,10 @@ function AuthScreen({
   onSwitch: () => void;
 }) {
   const isRegister = mode === "registro";
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] = useState(false);
+
   return (
     <section className="login-shell">
       <div className="login-logo">
@@ -1201,13 +1207,13 @@ function AuthScreen({
           <>
             <TextField name="register-name" label="Nombre" placeholder="Ej: Fabian" autoComplete="name" value={registerName} onChange={onRegisterNameChange} required />
             <TextField name="register-email" label="Correo electrónico" placeholder="tu@email.com" type="email" autoComplete="email" value={registerEmail} onChange={onRegisterEmailChange} required />
-            <TextField name="register-password" label="Contraseña" placeholder="Crea una contraseña" type="password" autoComplete="new-password" value={registerPassword} onChange={onRegisterPasswordChange} required />
-            <TextField name="register-confirm-password" label="Confirmar contraseña" placeholder="Repite tu contraseña" type="password" autoComplete="new-password" value={registerConfirmPassword} onChange={onRegisterConfirmPasswordChange} required />
+            <PasswordField name="register-password" label="Contraseña" placeholder="Crea una contraseña" autoComplete="new-password" value={registerPassword} onChange={onRegisterPasswordChange} visible={showRegisterPassword} onToggle={() => setShowRegisterPassword((current) => !current)} required />
+            <PasswordField name="register-confirm-password" label="Confirmar contraseña" placeholder="Repite tu contraseña" autoComplete="new-password" value={registerConfirmPassword} onChange={onRegisterConfirmPasswordChange} visible={showRegisterConfirmPassword} onToggle={() => setShowRegisterConfirmPassword((current) => !current)} required />
           </>
         ) : (
           <>
             <TextField name="login-email" label="Correo electrónico" placeholder="tu@email.com" type="email" autoComplete="username" value={loginEmail} onChange={onLoginEmailChange} required />
-            <TextField name="login-password" label="Contraseña" placeholder="Ingresa tu contraseña" type="password" autoComplete="current-password" value={loginPassword} onChange={onLoginPasswordChange} required />
+            <PasswordField name="login-password" label="Contraseña" placeholder="Ingresa tu contraseña" autoComplete="current-password" value={loginPassword} onChange={onLoginPasswordChange} visible={showLoginPassword} onToggle={() => setShowLoginPassword((current) => !current)} required />
           </>
         )}
         <p className="eyebrow">{message}</p>
@@ -1225,6 +1231,50 @@ function AuthScreen({
         </button>
       </form>
     </section>
+  );
+}
+
+function PasswordField({
+  name,
+  label,
+  value,
+  onChange,
+  placeholder = "",
+  autoComplete,
+  visible,
+  onToggle,
+  required = false,
+}: {
+  name: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  autoComplete?: string;
+  visible: boolean;
+  onToggle: () => void;
+  required?: boolean;
+}) {
+  const toggleLabel = visible ? "Ocultar contraseña" : "Mostrar contraseña";
+
+  return (
+    <label className="field password-field">
+      <span>{label}</span>
+      <div className="password-input-wrap">
+        <input
+          name={name}
+          type={visible ? "text" : "password"}
+          value={value}
+          placeholder={placeholder}
+          autoComplete={autoComplete}
+          required={required}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <button className="password-toggle" type="button" aria-label={toggleLabel} title={toggleLabel} onClick={onToggle}>
+          {visible ? <EyeOff size={17} /> : <Eye size={17} />}
+        </button>
+      </div>
+    </label>
   );
 }
 
