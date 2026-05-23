@@ -230,6 +230,7 @@ export function OrganizatechApp() {
   const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>(() => loadCycleHistory());
   const [isNewCycleConfirmOpen, setIsNewCycleConfirmOpen] = useState(false);
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
+  const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -332,7 +333,7 @@ export function OrganizatechApp() {
   const nextWeek = entries.length > 0 ? currentWeek + 1 : 1;
   const hasTrainingEntries = entries.length > 0;
   const hasRoutinePlan = exercises.length > 0;
-  const routineDays = getRoutineDays(exercises);
+  const routineDays = getActiveRoutineDays(exercises, trainingPlan);
   const dashboardCarouselDays = hasRoutinePlan ? routineDays : setupDays;
   const visibleDay = getVisibleTrainingDay(exercises, activeRoutineDay);
   const calendarDashboardDay = getCalendarTrainingDay();
@@ -648,11 +649,22 @@ export function OrganizatechApp() {
     setScreen("registro-entrenamiento");
   }
 
-  async function saveInitialRoutine() {
+  function cancelRoutineUpdate() {
+    const activeDays = getRoutineDays(exercises);
+    setTrainingPlan((current) => ({ ...current, trainingDays: activeDays }));
+    setSetupByDay(createSetupByDayFromExercises(exercises));
+    setSetupDay(activeDays.includes(activeRoutineDay) ? activeRoutineDay : activeDays[0] ?? "Lunes");
+    setIsRoutineUpdateConfirmOpen(false);
+    setStatusMessage("No se realizaron cambios en la rutina.");
+  }
+
+  async function saveInitialRoutine(confirmedRoutineUpdate = false) {
     const dayState = setupByDay[setupDay] ?? createSetupDayState();
     const routineName = dayState.routineName.trim() || setupDay;
     const validRows = dayState.rows.filter((row) => row.name.trim());
     const plannedDays = trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [setupDay];
+    const currentRoutineDays = getRoutineDays(exercises);
+    const isChangingRoutineDays = hasRoutinePlan && isEditingRoutinePlan && !sameDayList(plannedDays, currentRoutineDays);
     const savedDayState = {
       routineName,
       rows: validRows.map((row) => ({
@@ -674,6 +686,12 @@ export function OrganizatechApp() {
       return;
     }
 
+    if (isChangingRoutineDays && !confirmedRoutineUpdate) {
+      setIsRoutineUpdateConfirmOpen(true);
+      return;
+    }
+
+    setIsRoutineUpdateConfirmOpen(false);
     setSetupByDay(nextSetupByDay);
     setIsBusy(true);
     try {
@@ -1123,6 +1141,7 @@ export function OrganizatechApp() {
           exercises={exercises}
           metrics={metrics}
           currentWeek={currentWeek}
+          routineDays={routineDays}
           selectedDay={comparisonDay}
           setSelectedDay={setComparisonDay}
         />
@@ -1141,6 +1160,12 @@ export function OrganizatechApp() {
             setIsRoutineSuccessOpen(false);
             setScreen("dashboard");
           }}
+        />
+      )}
+      {isRoutineUpdateConfirmOpen && (
+        <ConfirmRoutineUpdateModal
+          onCancel={() => cancelRoutineUpdate()}
+          onConfirm={() => void saveInitialRoutine(true)}
         />
       )}
 
@@ -1677,7 +1702,9 @@ function CycleManagementScreen({
   editCurrentCycle: () => void;
   requestNewCycle: () => void;
 }) {
-  const targetSummary = calculateTargetSummary(exercises);
+  const activeDays = getActiveRoutineDays(exercises, trainingPlan);
+  const activeExercises = exercises.filter((exercise) => activeDays.includes(exercise.day ?? "Lunes"));
+  const targetSummary = calculateTargetSummary(activeExercises);
   const metrics = calculateWeeklyComparison(entries);
   const summary = calculateWeeklySummary(metrics, Math.max(1, ...entries.map((entry) => entry.week)));
   const cycleTitle = getCycleTitle(trainingPlan);
@@ -1688,7 +1715,7 @@ function CycleManagementScreen({
       <div className="card wide cycle-management-card">
         <p className="eyebrow">Ciclo activo</p>
         <h2>Ciclo {cycleNumber} - {cycleTitle}</h2>
-        <p className="eyebrow">{getCycleDurationLabel(trainingPlan)} - {getRoutineDays(exercises).length} dias - {targetSummary.exerciseCount} ejercicios</p>
+        <p className="eyebrow">{getCycleDurationLabel(trainingPlan)} - {activeDays.length} dias - {targetSummary.exerciseCount} ejercicios</p>
         <div className="cycle-summary-line">
           <div><span>Volumen registrado</span><strong>{formatKg(summary.volumeTotal)}</strong></div>
           <div><span>Reps registradas</span><strong>{summary.totalReps}</strong></div>
@@ -1721,6 +1748,21 @@ function ConfirmNewCycleModal({ onCancel, onConfirm }: { onCancel: () => void; o
         <div className="modal-actions">
           <button className="button danger-solid" type="button" onClick={onCancel}>No</button>
           <button className="button success-solid" type="button" onClick={onConfirm}>Si</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmRoutineUpdateModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirmar modificacion de rutina">
+      <div className="card confirm-modal">
+        <h2>Actualizar rutina</h2>
+        <p>Si modificas esta rutina, se actualizará tu ciclo de entrenamiento actual. Los días eliminados dejarán de aparecer en el ciclo. ¿Quieres continuar?</p>
+        <div className="modal-actions">
+          <button className="button secondary" type="button" onClick={onCancel}>Cancelar</button>
+          <button className="button success-solid" type="button" onClick={onConfirm}>Sí, actualizar rutina</button>
         </div>
       </div>
     </div>
@@ -2075,7 +2117,7 @@ function InitialTrainingScreen({
               <input type="number" min={1} placeholder="Series" value={row.sets || ""} onChange={(event) => updateRow(row.id, "sets", event.target.value)} />
               <input type="number" min={1} placeholder="Reps" value={row.reps || ""} onChange={(event) => updateRow(row.id, "reps", event.target.value)} />
               <input type="number" min={0} placeholder="Kg" value={row.weight || ""} onChange={(event) => updateRow(row.id, "weight", event.target.value)} />
-              <button className="row-delete" aria-label="Eliminar ejercicio" onClick={() => removeRow(row.id)}>
+              <button className="row-delete" type="button" aria-label="Eliminar ejercicio" onClick={() => removeRow(row.id)}>
                 <Trash2 size={13} />
               </button>
             </div>
@@ -2083,7 +2125,7 @@ function InitialTrainingScreen({
         </div>
         <div className="setup-actions">
           <button className="small-yellow-button" type="button" onClick={addRow}>Agregar más</button>
-          <button className="start-button compact" onClick={saveRoutine} disabled={isBusy}>
+          <button className="start-button compact" type="button" onClick={saveRoutine} disabled={isBusy}>
             {isBusy ? "Guardando..." : isLastPendingDay ? "Finalizar registro de rutina" : "Guardar y continuar"}
           </button>
         </div>
@@ -2411,12 +2453,12 @@ function GuidedTrainingScreen({
         </div>
         <SeriesResult entry={preview} />
         {!allRegistered ? (
-          <button className="button" onClick={registerExercise}>
+          <button className="button" type="button" onClick={registerExercise}>
             <Save size={17} />
             Registrar serie
           </button>
         ) : (
-          <button className="start-button compact" onClick={saveCompletedTraining} disabled={isBusy}>
+          <button className="start-button compact" type="button" onClick={saveCompletedTraining} disabled={isBusy}>
             {isBusy ? "Guardando..." : "Guardar entrenamiento"}
           </button>
         )}
@@ -2451,12 +2493,14 @@ function ComparisonScreenV2({
   exercises,
   metrics,
   currentWeek,
+  routineDays,
   selectedDay,
   setSelectedDay,
 }: {
   exercises: ExerciseTemplate[];
   metrics: ExerciseMetrics[];
   currentWeek: number;
+  routineDays: string[];
   selectedDay: string;
   setSelectedDay: (day: string) => void;
 }) {
@@ -2464,7 +2508,6 @@ function ComparisonScreenV2({
   const [activeWeek, setActiveWeek] = useState(currentWeek);
   const [selectedExerciseId, setSelectedExerciseId] = useState("");
   const [isExercisePickerOpen, setIsExercisePickerOpen] = useState(false);
-  const routineDays = getRoutineDays(exercises);
   const activeDay = routineDays.includes(selectedDay) ? selectedDay : routineDays[0];
   const dayExercises = exercises.filter((exercise) => (exercise.day ?? "Lunes") === activeDay);
   const dayExerciseIds = new Set(dayExercises.map((exercise) => exercise.id));
@@ -3096,8 +3139,9 @@ function createTrainingCycleSnapshot(index: number, plan: TrainingPlan, exercise
 function mergeTrainingPlanWithExercises(plan: TrainingPlan, exercises: ExerciseTemplate[]) {
   const routineDays = getRoutineDays(exercises);
   if (routineDays.length === 0) return plan;
-  const mergedDays = Array.from(new Set([...plan.trainingDays, ...routineDays])).filter((day) => setupDays.includes(day));
-  return { ...plan, trainingDays: mergedDays.length > 0 ? mergedDays : plan.trainingDays };
+  const hasDefaultDays = sameDayList(plan.trainingDays, createDefaultTrainingPlan().trainingDays);
+  if (hasDefaultDays) return { ...plan, trainingDays: routineDays };
+  return { ...plan, trainingDays: plan.trainingDays.filter((day) => setupDays.includes(day)) };
 }
 
 function isTrainingCycleId(value: unknown): value is TrainingCycleId {
@@ -3415,6 +3459,22 @@ function getDateForWeekday(day: string, calendarDay: string) {
 function getRoutineDays(exercises: ExerciseTemplate[]) {
   const days = setupDays.filter((day) => exercises.some((exercise) => (exercise.day ?? "Lunes") === day));
   return days.length > 0 ? days : ["Lunes"];
+}
+
+function getActiveRoutineDays(exercises: ExerciseTemplate[], plan: TrainingPlan) {
+  const routineDays = getRoutineDays(exercises);
+  const plannedDays = plan.trainingDays.filter((day) => setupDays.includes(day));
+  if (plannedDays.length === 0) return routineDays;
+
+  const activeDays = plannedDays.filter((day) => exercises.some((exercise) => (exercise.day ?? "Lunes") === day));
+  return activeDays.length > 0 ? activeDays : plannedDays;
+}
+
+function sameDayList(left: string[], right: string[]) {
+  const normalizedLeft = left.filter((day) => setupDays.includes(day));
+  const normalizedRight = right.filter((day) => setupDays.includes(day));
+  if (normalizedLeft.length !== normalizedRight.length) return false;
+  return normalizedLeft.every((day, index) => day === normalizedRight[index]);
 }
 
 function dedupeMetricsByWeekAndExercise(metrics: ExerciseMetrics[]) {
