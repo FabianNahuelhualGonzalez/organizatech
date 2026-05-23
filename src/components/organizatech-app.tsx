@@ -847,71 +847,6 @@ export function OrganizatechApp() {
     }
   }
 
-  async function loadComparisonDemoData() {
-    if (dataMode === "supabase") {
-      setStatusMessage("Los datos de prueba solo están disponibles en modo demo/local.");
-      return;
-    }
-
-    if (exercises.length === 0) {
-      setStatusMessage("Crea una rutina antes de cargar datos de prueba.");
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const savedEntries: ExerciseEntry[] = [];
-      const baseDate = new Date().toISOString().slice(0, 10);
-
-      for (const exercise of exercises) {
-        const weekOneReps = Array.from({ length: exercise.targetSets }, () => exercise.targetReps);
-        const weekTwoReps = createDemoWeekTwoReps(exercise);
-        const weekTwoWeight = createDemoWeekTwoWeight(exercise);
-
-        const weekOne = await saveTrainingEntry({
-          id: createId(),
-          exerciseId: exercise.id,
-          exerciseName: exercise.name,
-          routine: exercise.routine,
-          week: 1,
-          date: baseDate,
-          targetSets: exercise.targetSets,
-          targetReps: exercise.targetReps,
-          weight: exercise.baseWeight,
-          previousWeight: exercise.baseWeight,
-          reps: weekOneReps,
-          rir: "RIR 1-2",
-          notes: `Datos demo semana 1: ${exercise.day ?? "Lunes"}.`,
-        }, dataMode);
-
-        const weekTwo = await saveTrainingEntry({
-          id: createId(),
-          exerciseId: exercise.id,
-          exerciseName: exercise.name,
-          routine: exercise.routine,
-          week: 2,
-          date: baseDate,
-          targetSets: exercise.targetSets,
-          targetReps: exercise.targetReps,
-          weight: weekTwoWeight,
-          previousWeight: exercise.baseWeight,
-          reps: weekTwoReps,
-          rir: "RIR 1-2",
-          notes: `Datos demo semana 2: ${exercise.day ?? "Lunes"}.`,
-        }, dataMode);
-
-        savedEntries.push(weekOne, weekTwo);
-      }
-
-      setEntries((current) => [...current, ...savedEntries]);
-      setStatusMessage("Datos de prueba cargados para comparar semana 2 vs semana 1.");
-    } catch (error) {
-      handlePersistenceError(error);
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
   function clearAuthForms() {
     setLoginEmail("");
     setLoginPassword("");
@@ -1188,8 +1123,6 @@ export function OrganizatechApp() {
           currentWeek={currentWeek}
           selectedDay={comparisonDay}
           setSelectedDay={setComparisonDay}
-          loadDemoData={loadComparisonDemoData}
-          isBusy={isBusy}
         />
       )}
       {screen === "historial-ciclos" && <CycleHistoryScreen history={cycleHistory} />}
@@ -2470,16 +2403,12 @@ function ComparisonScreenV2({
   currentWeek,
   selectedDay,
   setSelectedDay,
-  loadDemoData,
-  isBusy,
 }: {
   exercises: ExerciseTemplate[];
   metrics: ExerciseMetrics[];
   currentWeek: number;
   selectedDay: string;
   setSelectedDay: (day: string) => void;
-  loadDemoData: () => void;
-  isBusy: boolean;
 }) {
   const [activeView, setActiveView] = useState<"plan" | "week">("plan");
   const [activeWeek, setActiveWeek] = useState(currentWeek);
@@ -2581,9 +2510,6 @@ function ComparisonScreenV2({
         ) : (
           <MetricGrid summary={calculateWeeklySummary(dayMetrics, selectedWeek)} />
         )}
-        <button className="button secondary" type="button" onClick={loadDemoData} disabled={isBusy}>
-          {isBusy ? "Cargando..." : "Cargar datos de prueba"}
-        </button>
       </div>
 
       <div className="card wide">
@@ -3391,27 +3317,6 @@ function normalizeExerciseDraft(exercise: ExerciseTemplate, draft?: ExerciseDraf
   };
 }
 
-function createDemoWeekTwoReps(exercise: ExerciseTemplate) {
-  const reps = Array.from({ length: exercise.targetSets }, () => exercise.targetReps);
-  const name = removeAccents(exercise.name.toLowerCase());
-
-  if (name.includes("pecho") || name.includes("press")) {
-    reps[0] = reps[0] + 1;
-  }
-
-  if (name.includes("triceps") || name.includes("peso muerto")) {
-    return reps.map((value) => Math.max(1, value - 2));
-  }
-
-  return reps;
-}
-
-function createDemoWeekTwoWeight(exercise: ExerciseTemplate) {
-  const name = removeAccents(exercise.name.toLowerCase());
-  if (name.includes("triceps")) return exercise.baseWeight + 10;
-  if (name.includes("peso muerto")) return exercise.baseWeight + 10;
-  return exercise.baseWeight;
-}
 
 function calculateTargetSummary(exercises: ExerciseTemplate[]) {
   return exercises.reduce(
