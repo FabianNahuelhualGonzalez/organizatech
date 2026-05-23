@@ -80,6 +80,9 @@ const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "registro-entren
 const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
 const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
+const ROUTINE_DRAFT_KEY_PREFIX = "organizatech:routine-draft";
+const ROUTINE_DRAFT_VERSION = 1;
+const ROUTINE_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const trainingCycles = [
   {
     id: "macro",
@@ -147,6 +150,20 @@ interface SetupExerciseRow {
 interface SetupDayState {
   routineName: string;
   rows: SetupExerciseRow[];
+}
+
+interface RoutineDraft {
+  version: number;
+  updatedAt: number;
+  dataMode: DataMode;
+  userKey: string;
+  screen: Screen;
+  setupDay: string;
+  setupByDay: Record<string, SetupDayState>;
+  trainingPlan: TrainingPlan;
+  isEditingRoutinePlan: boolean;
+  routineEditorReturnScreen: Screen | null;
+  activeRoutineDay: string;
 }
 
 interface TrainingPlan {
@@ -247,7 +264,9 @@ export function OrganizatechApp() {
         if (authState.session) {
           setStatusMessage("");
           await refreshData(authState.dataMode);
-          if (isMounted) setScreen("dashboard");
+          if (isMounted && !restoreRoutineDraftForSession(authState.dataMode, authState.user?.id)) {
+            setScreen("dashboard");
+          }
         } else {
           setStatusMessage(authState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
         }
@@ -274,7 +293,9 @@ export function OrganizatechApp() {
       if (event === "SIGNED_IN") {
         setStatusMessage("");
         void refreshData(nextState.dataMode).then(() => {
-          if (isMounted) setScreen("dashboard");
+          if (isMounted && !restoreRoutineDraftForSession(nextState.dataMode, nextState.user?.id)) {
+            setScreen("dashboard");
+          }
         });
       }
       if (event === "TOKEN_REFRESHED") {
@@ -328,6 +349,38 @@ export function OrganizatechApp() {
     saveTrainingPlan(trainingPlan);
   }, [trainingPlan]);
 
+  const hasRoutinePlanForDraft = exercises.length > 0;
+
+  useEffect(() => {
+    const isRoutineDraftActive = screen === "registro-entrenamiento" && (!hasRoutinePlanForDraft || isEditingRoutinePlan);
+    if (!isRoutineDraftActive) return;
+
+    function persistDraft() {
+      saveRoutineDraft({
+        version: ROUTINE_DRAFT_VERSION,
+        updatedAt: Date.now(),
+        dataMode,
+        userKey: getRoutineDraftUserKey(dataMode, supabaseUser?.id),
+        screen,
+        setupDay,
+        setupByDay,
+        trainingPlan,
+        isEditingRoutinePlan,
+        routineEditorReturnScreen,
+        activeRoutineDay,
+      });
+    }
+
+    persistDraft();
+    window.addEventListener("pagehide", persistDraft);
+    document.addEventListener("visibilitychange", persistDraft);
+
+    return () => {
+      window.removeEventListener("pagehide", persistDraft);
+      document.removeEventListener("visibilitychange", persistDraft);
+    };
+  }, [activeRoutineDay, dataMode, hasRoutinePlanForDraft, isEditingRoutinePlan, routineEditorReturnScreen, screen, setupByDay, setupDay, supabaseUser?.id, trainingPlan]);
+
   const metrics = useMemo(() => calculateWeeklyComparison(entries), [entries]);
   const currentWeek = Math.max(1, ...entries.map((entry) => entry.week));
   const nextWeek = entries.length > 0 ? currentWeek + 1 : 1;
@@ -364,6 +417,7 @@ export function OrganizatechApp() {
   }
 
   function clearUserSessionState(message: string) {
+    clearRoutineDraft(dataMode, supabaseUser?.id);
     setSupabaseSession(null);
     setSupabaseUser(null);
     setDataMode("demo");
@@ -379,6 +433,23 @@ export function OrganizatechApp() {
     setScreen("login");
   }
 
+  function restoreRoutineDraftForSession(mode: DataMode, userId?: string) {
+    const draft = loadRoutineDraft(mode, userId);
+    if (!draft) return false;
+
+    setSetupDay(draft.setupDay);
+    setSetupByDay(draft.setupByDay);
+    setTrainingPlan(draft.trainingPlan);
+    setIsEditingRoutinePlan(draft.isEditingRoutinePlan);
+    setRoutineEditorReturnScreen(draft.routineEditorReturnScreen);
+    setActiveRoutineDay(draft.activeRoutineDay);
+    setScreenHistory([]);
+    setIsMenuOpen(false);
+    setStatusMessage("Recuperamos tu avance pendiente.");
+    setScreen("registro-entrenamiento");
+    return true;
+  }
+
   async function refreshData(mode = dataMode) {
     setIsBusy(true);
     try {
@@ -390,8 +461,10 @@ export function OrganizatechApp() {
       setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
       setTrainingPlan((current) => mergeTrainingPlanWithExercises(current, next.exercises));
       setStatusMessage(next.source === "supabase" ? "Progreso actualizado." : "Modo de prueba activo.");
+      return next;
     } catch (error) {
       handlePersistenceError(error);
+      return null;
     } finally {
       setIsBusy(false);
     }
@@ -651,6 +724,7 @@ export function OrganizatechApp() {
 
   function cancelRoutineUpdate() {
     const activeDays = getRoutineDays(exercises);
+    clearRoutineDraft(dataMode, supabaseUser?.id);
     setTrainingPlan((current) => ({ ...current, trainingDays: activeDays }));
     setSetupByDay(createSetupByDayFromExercises(exercises));
     setSetupDay(activeDays.includes(activeRoutineDay) ? activeRoutineDay : activeDays[0] ?? "Lunes");
@@ -725,6 +799,7 @@ export function OrganizatechApp() {
         setSetupDay(nextIncompleteDay);
         setScreen("registro-entrenamiento");
       } else {
+        clearRoutineDraft(dataMode, supabaseUser?.id);
         setIsEditingRoutinePlan(false);
         setActiveRoutineDay(setupDay);
         setReadiness(null);
@@ -772,6 +847,7 @@ export function OrganizatechApp() {
     }
 
     const snapshot = createTrainingCycleSnapshot(cycleHistory.length + 1, trainingPlan, exercises, entries);
+    clearRoutineDraft(dataMode, supabaseUser?.id);
     const nextHistory = [...cycleHistory, snapshot];
     setCycleHistory(nextHistory);
     saveCycleHistory(nextHistory);
@@ -3058,6 +3134,13 @@ function getConfiguredSetupDays(setupByDay: Record<string, SetupDayState>) {
   return setupDays.filter((day) => setupByDay[day]?.rows.some((row) => row.name.trim()));
 }
 
+function hasSetupDraftContent(setupByDay: Record<string, SetupDayState>) {
+  return setupDays.some((day) => {
+    const state = setupByDay[day];
+    return Boolean(state?.routineName.trim() || state?.rows.some((row) => row.name.trim() || row.sets || row.reps || row.weight));
+  });
+}
+
 function createDefaultTrainingPlan(): TrainingPlan {
   return {
     cycleType: "meso",
@@ -3071,6 +3154,54 @@ function createDefaultTrainingPlan(): TrainingPlan {
     microFocus: "Progresión",
     sessionFocus: "Técnica",
   };
+}
+
+function normalizeTrainingPlan(value: unknown): TrainingPlan {
+  const fallback = createDefaultTrainingPlan();
+  if (!value || typeof value !== "object") return fallback;
+
+  const parsed = value as Partial<TrainingPlan>;
+  const trainingDays = Array.isArray(parsed.trainingDays)
+    ? parsed.trainingDays.filter((day) => setupDays.includes(day))
+    : fallback.trainingDays;
+
+  return {
+    cycleType: isTrainingCycleId(parsed.cycleType) ? parsed.cycleType : fallback.cycleType,
+    macroObjective: parsed.macroObjective || fallback.macroObjective,
+    macroDurationMonths: macroDurations.includes(Number(parsed.macroDurationMonths)) ? Number(parsed.macroDurationMonths) : fallback.macroDurationMonths,
+    mesoObjective: parsed.mesoObjective || fallback.mesoObjective,
+    mesoDurationWeeks: mesoDurations.includes(Number(parsed.mesoDurationWeeks)) ? Number(parsed.mesoDurationWeeks) : fallback.mesoDurationWeeks,
+    microDurationWeeks: Number(parsed.microDurationWeeks) === 1 ? 1 : fallback.microDurationWeeks,
+    sessionDurationDays: Number(parsed.sessionDurationDays) === 1 ? 1 : fallback.sessionDurationDays,
+    trainingDays: trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
+    microFocus: parsed.microFocus || fallback.microFocus,
+    sessionFocus: parsed.sessionFocus || fallback.sessionFocus,
+  };
+}
+
+function normalizeSetupByDay(value: unknown) {
+  const fallback = createSetupByDay();
+  if (!value || typeof value !== "object") return fallback;
+
+  const parsed = value as Record<string, Partial<SetupDayState> | undefined>;
+  return Object.fromEntries(setupDays.map((day) => {
+    const state = parsed[day];
+    const rows = Array.isArray(state?.rows)
+      ? state.rows.map((row) => ({
+        id: typeof row.id === "string" ? row.id : createId(),
+        sourceExerciseId: typeof row.sourceExerciseId === "string" ? row.sourceExerciseId : undefined,
+        name: typeof row.name === "string" ? row.name : "",
+        sets: Number(row.sets) || 0,
+        reps: Number(row.reps) || 0,
+        weight: Number(row.weight) || 0,
+      }))
+      : fallback[day].rows;
+
+    return [day, {
+      routineName: typeof state?.routineName === "string" ? state.routineName : "",
+      rows: rows.length > 0 ? rows : createSetupRows(),
+    }];
+  })) as Record<string, SetupDayState>;
 }
 
 function loadTrainingPlan(): TrainingPlan {
@@ -3121,6 +3252,68 @@ function loadCycleHistory(): TrainingCycleSnapshot[] {
 function saveCycleHistory(history: TrainingCycleSnapshot[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(LOCAL_CYCLE_HISTORY_KEY, JSON.stringify(history));
+}
+
+function getRoutineDraftUserKey(mode: DataMode, userId?: string) {
+  return mode === "supabase" ? `supabase:${userId ?? "anonymous"}` : "demo:local";
+}
+
+function getRoutineDraftKey(mode: DataMode, userId?: string) {
+  return `${ROUTINE_DRAFT_KEY_PREFIX}:${getRoutineDraftUserKey(mode, userId)}`;
+}
+
+function saveRoutineDraft(draft: RoutineDraft) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(`${ROUTINE_DRAFT_KEY_PREFIX}:${draft.userKey}`, JSON.stringify(draft));
+}
+
+function loadRoutineDraft(mode: DataMode, userId?: string) {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(getRoutineDraftKey(mode, userId));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<RoutineDraft>;
+    const userKey = getRoutineDraftUserKey(mode, userId);
+    const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
+    const isExpired = updatedAt === 0 || Date.now() - updatedAt > ROUTINE_DRAFT_MAX_AGE_MS;
+    if (parsed.version !== ROUTINE_DRAFT_VERSION || parsed.userKey !== userKey || parsed.dataMode !== mode || isExpired) {
+      clearRoutineDraft(mode, userId);
+      return null;
+    }
+
+    const setupDay = typeof parsed.setupDay === "string" && setupDays.includes(parsed.setupDay) ? parsed.setupDay : "Lunes";
+    const trainingPlan = normalizeTrainingPlan(parsed.trainingPlan);
+    const setupByDay = normalizeSetupByDay(parsed.setupByDay);
+    if (!hasSetupDraftContent(setupByDay)) return null;
+
+    return {
+      version: ROUTINE_DRAFT_VERSION,
+      updatedAt,
+      dataMode: mode,
+      userKey,
+      screen: "registro-entrenamiento" as Screen,
+      setupDay,
+      setupByDay,
+      trainingPlan,
+      isEditingRoutinePlan: Boolean(parsed.isEditingRoutinePlan),
+      routineEditorReturnScreen: parsed.routineEditorReturnScreen && isAppScreen(parsed.routineEditorReturnScreen)
+        ? parsed.routineEditorReturnScreen
+        : null,
+      activeRoutineDay: typeof parsed.activeRoutineDay === "string" && setupDays.includes(parsed.activeRoutineDay)
+        ? parsed.activeRoutineDay
+        : setupDay,
+    } satisfies RoutineDraft;
+  } catch {
+    clearRoutineDraft(mode, userId);
+    return null;
+  }
+}
+
+function clearRoutineDraft(mode: DataMode, userId?: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(getRoutineDraftKey(mode, userId));
 }
 
 function createTrainingCycleSnapshot(index: number, plan: TrainingPlan, exercises: ExerciseTemplate[], entries: ExerciseEntry[]): TrainingCycleSnapshot {
@@ -3475,6 +3668,19 @@ function sameDayList(left: string[], right: string[]) {
   const normalizedRight = right.filter((day) => setupDays.includes(day));
   if (normalizedLeft.length !== normalizedRight.length) return false;
   return normalizedLeft.every((day, index) => day === normalizedRight[index]);
+}
+
+function isAppScreen(value: unknown): value is Screen {
+  return typeof value === "string" && (
+    value === "login" ||
+    value === "registro" ||
+    value === "dashboard" ||
+    value === "entrenamiento" ||
+    value === "registro-entrenamiento" ||
+    value === "comparacion" ||
+    value === "historial-ciclos" ||
+    value === "perfil"
+  );
 }
 
 function dedupeMetricsByWeekAndExercise(metrics: ExerciseMetrics[]) {
