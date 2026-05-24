@@ -1166,7 +1166,6 @@ export function OrganizatechApp() {
           day={dashboardDay}
           weekDays={dashboardCarouselDays}
           routineDays={routineDays}
-          calendarDay={calendarDashboardDay}
           routine={dashboardRoutine}
           dayExercises={dashboardExercises}
           summary={summary}
@@ -1429,7 +1428,6 @@ function DashboardScreen({
   day,
   weekDays,
   routineDays,
-  calendarDay,
   routine,
   dayExercises,
   summary,
@@ -1447,7 +1445,6 @@ function DashboardScreen({
   day: string;
   weekDays: string[];
   routineDays: string[];
-  calendarDay: string;
   routine: string;
   dayExercises: ExerciseTemplate[];
   summary: ReturnType<typeof calculateWeeklySummary>;
@@ -1482,9 +1479,6 @@ function DashboardScreen({
   }, [day, carouselDays]);
 
   function getDashboardDayData(item: string) {
-    const date = getDateForWeekday(item, calendarDay);
-    const dateLabel = new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(date);
-    const prefix = item === calendarDay ? "Entrenamiento de hoy" : "Entrenamiento";
     const itemExercises = exercises.filter((exercise) => (exercise.day ?? item) === item);
     const exerciseIds = new Set(itemExercises.map((exercise) => exercise.id));
     const itemMetrics = allWeekMetrics.filter((entry) => exerciseIds.has(entry.exerciseId));
@@ -1493,7 +1487,7 @@ function DashboardScreen({
 
     return {
       day: item,
-      title: itemExercises.length > 0 ? `${prefix} ${dateLabel} | ${item}` : `Entrenamiento ${dateLabel} | ${item}: no registra entrenamientos`,
+      title: itemExercises.length > 0 ? `Entrenamiento · ${item}` : `Entrenamiento · ${item}: no registra entrenamientos`,
       exercises: itemExercises,
       metrics: preview,
       hasRoutine: itemExercises.length > 0,
@@ -3713,17 +3707,6 @@ function getCalendarTrainingDay() {
   const today = new Intl.DateTimeFormat("es-CL", { weekday: "long" }).format(new Date());
   const normalizedToday = setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(today.toLowerCase()));
   return normalizedToday ?? "Lunes";
-}
-
-function getDateForWeekday(day: string, calendarDay: string) {
-  const today = new Date();
-  const currentIndex = setupDays.indexOf(calendarDay);
-  const targetIndex = setupDays.indexOf(day);
-  if (currentIndex < 0 || targetIndex < 0) return today;
-
-  const target = new Date(today);
-  target.setDate(today.getDate() + targetIndex - currentIndex);
-  return target;
 }
 
 function getRoutineDays(exercises: ExerciseTemplate[]) {
