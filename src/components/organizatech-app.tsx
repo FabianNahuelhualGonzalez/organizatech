@@ -40,6 +40,7 @@ import {
   YAxis,
 } from "recharts";
 import {
+  deactivateActiveCycle,
   loadAppData,
   replaceLocalData,
   resetLocalData,
@@ -246,6 +247,7 @@ export function OrganizatechApp() {
   const [routineEditorReturnScreen, setRoutineEditorReturnScreen] = useState<Screen | null>(null);
   const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>(() => loadCycleHistory());
   const [isNewCycleConfirmOpen, setIsNewCycleConfirmOpen] = useState(false);
+  const [isDeleteCycleConfirmOpen, setIsDeleteCycleConfirmOpen] = useState(false);
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
 
@@ -871,6 +873,39 @@ export function OrganizatechApp() {
     setScreen("registro-entrenamiento");
   }
 
+  async function deleteCurrentTrainingCycle() {
+    setIsBusy(true);
+    try {
+      await deactivateActiveCycle(dataMode);
+      clearRoutineDraft(dataMode, supabaseUser?.id);
+      await refreshData(dataMode);
+
+      const nextPlan = createDefaultTrainingPlan();
+      setTrainingPlan(nextPlan);
+      saveTrainingPlan(nextPlan);
+      setSetupByDay(createSetupByDay());
+      setSetupDay("Lunes");
+      setActiveRoutineDay("Lunes");
+      setDashboardDayOverride("");
+      setComparisonDay("Lunes");
+      setExerciseDrafts({});
+      setReadiness(null);
+      setHasStartedTraining(false);
+      setIsEditingRoutinePlan(true);
+      setIsDeleteCycleConfirmOpen(false);
+      setStatusMessage("Ciclo eliminado. Ya puedes configurar un nuevo ciclo de entrenamiento.");
+      setScreen("registro-entrenamiento");
+    } catch (error) {
+      if (isSessionExpiredError(error)) {
+        clearUserSessionState("Tu sesiÃ³n expirÃ³. Inicia sesiÃ³n nuevamente.");
+      } else {
+        setStatusMessage(translatePersistenceError(error));
+      }
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   function updateExerciseDraft(exercise: ExerciseTemplate, patch: Partial<ExerciseDraft>) {
     setExerciseDrafts((current) => ({
       ...current,
@@ -1170,6 +1205,7 @@ export function OrganizatechApp() {
           cycleNumber={cycleHistory.length + 1}
           editCurrentCycle={() => openRoutineEditor(visibleDay)}
           requestNewCycle={() => setIsNewCycleConfirmOpen(true)}
+          requestDeleteCycle={() => setIsDeleteCycleConfirmOpen(true)}
         />
       )}
       {screen === "entrenamiento" && !hasRoutinePlan && (
@@ -1228,6 +1264,13 @@ export function OrganizatechApp() {
         <ConfirmNewCycleModal
           onCancel={() => setIsNewCycleConfirmOpen(false)}
           onConfirm={() => void startNewTrainingCycle()}
+        />
+      )}
+      {isDeleteCycleConfirmOpen && (
+        <ConfirmDeleteCycleModal
+          isBusy={isBusy}
+          onCancel={() => setIsDeleteCycleConfirmOpen(false)}
+          onConfirm={() => void deleteCurrentTrainingCycle()}
         />
       )}
       {isRoutineSuccessOpen && (
@@ -1770,6 +1813,7 @@ function CycleManagementScreen({
   cycleNumber,
   editCurrentCycle,
   requestNewCycle,
+  requestDeleteCycle,
 }: {
   trainingPlan: TrainingPlan;
   exercises: ExerciseTemplate[];
@@ -1777,6 +1821,7 @@ function CycleManagementScreen({
   cycleNumber: number;
   editCurrentCycle: () => void;
   requestNewCycle: () => void;
+  requestDeleteCycle: () => void;
 }) {
   const activeDays = getActiveRoutineDays(exercises, trainingPlan);
   const activeExercises = exercises.filter((exercise) => activeDays.includes(exercise.day ?? "Lunes"));
@@ -1797,10 +1842,16 @@ function CycleManagementScreen({
           <div><span>Reps registradas</span><strong>{summary.totalReps}</strong></div>
           <div><span>Semanas</span><strong>{weeksRegistered}</strong></div>
         </div>
-        <button className="button secondary" type="button" onClick={editCurrentCycle}>
-          <Pencil size={16} />
-          Modificar ciclo actual
-        </button>
+        <div className="cycle-management-actions">
+          <button className="button secondary" type="button" onClick={editCurrentCycle}>
+            <Pencil size={16} />
+            Modificar ciclo actual
+          </button>
+          <button className="button danger-solid" type="button" onClick={requestDeleteCycle}>
+            <Trash2 size={16} />
+            Eliminar ciclo
+          </button>
+        </div>
       </div>
 
       <div className="card wide new-cycle-card">
@@ -1812,6 +1863,32 @@ function CycleManagementScreen({
       </div>
 
     </section>
+  );
+}
+
+function ConfirmDeleteCycleModal({
+  isBusy,
+  onCancel,
+  onConfirm,
+}: {
+  isBusy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Eliminar ciclo actual">
+      <div className="card confirm-modal">
+        <h2>¿Eliminar ciclo actual?</h2>
+        <p>Este ciclo dejará de estar visible en tu cuenta. Los datos asociados no se mostrarán en tu progreso actual.</p>
+        <p>Esta acción no se puede deshacer desde la aplicación.</p>
+        <div className="modal-actions">
+          <button className="button secondary" type="button" onClick={onCancel} disabled={isBusy}>Cancelar</button>
+          <button className="button danger-solid" type="button" onClick={onConfirm} disabled={isBusy}>
+            {isBusy ? "Eliminando..." : "Sí, eliminar ciclo"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -2205,6 +2205,22 @@ h3 {
   gap: 12px;
 }
 
+.cycle-management-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.cycle-management-actions .button {
+  width: 100%;
+}
+
+@media (min-width: 420px) {
+  .cycle-management-actions {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.85fr);
+  }
+}
+
 .cycle-history-hero {
   position: relative;
   overflow: hidden;
