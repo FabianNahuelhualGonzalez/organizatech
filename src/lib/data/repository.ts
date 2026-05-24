@@ -90,6 +90,40 @@ export async function deleteExercise(exerciseId: string, mode: RepositoryMode = 
   if (error) throw error;
 }
 
+export async function deactivateActiveCycle(mode: RepositoryMode = "demo"): Promise<void> {
+  if (mode === "demo") {
+    replaceLocalData([], []);
+    return;
+  }
+
+  const auth = await getRepositoryAuth(mode);
+  if (auth.mode === "demo") return;
+
+  const { supabase, userId } = auth;
+  const { data, error } = await supabase
+    .from("exercises")
+    .select("id,notes")
+    .eq("user_id", userId);
+
+  if (error) throw error;
+
+  const inactiveAt = new Date().toISOString();
+  const activeRows = ((data ?? []) as Array<{ id: string; notes: string | null }>).filter(
+    (row) => !isInactiveCycleNote(row.notes),
+  );
+
+  for (const row of activeRows) {
+    const nextNotes = appendInactiveCycleNote(row.notes, inactiveAt);
+    const { error: updateError } = await supabase
+      .from("exercises")
+      .update({ notes: nextNotes })
+      .eq("id", row.id)
+      .eq("user_id", userId);
+
+    if (updateError) throw updateError;
+  }
+}
+
 export async function saveTrainingEntry(entry: ExerciseEntry, mode: RepositoryMode = "demo"): Promise<ExerciseEntry> {
   const auth = await getRepositoryAuth(mode);
 
@@ -250,17 +284,19 @@ async function fetchExercises(userId: string): Promise<ExerciseTemplate[]> {
 
   if (error) throw error;
 
-  return ((data ?? []) as unknown as SupabaseExerciseRow[]).map((row) => ({
-    id: row.id,
-    routine: readRoutineName(firstRelation(row.routines)?.name),
-    name: row.name,
-    targetSets: row.target_sets,
-    targetReps: row.target_reps,
-    baseWeight: Number(row.base_weight),
-    sideWeight: row.side_weight === null ? undefined : Number(row.side_weight),
-    day: readExerciseDay(row.day, row.notes),
-    notes: row.notes ?? undefined,
-  }));
+  return ((data ?? []) as unknown as SupabaseExerciseRow[])
+    .filter((row) => !isInactiveCycleNote(row.notes))
+    .map((row) => ({
+      id: row.id,
+      routine: readRoutineName(firstRelation(row.routines)?.name),
+      name: row.name,
+      targetSets: row.target_sets,
+      targetReps: row.target_reps,
+      baseWeight: Number(row.base_weight),
+      sideWeight: row.side_weight === null ? undefined : Number(row.side_weight),
+      day: readExerciseDay(row.day, row.notes),
+      notes: row.notes ?? undefined,
+    }));
 }
 
 async function fetchEntries(userId: string): Promise<ExerciseEntry[]> {
@@ -275,25 +311,26 @@ async function fetchEntries(userId: string): Promise<ExerciseEntry[]> {
 
   if (error) throw error;
 
-  return ((data ?? []) as unknown as SupabaseEntryRow[]).map((row) => {
+  return ((data ?? []) as unknown as SupabaseEntryRow[]).flatMap((row) => {
     const session = firstRelation(row.training_sessions);
     const exercise = firstRelation(row.exercises);
+    if (isInactiveCycleNote(exercise.notes)) return [];
 
-    return {
-    id: row.id,
-    exerciseId: exercise.id,
-    exerciseName: exercise.name,
-    routine: readRoutineName(firstRelation(exercise.routines)?.name),
-    week: session.week_number,
-    date: session.trained_at,
-    targetSets: exercise.target_sets,
-    targetReps: exercise.target_reps,
-    weight: Number(row.weight),
-    previousWeight: Number(row.previous_weight),
-    reps: row.reps,
-    notes: row.notes ?? exercise.notes ?? undefined,
-    rir: row.rir ?? undefined,
-    };
+    return [{
+      id: row.id,
+      exerciseId: exercise.id,
+      exerciseName: exercise.name,
+      routine: readRoutineName(firstRelation(exercise.routines)?.name),
+      week: session.week_number,
+      date: session.trained_at,
+      targetSets: exercise.target_sets,
+      targetReps: exercise.target_reps,
+      weight: Number(row.weight),
+      previousWeight: Number(row.previous_weight),
+      reps: row.reps,
+      notes: row.notes ?? exercise.notes ?? undefined,
+      rir: row.rir ?? undefined,
+    }];
   });
 }
 
@@ -305,6 +342,16 @@ function readExerciseDay(day: string | null | undefined, notes: string | null) {
   if (day?.trim()) return day;
   const match = notes?.match(/Rutina creada para ([^.]+)\./i);
   return match?.[1]?.trim() || undefined;
+}
+
+function isInactiveCycleNote(notes: string | null | undefined) {
+  return Boolean(notes?.includes("[[organizatech:cycle-inactive:"));
+}
+
+function appendInactiveCycleNote(notes: string | null | undefined, inactiveAt: string) {
+  const baseNotes = notes?.trim();
+  const marker = `[[organizatech:cycle-inactive:${inactiveAt}]]`;
+  return baseNotes ? `${baseNotes}\n${marker}` : marker;
 }
 
 function isMissingDayColumnError(error: unknown) {
