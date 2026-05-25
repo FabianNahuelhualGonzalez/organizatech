@@ -82,8 +82,14 @@ const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábad
 const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
 const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
 const ROUTINE_DRAFT_KEY_PREFIX = "organizatech:routine-draft";
+const WORKOUT_DRAFT_KEY_PREFIX = "organizatech:workout-draft";
+const ACTIVE_FLOW_KEY_PREFIX = "organizatech:active-flow";
 const ROUTINE_DRAFT_VERSION = 1;
+const WORKOUT_DRAFT_VERSION = 1;
+const ACTIVE_FLOW_VERSION = 1;
 const ROUTINE_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const ACTIVE_FLOW_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const trainingCycles = [
   {
     id: "macro",
@@ -165,6 +171,37 @@ interface RoutineDraft {
   isEditingRoutinePlan: boolean;
   routineEditorReturnScreen: Screen | null;
   activeRoutineDay: string;
+}
+
+type ActiveFlow =
+  | "dashboard"
+  | "routine_setup"
+  | "routine_edit"
+  | "training_start"
+  | "motivation_form"
+  | "active_workout"
+  | "comparison"
+  | "cycle_history"
+  | "profile";
+
+interface ActiveFlowState {
+  version: number;
+  updatedAt: number;
+  dataMode: DataMode;
+  userKey: string;
+  flow: ActiveFlow;
+}
+
+interface WorkoutDraft {
+  version: number;
+  updatedAt: number;
+  dataMode: DataMode;
+  userKey: string;
+  activeRoutineDay: string;
+  activeExerciseIndex: number;
+  hasStartedTraining: boolean;
+  readiness: TrainingReadiness | null;
+  exerciseDrafts: Record<string, ExerciseDraft>;
 }
 
 interface TrainingPlan {
@@ -266,7 +303,7 @@ export function OrganizatechApp() {
         if (authState.session) {
           setStatusMessage("");
           await refreshData(authState.dataMode);
-          if (isMounted && !restoreRoutineDraftForSession(authState.dataMode, authState.user?.id)) {
+          if (isMounted && !restoreActiveFlowForSession(authState.dataMode, authState.user?.id)) {
             setScreen("dashboard");
           }
         } else {
@@ -295,7 +332,7 @@ export function OrganizatechApp() {
       if (event === "SIGNED_IN") {
         setStatusMessage("");
         void refreshData(nextState.dataMode).then(() => {
-          if (isMounted && !restoreRoutineDraftForSession(nextState.dataMode, nextState.user?.id)) {
+          if (isMounted && !restoreActiveFlowForSession(nextState.dataMode, nextState.user?.id)) {
             setScreen("dashboard");
           }
         });
@@ -354,6 +391,30 @@ export function OrganizatechApp() {
   const hasRoutinePlanForDraft = exercises.length > 0;
 
   useEffect(() => {
+    if (screen === "login" || screen === "registro") return;
+    const flow = getActiveFlow(screen, hasRoutinePlanForDraft, isEditingRoutinePlan, hasStartedTraining, readiness);
+
+    function persistFlow() {
+      saveActiveFlow({
+        version: ACTIVE_FLOW_VERSION,
+        updatedAt: Date.now(),
+        dataMode,
+        userKey: getDraftUserKey(dataMode, supabaseUser?.id),
+        flow,
+      });
+    }
+
+    persistFlow();
+    window.addEventListener("pagehide", persistFlow);
+    document.addEventListener("visibilitychange", persistFlow);
+
+    return () => {
+      window.removeEventListener("pagehide", persistFlow);
+      document.removeEventListener("visibilitychange", persistFlow);
+    };
+  }, [dataMode, hasRoutinePlanForDraft, hasStartedTraining, isEditingRoutinePlan, readiness, screen, supabaseUser?.id]);
+
+  useEffect(() => {
     const isRoutineDraftActive = screen === "registro-entrenamiento" && (!hasRoutinePlanForDraft || isEditingRoutinePlan);
     if (!isRoutineDraftActive) return;
 
@@ -362,7 +423,7 @@ export function OrganizatechApp() {
         version: ROUTINE_DRAFT_VERSION,
         updatedAt: Date.now(),
         dataMode,
-        userKey: getRoutineDraftUserKey(dataMode, supabaseUser?.id),
+        userKey: getDraftUserKey(dataMode, supabaseUser?.id),
         screen,
         setupDay,
         setupByDay,
@@ -382,6 +443,40 @@ export function OrganizatechApp() {
       document.removeEventListener("visibilitychange", persistDraft);
     };
   }, [activeRoutineDay, dataMode, hasRoutinePlanForDraft, isEditingRoutinePlan, routineEditorReturnScreen, screen, setupByDay, setupDay, supabaseUser?.id, trainingPlan]);
+
+  useEffect(() => {
+    const isWorkoutDraftActive = screen === "entrenamiento" && hasStartedTraining;
+    if (!isWorkoutDraftActive) return;
+
+    function persistWorkoutDraft() {
+      saveWorkoutDraft({
+        version: WORKOUT_DRAFT_VERSION,
+        updatedAt: Date.now(),
+        dataMode,
+        userKey: getDraftUserKey(dataMode, supabaseUser?.id),
+        activeRoutineDay,
+        activeExerciseIndex,
+        hasStartedTraining,
+        readiness,
+        exerciseDrafts,
+      });
+    }
+
+    persistWorkoutDraft();
+    window.addEventListener("pagehide", persistWorkoutDraft);
+    document.addEventListener("visibilitychange", persistWorkoutDraft);
+
+    return () => {
+      window.removeEventListener("pagehide", persistWorkoutDraft);
+      document.removeEventListener("visibilitychange", persistWorkoutDraft);
+    };
+  }, [activeExerciseIndex, activeRoutineDay, dataMode, exerciseDrafts, hasStartedTraining, readiness, screen, supabaseUser?.id]);
+
+  useEffect(() => {
+    if (screen === "entrenamiento" && !hasStartedTraining) {
+      clearWorkoutDraft(dataMode, supabaseUser?.id);
+    }
+  }, [dataMode, hasStartedTraining, screen, supabaseUser?.id]);
 
   const metrics = useMemo(() => calculateWeeklyComparison(entries), [entries]);
   const currentWeek = Math.max(1, ...entries.map((entry) => entry.week));
@@ -419,7 +514,9 @@ export function OrganizatechApp() {
   }
 
   function clearUserSessionState(message: string) {
+    clearActiveFlow(dataMode, supabaseUser?.id);
     clearRoutineDraft(dataMode, supabaseUser?.id);
+    clearWorkoutDraft(dataMode, supabaseUser?.id);
     setSupabaseSession(null);
     setSupabaseUser(null);
     setDataMode("demo");
@@ -433,6 +530,41 @@ export function OrganizatechApp() {
     setIsMenuOpen(false);
     setStatusMessage(message);
     setScreen("login");
+  }
+
+  function restoreActiveFlowForSession(mode: DataMode, userId?: string) {
+    const activeFlow = loadActiveFlow(mode, userId);
+    if (!activeFlow) return false;
+
+    if (activeFlow.flow === "routine_setup" || activeFlow.flow === "routine_edit") {
+      return restoreRoutineDraftForSession(mode, userId);
+    }
+
+    if (activeFlow.flow === "motivation_form" || activeFlow.flow === "active_workout") {
+      return restoreWorkoutDraftForSession(mode, userId);
+    }
+
+    if (activeFlow.flow === "training_start") {
+      setHasStartedTraining(false);
+      setReadiness(null);
+      setScreenHistory([]);
+      setIsMenuOpen(false);
+      setScreen("entrenamiento");
+      return true;
+    }
+
+    const screenByFlow: Partial<Record<ActiveFlow, Screen>> = {
+      dashboard: "dashboard",
+      comparison: "comparacion",
+      cycle_history: "historial-ciclos",
+      profile: "perfil",
+    };
+    const restoredScreen = screenByFlow[activeFlow.flow];
+    if (!restoredScreen) return false;
+    setScreenHistory([]);
+    setIsMenuOpen(false);
+    setScreen(restoredScreen);
+    return true;
   }
 
   function restoreRoutineDraftForSession(mode: DataMode, userId?: string) {
@@ -449,6 +581,23 @@ export function OrganizatechApp() {
     setIsMenuOpen(false);
     setStatusMessage("Recuperamos tu avance pendiente.");
     setScreen("registro-entrenamiento");
+    return true;
+  }
+
+  function restoreWorkoutDraftForSession(mode: DataMode, userId?: string) {
+    const draft = loadWorkoutDraft(mode, userId);
+    if (!draft) return false;
+
+    setActiveRoutineDay(draft.activeRoutineDay);
+    setActiveExerciseIndex(draft.activeExerciseIndex);
+    setHasStartedTraining(draft.hasStartedTraining);
+    setReadiness(draft.readiness);
+    setExerciseDrafts(draft.exerciseDrafts);
+    setIsEditingRoutinePlan(false);
+    setScreenHistory([]);
+    setIsMenuOpen(false);
+    setStatusMessage("Recuperamos tu entrenamiento pendiente.");
+    setScreen("entrenamiento");
     return true;
   }
 
@@ -968,6 +1117,7 @@ export function OrganizatechApp() {
         return next;
       });
       setStatusMessage("Entrenamiento guardado.");
+      clearWorkoutDraft(dataMode, supabaseUser?.id);
       setReadiness(null);
       setHasStartedTraining(false);
       setScreen("dashboard");
@@ -3325,12 +3475,100 @@ function saveCycleHistory(history: TrainingCycleSnapshot[]) {
   window.localStorage.setItem(LOCAL_CYCLE_HISTORY_KEY, JSON.stringify(history));
 }
 
-function getRoutineDraftUserKey(mode: DataMode, userId?: string) {
+function getDraftUserKey(mode: DataMode, userId?: string) {
   return mode === "supabase" ? `supabase:${userId ?? "anonymous"}` : "demo:local";
 }
 
 function getRoutineDraftKey(mode: DataMode, userId?: string) {
-  return `${ROUTINE_DRAFT_KEY_PREFIX}:${getRoutineDraftUserKey(mode, userId)}`;
+  return `${ROUTINE_DRAFT_KEY_PREFIX}:${getDraftUserKey(mode, userId)}`;
+}
+
+function getWorkoutDraftKey(mode: DataMode, userId?: string) {
+  return `${WORKOUT_DRAFT_KEY_PREFIX}:${getDraftUserKey(mode, userId)}`;
+}
+
+function getActiveFlowKey(mode: DataMode, userId?: string) {
+  return `${ACTIVE_FLOW_KEY_PREFIX}:${getDraftUserKey(mode, userId)}`;
+}
+
+function getActiveFlow(
+  screen: Screen,
+  hasRoutinePlan: boolean,
+  isEditingRoutinePlan: boolean,
+  hasStartedTraining: boolean,
+  readiness: TrainingReadiness | null,
+): ActiveFlow {
+  if (screen === "registro-entrenamiento" && (!hasRoutinePlan || isEditingRoutinePlan)) {
+    return isEditingRoutinePlan && hasRoutinePlan ? "routine_edit" : "routine_setup";
+  }
+  if (screen === "entrenamiento") {
+    if (hasStartedTraining && readiness) return "active_workout";
+    if (hasStartedTraining) return "motivation_form";
+    return "training_start";
+  }
+  if (screen === "comparacion") return "comparison";
+  if (screen === "historial-ciclos") return "cycle_history";
+  if (screen === "perfil") return "profile";
+  return "dashboard";
+}
+
+function saveActiveFlow(flow: ActiveFlowState) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(`${ACTIVE_FLOW_KEY_PREFIX}:${flow.userKey}`, JSON.stringify(flow));
+}
+
+function loadActiveFlow(mode: DataMode, userId?: string) {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(getActiveFlowKey(mode, userId));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<ActiveFlowState>;
+    const userKey = getDraftUserKey(mode, userId);
+    const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
+    const isExpired = updatedAt === 0 || Date.now() - updatedAt > ACTIVE_FLOW_MAX_AGE_MS;
+    if (
+      parsed.version !== ACTIVE_FLOW_VERSION ||
+      parsed.userKey !== userKey ||
+      parsed.dataMode !== mode ||
+      !isActiveFlow(parsed.flow) ||
+      isExpired
+    ) {
+      clearActiveFlow(mode, userId);
+      return null;
+    }
+
+    return {
+      version: ACTIVE_FLOW_VERSION,
+      updatedAt,
+      dataMode: mode,
+      userKey,
+      flow: parsed.flow,
+    } satisfies ActiveFlowState;
+  } catch {
+    clearActiveFlow(mode, userId);
+    return null;
+  }
+}
+
+function clearActiveFlow(mode: DataMode, userId?: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(getActiveFlowKey(mode, userId));
+}
+
+function isActiveFlow(value: unknown): value is ActiveFlow {
+  return typeof value === "string" && [
+    "dashboard",
+    "routine_setup",
+    "routine_edit",
+    "training_start",
+    "motivation_form",
+    "active_workout",
+    "comparison",
+    "cycle_history",
+    "profile",
+  ].includes(value);
 }
 
 function saveRoutineDraft(draft: RoutineDraft) {
@@ -3346,7 +3584,7 @@ function loadRoutineDraft(mode: DataMode, userId?: string) {
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as Partial<RoutineDraft>;
-    const userKey = getRoutineDraftUserKey(mode, userId);
+    const userKey = getDraftUserKey(mode, userId);
     const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
     const isExpired = updatedAt === 0 || Date.now() - updatedAt > ROUTINE_DRAFT_MAX_AGE_MS;
     if (parsed.version !== ROUTINE_DRAFT_VERSION || parsed.userKey !== userKey || parsed.dataMode !== mode || isExpired) {
@@ -3385,6 +3623,51 @@ function loadRoutineDraft(mode: DataMode, userId?: string) {
 function clearRoutineDraft(mode: DataMode, userId?: string) {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(getRoutineDraftKey(mode, userId));
+}
+
+function saveWorkoutDraft(draft: WorkoutDraft) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(`${WORKOUT_DRAFT_KEY_PREFIX}:${draft.userKey}`, JSON.stringify(draft));
+}
+
+function loadWorkoutDraft(mode: DataMode, userId?: string) {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(getWorkoutDraftKey(mode, userId));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<WorkoutDraft>;
+    const userKey = getDraftUserKey(mode, userId);
+    const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
+    const isExpired = updatedAt === 0 || Date.now() - updatedAt > WORKOUT_DRAFT_MAX_AGE_MS;
+    if (parsed.version !== WORKOUT_DRAFT_VERSION || parsed.userKey !== userKey || parsed.dataMode !== mode || isExpired) {
+      clearWorkoutDraft(mode, userId);
+      return null;
+    }
+
+    return {
+      version: WORKOUT_DRAFT_VERSION,
+      updatedAt,
+      dataMode: mode,
+      userKey,
+      activeRoutineDay: typeof parsed.activeRoutineDay === "string" && setupDays.includes(parsed.activeRoutineDay)
+        ? parsed.activeRoutineDay
+        : "Lunes",
+      activeExerciseIndex: Math.max(0, Number(parsed.activeExerciseIndex) || 0),
+      hasStartedTraining: Boolean(parsed.hasStartedTraining),
+      readiness: normalizeTrainingReadiness(parsed.readiness),
+      exerciseDrafts: normalizeExerciseDrafts(parsed.exerciseDrafts),
+    } satisfies WorkoutDraft;
+  } catch {
+    clearWorkoutDraft(mode, userId);
+    return null;
+  }
+}
+
+function clearWorkoutDraft(mode: DataMode, userId?: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(getWorkoutDraftKey(mode, userId));
 }
 
 function createTrainingCycleSnapshot(index: number, plan: TrainingPlan, exercises: ExerciseTemplate[], entries: ExerciseEntry[]): TrainingCycleSnapshot {
@@ -3677,6 +3960,41 @@ function normalizeExerciseDraft(exercise: ExerciseTemplate, draft?: ExerciseDraf
   };
 }
 
+function normalizeExerciseDrafts(value: unknown): Record<string, ExerciseDraft> {
+  if (!value || typeof value !== "object") return {};
+
+  const parsed = value as Record<string, Partial<ExerciseDraft> | undefined>;
+  return Object.fromEntries(Object.entries(parsed).flatMap(([id, draft]) => {
+    if (!draft || typeof id !== "string") return [];
+    const reps = Array.isArray(draft.reps)
+      ? draft.reps.map((item) => (item === "" ? "" : Number(item) || 0))
+      : [];
+
+    return [[id, {
+      weight: draft.weight === "" ? "" : Number(draft.weight) || 0,
+      rir: typeof draft.rir === "string" ? draft.rir : "",
+      reps,
+      registered: Boolean(draft.registered),
+    } satisfies ExerciseDraft]];
+  }));
+}
+
+function normalizeTrainingReadiness(value: unknown): TrainingReadiness | null {
+  if (!value || typeof value !== "object") return null;
+  const parsed = value as Partial<TrainingReadiness>;
+  return {
+    motivation: normalizeReadinessScore(parsed.motivation),
+    hydration: normalizeReadinessScore(parsed.hydration),
+    sleep: normalizeReadinessScore(parsed.sleep),
+    energy: normalizeReadinessScore(parsed.energy),
+    skipped: Boolean(parsed.skipped),
+  };
+}
+
+function normalizeReadinessScore(value: unknown) {
+  const score = Number(value);
+  return Number.isInteger(score) && score >= 1 && score <= 7 ? score : undefined;
+}
 
 function calculateTargetSummary(exercises: ExerciseTemplate[]) {
   return exercises.reduce(
