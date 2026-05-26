@@ -84,6 +84,36 @@ const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
 const ROUTINE_DRAFT_KEY_PREFIX = "organizatech:routine-draft";
 const ROUTINE_DRAFT_VERSION = 1;
 const ROUTINE_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+const blockedSignupDomains = new Set([
+  "example.com",
+  "example.cl",
+  "test.com",
+  "test.cl",
+  "fake.com",
+  "fake.cl",
+  "prueba.com",
+  "demo.com",
+  "dominio.com",
+  "correo.com",
+  "email.com",
+  "mailinator.com",
+  "yopmail.com",
+  "tempmail.com",
+  "10minutemail.com",
+]);
+const blockedSignupLocalParts = new Set([
+  "test",
+  "prueba",
+  "fake",
+  "demo",
+  "usuario",
+  "user",
+  "asd",
+  "aaa",
+  "qwe",
+  "correo",
+  "email",
+]);
 const trainingCycles = [
   {
     id: "macro",
@@ -482,7 +512,8 @@ export function OrganizatechApp() {
 
   async function handleAuth(mode: "login" | "registro", formData: FormData) {
     const name = String(formData.get("register-name") || "").trim();
-    const email = String(formData.get(mode === "registro" ? "register-email" : "login-email") || "").trim();
+    const rawEmail = String(formData.get(mode === "registro" ? "register-email" : "login-email") || "");
+    const email = rawEmail.trim().toLowerCase();
     const password = String(formData.get(mode === "registro" ? "register-password" : "login-password") || "");
     const confirm = String(formData.get("register-confirm-password") || "");
     const supabase = getSupabaseBrowserClient();
@@ -491,12 +522,19 @@ export function OrganizatechApp() {
       return;
     }
 
+    const signupEmailValidation = mode === "registro" ? validateSignupEmail(rawEmail) : null;
+
     if (!email) {
       setStatusMessage("Ingresa tu correo electr\u00f3nico.");
       return;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (signupEmailValidation) {
+      setStatusMessage(signupEmailValidation);
+      return;
+    }
+
+    if (mode === "login" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setStatusMessage("Ingresa un correo electr\u00f3nico v\u00e1lido.");
       return;
     }
@@ -3790,6 +3828,37 @@ function getWeeklyComparisonContext(metrics: ExerciseMetrics[], week: number, da
 
 function removeAccents(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function validateSignupEmail(rawEmail: string) {
+  const email = rawEmail.trim().toLowerCase();
+  if (/\s/.test(rawEmail)) return "El correo no debe contener espacios.";
+  if (!isValidSignupEmailFormat(email)) return "Ingresa un correo válido para poder confirmar tu cuenta.";
+
+  const [localPart, domain] = email.split("@");
+  if (blockedSignupDomains.has(domain) || blockedSignupLocalParts.has(localPart)) {
+    return "No uses correos de prueba. Necesitamos un correo real para confirmar tu cuenta.";
+  }
+
+  return null;
+}
+
+function isValidSignupEmailFormat(email: string) {
+  if (email.length < 6 || email.length > 254) return false;
+  if ((email.match(/@/g) ?? []).length !== 1) return false;
+
+  const [localPart, domain] = email.split("@");
+  if (!localPart || !domain || localPart.length > 64) return false;
+  if (localPart.startsWith(".") || localPart.endsWith(".") || localPart.includes("..")) return false;
+  if (domain.startsWith(".") || domain.endsWith(".") || domain.includes("..")) return false;
+
+  const labels = domain.split(".");
+  const extension = labels.at(-1) ?? "";
+  if (labels.length < 2 || extension.length < 2) return false;
+  if (!labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return false;
+  if (!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(localPart)) return false;
+
+  return true;
 }
 
 function readSetupNumber(value: string) {
