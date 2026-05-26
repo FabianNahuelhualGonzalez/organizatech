@@ -335,6 +335,12 @@ export function OrganizatechApp() {
         if (!isMounted) return;
 
         applySessionState(authState);
+        if (isPasswordRecoveryFlow()) {
+          setStatusMessage("Crea una nueva contraseña para continuar.");
+          setScreenHistory([]);
+          setScreen("nueva-password");
+          return;
+        }
         if (authState.session) {
           setStatusMessage("");
           await refreshData(authState.dataMode);
@@ -371,6 +377,12 @@ export function OrganizatechApp() {
         return;
       }
       if (event === "SIGNED_IN") {
+        if (isPasswordRecoveryFlow()) {
+          setStatusMessage("Crea una nueva contraseña para continuar.");
+          setScreenHistory([]);
+          setScreen("nueva-password");
+          return;
+        }
         setStatusMessage("");
         void refreshData(nextState.dataMode).then(() => {
           if (isMounted && !restoreActiveFlowForSession(nextState.dataMode, nextState.user?.id)) {
@@ -803,7 +815,7 @@ export function OrganizatechApp() {
 
     setIsBusy(true);
     try {
-      const redirectTo = typeof window === "undefined" ? "https://organizatech.cl" : window.location.origin;
+      const redirectTo = getPasswordRecoveryRedirectUrl();
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       if (error) {
         setStatusMessage(translateAuthError(error));
@@ -4396,6 +4408,18 @@ function validateSignupEmail(rawEmail: string) {
   }
 
   return null;
+}
+
+function getPasswordRecoveryRedirectUrl() {
+  if (typeof window === "undefined") return "https://organizatech.cl?flow=password-recovery";
+  const url = new URL(window.location.origin);
+  url.searchParams.set("flow", "password-recovery");
+  return url.toString();
+}
+
+function isPasswordRecoveryFlow() {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("flow") === "password-recovery";
 }
 
 function isValidSignupEmailFormat(email: string) {
