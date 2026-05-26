@@ -86,6 +86,7 @@ const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
 const ROUTINE_DRAFT_KEY_PREFIX = "organizatech:routine-draft";
 const WORKOUT_DRAFT_KEY_PREFIX = "organizatech:workout-draft";
 const ACTIVE_FLOW_KEY_PREFIX = "organizatech:active-flow";
+const PASSWORD_RECOVERY_FLOW_KEY = "organizatech:password-recovery-flow";
 const ROUTINE_DRAFT_VERSION = 1;
 const WORKOUT_DRAFT_VERSION = 1;
 const ACTIVE_FLOW_VERSION = 1;
@@ -280,7 +281,7 @@ interface TrainingCycleSnapshot {
 }
 
 export function OrganizatechApp() {
-  const [screen, setScreen] = useState<Screen>("login");
+  const [screen, setScreen] = useState<Screen>(() => (isPasswordRecoveryFlow() ? "nueva-password" : "login"));
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
   const [sessionName, setSessionName] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
@@ -292,14 +293,17 @@ export function OrganizatechApp() {
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
-  const [statusMessage, setStatusMessage] = useState("Validando sesión...");
+  const [statusMessage, setStatusMessage] = useState(() => (
+    isPasswordRecoveryFlow() ? "Crea una nueva contraseña para continuar." : "Validando sesión..."
+  ));
   const [dataSource, setDataSource] = useState<DataSource>("local");
   const [dataMode, setDataMode] = useState<DataMode>("demo");
   const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isAuthLoading, setIsAuthLoading] = useState(() => !isPasswordRecoveryFlow());
   const [isBusy, setIsBusy] = useState(false);
+  const passwordUpdateSuccessRef = useRef(false);
   const [exercises, setExercises] = useState<ExerciseTemplate[]>([]);
   const [entries, setEntries] = useState<ExerciseEntry[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -328,14 +332,24 @@ export function OrganizatechApp() {
     const supabase = getSupabaseBrowserClient();
 
     async function bootstrapSession() {
-      setIsAuthLoading(true);
-      setStatusMessage("Validando sesión...");
+      const recoveryRequested = isPasswordRecoveryFlow();
+      if (recoveryRequested) {
+        markPasswordRecoveryFlow();
+        setIsAuthLoading(false);
+        setStatusMessage("Crea una nueva contraseña para continuar.");
+        setScreenHistory([]);
+        setScreen("nueva-password");
+      } else {
+        setIsAuthLoading(true);
+        setStatusMessage("Validando sesión...");
+      }
       try {
         const authState = await getInitialSupabaseSession();
         if (!isMounted) return;
 
         applySessionState(authState);
-        if (isPasswordRecoveryFlow()) {
+        if (recoveryRequested || isPasswordRecoveryFlow()) {
+          markPasswordRecoveryFlow();
           setStatusMessage("Crea una nueva contraseña para continuar.");
           setScreenHistory([]);
           setScreen("nueva-password");
@@ -371,13 +385,17 @@ export function OrganizatechApp() {
 
       applySessionState(nextState);
       if (event === "PASSWORD_RECOVERY") {
-        setStatusMessage("Crea una nueva contraseÃ±a para continuar.");
+        markPasswordRecoveryFlow();
+        setIsAuthLoading(false);
+        setStatusMessage("Crea una nueva contraseña para continuar.");
         setScreenHistory([]);
         setScreen("nueva-password");
         return;
       }
       if (event === "SIGNED_IN") {
         if (isPasswordRecoveryFlow()) {
+          markPasswordRecoveryFlow();
+          setIsAuthLoading(false);
           setStatusMessage("Crea una nueva contraseña para continuar.");
           setScreenHistory([]);
           setScreen("nueva-password");
@@ -394,6 +412,11 @@ export function OrganizatechApp() {
         setStatusMessage("");
       }
       if (event === "SIGNED_OUT") {
+        if (passwordUpdateSuccessRef.current) {
+          passwordUpdateSuccessRef.current = false;
+          clearUserSessionState("Contraseña actualizada correctamente. Ya puedes iniciar sesión.");
+          return;
+        }
         clearUserSessionState("Sesión cerrada correctamente.");
       }
     }).data.subscription;
@@ -444,7 +467,7 @@ export function OrganizatechApp() {
   const hasRoutinePlanForDraft = exercises.length > 0;
 
   useEffect(() => {
-    if (screen === "login" || screen === "registro") return;
+    if (screen === "login" || screen === "registro" || screen === "recuperar-password" || screen === "nueva-password") return;
     const flow = getActiveFlow(screen, hasRoutinePlanForDraft, isEditingRoutinePlan, hasStartedTraining, readiness);
 
     function persistFlow() {
@@ -875,7 +898,10 @@ export function OrganizatechApp() {
 
       setNewPassword("");
       setNewPasswordConfirm("");
+      passwordUpdateSuccessRef.current = true;
       await supabase.auth.signOut();
+      clearPasswordRecoveryFlow();
+      clearPasswordRecoveryUrl();
       setStatusMessage("Contrase\u00f1a actualizada correctamente. Ya puedes iniciar sesi\u00f3n.");
       setScreen("login");
     } catch (error) {
@@ -4419,7 +4445,36 @@ function getPasswordRecoveryRedirectUrl() {
 
 function isPasswordRecoveryFlow() {
   if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get("flow") === "password-recovery";
+  const searchParams = new URLSearchParams(window.location.search);
+  if (searchParams.get("flow") === "password-recovery") return true;
+
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+  const hashParams = new URLSearchParams(hash);
+  if (hashParams.get("type") === "recovery") return true;
+
+  return (
+    window.sessionStorage.getItem(PASSWORD_RECOVERY_FLOW_KEY) === "true" ||
+    window.localStorage.getItem(PASSWORD_RECOVERY_FLOW_KEY) === "true"
+  );
+}
+
+function markPasswordRecoveryFlow() {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(PASSWORD_RECOVERY_FLOW_KEY, "true");
+  window.localStorage.setItem(PASSWORD_RECOVERY_FLOW_KEY, "true");
+}
+
+function clearPasswordRecoveryFlow() {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(PASSWORD_RECOVERY_FLOW_KEY);
+  window.localStorage.removeItem(PASSWORD_RECOVERY_FLOW_KEY);
+}
+
+function clearPasswordRecoveryUrl() {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("flow");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}`);
 }
 
 function isValidSignupEmailFormat(email: string) {
