@@ -509,8 +509,7 @@ export function OrganizatechApp() {
   }, [dataMode, hasStartedTraining, screen, supabaseUser?.id]);
 
   const metrics = useMemo(() => calculateWeeklyComparison(entries), [entries]);
-  const currentWeek = Math.max(1, ...entries.map((entry) => entry.week));
-  const nextWeek = entries.length > 0 ? currentWeek + 1 : 1;
+  const currentWeek = getTrainingWeekNumberForDate(entries, getSantiagoDateKey(new Date()));
   const hasTrainingEntries = entries.length > 0;
   const hasRoutinePlan = exercises.length > 0;
   const routineDays = getActiveRoutineDays(exercises, trainingPlan);
@@ -1127,6 +1126,8 @@ export function OrganizatechApp() {
     setIsBusy(true);
     try {
       const savedEntries: ExerciseEntry[] = [];
+      const trainingDate = getSantiagoDateKey(new Date());
+      const trainingWeek = getTrainingWeekNumberForDate(entries, trainingDate);
       for (const exercise of validExercises) {
         const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
         const previous = metrics.filter((entry) => entry.exerciseId === exercise.id).at(-1);
@@ -1135,8 +1136,8 @@ export function OrganizatechApp() {
           exerciseId: exercise.id,
           exerciseName: exercise.name,
           routine: exercise.routine,
-          week: nextWeek,
-          date: getSantiagoDateKey(new Date()),
+          week: trainingWeek,
+          date: trainingDate,
           targetSets: exercise.targetSets,
           targetReps: exercise.targetReps,
           weight: Number(draft.weight) || 0,
@@ -1363,6 +1364,10 @@ export function OrganizatechApp() {
           entries={entries}
           startRegistration={() => navigateTo("registro-entrenamiento")}
           goToRoutine={() => openRoutineDay(dashboardDay)}
+          viewSummary={(selectedDay) => {
+            setComparisonDay(selectedDay);
+            navigateTo("comparacion");
+          }}
           switchDay={setDashboardDayOverride}
         />
       )}
@@ -1625,6 +1630,7 @@ function DashboardScreen({
   entries,
   startRegistration,
   goToRoutine,
+  viewSummary,
   switchDay,
 }: {
   exercises: ExerciseTemplate[];
@@ -1642,6 +1648,7 @@ function DashboardScreen({
   entries: ExerciseEntry[];
   startRegistration: () => void;
   goToRoutine: () => void;
+  viewSummary: (day: string) => void;
   switchDay: (day: string) => void;
 }) {
   const hasTodayRoutine = dayExercises.length > 0;
@@ -1830,7 +1837,10 @@ function DashboardScreen({
           })}
         </div>
         {activeDayData.hasRoutine ? (
-          <button className="button secondary dashboard-routine-button" onClick={goToRoutine}>
+          <button
+            className="button secondary dashboard-routine-button"
+            onClick={() => activeDayData.isCompleted ? viewSummary(activeDayData.day) : goToRoutine()}
+          >
             {activeDayData.isCompleted ? "Ver resumen" : "Ir a rutina"}
           </button>
         ) : null}
@@ -4151,9 +4161,12 @@ function getCalendarTrainingDay() {
 }
 
 function getCurrentSantiagoWeekDates(reference = new Date()) {
-  const todayKey = getSantiagoDateKey(reference);
-  const todayDate = parseDateKeyAsLocalNoon(todayKey);
-  const todayName = getTrainingDayFromDate(todayKey);
+  return getSantiagoWeekDatesForDateKey(getSantiagoDateKey(reference));
+}
+
+function getSantiagoWeekDatesForDateKey(dateKey: string) {
+  const todayDate = parseDateKeyAsLocalNoon(dateKey);
+  const todayName = getTrainingDayFromDate(dateKey);
   const todayIndex = Math.max(0, setupDays.indexOf(todayName));
   const mondayDate = new Date(todayDate);
   mondayDate.setDate(todayDate.getDate() - todayIndex);
@@ -4163,6 +4176,26 @@ function getCurrentSantiagoWeekDates(reference = new Date()) {
     date.setDate(mondayDate.getDate() + index);
     return [day, getLocalDateKey(date)];
   }));
+}
+
+function getTrainingWeekNumberForDate(entries: ExerciseEntry[], dateKey: string) {
+  if (entries.length === 0) return 1;
+
+  const weekDates = getSantiagoWeekDatesForDateKey(dateKey);
+  const weekDateValues = Object.values(weekDates);
+  const weekStart = weekDates.Lunes;
+  const sameWeekEntries = entries.filter((entry) => weekDateValues.includes(normalizeTrainingDateKey(entry.date)));
+  if (sameWeekEntries.length > 0) {
+    return Math.min(...sameWeekEntries.map((entry) => entry.week));
+  }
+
+  const previousEntries = entries.filter((entry) => {
+    const entryDate = normalizeTrainingDateKey(entry.date);
+    return Boolean(entryDate && entryDate < weekStart);
+  });
+  if (previousEntries.length === 0) return 1;
+
+  return Math.max(...previousEntries.map((entry) => entry.week)) + 1;
 }
 
 function isDateInWeek(value: string, weekDates: Record<string, string>) {
