@@ -2953,12 +2953,15 @@ function ComparisonScreenV2({
   const routineName = dayExercises[0]?.routine ?? activeDay;
   const comparisonContext = getWeeklyComparisonContext(dayMetrics, selectedWeek, activeDay);
   const title = activeView === "plan"
-    ? `Rutina registrada ${activeDay}`
-    : comparisonContext.title;
+    ? `Rutina programada ${activeDay}`
+    : `Entrenamiento registrado ${activeDay}`;
+  const subtitle = activeView === "plan"
+    ? "Planificacion de entrenamiento"
+    : `Registro real del entrenamiento | Semana ${selectedWeek}`;
   const visibleMetrics = activeView === "plan" ? [] : currentMetrics;
   const listTitle = activeView === "plan"
-    ? `Listado de rutina registrada día ${activeDay} | ${routineName}`
-    : `Ejercicios comparados | Semana ${selectedWeek}`;
+    ? `Listado de rutina programada dia ${activeDay} | ${routineName}`
+    : `Ejercicios registrados | Semana ${selectedWeek}`;
   const allComparableExercises = exercises.filter((exercise) => exercise.name.trim().length > 0);
   const selectedExercise = allComparableExercises.find((exercise) => exercise.id === selectedExerciseId) ?? allComparableExercises[0];
   const selectedHistory = selectedExercise
@@ -3013,9 +3016,9 @@ function ComparisonScreenV2({
       <div className="card wide comparison-hero">
         <p className="eyebrow">Comparacion semanal</p>
         <h3>{title}</h3>
-        <p className="eyebrow">{activeDay} | {routineName}</p>
+        <p className="eyebrow">{subtitle}</p>
         <div className="comparison-chip-row">
-          <button className={`compare-chip ${activeView === "plan" ? "active" : ""}`} type="button" onClick={() => setActiveView("plan")}>Rutina registrada</button>
+          <button className={`compare-chip ${activeView === "plan" ? "active" : ""}`} type="button" onClick={() => setActiveView("plan")}>Rutina programada</button>
           <span className="compare-chip">vs</span>
           {weekNumbers.map((week) => (
             <button
@@ -4331,8 +4334,8 @@ function getWeeklyComparisonContext(metrics: ExerciseMetrics[], week: number, da
 
   if (week <= 1 || !latestPreviousWeek) {
     return {
-      title: `Rutina registrada vs Semana ${week} | ${day}`,
-      detail: `Semana ${week} se compara contra la rutina registrada de ${day}.`,
+      title: `Rutina programada vs Semana ${week} | ${day}`,
+      detail: `Semana ${week} se compara contra la rutina programada de ${day}.`,
       referenceWeek: null,
     };
   }
