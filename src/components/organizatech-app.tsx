@@ -1649,11 +1649,19 @@ function DashboardScreen({
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
-  const carouselDays = useMemo(() => hasRoutinePlan ? weekDays : [day], [hasRoutinePlan, weekDays, day]);
   const allWeekMetrics = useMemo(
     () => calculateWeeklyComparison(entries).filter((entry) => entry.week === currentWeek),
     [entries, currentWeek],
   );
+  const registeredDays = useMemo(() => {
+    const days = new Set(allWeekMetrics.map((entry) => getTrainingDayFromDate(entry.date)).filter(Boolean));
+    return setupDays.filter((item) => days.has(item));
+  }, [allWeekMetrics]);
+  const carouselDays = useMemo(() => {
+    if (!hasRoutinePlan) return [day];
+    const merged = [...weekDays, ...registeredDays];
+    return setupDays.filter((item) => merged.includes(item));
+  }, [hasRoutinePlan, weekDays, registeredDays, day]);
 
   useEffect(() => {
     setActiveCarouselDay(day);
@@ -1668,17 +1676,28 @@ function DashboardScreen({
 
   function getDashboardDayData(item: string) {
     const itemExercises = exercises.filter((exercise) => (exercise.day ?? item) === item);
-    const exerciseIds = new Set(itemExercises.map((exercise) => exercise.id));
-    const itemMetrics = allWeekMetrics.filter((entry) => exerciseIds.has(entry.exerciseId));
+    const itemMetrics = allWeekMetrics.filter((entry) => getTrainingDayFromDate(entry.date) === item);
     const itemRoutine = itemMetrics[0]?.routine ?? itemExercises[0]?.routine ?? (item === day ? routine : item);
-    const preview = itemMetrics.filter((entry) => entry.routine === itemRoutine);
+    const isCompleted = itemMetrics.length > 0;
+    const isToday = item === getCalendarTrainingDay();
+    const plannedSummary = calculateTargetSummary(itemExercises);
+    const registeredWeightSimple = itemMetrics.reduce((total, entry) => total + entry.weight, 0);
+    const registeredReps = itemMetrics.reduce((total, entry) => total + entry.totalReps, 0);
+    const exerciseCount = isCompleted ? itemMetrics.length : itemExercises.length;
+    const totalWeightSimple = isCompleted ? registeredWeightSimple : plannedSummary.totalWeight;
+    const totalReps = isCompleted ? registeredReps : plannedSummary.reps;
 
     return {
       day: item,
-      title: itemExercises.length > 0 ? `Entrenamiento · ${item}` : `Entrenamiento · ${item}: no registra entrenamientos`,
+      title: itemExercises.length > 0 || isCompleted ? `Entrenamiento · ${item}` : `Entrenamiento · ${item}: no registra entrenamientos`,
       exercises: itemExercises,
-      metrics: preview,
-      hasRoutine: itemExercises.length > 0,
+      metrics: itemMetrics,
+      hasRoutine: itemExercises.length > 0 || isCompleted,
+      isCompleted,
+      isToday,
+      statusLabel: isCompleted ? (isToday ? "Completado · Hoy" : "Completado") : isToday ? "Pendiente · Hoy" : "Pendiente",
+      summaryTitle: isCompleted ? "Entrenamiento registrado" : "Rutina programada",
+      summaryLabel: `${exerciseCount} ejercicios · ${formatKg(totalWeightSimple)} · ${totalReps} reps`,
     };
   }
 
@@ -1729,23 +1748,23 @@ function DashboardScreen({
           <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
             {carouselDays.map((item) => {
               const itemData = getDashboardDayData(item);
-              const itemSummary = calculateTargetSummary(itemData.exercises);
+              const visibleExercises = itemData.exercises.slice(0, 3);
+              const hiddenCount = Math.max(0, itemData.exercises.length - visibleExercises.length);
 
               return (
                 <article className="dashboard-training-slide" key={item}>
                   <p className="eyebrow">{itemData.exercises[0]?.routine ?? item}</p>
-                  <h3>{itemData.title}</h3>
+                  <DashboardTrainingHeader title={itemData.title} status={itemData.statusLabel} completed={itemData.isCompleted} today={itemData.isToday} />
                   {itemData.hasRoutine ? (
                     <>
-                      <RoutineMetricGrid targetSummary={itemSummary} exerciseLabel="Ejercicios total" />
+                      <DashboardDaySummary title={itemData.summaryTitle} label={itemData.summaryLabel} completed={itemData.isCompleted} today={itemData.isToday} />
                       <div className="exercise-preview-section">
                         <h3>Ejercicios a realizar · {item}</h3>
-                        <div className="exercise-preview-carousel">
-                          {itemData.exercises.map((exercise) => (
-                            <article className="exercise-preview-slide" key={exercise.id}>
-                              <ProgrammedExerciseCard exercise={exercise} />
-                            </article>
+                        <div className="exercise-list">
+                          {visibleExercises.map((exercise) => (
+                            <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
                           ))}
+                          {hiddenCount > 0 ? <MoreExercisesNotice count={hiddenCount} /> : null}
                         </div>
                       </div>
                     </>
@@ -1775,22 +1794,31 @@ function DashboardScreen({
         </div>
         <WeeklyProgressSvg value={summary.volumePercentage} />
       </div>
-      <div className={`card wide dashboard-training-card ${activeDayData.metrics[0] ? getObjectiveTone(activeDayData.metrics[0].objectiveStatus) : ""}`}>
+      <div className={`card wide dashboard-training-card ${activeDayData.isCompleted ? "completed" : activeDayData.isToday ? "today" : ""}`}>
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
           {carouselDays.map((item) => {
             const itemData = getDashboardDayData(item);
+            const visibleMetrics = itemData.metrics.slice(0, 3);
+            const visibleExercises = itemData.exercises.slice(0, 3);
+            const totalItems = itemData.isCompleted ? itemData.metrics.length : itemData.exercises.length;
+            const visibleCount = itemData.isCompleted ? visibleMetrics.length : visibleExercises.length;
+            const hiddenCount = Math.max(0, totalItems - visibleCount);
 
             return (
               <article className="dashboard-training-slide" key={item}>
-                <h3>{itemData.title}</h3>
+                <DashboardTrainingHeader title={itemData.title} status={itemData.statusLabel} completed={itemData.isCompleted} today={itemData.isToday} />
                 {itemData.hasRoutine ? (
-                  <div className="exercise-list">
-                    {itemData.metrics.length > 0
-                      ? itemData.metrics.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)
-                      : itemData.exercises.slice(0, 4).map((exercise) => (
-                        <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
-                      ))}
-                  </div>
+                  <>
+                    <DashboardDaySummary title={itemData.summaryTitle} label={itemData.summaryLabel} completed={itemData.isCompleted} today={itemData.isToday} />
+                    <div className="exercise-list">
+                      {itemData.isCompleted
+                        ? visibleMetrics.map((entry) => <RegisteredExerciseCard entry={entry} key={entry.id} />)
+                        : visibleExercises.map((exercise) => (
+                          <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
+                        ))}
+                      {hiddenCount > 0 ? <MoreExercisesNotice count={hiddenCount} /> : null}
+                    </div>
+                  </>
                 ) : (
                   <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
                 )}
@@ -1800,7 +1828,7 @@ function DashboardScreen({
         </div>
         {activeDayData.hasRoutine ? (
           <button className="button secondary dashboard-routine-button" onClick={goToRoutine}>
-            Ir a rutina
+            {activeDayData.isCompleted ? "Ver resumen" : "Ir a rutina"}
           </button>
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
@@ -1811,6 +1839,60 @@ function DashboardScreen({
     </section>
   );
 }
+
+function DashboardTrainingHeader({
+  title,
+  status,
+  completed,
+  today,
+}: {
+  title: string;
+  status: string;
+  completed: boolean;
+  today: boolean;
+}) {
+  const tone = completed ? "completed" : today ? "today" : "pending";
+
+  return (
+    <div className="dashboard-training-header">
+      <h3>{title}</h3>
+      <span className={`day-status-badge ${tone}`}>{status}</span>
+    </div>
+  );
+}
+
+function DashboardDaySummary({
+  title,
+  label,
+  completed,
+  today,
+}: {
+  title: string;
+  label: string;
+  completed: boolean;
+  today: boolean;
+}) {
+  return (
+    <div className={`dashboard-day-summary ${completed ? "completed" : today ? "today" : ""}`}>
+      <span>{title}</span>
+      <strong>{label}</strong>
+    </div>
+  );
+}
+
+function RegisteredExerciseCard({ entry }: { entry: ExerciseMetrics }) {
+  return (
+    <div className="registered-exercise-card">
+      <strong>{entry.exerciseName}</strong>
+      <span>Registrado</span>
+    </div>
+  );
+}
+
+function MoreExercisesNotice({ count }: { count: number }) {
+  return <p className="more-exercises-notice">+{count} ejercicios más</p>;
+}
+
 function DashboardDayDots({ day, weekDays }: { day: string; weekDays: string[] }) {
   const activeIndex = Math.max(0, weekDays.indexOf(day));
   return <IndexDots activeIndex={activeIndex} count={weekDays.length} />;
@@ -4063,6 +4145,21 @@ function getCalendarTrainingDay() {
   const today = new Intl.DateTimeFormat("es-CL", { weekday: "long" }).format(new Date());
   const normalizedToday = setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(today.toLowerCase()));
   return normalizedToday ?? "Lunes";
+}
+
+function getTrainingDayFromDate(value: string) {
+  const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const date = dateOnlyMatch
+    ? new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]), 12)
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const weekday = new Intl.DateTimeFormat("es-CL", {
+    weekday: "long",
+    timeZone: "America/Santiago",
+  }).format(date);
+
+  return setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(weekday.toLowerCase())) ?? "";
 }
 
 function getRoutineDays(exercises: ExerciseTemplate[]) {
