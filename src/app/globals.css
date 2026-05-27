@@ -1932,7 +1932,7 @@ h3 {
 
 .dashboard-training-card {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   overflow: hidden;
 }
 
@@ -1954,6 +1954,85 @@ h3 {
 .dashboard-training-card h3 {
   margin: 0;
   font-size: clamp(16px, 4.8vw, 20px);
+  line-height: 1.35;
+}
+
+.dashboard-training-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dashboard-training-header h3 {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.day-status-badge {
+  display: inline-flex;
+  min-height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 191, 77, 0.68);
+  border-radius: 999px;
+  padding: 0 10px;
+  color: var(--yellow);
+  background: rgba(255, 191, 77, 0.1);
+  font-size: clamp(10px, 2.7vw, 12px);
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.day-status-badge.completed {
+  border-color: rgba(116, 223, 113, 0.68);
+  color: var(--green);
+  background: rgba(116, 223, 113, 0.12);
+}
+
+.day-status-badge.today {
+  border-color: rgba(60, 122, 255, 0.72);
+  color: #8bb5ff;
+  background: rgba(60, 122, 255, 0.16);
+}
+
+.dashboard-day-summary {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(255, 191, 77, 0.34);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(255, 191, 77, 0.09), transparent 38%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.dashboard-day-summary.completed {
+  border-color: rgba(116, 223, 113, 0.36);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(116, 223, 113, 0.1), transparent 38%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.dashboard-day-summary.today {
+  border-color: rgba(60, 122, 255, 0.4);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(60, 122, 255, 0.12), transparent 38%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.dashboard-day-summary span {
+  color: var(--muted);
+  font-size: clamp(10px, 2.8vw, 12px);
+  font-weight: 800;
+}
+
+.dashboard-day-summary strong {
+  color: white;
+  font-size: clamp(12px, 3.4vw, 14px);
   line-height: 1.35;
 }
 
@@ -2908,14 +2987,15 @@ h3 {
 }
 
 .exercise-preview-slide .plan-row {
-  height: 100%;
+  height: auto;
 }
 
 .dashboard-training-slide {
   display: grid;
   flex: 0 0 100%;
   min-width: 0;
-  gap: 10px;
+  align-content: start;
+  gap: 9px;
   scroll-snap-align: start;
 }
 

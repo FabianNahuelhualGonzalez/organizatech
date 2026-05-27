@@ -1671,14 +1671,24 @@ function DashboardScreen({
     const exerciseIds = new Set(itemExercises.map((exercise) => exercise.id));
     const itemMetrics = allWeekMetrics.filter((entry) => exerciseIds.has(entry.exerciseId));
     const itemRoutine = itemMetrics[0]?.routine ?? itemExercises[0]?.routine ?? (item === day ? routine : item);
-    const preview = itemMetrics.filter((entry) => entry.routine === itemRoutine);
+    const isCompleted = itemMetrics.length > 0;
+    const isToday = item === getCalendarTrainingDay();
+    const targetSummary = calculateTargetSummary(itemExercises);
+    const registeredVolume = itemMetrics.reduce((total, entry) => total + entry.volumeTotal, 0);
+    const registeredReps = itemMetrics.reduce((total, entry) => total + entry.totalReps, 0);
 
     return {
       day: item,
       title: itemExercises.length > 0 ? `Entrenamiento · ${item}` : `Entrenamiento · ${item}: no registra entrenamientos`,
       exercises: itemExercises,
-      metrics: preview,
+      metrics: itemMetrics,
       hasRoutine: itemExercises.length > 0,
+      isCompleted,
+      isToday,
+      statusLabel: isCompleted ? "Completado" : isToday ? "Pendiente · Hoy" : "Pendiente",
+      summaryLabel: isCompleted
+        ? `${itemMetrics.length} ejercicios · ${formatKg(registeredVolume)} · ${registeredReps} reps`
+        : `${itemExercises.length} ejercicios · ${formatKg(targetSummary.totalWeight)} · ${targetSummary.reps} reps`,
     };
   }
 
@@ -1729,15 +1739,17 @@ function DashboardScreen({
           <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
             {carouselDays.map((item) => {
               const itemData = getDashboardDayData(item);
-              const itemSummary = calculateTargetSummary(itemData.exercises);
 
               return (
                 <article className="dashboard-training-slide" key={item}>
                   <p className="eyebrow">{itemData.exercises[0]?.routine ?? item}</p>
-                  <h3>{itemData.title}</h3>
+                  <DashboardTrainingHeader title={itemData.title} status={itemData.statusLabel} completed={itemData.isCompleted} today={itemData.isToday} />
                   {itemData.hasRoutine ? (
                     <>
-                      <RoutineMetricGrid targetSummary={itemSummary} exerciseLabel="Ejercicios total" />
+                      <div className={`dashboard-day-summary ${itemData.isCompleted ? "completed" : itemData.isToday ? "today" : ""}`}>
+                        <span>{itemData.isCompleted ? "Entrenamiento registrado" : "Rutina programada"}</span>
+                        <strong>{itemData.summaryLabel}</strong>
+                      </div>
                       <div className="exercise-preview-section">
                         <h3>Ejercicios a realizar · {item}</h3>
                         <div className="exercise-preview-carousel">
@@ -1782,15 +1794,21 @@ function DashboardScreen({
 
             return (
               <article className="dashboard-training-slide" key={item}>
-                <h3>{itemData.title}</h3>
+                <DashboardTrainingHeader title={itemData.title} status={itemData.statusLabel} completed={itemData.isCompleted} today={itemData.isToday} />
                 {itemData.hasRoutine ? (
-                  <div className="exercise-list">
-                    {itemData.metrics.length > 0
-                      ? itemData.metrics.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)
-                      : itemData.exercises.slice(0, 4).map((exercise) => (
-                        <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
-                      ))}
-                  </div>
+                  <>
+                    <div className={`dashboard-day-summary ${itemData.isCompleted ? "completed" : itemData.isToday ? "today" : ""}`}>
+                      <span>{itemData.isCompleted ? "Entrenamiento registrado" : "Rutina programada"}</span>
+                      <strong>{itemData.summaryLabel}</strong>
+                    </div>
+                    <div className="exercise-list">
+                      {itemData.isCompleted
+                        ? itemData.metrics.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)
+                        : itemData.exercises.slice(0, 4).map((exercise) => (
+                          <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
+                        ))}
+                    </div>
+                  </>
                 ) : (
                   <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
                 )}
@@ -1800,7 +1818,7 @@ function DashboardScreen({
         </div>
         {activeDayData.hasRoutine ? (
           <button className="button secondary dashboard-routine-button" onClick={goToRoutine}>
-            Ir a rutina
+            {activeDayData.isCompleted ? "Ver resumen" : activeDayData.isToday ? "Comenzar entrenamiento" : "Ir a rutina"}
           </button>
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
@@ -1811,6 +1829,28 @@ function DashboardScreen({
     </section>
   );
 }
+
+function DashboardTrainingHeader({
+  title,
+  status,
+  completed,
+  today,
+}: {
+  title: string;
+  status: string;
+  completed: boolean;
+  today: boolean;
+}) {
+  const tone = completed ? "completed" : today ? "today" : "pending";
+
+  return (
+    <div className="dashboard-training-header">
+      <h3>{title}</h3>
+      <span className={`day-status-badge ${tone}`}>{status}</span>
+    </div>
+  );
+}
+
 function DashboardDayDots({ day, weekDays }: { day: string; weekDays: string[] }) {
   const activeIndex = Math.max(0, weekDays.indexOf(day));
   return <IndexDots activeIndex={activeIndex} count={weekDays.length} />;
