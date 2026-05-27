@@ -70,6 +70,7 @@ declare
   v_session_id uuid;
   v_entry jsonb;
   v_exercise_id uuid;
+  v_reps jsonb;
   v_seen_exercises uuid[] := array[]::uuid[];
   v_entries jsonb := coalesce(p_entries, '[]'::jsonb);
 begin
@@ -86,11 +87,15 @@ begin
   end if;
 
   if p_status not in ('completed', 'skipped') then
-    raise exception 'Estado de entrenamiento inválido';
+    raise exception 'Estado de entrenamiento invalido';
   end if;
 
   if p_planned_day is not null and p_planned_day not in ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday') then
-    raise exception 'Día planificado inválido';
+    raise exception 'Dia planificado invalido';
+  end if;
+
+  if jsonb_typeof(v_entries) <> 'array' then
+    raise exception 'La lista de ejercicios debe ser un arreglo JSON';
   end if;
 
   if not exists (
@@ -151,12 +156,42 @@ begin
   if p_status = 'completed' then
     for v_entry in select * from jsonb_array_elements(v_entries)
     loop
-      v_exercise_id := (v_entry->>'exercise_id')::uuid;
+      if jsonb_typeof(v_entry) <> 'object' then
+        raise exception 'Cada ejercicio debe ser un objeto JSON';
+      end if;
+
+      if nullif(v_entry->>'exercise_id', '') is null then
+        raise exception 'Cada ejercicio requiere exercise_id';
+      end if;
+
+      begin
+        v_exercise_id := (v_entry->>'exercise_id')::uuid;
+      exception
+        when invalid_text_representation then
+          raise exception 'exercise_id invalido';
+      end;
 
       if v_exercise_id = any(v_seen_exercises) then
         raise exception 'El entrenamiento contiene ejercicios duplicados';
       end if;
       v_seen_exercises := array_append(v_seen_exercises, v_exercise_id);
+
+      v_reps := v_entry->'reps';
+      if v_reps is null or jsonb_typeof(v_reps) <> 'array' then
+        raise exception 'Cada ejercicio requiere reps como arreglo';
+      end if;
+
+      if jsonb_array_length(v_reps) = 0 then
+        raise exception 'Cada ejercicio requiere al menos una repeticion';
+      end if;
+
+      begin
+        perform rep_value::integer
+        from jsonb_array_elements_text(v_reps) as reps(rep_value);
+      exception
+        when invalid_text_representation then
+          raise exception 'reps debe contener enteros validos';
+      end;
 
       if not exists (
         select 1
@@ -186,7 +221,7 @@ begin
         v_exercise_id,
         coalesce((v_entry->>'weight')::numeric, 0),
         coalesce((v_entry->>'previous_weight')::numeric, 0),
-        array(select jsonb_array_elements_text(v_entry->'reps')::integer),
+        array(select rep_value::integer from jsonb_array_elements_text(v_reps) as reps(rep_value)),
         nullif(v_entry->>'rir', ''),
         nullif(v_entry->>'notes', '')
       );
