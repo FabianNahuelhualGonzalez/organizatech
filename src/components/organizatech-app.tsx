@@ -1689,11 +1689,10 @@ function DashboardScreen({
     const expectedDate = currentWeekDates[item] ?? "";
     const itemExerciseIds = new Set(itemExercises.map((exercise) => exercise.id));
     const itemMetrics = allWeekMetrics.filter((entry) => (
-      normalizeTrainingDateKey(entry.date) === expectedDate && itemExerciseIds.has(entry.exerciseId)
+      normalizeTrainingDateKey(entry.date) === expectedDate && entryMatchesRegisteredDay(entry, item, itemExerciseIds)
     ));
     const itemRoutine = itemMetrics[0]?.routine ?? itemExercises[0]?.routine ?? (item === day ? routine : item);
-    const isCompleted = itemExercises.length > 0
-      && itemExercises.every((exercise) => itemMetrics.some((entry) => entry.exerciseId === exercise.id));
+    const isCompleted = itemMetrics.length > 0;
     const isToday = expectedDate === getSantiagoDateKey(new Date());
     const plannedSummary = calculateTargetSummary(itemExercises);
     const registeredWeightSimple = itemMetrics.reduce((total, entry) => total + entry.weight, 0);
@@ -4211,6 +4210,19 @@ function isDateInWeek(value: string, weekDates: Record<string, string>) {
 function getTrainingDayFromWeekDate(value: string, weekDates: Record<string, string>) {
   const dateKey = normalizeTrainingDateKey(value);
   return setupDays.find((day) => weekDates[day] === dateKey) ?? "";
+}
+
+function entryMatchesRegisteredDay(entry: ExerciseMetrics, day: string, exerciseIds: Set<string>) {
+  const noteDay = getTrainingDayFromEntryNotes(entry.notes);
+  if (noteDay) return noteDay === day;
+  return exerciseIds.has(entry.exerciseId);
+}
+
+function getTrainingDayFromEntryNotes(notes: string | undefined) {
+  const match = notes?.match(/Entrenamiento\s+([^:]+):/i);
+  const value = match?.[1]?.trim();
+  if (!value) return "";
+  return setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(value.toLowerCase())) ?? "";
 }
 
 function getTrainingDayFromDate(value: string) {
