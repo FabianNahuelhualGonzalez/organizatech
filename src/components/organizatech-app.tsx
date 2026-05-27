@@ -72,6 +72,7 @@ type Screen =
   | "registro"
   | "recuperar-password"
   | "nueva-password"
+  | "recovery-expired"
   | "dashboard"
   | "entrenamiento"
   | "registro-entrenamiento"
@@ -281,7 +282,7 @@ interface TrainingCycleSnapshot {
 }
 
 export function OrganizatechApp() {
-  const [screen, setScreen] = useState<Screen>(() => (isPasswordRecoveryFlow() ? "nueva-password" : "login"));
+  const [screen, setScreen] = useState<Screen>(() => getInitialAuthScreen());
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
   const [sessionName, setSessionName] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
@@ -293,15 +294,18 @@ export function OrganizatechApp() {
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
-  const [statusMessage, setStatusMessage] = useState(() => (
-    isPasswordRecoveryFlow() ? "Crea una nueva contraseña para continuar." : "Validando sesión..."
-  ));
+  const [statusMessage, setStatusMessage] = useState(() => {
+    const recoveryState = getPasswordRecoveryRouteState();
+    if (recoveryState === "expired") return "El enlace de recuperación expiró o ya fue utilizado.";
+    if (recoveryState === "active") return "Crea una nueva contraseña para continuar.";
+    return "Validando sesión...";
+  });
   const [dataSource, setDataSource] = useState<DataSource>("local");
   const [dataMode, setDataMode] = useState<DataMode>("demo");
   const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
-  const [isAuthLoading, setIsAuthLoading] = useState(() => !isPasswordRecoveryFlow());
+  const [isAuthLoading, setIsAuthLoading] = useState(() => getPasswordRecoveryRouteState() === "none");
   const [isBusy, setIsBusy] = useState(false);
   const passwordUpdateSuccessRef = useRef(false);
   const [exercises, setExercises] = useState<ExerciseTemplate[]>([]);
@@ -332,8 +336,16 @@ export function OrganizatechApp() {
     const supabase = getSupabaseBrowserClient();
 
     async function bootstrapSession() {
-      const recoveryRequested = isPasswordRecoveryFlow();
-      if (recoveryRequested) {
+      const recoveryState = getPasswordRecoveryRouteState();
+      if (recoveryState === "expired") {
+        clearPasswordRecoveryFlow();
+        setIsAuthLoading(false);
+        setStatusMessage("El enlace de recuperación expiró o ya fue utilizado.");
+        setScreenHistory([]);
+        setScreen("recovery-expired");
+        return;
+      }
+      if (recoveryState === "active") {
         markPasswordRecoveryFlow();
         setIsAuthLoading(false);
         setStatusMessage("Crea una nueva contraseña para continuar.");
@@ -348,7 +360,15 @@ export function OrganizatechApp() {
         if (!isMounted) return;
 
         applySessionState(authState);
-        if (recoveryRequested || isPasswordRecoveryFlow()) {
+        const currentRecoveryState = getPasswordRecoveryRouteState();
+        if (currentRecoveryState === "expired") {
+          clearPasswordRecoveryFlow();
+          setStatusMessage("El enlace de recuperación expiró o ya fue utilizado.");
+          setScreenHistory([]);
+          setScreen("recovery-expired");
+          return;
+        }
+        if (currentRecoveryState === "active") {
           markPasswordRecoveryFlow();
           setStatusMessage("Crea una nueva contraseña para continuar.");
           setScreenHistory([]);
@@ -384,6 +404,15 @@ export function OrganizatechApp() {
       };
 
       applySessionState(nextState);
+      const recoveryState = getPasswordRecoveryRouteState();
+      if (recoveryState === "expired") {
+        clearPasswordRecoveryFlow();
+        setIsAuthLoading(false);
+        setStatusMessage("El enlace de recuperación expiró o ya fue utilizado.");
+        setScreenHistory([]);
+        setScreen("recovery-expired");
+        return;
+      }
       if (event === "PASSWORD_RECOVERY") {
         markPasswordRecoveryFlow();
         setIsAuthLoading(false);
@@ -393,7 +422,7 @@ export function OrganizatechApp() {
         return;
       }
       if (event === "SIGNED_IN") {
-        if (isPasswordRecoveryFlow()) {
+        if (recoveryState === "active") {
           markPasswordRecoveryFlow();
           setIsAuthLoading(false);
           setStatusMessage("Crea una nueva contraseña para continuar.");
@@ -467,7 +496,13 @@ export function OrganizatechApp() {
   const hasRoutinePlanForDraft = exercises.length > 0;
 
   useEffect(() => {
-    if (screen === "login" || screen === "registro" || screen === "recuperar-password" || screen === "nueva-password") return;
+    if (
+      screen === "login" ||
+      screen === "registro" ||
+      screen === "recuperar-password" ||
+      screen === "nueva-password" ||
+      screen === "recovery-expired"
+    ) return;
     const flow = getActiveFlow(screen, hasRoutinePlanForDraft, isEditingRoutinePlan, hasStartedTraining, readiness);
 
     function persistFlow() {
@@ -1321,9 +1356,40 @@ export function OrganizatechApp() {
   }
 
   function switchAuthScreen(nextScreen: "login" | "registro" | "recuperar-password") {
+    if (nextScreen === "recuperar-password") {
+      clearPasswordRecoveryFlow();
+      clearPasswordRecoveryUrl();
+    }
     clearAuthForms();
     setStatusMessage("");
     setScreen(nextScreen);
+  }
+
+  if (screen === "recovery-expired") {
+    return (
+      <main className="app-shell">
+        <RecoveryExpiredScreen
+          message={statusMessage}
+          onRequestNewLink={() => switchAuthScreen("recuperar-password")}
+        />
+      </main>
+    );
+  }
+
+  if (screen === "nueva-password") {
+    return (
+      <main className="app-shell">
+        <NewPasswordScreen
+          password={newPassword}
+          confirmPassword={newPasswordConfirm}
+          message={statusMessage}
+          isBusy={isBusy}
+          onPasswordChange={setNewPassword}
+          onConfirmPasswordChange={setNewPasswordConfirm}
+          onSubmit={handleUpdatePassword}
+        />
+      </main>
+    );
   }
 
   if (isAuthLoading) {
@@ -1412,22 +1478,6 @@ export function OrganizatechApp() {
           onEmailChange={setRecoveryEmail}
           onSubmit={handlePasswordRecovery}
           onBack={() => switchAuthScreen("login")}
-        />
-      </main>
-    );
-  }
-
-  if (screen === "nueva-password") {
-    return (
-      <main className="app-shell">
-        <NewPasswordScreen
-          password={newPassword}
-          confirmPassword={newPasswordConfirm}
-          message={statusMessage}
-          isBusy={isBusy}
-          onPasswordChange={setNewPassword}
-          onConfirmPasswordChange={setNewPasswordConfirm}
-          onSubmit={handleUpdatePassword}
         />
       </main>
     );
@@ -1793,6 +1843,37 @@ function PasswordRecoveryScreen({
   );
 }
 
+function RecoveryExpiredScreen({
+  message,
+  onRequestNewLink,
+}: {
+  message: string;
+  onRequestNewLink: () => void;
+}) {
+  return (
+    <section className="login-shell">
+      <div className="login-logo">
+        <div className="brand-mark">
+          <Dumbbell size={28} />
+        </div>
+        <div>
+          <h1>Organizatech</h1>
+          <p className="eyebrow">Recupera el acceso a tu cuenta.</p>
+        </div>
+      </div>
+      <div className="card form-grid">
+        <h2>Enlace expirado</h2>
+        <p className="eyebrow">{message || "El enlace de recuperación expiró o ya fue utilizado."}</p>
+        <p className="eyebrow">Solicita un nuevo enlace para restablecer tu contraseña.</p>
+        <button className="button" type="button" onClick={onRequestNewLink}>
+          <Mail size={17} />
+          Solicitar nuevo enlace
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function NewPasswordScreen({
   password,
   confirmPassword,
@@ -1831,7 +1912,7 @@ function NewPasswordScreen({
         <p className="eyebrow">{message}</p>
         <button className="button" type="submit" disabled={isBusy}>
           <Save size={17} />
-          {isBusy ? "Actualizando..." : "Actualizar contraseña"}
+          {isBusy ? "Actualizando..." : "Cambiar contraseña"}
         </button>
       </form>
     </section>
@@ -4365,6 +4446,7 @@ function isAppScreen(value: unknown): value is Screen {
     value === "registro" ||
     value === "recuperar-password" ||
     value === "nueva-password" ||
+    value === "recovery-expired" ||
     value === "dashboard" ||
     value === "entrenamiento" ||
     value === "registro-entrenamiento" ||
@@ -4443,19 +4525,39 @@ function getPasswordRecoveryRedirectUrl() {
   return url.toString();
 }
 
-function isPasswordRecoveryFlow() {
-  if (typeof window === "undefined") return false;
-  const searchParams = new URLSearchParams(window.location.search);
-  if (searchParams.get("flow") === "password-recovery") return true;
+function getInitialAuthScreen(): Screen {
+  const recoveryState = getPasswordRecoveryRouteState();
+  if (recoveryState === "expired") return "recovery-expired";
+  if (recoveryState === "active") return "nueva-password";
+  return "login";
+}
 
+function getPasswordRecoveryRouteState(): "none" | "active" | "expired" {
+  if (typeof window === "undefined") return "none";
+
+  const searchParams = new URLSearchParams(window.location.search);
   const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
   const hashParams = new URLSearchParams(hash);
-  if (hashParams.get("type") === "recovery") return true;
 
-  return (
+  const errorCode = searchParams.get("error_code") ?? hashParams.get("error_code");
+  const error = searchParams.get("error") ?? hashParams.get("error");
+  if (errorCode === "otp_expired" || error === "access_denied") return "expired";
+
+  if (searchParams.get("flow") === "password-recovery") return "active";
+  if (searchParams.get("type") === "recovery" || hashParams.get("type") === "recovery") return "active";
+
+  if (
     window.sessionStorage.getItem(PASSWORD_RECOVERY_FLOW_KEY) === "true" ||
     window.localStorage.getItem(PASSWORD_RECOVERY_FLOW_KEY) === "true"
-  );
+  ) {
+    return "active";
+  }
+
+  return "none";
+}
+
+function isPasswordRecoveryFlow() {
+  return getPasswordRecoveryRouteState() === "active";
 }
 
 function markPasswordRecoveryFlow() {
@@ -4474,6 +4576,10 @@ function clearPasswordRecoveryUrl() {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
   url.searchParams.delete("flow");
+  url.searchParams.delete("type");
+  url.searchParams.delete("error");
+  url.searchParams.delete("error_code");
+  url.searchParams.delete("error_description");
   window.history.replaceState({}, "", `${url.pathname}${url.search}`);
 }
 
@@ -4513,6 +4619,7 @@ function screenLabel(screen: Screen) {
     registro: "Registro",
     "recuperar-password": "Recuperar contraseña",
     "nueva-password": "Nueva contraseña",
+    "recovery-expired": "Enlace expirado",
     dashboard: "Panel principal",
     entrenamiento: "Entrenamiento",
     "registro-entrenamiento": "Registro de entrenamiento",
