@@ -1136,7 +1136,7 @@ export function OrganizatechApp() {
           exerciseName: exercise.name,
           routine: exercise.routine,
           week: nextWeek,
-          date: new Date().toISOString().slice(0, 10),
+          date: getSantiagoDateKey(new Date()),
           targetSets: exercise.targetSets,
           targetReps: exercise.targetReps,
           weight: Number(draft.weight) || 0,
@@ -1649,14 +1649,16 @@ function DashboardScreen({
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
+  const currentWeekDates = useMemo(() => getCurrentSantiagoWeekDates(), []);
+  const allMetrics = useMemo(() => calculateWeeklyComparison(entries), [entries]);
   const allWeekMetrics = useMemo(
-    () => calculateWeeklyComparison(entries).filter((entry) => entry.week === currentWeek),
-    [entries, currentWeek],
+    () => allMetrics.filter((entry) => isDateInWeek(entry.date, currentWeekDates)),
+    [allMetrics, currentWeekDates],
   );
   const registeredDays = useMemo(() => {
-    const days = new Set(allWeekMetrics.map((entry) => getTrainingDayFromDate(entry.date)).filter(Boolean));
+    const days = new Set(allWeekMetrics.map((entry) => getTrainingDayFromWeekDate(entry.date, currentWeekDates)).filter(Boolean));
     return setupDays.filter((item) => days.has(item));
-  }, [allWeekMetrics]);
+  }, [allWeekMetrics, currentWeekDates]);
   const carouselDays = useMemo(() => {
     if (!hasRoutinePlan) return [day];
     const merged = [...weekDays, ...registeredDays];
@@ -1676,10 +1678,11 @@ function DashboardScreen({
 
   function getDashboardDayData(item: string) {
     const itemExercises = exercises.filter((exercise) => (exercise.day ?? item) === item);
-    const itemMetrics = allWeekMetrics.filter((entry) => getTrainingDayFromDate(entry.date) === item);
+    const expectedDate = currentWeekDates[item] ?? "";
+    const itemMetrics = allWeekMetrics.filter((entry) => normalizeTrainingDateKey(entry.date) === expectedDate);
     const itemRoutine = itemMetrics[0]?.routine ?? itemExercises[0]?.routine ?? (item === day ? routine : item);
     const isCompleted = itemMetrics.length > 0;
-    const isToday = item === getCalendarTrainingDay();
+    const isToday = expectedDate === getSantiagoDateKey(new Date());
     const plannedSummary = calculateTargetSummary(itemExercises);
     const registeredWeightSimple = itemMetrics.reduce((total, entry) => total + entry.weight, 0);
     const registeredReps = itemMetrics.reduce((total, entry) => total + entry.totalReps, 0);
@@ -2737,7 +2740,7 @@ function GuidedTrainingScreen({
         exerciseName: activeExercise.name,
         routine: activeExercise.routine,
         week: 1,
-        date: new Date().toISOString().slice(0, 10),
+        date: getSantiagoDateKey(new Date()),
         targetSets: activeExercise.targetSets,
         targetReps: activeExercise.targetReps,
         weight: Number(draft.weight) || 0,
@@ -4147,6 +4150,31 @@ function getCalendarTrainingDay() {
   return normalizedToday ?? "Lunes";
 }
 
+function getCurrentSantiagoWeekDates(reference = new Date()) {
+  const todayKey = getSantiagoDateKey(reference);
+  const todayDate = parseDateKeyAsLocalNoon(todayKey);
+  const todayName = getTrainingDayFromDate(todayKey);
+  const todayIndex = Math.max(0, setupDays.indexOf(todayName));
+  const mondayDate = new Date(todayDate);
+  mondayDate.setDate(todayDate.getDate() - todayIndex);
+
+  return Object.fromEntries(setupDays.map((day, index) => {
+    const date = new Date(mondayDate);
+    date.setDate(mondayDate.getDate() + index);
+    return [day, getLocalDateKey(date)];
+  }));
+}
+
+function isDateInWeek(value: string, weekDates: Record<string, string>) {
+  const dateKey = normalizeTrainingDateKey(value);
+  return Boolean(dateKey && Object.values(weekDates).includes(dateKey));
+}
+
+function getTrainingDayFromWeekDate(value: string, weekDates: Record<string, string>) {
+  const dateKey = normalizeTrainingDateKey(value);
+  return setupDays.find((day) => weekDates[day] === dateKey) ?? "";
+}
+
 function getTrainingDayFromDate(value: string) {
   const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
   const date = dateOnlyMatch
@@ -4160,6 +4188,39 @@ function getTrainingDayFromDate(value: string) {
   }).format(date);
 
   return setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(weekday.toLowerCase())) ?? "";
+}
+
+function normalizeTrainingDateKey(value: string) {
+  const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (dateOnlyMatch) return `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]}`;
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : getSantiagoDateKey(date);
+}
+
+function getSantiagoDateKey(value: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const year = parts.find((part) => part.type === "year")?.value ?? "1970";
+  const month = parts.find((part) => part.type === "month")?.value ?? "01";
+  const day = parts.find((part) => part.type === "day")?.value ?? "01";
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateKeyAsLocalNoon(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
+function getLocalDateKey(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function getRoutineDays(exercises: ExerciseTemplate[]) {
