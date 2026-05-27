@@ -1126,7 +1126,8 @@ export function OrganizatechApp() {
     setIsBusy(true);
     try {
       const savedEntries: ExerciseEntry[] = [];
-      const trainingDate = getSantiagoDateKey(new Date());
+      const currentWeekDates = getCurrentSantiagoWeekDates();
+      const trainingDate = currentWeekDates[visibleDay] ?? getSantiagoDateKey(new Date());
       const trainingWeek = getTrainingWeekNumberForDate(entries, trainingDate);
       for (const exercise of validExercises) {
         const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
@@ -1686,9 +1687,13 @@ function DashboardScreen({
   function getDashboardDayData(item: string) {
     const itemExercises = exercises.filter((exercise) => (exercise.day ?? item) === item);
     const expectedDate = currentWeekDates[item] ?? "";
-    const itemMetrics = allWeekMetrics.filter((entry) => normalizeTrainingDateKey(entry.date) === expectedDate);
+    const itemExerciseIds = new Set(itemExercises.map((exercise) => exercise.id));
+    const itemMetrics = allWeekMetrics.filter((entry) => (
+      normalizeTrainingDateKey(entry.date) === expectedDate && itemExerciseIds.has(entry.exerciseId)
+    ));
     const itemRoutine = itemMetrics[0]?.routine ?? itemExercises[0]?.routine ?? (item === day ? routine : item);
-    const isCompleted = itemMetrics.length > 0;
+    const isCompleted = itemExercises.length > 0
+      && itemExercises.every((exercise) => itemMetrics.some((entry) => entry.exerciseId === exercise.id));
     const isToday = expectedDate === getSantiagoDateKey(new Date());
     const plannedSummary = calculateTargetSummary(itemExercises);
     const registeredWeightSimple = itemMetrics.reduce((total, entry) => total + entry.weight, 0);
