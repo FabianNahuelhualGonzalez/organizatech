@@ -193,6 +193,10 @@ Despues de rollback:
 - Ejecutar consolidacion sin que los prechecks coincidan.
 - El cleanup podria eliminar auditoria sintetica necesaria si se ejecuta antes de guardar evidencia.
 
+## Nota de compatibilidad PostgreSQL
+
+PostgreSQL no permite `min(uuid)`. Los scripts de consolidacion infieren `routine_id` con `array_agg(distinct ex.routine_id::text order by ex.routine_id::text)[1]::uuid` y mantienen `routine_count = 1` como validacion de seguridad para asegurar que cada grupo tenga una sola rutina inferible.
+
 ## Recomendacion
 
 Usar este dataset solo para validar el flujo QA de consolidacion, rollback y postchecks. Mantener fallback legacy activo hasta cerrar todos los casos legacy reales y no avanzar a Produccion sin auditoria Claude, validacion QA y aprobacion humana explicita.
