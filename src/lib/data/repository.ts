@@ -1,5 +1,12 @@
 import { demoEntries, exerciseTemplates } from "@/lib/data/demo";
-import type { ExerciseEntry, ExerciseTemplate, RoutineName } from "@/lib/progress/types";
+import type {
+  ExerciseEntry,
+  ExerciseTemplate,
+  RoutineName,
+  TrainingDayCode,
+  TrainingSession,
+  TrainingSessionStatus,
+} from "@/lib/progress/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export type DataSource = "local" | "supabase";
@@ -8,11 +15,38 @@ export type RepositoryMode = "demo" | "supabase";
 export interface AppData {
   exercises: ExerciseTemplate[];
   entries: ExerciseEntry[];
+  sessions: TrainingSession[];
   source: DataSource;
 }
 
 const LOCAL_EXERCISES_KEY = "organizatech:exercises";
 const LOCAL_ENTRIES_KEY = "organizatech:entries";
+const LOCAL_SESSIONS_KEY = "organizatech:training-sessions";
+
+export interface TrainingSessionEntryInput {
+  id: string;
+  exerciseId: string;
+  exerciseName: string;
+  routine: RoutineName;
+  targetSets: number;
+  targetReps: number;
+  weight: number;
+  previousWeight: number;
+  reps: number[];
+  rir?: string;
+  notes?: string;
+}
+
+export interface SaveTrainingSessionInput {
+  routine: RoutineName;
+  plannedDay: TrainingDayCode;
+  plannedDate: string;
+  trainedDate: string;
+  weekNumber: number;
+  status: TrainingSessionStatus;
+  notes?: string;
+  entries: TrainingSessionEntryInput[];
+}
 
 export async function loadAppData(mode: RepositoryMode = "demo"): Promise<AppData> {
   if (mode === "demo") return loadLocalData();
@@ -30,8 +64,9 @@ export async function loadAppData(mode: RepositoryMode = "demo"): Promise<AppDat
 
   await ensureProfile(userId, user.email ?? "");
   const exercises = await fetchExercises(userId);
-  const entries = await fetchEntries(userId);
-  return { exercises, entries, source: "supabase" };
+  const sessions = await fetchTrainingSessions(userId);
+  const entries = sessions.flatMap((session) => session.entries);
+  return { exercises, entries, sessions, source: "supabase" };
 }
 
 export async function saveExercise(exercise: ExerciseTemplate, mode: RepositoryMode = "demo"): Promise<ExerciseTemplate> {
@@ -43,7 +78,7 @@ export async function saveExercise(exercise: ExerciseTemplate, mode: RepositoryM
     const exercises = exists
       ? local.exercises.map((item) => (item.id === exercise.id ? exercise : item))
       : [...local.exercises, exercise];
-    saveLocalData(exercises, local.entries);
+    saveLocalData(exercises, local.entries, local.sessions);
     return exercise;
   }
 
@@ -81,6 +116,10 @@ export async function deleteExercise(exerciseId: string, mode: RepositoryMode = 
     saveLocalData(
       local.exercises.filter((exercise) => exercise.id !== exerciseId),
       local.entries.filter((entry) => entry.exerciseId !== exerciseId),
+      local.sessions.map((session) => ({
+        ...session,
+        entries: session.entries.filter((entry) => entry.exerciseId !== exerciseId),
+      })),
     );
     return;
   }
@@ -124,56 +163,94 @@ export async function deactivateActiveCycle(mode: RepositoryMode = "demo"): Prom
   }
 }
 
-export async function saveTrainingEntry(entry: ExerciseEntry, mode: RepositoryMode = "demo"): Promise<ExerciseEntry> {
+export async function saveTrainingSessionWithEntries(
+  input: SaveTrainingSessionInput,
+  mode: RepositoryMode = "demo",
+): Promise<TrainingSession> {
   const auth = await getRepositoryAuth(mode);
+  const routineId = createIdFromRoutine(input.routine);
+  const sessionId = crypto.randomUUID();
+  const calendarWeekStart = getCalendarWeekStart(input.trainedDate);
+  const entries = input.status === "completed"
+    ? input.entries.map((entry) => ({
+      id: entry.id,
+      sessionId,
+      exerciseId: entry.exerciseId,
+      exerciseName: entry.exerciseName,
+      routine: entry.routine,
+      week: input.weekNumber,
+      date: input.trainedDate,
+      targetSets: entry.targetSets,
+      targetReps: entry.targetReps,
+      weight: entry.weight,
+      previousWeight: entry.previousWeight,
+      reps: entry.reps,
+      notes: entry.notes,
+      rir: entry.rir,
+    }))
+    : [];
+
+  const session: TrainingSession = {
+    id: sessionId,
+    routineId,
+    routine: input.routine,
+    weekNumber: input.weekNumber,
+    calendarWeekStart,
+    plannedDay: input.plannedDay,
+    plannedDate: input.plannedDate,
+    trainedDate: input.trainedDate,
+    trainedAt: input.trainedDate,
+    status: input.status,
+    completedAt: input.status === "completed" ? new Date().toISOString() : undefined,
+    notes: input.notes,
+    entries,
+  };
 
   if (auth.mode === "demo") {
     const local = loadLocalData();
-    const entries = [...local.entries, entry];
-    saveLocalData(local.exercises, entries);
-    return entry;
+    saveLocalData(local.exercises, [...local.entries, ...entries], [...local.sessions, session]);
+    return session;
   }
 
   const { supabase, userId } = auth;
-  const { data: session, error: sessionError } = await supabase
-    .from("training_sessions")
-    .insert({
-      user_id: userId,
-      week_number: entry.week,
-      trained_at: entry.date,
-      notes: entry.notes ?? null,
-    })
-    .select("id")
-    .single();
-
-  if (sessionError) throw sessionError;
-
-  const { data, error } = await supabase
-    .from("exercise_entries")
-    .insert({
-      id: entry.id,
-      user_id: userId,
-      session_id: session.id,
-      exercise_id: entry.exerciseId,
-      weight: entry.weight,
-      previous_weight: entry.previousWeight,
-      reps: entry.reps,
-      rir: entry.rir ?? null,
-      notes: entry.notes ?? null,
-    })
-    .select("id")
-    .single();
+  const persistedRoutineId = await upsertRoutine(userId, input.routine);
+  const { data, error } = await supabase.rpc("create_training_session_with_entries", {
+    p_routine_id: persistedRoutineId,
+    p_planned_day: input.plannedDay,
+    p_planned_date: input.plannedDate,
+    p_trained_date: input.trainedDate,
+    p_status: input.status,
+    p_week_number: input.weekNumber,
+    p_notes: input.notes ?? null,
+    p_entries: input.status === "completed"
+      ? input.entries.map((entry) => ({
+        id: entry.id,
+        exercise_id: entry.exerciseId,
+        weight: entry.weight,
+        previous_weight: entry.previousWeight,
+        reps: entry.reps,
+        rir: entry.rir ?? "",
+        notes: entry.notes ?? "",
+      }))
+      : [],
+  });
 
   if (error) throw error;
-  return { ...entry, id: data.id };
+
+  return {
+    ...session,
+    id: String(data),
+    routineId: persistedRoutineId,
+    entries: entries.map((entry) => ({ ...entry, sessionId: String(data) })),
+  };
 }
 
 export function resetLocalData() {
-  saveLocalData(exerciseTemplates, demoEntries);
+  saveLocalData(exerciseTemplates, demoEntries, deriveLegacyTrainingSessions(demoEntries));
 }
 
 export function replaceLocalData(exercises: ExerciseTemplate[], entries: ExerciseEntry[]) {
-  saveLocalData(exercises, entries);
+  saveLocalData(exercises, entries, deriveLegacyTrainingSessions(entries));
 }
 
 async function getRepositoryAuth(mode: RepositoryMode) {
@@ -206,22 +283,25 @@ function createSessionExpiredError() {
 
 function loadLocalData(): AppData {
   if (typeof window === "undefined") {
-    return { exercises: exerciseTemplates, entries: demoEntries, source: "local" };
+    return { exercises: exerciseTemplates, entries: demoEntries, sessions: deriveLegacyTrainingSessions(demoEntries), source: "local" };
   }
 
   const savedExercises = window.localStorage.getItem(LOCAL_EXERCISES_KEY);
   const savedEntries = window.localStorage.getItem(LOCAL_ENTRIES_KEY);
+  const savedSessions = window.localStorage.getItem(LOCAL_SESSIONS_KEY);
   const exercises = savedExercises ? (JSON.parse(savedExercises) as ExerciseTemplate[]) : [];
   const entries = savedEntries ? (JSON.parse(savedEntries) as ExerciseEntry[]) : [];
+  const sessions = savedSessions ? (JSON.parse(savedSessions) as TrainingSession[]) : deriveLegacyTrainingSessions(entries);
 
-  if (!savedExercises || !savedEntries) saveLocalData(exercises, entries);
-  return { exercises, entries, source: "local" };
+  if (!savedExercises || !savedEntries || !savedSessions) saveLocalData(exercises, entries, sessions);
+  return { exercises, entries, sessions, source: "local" };
 }
 
-function saveLocalData(exercises: ExerciseTemplate[], entries: ExerciseEntry[]) {
+function saveLocalData(exercises: ExerciseTemplate[], entries: ExerciseEntry[], sessions: TrainingSession[] = deriveLegacyTrainingSessions(entries)) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(LOCAL_EXERCISES_KEY, JSON.stringify(exercises));
   window.localStorage.setItem(LOCAL_ENTRIES_KEY, JSON.stringify(entries));
+  window.localStorage.setItem(LOCAL_SESSIONS_KEY, JSON.stringify(sessions));
 }
 
 async function ensureProfile(userId: string, email: string) {
@@ -305,7 +385,7 @@ async function fetchEntries(userId: string): Promise<ExerciseEntry[]> {
 
   const { data, error } = await supabase
     .from("exercise_entries")
-    .select("id,weight,previous_weight,reps,rir,notes,training_sessions(week_number,trained_at),exercises(id,name,target_sets,target_reps,base_weight,notes,routines(name))")
+    .select("id,session_id,weight,previous_weight,reps,rir,notes,training_sessions(week_number,trained_at),exercises(id,name,target_sets,target_reps,base_weight,notes,routines(name))")
     .eq("user_id", userId)
     .order("created_at");
 
@@ -318,11 +398,113 @@ async function fetchEntries(userId: string): Promise<ExerciseEntry[]> {
 
     return [{
       id: row.id,
+      sessionId: row.session_id,
       exerciseId: exercise.id,
       exerciseName: exercise.name,
       routine: readRoutineName(firstRelation(exercise.routines)?.name),
       week: session.week_number,
       date: session.trained_at,
+      targetSets: exercise.target_sets,
+      targetReps: exercise.target_reps,
+      weight: Number(row.weight),
+      previousWeight: Number(row.previous_weight),
+      reps: row.reps,
+      notes: row.notes ?? exercise.notes ?? undefined,
+      rir: row.rir ?? undefined,
+    }];
+  });
+}
+
+export async function fetchTrainingSessions(userId: string): Promise<TrainingSession[]> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("training_sessions")
+    .select("id,routine_id,week_number,trained_at,calendar_week_start,planned_day,planned_date,trained_date,status,completed_at,deleted_at,notes,routines(name),exercise_entries(id,exercise_id,weight,previous_weight,reps,rir,notes,exercises(id,name,target_sets,target_reps,base_weight,notes,routines(name)))")
+    .eq("user_id", userId)
+    .is("deleted_at", null)
+    .order("created_at");
+
+  if (isMissingTrainingSessionSourceColumnError(error)) {
+    return deriveLegacyTrainingSessions(await fetchEntries(userId));
+  }
+  if (error) throw error;
+
+  return ((data ?? []) as unknown as SupabaseTrainingSessionRow[]).map((row) => {
+    const routineName = readRoutineName(firstRelationOrNull(row.routines)?.name);
+    const trainedDate = row.trained_date ?? row.trained_at;
+    const entries = (row.exercise_entries ?? []).flatMap((entry) => {
+      const exercise = firstRelation(entry.exercises);
+      if (isInactiveCycleNote(exercise.notes)) return [];
+
+      return [{
+        id: entry.id,
+        sessionId: row.id,
+        exerciseId: entry.exercise_id,
+        exerciseName: exercise.name,
+        routine: readRoutineName(firstRelationOrNull(exercise.routines)?.name) || routineName,
+        week: row.week_number,
+        date: trainedDate,
+        targetSets: exercise.target_sets,
+        targetReps: exercise.target_reps,
+        weight: Number(entry.weight),
+        previousWeight: Number(entry.previous_weight),
+        reps: entry.reps,
+        notes: entry.notes ?? row.notes ?? undefined,
+        rir: entry.rir ?? undefined,
+      }];
+    });
+
+    return {
+      id: row.id,
+      routineId: row.routine_id,
+      routine: routineName,
+      weekNumber: row.week_number,
+      calendarWeekStart: row.calendar_week_start,
+      plannedDay: readTrainingDayCode(row.planned_day),
+      plannedDate: row.planned_date,
+      trainedDate,
+      trainedAt: row.trained_at,
+      status: readTrainingSessionStatus(row.status),
+      completedAt: row.completed_at ?? undefined,
+      deletedAt: row.deleted_at ?? undefined,
+      notes: row.notes ?? undefined,
+      entries,
+    };
+  });
+}
+
+export async function fetchTrainingSessionEntries(sessionId: string, mode: RepositoryMode = "demo"): Promise<ExerciseEntry[]> {
+  const auth = await getRepositoryAuth(mode);
+
+  if (auth.mode === "demo") {
+    return loadLocalData().sessions.find((session) => session.id === sessionId)?.entries ?? [];
+  }
+
+  const { supabase, userId } = auth;
+  const { data, error } = await supabase
+    .from("exercise_entries")
+    .select("id,session_id,weight,previous_weight,reps,rir,notes,training_sessions(week_number,trained_at,trained_date),exercises(id,name,target_sets,target_reps,base_weight,notes,routines(name))")
+    .eq("user_id", userId)
+    .eq("session_id", sessionId)
+    .order("created_at");
+
+  if (error) throw error;
+
+  return ((data ?? []) as unknown as SupabaseEntryRow[]).flatMap((row) => {
+    const session = firstRelation(row.training_sessions);
+    const exercise = firstRelation(row.exercises);
+    if (isInactiveCycleNote(exercise.notes)) return [];
+
+    return [{
+      id: row.id,
+      sessionId: row.session_id,
+      exerciseId: exercise.id,
+      exerciseName: exercise.name,
+      routine: readRoutineName(firstRelationOrNull(exercise.routines)?.name),
+      week: session.week_number,
+      date: session.trained_date ?? session.trained_at,
       targetSets: exercise.target_sets,
       targetReps: exercise.target_reps,
       weight: Number(row.weight),
@@ -354,6 +536,67 @@ function appendInactiveCycleNote(notes: string | null | undefined, inactiveAt: s
   return baseNotes ? `${baseNotes}\n${marker}` : marker;
 }
 
+function deriveLegacyTrainingSessions(entries: ExerciseEntry[]): TrainingSession[] {
+  const grouped = new Map<string, ExerciseEntry[]>();
+  for (const entry of entries) {
+    const key = `${entry.date}:${entry.week}:${entry.routine}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), entry]);
+  }
+
+  return Array.from(grouped.entries()).map(([key, group]) => {
+    const [date, weekText, routine] = key.split(":");
+    const id = `legacy:${key}`;
+    return {
+      id,
+      routineId: null,
+      routine: routine || group[0]?.routine || "Rutina",
+      weekNumber: Number(weekText) || 1,
+      calendarWeekStart: getCalendarWeekStart(date),
+      plannedDay: null,
+      plannedDate: date,
+      trainedDate: date,
+      trainedAt: date,
+      status: "completed",
+      notes: "Sesion legacy derivada de exercise_entries.",
+      entries: group.map((entry) => ({ ...entry, sessionId: entry.sessionId ?? id })),
+    };
+  });
+}
+
+function getCalendarWeekStart(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day, 12);
+  const dayOfWeek = date.getDay() === 0 ? 7 : date.getDay();
+  date.setDate(date.getDate() - (dayOfWeek - 1));
+  const startYear = date.getFullYear();
+  const startMonth = String(date.getMonth() + 1).padStart(2, "0");
+  const startDay = String(date.getDate()).padStart(2, "0");
+  return `${startYear}-${startMonth}-${startDay}`;
+}
+
+function createIdFromRoutine(routine: RoutineName) {
+  return `local:${routine.toLowerCase().replace(/[^a-z0-9]+/gi, "-")}`;
+}
+
+function readTrainingDayCode(value: string | null): TrainingDayCode | null {
+  if (
+    value === "monday" ||
+    value === "tuesday" ||
+    value === "wednesday" ||
+    value === "thursday" ||
+    value === "friday" ||
+    value === "saturday" ||
+    value === "sunday"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function readTrainingSessionStatus(value: string | null): TrainingSessionStatus {
+  return value === "skipped" ? "skipped" : "completed";
+}
+
 function isMissingDayColumnError(error: unknown) {
   if (!error || typeof error !== "object") return false;
   const message = "message" in error ? String(error.message) : "";
@@ -361,9 +604,27 @@ function isMissingDayColumnError(error: unknown) {
   return code === "PGRST204" || (message.toLowerCase().includes("day") && message.toLowerCase().includes("column"));
 }
 
+function isMissingTrainingSessionSourceColumnError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const message = "message" in error ? String(error.message).toLowerCase() : "";
+  const code = "code" in error ? String(error.code) : "";
+  return code === "PGRST204" || (
+    message.includes("calendar_week_start") ||
+    message.includes("planned_day") ||
+    message.includes("planned_date") ||
+    message.includes("trained_date") ||
+    message.includes("routine_id")
+  );
+}
+
 function firstRelation<T>(value: T | T[] | null): T {
   if (Array.isArray(value)) return value[0];
   if (!value) throw new Error("No se pudo leer una relación de Supabase.");
+  return value;
+}
+
+function firstRelationOrNull<T>(value: T | T[] | null): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
   return value;
 }
 
@@ -381,12 +642,13 @@ interface SupabaseExerciseRow {
 
 interface SupabaseEntryRow {
   id: string;
+  session_id: string;
   weight: number | string;
   previous_weight: number | string;
   reps: number[];
   rir: string | null;
   notes: string | null;
-  training_sessions: { week_number: number; trained_at: string } | Array<{ week_number: number; trained_at: string }>;
+  training_sessions: { week_number: number; trained_at: string; trained_date?: string | null } | Array<{ week_number: number; trained_at: string; trained_date?: string | null }>;
   exercises: {
     id: string;
     name: string;
@@ -403,5 +665,47 @@ interface SupabaseEntryRow {
     base_weight: number | string;
     notes: string | null;
     routines: { name?: string } | Array<{ name?: string }> | null;
+  }>;
+}
+
+interface SupabaseTrainingSessionRow {
+  id: string;
+  routine_id: string | null;
+  week_number: number;
+  trained_at: string;
+  calendar_week_start: string | null;
+  planned_day: string | null;
+  planned_date: string | null;
+  trained_date: string | null;
+  status: string | null;
+  completed_at: string | null;
+  deleted_at: string | null;
+  notes: string | null;
+  routines: { name?: string } | Array<{ name?: string }> | null;
+  exercise_entries: Array<{
+    id: string;
+    exercise_id: string;
+    weight: number | string;
+    previous_weight: number | string;
+    reps: number[];
+    rir: string | null;
+    notes: string | null;
+    exercises: {
+      id: string;
+      name: string;
+      target_sets: number;
+      target_reps: number;
+      base_weight: number | string;
+      notes: string | null;
+      routines: { name?: string } | Array<{ name?: string }> | null;
+    } | Array<{
+      id: string;
+      name: string;
+      target_sets: number;
+      target_reps: number;
+      base_weight: number | string;
+      notes: string | null;
+      routines: { name?: string } | Array<{ name?: string }> | null;
+    }>;
   }>;
 }

@@ -45,7 +45,7 @@ import {
   replaceLocalData,
   resetLocalData,
   saveExercise,
-  saveTrainingEntry,
+  saveTrainingSessionWithEntries,
   type DataSource,
 } from "@/lib/data/repository";
 import {
@@ -56,7 +56,15 @@ import {
   generateSmartInsights,
 } from "@/lib/progress/calculations";
 import { buildExerciseComparisonSummary, getExerciseHistory } from "@/lib/progress/exercise-history";
-import type { ExerciseComparisonSummary, ExerciseEntry, ExerciseMetrics, ExerciseTemplate, ObjectiveStatus } from "@/lib/progress/types";
+import type {
+  ExerciseComparisonSummary,
+  ExerciseEntry,
+  ExerciseMetrics,
+  ExerciseTemplate,
+  ObjectiveStatus,
+  TrainingDayCode,
+  TrainingSession,
+} from "@/lib/progress/types";
 import { isSessionExpiredError, translateAuthError, translatePersistenceError } from "@/lib/supabase/auth-errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
@@ -310,6 +318,7 @@ export function OrganizatechApp() {
   const passwordUpdateSuccessRef = useRef(false);
   const [exercises, setExercises] = useState<ExerciseTemplate[]>([]);
   const [entries, setEntries] = useState<ExerciseEntry[]>([]);
+  const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isEditingRoutinePlan, setIsEditingRoutinePlan] = useState(false);
   const [routineNotice, setRoutineNotice] = useState("");
@@ -590,9 +599,9 @@ export function OrganizatechApp() {
   }, [dataMode, hasStartedTraining, screen, supabaseUser?.id]);
 
   const metrics = useMemo(() => calculateWeeklyComparison(entries), [entries]);
-  const currentWeek = Math.max(1, ...entries.map((entry) => entry.week));
-  const nextWeek = entries.length > 0 ? currentWeek + 1 : 1;
-  const hasTrainingEntries = entries.length > 0;
+  const todayKey = getSantiagoDateKey(new Date());
+  const currentWeek = getLegacyWeekNumberForTrainingDate(trainingSessions, entries, todayKey);
+  const hasTrainingEntries = trainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
   const hasRoutinePlan = exercises.length > 0;
   const routineDays = getActiveRoutineDays(exercises, trainingPlan);
   const dashboardCarouselDays = hasRoutinePlan ? routineDays : setupDays;
@@ -634,6 +643,7 @@ export function OrganizatechApp() {
     setDataSource("local");
     setExercises([]);
     setEntries([]);
+    setTrainingSessions([]);
     setExerciseDrafts({});
     setReadiness(null);
     setHasStartedTraining(false);
@@ -718,6 +728,7 @@ export function OrganizatechApp() {
       const next = await loadAppData(mode);
       setExercises(next.exercises);
       setEntries(next.entries);
+      setTrainingSessions(next.sessions);
       setDataSource(next.source);
       setActiveRoutineDay((current) => getVisibleTrainingDay(next.exercises, current));
       setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
@@ -738,6 +749,7 @@ export function OrganizatechApp() {
     if (dataMode === "supabase" && (isSessionExpiredError(error) || message.includes("iniciar sesión"))) {
       clearUserSessionState(message);
     }
+    return message;
   }
 
   async function handleAuth(mode: "login" | "registro", formData: FormData) {
@@ -1222,6 +1234,7 @@ export function OrganizatechApp() {
     replaceLocalData([], []);
     setExercises([]);
     setEntries([]);
+    setTrainingSessions([]);
     setSetupByDay(createSetupByDay());
     setSetupDay("Lunes");
     setTrainingPlan(nextPlan);
@@ -1302,18 +1315,29 @@ export function OrganizatechApp() {
     }
 
     setIsBusy(true);
+    setRoutineNotice("");
     try {
-      const savedEntries: ExerciseEntry[] = [];
-      for (const exercise of validExercises) {
+      const currentWeekDates = getCurrentSantiagoWeekDates();
+      const plannedDate = currentWeekDates[visibleDay] ?? todayKey;
+      const trainedDate = todayKey;
+      const plannedDay = getTrainingDayCode(visibleDay);
+      const trainingWeek = getLegacyWeekNumberForTrainingDate(trainingSessions, entries, trainedDate);
+      const savedSession = await saveTrainingSessionWithEntries({
+        routine: visibleRoutine,
+        plannedDay,
+        plannedDate,
+        trainedDate,
+        weekNumber: trainingWeek,
+        status: "completed",
+        notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${formatReadinessNote(readiness)}`,
+        entries: validExercises.map((exercise) => {
         const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
         const previous = metrics.filter((entry) => entry.exerciseId === exercise.id).at(-1);
-        const saved = await saveTrainingEntry({
+        return {
           id: createId(),
           exerciseId: exercise.id,
           exerciseName: exercise.name,
           routine: exercise.routine,
-          week: nextWeek,
-          date: new Date().toISOString().slice(0, 10),
           targetSets: exercise.targetSets,
           targetReps: exercise.targetReps,
           weight: Number(draft.weight) || 0,
@@ -1321,11 +1345,12 @@ export function OrganizatechApp() {
           reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
           rir: draft.rir,
           notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
-        }, dataMode);
-        savedEntries.push(saved);
-      }
+        };
+      }),
+      }, dataMode);
 
-      setEntries((current) => [...current, ...savedEntries]);
+      setTrainingSessions((current) => [...current, savedSession]);
+      setEntries((current) => [...current, ...savedSession.entries]);
       setExerciseDrafts((current) => {
         const next = { ...current };
         for (const exercise of validExercises) delete next[exercise.id];
@@ -1337,7 +1362,10 @@ export function OrganizatechApp() {
       setHasStartedTraining(false);
       setScreen("dashboard");
     } catch (error) {
-      handlePersistenceError(error);
+      const message = handlePersistenceError(error);
+      setRoutineNotice(message === "Ya existe un entrenamiento registrado para esta rutina y fecha."
+        ? "Ya existe un entrenamiento registrado para esta rutina y fecha. Puedes revisar el resumen o editar el registro existente."
+        : message);
     } finally {
       setIsBusy(false);
     }
@@ -1589,8 +1617,13 @@ export function OrganizatechApp() {
           insights={insights}
           currentWeek={currentWeek}
           entries={entries}
+          sessions={trainingSessions}
           startRegistration={() => navigateTo("registro-entrenamiento")}
           goToRoutine={() => openRoutineDay(dashboardDay)}
+          viewSummary={(selectedDay) => {
+            setComparisonDay(selectedDay);
+            navigateTo("comparacion");
+          }}
           switchDay={setDashboardDayOverride}
         />
       )}
@@ -1977,8 +2010,10 @@ function DashboardScreen({
   insights,
   currentWeek,
   entries,
+  sessions,
   startRegistration,
   goToRoutine,
+  viewSummary,
   switchDay,
 }: {
   exercises: ExerciseTemplate[];
@@ -1994,8 +2029,10 @@ function DashboardScreen({
   insights: ReturnType<typeof generateSmartInsights>;
   currentWeek: number;
   entries: ExerciseEntry[];
+  sessions: TrainingSession[];
   startRegistration: () => void;
   goToRoutine: () => void;
+  viewSummary: (day: string) => void;
   switchDay: (day: string) => void;
 }) {
   const hasTodayRoutine = dayExercises.length > 0;
@@ -2004,9 +2041,15 @@ function DashboardScreen({
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
   const carouselDays = useMemo(() => hasRoutinePlan ? weekDays : [day], [hasRoutinePlan, weekDays, day]);
-  const allWeekMetrics = useMemo(
-    () => calculateWeeklyComparison(entries).filter((entry) => entry.week === currentWeek),
-    [entries, currentWeek],
+  const currentWeekDates = useMemo(() => getCurrentSantiagoWeekDates(), []);
+  const currentWeekStart = currentWeekDates.Lunes;
+  const activeSessions = useMemo(
+    () => sessions.filter((session) => (
+      session.status === "completed" &&
+      !session.deletedAt &&
+      session.calendarWeekStart === currentWeekStart
+    )),
+    [sessions, currentWeekStart],
   );
 
   useEffect(() => {
@@ -2022,17 +2065,22 @@ function DashboardScreen({
 
   function getDashboardDayData(item: string) {
     const itemExercises = exercises.filter((exercise) => (exercise.day ?? item) === item);
-    const exerciseIds = new Set(itemExercises.map((exercise) => exercise.id));
-    const itemMetrics = allWeekMetrics.filter((entry) => exerciseIds.has(entry.exerciseId));
-    const itemRoutine = itemMetrics[0]?.routine ?? itemExercises[0]?.routine ?? (item === day ? routine : item);
-    const preview = itemMetrics.filter((entry) => entry.routine === itemRoutine);
+    const expectedDate = currentWeekDates[item] ?? "";
+    const plannedDay = getTrainingDayCode(item);
+    const session = activeSessions.find((candidate) => (
+      candidate.plannedDate ? candidate.plannedDate === expectedDate : candidate.plannedDay === plannedDay
+    ));
+    const itemMetrics = session ? calculateWeeklyComparison(session.entries) : [];
 
     return {
       day: item,
       title: itemExercises.length > 0 ? `Entrenamiento · ${item}` : `Entrenamiento · ${item}: no registra entrenamientos`,
       exercises: itemExercises,
-      metrics: preview,
-      hasRoutine: itemExercises.length > 0,
+      metrics: itemMetrics,
+      session,
+      isToday: expectedDate === getSantiagoDateKey(new Date()),
+      hasRoutine: itemExercises.length > 0 || Boolean(session),
+      isCompleted: Boolean(session),
     };
   }
 
@@ -2129,21 +2177,41 @@ function DashboardScreen({
         </div>
         <WeeklyProgressSvg value={summary.volumePercentage} />
       </div>
-      <div className={`card wide dashboard-training-card ${activeDayData.metrics[0] ? getObjectiveTone(activeDayData.metrics[0].objectiveStatus) : ""}`}>
+      <div className={`card wide dashboard-training-card ${activeDayData.isCompleted ? "completed" : "pending"}`}>
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
           {carouselDays.map((item) => {
             const itemData = getDashboardDayData(item);
+            const registeredSummary = calculateRegisteredDashboardSummary(itemData.metrics);
 
             return (
               <article className="dashboard-training-slide" key={item}>
-                <h3>{itemData.title}</h3>
+                <div className="dashboard-training-heading">
+                  <h3>{itemData.title}</h3>
+                  {itemData.hasRoutine ? (
+                    <span className={`dashboard-status-badge ${itemData.isCompleted ? "completed" : "pending"}`}>
+                      {itemData.isCompleted ? `Completado${itemData.isToday ? " · Hoy" : ""}` : `Pendiente${itemData.isToday ? " · Hoy" : ""}`}
+                    </span>
+                  ) : null}
+                </div>
                 {itemData.hasRoutine ? (
                   <div className="exercise-list">
-                    {itemData.metrics.length > 0
-                      ? itemData.metrics.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)
-                      : itemData.exercises.slice(0, 4).map((exercise) => (
+                    {itemData.isCompleted ? (
+                      <div className="registered-summary-card">
+                        <span>Entrenamiento registrado</span>
+                        <strong>{registeredSummary.exerciseCount} ejercicios · {formatKg(registeredSummary.totalWeight)} · {registeredSummary.totalReps} reps</strong>
+                      </div>
+                    ) : null}
+                    {itemData.isCompleted
+                      ? itemData.metrics.slice(0, 3).map((entry) => <RegisteredExerciseCard key={entry.id} entry={entry} />)
+                      : itemData.exercises.slice(0, 3).map((exercise) => (
                         <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
                       ))}
+                    {itemData.isCompleted && itemData.metrics.length > 3 ? (
+                      <p className="dashboard-more-exercises">+{itemData.metrics.length - 3} ejercicios más</p>
+                    ) : null}
+                    {!itemData.isCompleted && itemData.exercises.length > 3 ? (
+                      <p className="dashboard-more-exercises">+{itemData.exercises.length - 3} ejercicios más</p>
+                    ) : null}
                   </div>
                 ) : (
                   <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
@@ -2153,8 +2221,11 @@ function DashboardScreen({
           })}
         </div>
         {activeDayData.hasRoutine ? (
-          <button className="button secondary dashboard-routine-button" onClick={goToRoutine}>
-            Ir a rutina
+          <button
+            className={`button secondary dashboard-routine-button ${activeDayData.isCompleted ? "completed" : "pending"}`}
+            onClick={() => activeDayData.isCompleted ? viewSummary(activeDayData.day) : goToRoutine()}
+          >
+            {activeDayData.isCompleted ? "Ver resumen" : "Ir a rutina"}
           </button>
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
@@ -3055,7 +3126,7 @@ function GuidedTrainingScreen({
       <div className="card wide routine-summary-card">
         <h3>Entrenamiento día {day}</h3>
         <p className="eyebrow">{routine}</p>
-        {notice ? <div className="notice-banner">{notice}</div> : null}
+        {notice ? <div className={`notice-banner ${notice.includes("Ya existe un entrenamiento") ? "warning" : ""}`}>{notice}</div> : null}
         <p className="eyebrow">Ejercicio {activeIndex + 1} de {exercises.length} · {completedCount} registrados</p>
         <RoutineMetricGrid targetSummary={targetSummary} />
         <button className="button secondary" type="button" onClick={editRoutine}>
@@ -3632,6 +3703,15 @@ function ProgrammedExerciseCard({ exercise, showStatus = true }: { exercise: Exe
         <span>Reps: <b>{exercise.targetReps}</b></span>
         <span>Kg: <b>{exercise.baseWeight}</b></span>
       </div>
+    </div>
+  );
+}
+
+function RegisteredExerciseCard({ entry }: { entry: ExerciseMetrics }) {
+  return (
+    <div className="registered-exercise-card">
+      <strong>{entry.exerciseName}</strong>
+      <span className="registered-status">Registrado</span>
     </div>
   );
 }
@@ -4403,6 +4483,17 @@ function calculateTargetSummary(exercises: ExerciseTemplate[]) {
   );
 }
 
+function calculateRegisteredDashboardSummary(metrics: ExerciseMetrics[]) {
+  return metrics.reduce(
+    (summary, entry) => ({
+      totalWeight: summary.totalWeight + entry.weight,
+      totalReps: summary.totalReps + entry.totalReps,
+      exerciseCount: summary.exerciseCount + 1,
+    }),
+    { totalWeight: 0, totalReps: 0, exerciseCount: 0 },
+  );
+}
+
 function getVisibleTrainingDay(exercises: ExerciseTemplate[], current: string) {
   if (exercises.some((exercise) => exercise.day === current)) return current;
 
@@ -4417,6 +4508,88 @@ function getCalendarTrainingDay() {
   const today = new Intl.DateTimeFormat("es-CL", { weekday: "long" }).format(new Date());
   const normalizedToday = setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(today.toLowerCase()));
   return normalizedToday ?? "Lunes";
+}
+
+function getCurrentSantiagoWeekDates(reference = new Date()) {
+  const todayKey = getSantiagoDateKey(reference);
+  const todayDate = parseDateKeyAsLocalNoon(todayKey);
+  const todayName = getTrainingDayFromDate(todayKey);
+  const todayIndex = Math.max(0, setupDays.indexOf(todayName));
+  const mondayDate = new Date(todayDate);
+  mondayDate.setDate(todayDate.getDate() - todayIndex);
+
+  return Object.fromEntries(setupDays.map((day, index) => {
+    const date = new Date(mondayDate);
+    date.setDate(mondayDate.getDate() + index);
+    return [day, getLocalDateKey(date)];
+  }));
+}
+
+function getSantiagoDateKey(value: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const year = parts.find((part) => part.type === "year")?.value ?? "1970";
+  const month = parts.find((part) => part.type === "month")?.value ?? "01";
+  const day = parts.find((part) => part.type === "day")?.value ?? "01";
+  return `${year}-${month}-${day}`;
+}
+
+function getTrainingDayFromDate(value: string) {
+  const date = parseDateKeyAsLocalNoon(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const weekday = new Intl.DateTimeFormat("es-CL", {
+    weekday: "long",
+    timeZone: "America/Santiago",
+  }).format(date);
+  return setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(weekday.toLowerCase())) ?? "";
+}
+
+function parseDateKeyAsLocalNoon(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
+function getLocalDateKey(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getTrainingDayCode(day: string): TrainingDayCode {
+  const mapping: Record<string, TrainingDayCode> = {
+    Lunes: "monday",
+    Martes: "tuesday",
+    Miércoles: "wednesday",
+    Jueves: "thursday",
+    Viernes: "friday",
+    Sábado: "saturday",
+    Domingo: "sunday",
+  };
+  return mapping[day] ?? "monday";
+}
+
+function getLegacyWeekNumberForTrainingDate(sessions: TrainingSession[], entries: ExerciseEntry[], trainedDate: string) {
+  const weekStart = getCurrentSantiagoWeekDates(parseDateKeyAsLocalNoon(trainedDate)).Lunes;
+  const sameWeekSessions = sessions.filter((session) => session.calendarWeekStart === weekStart);
+  if (sameWeekSessions.length > 0) {
+    return Math.min(...sameWeekSessions.map((session) => session.weekNumber));
+  }
+
+  const legacySameWeek = entries.filter((entry) => getCurrentSantiagoWeekDates(parseDateKeyAsLocalNoon(entry.date)).Lunes === weekStart);
+  if (legacySameWeek.length > 0) {
+    return Math.min(...legacySameWeek.map((entry) => entry.week));
+  }
+
+  const previousWeeks = [
+    ...sessions.filter((session) => session.calendarWeekStart && session.calendarWeekStart < weekStart).map((session) => session.weekNumber),
+    ...entries.filter((entry) => entry.date < weekStart).map((entry) => entry.week),
+  ];
+  return previousWeeks.length > 0 ? Math.max(...previousWeeks) + 1 : 1;
 }
 
 function getRoutineDays(exercises: ExerciseTemplate[]) {

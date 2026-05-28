@@ -2,6 +2,8 @@ export type ObjectiveStatus = "Cumplimos" | "Mantenemos esfuerzo" | "No cumplimo
 export type KgStatus = "Kg aumentado" | "Mismo kg" | "Kg disminuido";
 
 export type RoutineName = string;
+export type TrainingDayCode = "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
+export type TrainingSessionStatus = "completed" | "skipped";
 
 export interface ExerciseTemplate {
   id: string;
@@ -17,6 +19,7 @@ export interface ExerciseTemplate {
 
 export interface ExerciseEntry {
   id: string;
+  sessionId?: string;
   exerciseId: string;
   exerciseName: string;
   routine: RoutineName;
@@ -29,6 +32,23 @@ export interface ExerciseEntry {
   reps: number[];
   notes?: string;
   rir?: string;
+}
+
+export interface TrainingSession {
+  id: string;
+  routineId: string | null;
+  routine: RoutineName;
+  weekNumber: number;
+  calendarWeekStart: string | null;
+  plannedDay: TrainingDayCode | null;
+  plannedDate: string | null;
+  trainedDate: string;
+  trainedAt: string;
+  status: TrainingSessionStatus;
+  completedAt?: string;
+  deletedAt?: string;
+  notes?: string;
+  entries: ExerciseEntry[];
 }
 
 export interface ExerciseMetrics extends ExerciseEntry {

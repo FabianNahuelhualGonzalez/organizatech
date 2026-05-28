@@ -19,6 +19,9 @@ export function translateAuthError(error: unknown) {
   if (message.includes("password should be at least") || message.includes("password")) {
     return "La contraseña debe tener al menos 8 caracteres.";
   }
+  if (message.includes("ya existe un entrenamiento registrado para esta rutina y fecha")) {
+    return "Ya existe un entrenamiento registrado para esta rutina y fecha.";
+  }
   if (message.includes("fetch") || message.includes("network") || message.includes("failed to fetch")) {
     return "No pudimos conectar con el servidor. Intenta nuevamente.";
   }
@@ -35,6 +38,9 @@ export function translatePersistenceError(error: unknown) {
   }
   if (message.includes("fetch") || message.includes("network") || message.includes("failed to fetch")) {
     return "No pudimos completar la acción. Revisa tu conexión e intenta nuevamente.";
+  }
+  if (message.includes("ya existe un entrenamiento registrado para esta rutina y fecha")) {
+    return "Ya existe un entrenamiento registrado para esta rutina y fecha.";
   }
   if (message.includes("supabase")) return "No pudimos completar la acción. Intenta nuevamente.";
 
