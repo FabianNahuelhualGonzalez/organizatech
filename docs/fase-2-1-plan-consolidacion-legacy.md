@@ -122,6 +122,7 @@ E infiere:
 - `trained_date` desde `trained_at::date`.
 - `calendar_week_start` desde el lunes de la semana de `trained_at`.
 - `planned_date` calculada desde `calendar_week_start` + `inferred_planned_day_code`, si el dia es seguro.
+- La normalizacion tecnica debe usar `lower(btrim(inferred_planned_day))` para evitar rechazos por espacios en valores legacy.
 
 ## Seleccion de sesion canonica
 
@@ -201,8 +202,26 @@ Campos sugeridos:
 - `created_at timestamptz not null default now()`
 - `executed_at timestamptz null`
 - `rollback_payload jsonb not null`
+- `rolled_back_at timestamptz null`
 
 No crear tabla todavia.
+
+### Acceso y RLS de auditoria
+
+La tabla `training_session_consolidation_audit` no puede quedar publica ni accesible desde el frontend.
+
+Opciones aceptables:
+
+- RLS por usuario: policies con `auth.uid() = user_id`.
+- Tabla administrativa: sin acceso a usuarios normales, usada solo por scripts internos con rol autorizado.
+
+Recomendacion preferida:
+
+- Definirla como tabla administrativa.
+- No exponerla al frontend.
+- No otorgar permisos amplios a `anon` ni `authenticated`.
+- Usar `GRANT` controlado solo para roles necesarios en el proceso operativo aprobado.
+- Mantener auditoria de ejecucion y rollback fuera del flujo normal de usuario.
 
 Uso esperado:
 
@@ -210,6 +229,7 @@ Uso esperado:
 - Guardar payload suficiente para rollback.
 - Evitar operaciones anonimas o irreversibles.
 - Permitir auditoria de Claude/Arquitectura antes de tocar datos.
+- Distinguir estados pendientes, ejecutados y revertidos mediante `status`, `executed_at` y `rolled_back_at`.
 
 ## Rollback conceptual
 
@@ -228,6 +248,43 @@ El `rollback_payload` deberia guardar, como minimo:
 - Usuario afectado.
 - Grupo legacy afectado.
 
+Schema JSON estable propuesto:
+
+```json
+{
+  "entries": [
+    {
+      "id": "uuid",
+      "original_session_id": "uuid"
+    }
+  ],
+  "canonical_session": {
+    "id": "uuid",
+    "routine_id": null,
+    "calendar_week_start": null,
+    "planned_day": null,
+    "planned_date": null,
+    "trained_date": null,
+    "status": "completed",
+    "completed_at": null,
+    "deleted_at": null
+  },
+  "non_canonical_sessions": [
+    {
+      "id": "uuid",
+      "routine_id": null,
+      "calendar_week_start": null,
+      "planned_day": null,
+      "planned_date": null,
+      "trained_date": null,
+      "status": "completed",
+      "completed_at": null,
+      "deleted_at": null
+    }
+  ]
+}
+```
+
 Rollback conceptual futuro:
 
 1. Leer `rollback_payload`.
@@ -235,6 +292,7 @@ Rollback conceptual futuro:
 3. Restaurar campos originales de sesiones legacy.
 4. Limpiar `deleted_at` de sesiones no canonicas si antes estaba `null`.
 5. Marcar auditoria como revertida en una columna futura si se define.
+6. Poblar `rolled_back_at` para distinguir una consolidacion revertida de una pendiente o ejecutada.
 
 No ejecutar rollback ni consolidacion en esta fase.
 
@@ -260,6 +318,7 @@ Despues de una futura consolidacion en QA, validar:
 - No existen entries apuntando a sesiones de otro usuario.
 - No existen entries apuntando a ejercicios de otro usuario.
 - No se mezclan usuarios.
+- No existen entries apuntando a sesiones soft-deleted.
 
 ### Integridad semantica
 
@@ -267,6 +326,7 @@ Despues de una futura consolidacion en QA, validar:
 - No hay sesiones activas duplicadas para `user_id/routine_id/trained_date`.
 - Cada sesion canonica tiene entries asociadas.
 - Las sesiones no canonicas quedan marcadas logicamente, no borradas.
+- `canonical_session_id` coincide con la primera sesion ordenada del grupo (`legacy_session_ids[1]` en el plan). Si no coincide, el grupo debe rechazarse o revisarse manualmente.
 
 ### Validacion funcional
 
@@ -274,6 +334,7 @@ Despues de una futura consolidacion en QA, validar:
 - Comparacion semanal no duplica volumen ni reps.
 - Guardado nuevo Fase 2 sigue funcionando.
 - Fallback legacy no se rompe para datos no consolidados.
+- El fallback legacy read-only se mantiene despues de una consolidacion hasta confirmar que no quedan sesiones legacy activas pendientes ni casos no consolidables.
 
 ## Orden futuro propuesto
 

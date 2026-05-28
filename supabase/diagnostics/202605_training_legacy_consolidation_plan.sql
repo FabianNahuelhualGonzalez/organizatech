@@ -69,7 +69,21 @@ with legacy_group_details as (
     s.user_id,
     s.trained_at,
     s.week_number,
-    array_agg(distinct s.id order by s.created_at, s.id) as legacy_session_ids,
+    array(
+      select s_ids.id
+      from public.training_sessions s_ids
+      where s_ids.user_id = s.user_id
+        and s_ids.trained_at = s.trained_at
+        and s_ids.week_number = s.week_number
+        and (
+          s_ids.routine_id is null
+          or s_ids.trained_date is null
+          or s_ids.calendar_week_start is null
+          or s_ids.planned_day is null
+          or s_ids.planned_date is null
+        )
+      order by s_ids.created_at, s_ids.id
+    ) as legacy_session_ids,
     array_agg(e.id order by e.id) filter (where e.id is not null) as entry_ids,
     min(s.created_at) as first_session_created_at,
     count(distinct s.id) as legacy_session_count,
@@ -128,7 +142,7 @@ canonical_selection as (
 planned_day_normalized as (
   select
     cs.*,
-    case lower(cs.inferred_planned_day)
+    case lower(btrim(cs.inferred_planned_day))
       when 'lunes' then 'monday'
       when 'martes' then 'tuesday'
       when 'miercoles' then 'wednesday'
@@ -183,6 +197,13 @@ with candidate_groups as (
       where s2.user_id = s.user_id
         and s2.trained_at = s.trained_at
         and s2.week_number = s.week_number
+        and (
+          s2.routine_id is null
+          or s2.trained_date is null
+          or s2.calendar_week_start is null
+          or s2.planned_day is null
+          or s2.planned_date is null
+        )
       order by s2.created_at, s2.id
       limit 1
     ) as canonical_session_id,
@@ -235,6 +256,13 @@ from valid_groups vg
 join public.training_sessions s on s.user_id = vg.user_id
   and s.trained_at = vg.trained_at
   and s.week_number = vg.week_number
+  and (
+    s.routine_id is null
+    or s.trained_date is null
+    or s.calendar_week_start is null
+    or s.planned_day is null
+    or s.planned_date is null
+  )
 join public.exercise_entries e on e.session_id = s.id
 order by vg.trained_at desc, e.user_id, e.id;
 
@@ -251,6 +279,13 @@ with valid_groups as (
       where s2.user_id = s.user_id
         and s2.trained_at = s.trained_at
         and s2.week_number = s.week_number
+        and (
+          s2.routine_id is null
+          or s2.trained_date is null
+          or s2.calendar_week_start is null
+          or s2.planned_day is null
+          or s2.planned_date is null
+        )
       order by s2.created_at, s2.id
       limit 1
     ) as canonical_session_id,
@@ -305,11 +340,19 @@ from valid_groups vg
 join public.training_sessions s on s.user_id = vg.user_id
   and s.trained_at = vg.trained_at
   and s.week_number = vg.week_number
+  and (
+    s.routine_id is null
+    or s.trained_date is null
+    or s.calendar_week_start is null
+    or s.planned_day is null
+    or s.planned_date is null
+  )
 where s.id <> vg.canonical_session_id
 order by s.trained_at desc, s.user_id, s.created_at, s.id;
 
--- 5) Validacion read-only de totales para comparar antes/despues en una fase futura.
+-- 5) Validacion read-only de totales por usuario para comparar antes/despues en una fase futura.
 select
+  s.user_id,
   count(distinct s.id) as session_count,
   count(e.id) as entry_count,
   coalesce(sum(array_length(e.reps, 1)), 0) as set_count,
@@ -321,7 +364,9 @@ left join public.exercise_entries e on e.session_id = s.id
 left join lateral (
   select coalesce(sum(rep_value), 0) as total_reps
   from unnest(e.reps) as rep_value
-) reps_total on true;
+) reps_total on true
+group by s.user_id
+order by s.user_id;
 
 -- 6) Validacion read-only de posibles duplicados activos en el modelo nuevo.
 select
@@ -336,3 +381,107 @@ where routine_id is not null
 group by user_id, routine_id, trained_date
 having count(*) > 1
 order by trained_date desc;
+
+-- 7) Validacion read-only: no deben quedar entries apuntando a sesiones soft-deleted.
+-- Despues de una consolidacion correcta debe retornar 0 filas.
+select
+  e.id as entry_id,
+  e.session_id,
+  s.user_id,
+  s.deleted_at
+from public.exercise_entries e
+join public.training_sessions s on s.id = e.session_id
+where s.deleted_at is not null
+order by s.user_id, e.id;
+
+-- 8) Validacion read-only de sesion canonica deterministica.
+-- canonical_session_id debe coincidir con legacy_session_ids[1].
+-- Si no coincide, el grupo debe rechazarse o revisarse manualmente.
+with legacy_group_details as (
+  select
+    s.user_id,
+    s.trained_at,
+    s.week_number,
+    array(
+      select s_ids.id
+      from public.training_sessions s_ids
+      where s_ids.user_id = s.user_id
+        and s_ids.trained_at = s.trained_at
+        and s_ids.week_number = s.week_number
+        and (
+          s_ids.routine_id is null
+          or s_ids.trained_date is null
+          or s_ids.calendar_week_start is null
+          or s_ids.planned_day is null
+          or s_ids.planned_date is null
+        )
+      order by s_ids.created_at, s_ids.id
+    ) as legacy_session_ids,
+    count(distinct s.id) as legacy_session_count,
+    count(e.id) as entry_count,
+    count(distinct e.exercise_id) as distinct_exercise_count,
+    count(distinct ex.routine_id) filter (where ex.routine_id is not null) as routine_count,
+    count(distinct ex.day) filter (where ex.day is not null and btrim(ex.day) <> '') as planned_day_count,
+    count(*) filter (where e.id is null) as sessions_without_entries,
+    count(*) filter (where ex.id is null and e.id is not null) as orphan_entry_count,
+    count(*) filter (
+      where e.id is not null
+        and (
+          e.user_id <> s.user_id
+          or ex.user_id is null
+          or ex.user_id <> s.user_id
+        )
+    ) as ownership_issue_count
+  from public.training_sessions s
+  left join public.exercise_entries e on e.session_id = s.id
+  left join public.exercises ex on ex.id = e.exercise_id
+  where s.routine_id is null
+     or s.trained_date is null
+     or s.calendar_week_start is null
+     or s.planned_day is null
+     or s.planned_date is null
+  group by s.user_id, s.trained_at, s.week_number
+),
+valid_groups as (
+  select *
+  from legacy_group_details
+  where legacy_session_count >= 2
+    and entry_count > 0
+    and entry_count = distinct_exercise_count
+    and routine_count = 1
+    and planned_day_count = 1
+    and sessions_without_entries = 0
+    and orphan_entry_count = 0
+    and ownership_issue_count = 0
+),
+canonical_selection as (
+  select
+    vg.*,
+    (
+      select s2.id
+      from public.training_sessions s2
+      where s2.user_id = vg.user_id
+        and s2.trained_at = vg.trained_at
+        and s2.week_number = vg.week_number
+        and (
+          s2.routine_id is null
+          or s2.trained_date is null
+          or s2.calendar_week_start is null
+          or s2.planned_day is null
+          or s2.planned_date is null
+        )
+      order by s2.created_at, s2.id
+      limit 1
+    ) as canonical_session_id
+  from valid_groups vg
+)
+select
+  user_id,
+  trained_at,
+  week_number,
+  legacy_session_ids,
+  canonical_session_id,
+  legacy_session_ids[1] as expected_canonical_session_id
+from canonical_selection
+where canonical_session_id is distinct from legacy_session_ids[1]
+order by trained_at desc, user_id, week_number;
