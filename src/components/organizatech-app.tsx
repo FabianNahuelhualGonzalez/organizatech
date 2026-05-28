@@ -2070,7 +2070,10 @@ function DashboardScreen({
     const session = activeSessions.find((candidate) => (
       candidate.plannedDate ? candidate.plannedDate === expectedDate : candidate.plannedDay === plannedDay
     ));
-    const itemMetrics = session ? calculateWeeklyComparison(session.entries) : [];
+    const legacyEntries = session ? [] : findLegacyDashboardEntries(entries, itemExercises, expectedDate);
+    const itemEntries = session ? session.entries : legacyEntries;
+    const itemMetrics = itemEntries.length > 0 ? calculateWeeklyComparison(itemEntries) : [];
+    const isCompleted = Boolean(session) || legacyEntries.length > 0;
 
     return {
       day: item,
@@ -2079,8 +2082,8 @@ function DashboardScreen({
       metrics: itemMetrics,
       session,
       isToday: expectedDate === getSantiagoDateKey(new Date()),
-      hasRoutine: itemExercises.length > 0 || Boolean(session),
-      isCompleted: Boolean(session),
+      hasRoutine: itemExercises.length > 0 || isCompleted,
+      isCompleted,
     };
   }
 
@@ -4492,6 +4495,19 @@ function calculateRegisteredDashboardSummary(metrics: ExerciseMetrics[]) {
     }),
     { totalWeight: 0, totalReps: 0, exerciseCount: 0 },
   );
+}
+
+function findLegacyDashboardEntries(entries: ExerciseEntry[], dayExercises: ExerciseTemplate[], expectedDate: string) {
+  if (!expectedDate || dayExercises.length === 0) return [];
+  const dayExerciseIds = new Set(dayExercises.map((exercise) => exercise.id));
+  return entries.filter((entry) => (
+    normalizeEntryDateKey(entry.date) === expectedDate &&
+    dayExerciseIds.has(entry.exerciseId)
+  ));
+}
+
+function normalizeEntryDateKey(value: string) {
+  return value.slice(0, 10);
 }
 
 function getVisibleTrainingDay(exercises: ExerciseTemplate[], current: string) {
