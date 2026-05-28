@@ -1961,6 +1961,54 @@ h3 {
   border-color: rgba(255, 77, 109, 0.48);
 }
 
+.dashboard-training-card.completed {
+  border-color: rgba(116, 223, 113, 0.5);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(116, 223, 113, 0.12), transparent 42%),
+    linear-gradient(180deg, rgba(18, 32, 50, 0.96), rgba(8, 19, 34, 0.96));
+}
+
+.dashboard-training-card.pending {
+  border-color: rgba(255, 191, 77, 0.42);
+}
+
+.dashboard-training-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dashboard-training-heading h3 {
+  min-width: 0;
+}
+
+.dashboard-status-badge,
+.registered-status {
+  display: inline-flex;
+  min-height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: clamp(10px, 2.8vw, 12px);
+  font-weight: 900;
+}
+
+.dashboard-status-badge.completed,
+.registered-status {
+  color: var(--green);
+  background: rgba(116, 223, 113, 0.1);
+}
+
+.dashboard-status-badge.pending {
+  color: var(--yellow);
+  background: rgba(255, 191, 77, 0.1);
+}
+
 .dashboard-training-card .exercise-row {
   border-radius: 10px;
   padding: clamp(14px, 4vw, 18px);
@@ -1976,6 +2024,43 @@ h3 {
   border-color: rgba(203, 213, 225, 0.14);
   background: rgba(255, 255, 255, 0.035);
   font-size: clamp(14px, 4vw, 18px);
+}
+
+.dashboard-routine-button.completed {
+  border-color: rgba(116, 223, 113, 0.44);
+  background: rgba(116, 223, 113, 0.12);
+  color: var(--green);
+}
+
+.dashboard-routine-button.pending {
+  border-color: rgba(255, 191, 77, 0.4);
+}
+
+.registered-exercise-card {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: clamp(12px, 3.7vw, 16px);
+  border: 1px solid rgba(116, 223, 113, 0.42);
+  border-radius: 10px;
+  background: rgba(116, 223, 113, 0.08);
+}
+
+.registered-exercise-card strong {
+  min-width: 0;
+  color: white;
+  font-size: clamp(14px, 4vw, 17px);
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-more-exercises {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(12px, 3.4vw, 14px);
+  font-weight: 900;
 }
 
 .exercise-row.ok {

@@ -2072,6 +2072,7 @@ function DashboardScreen({
       title: itemExercises.length > 0 ? `Entrenamiento · ${item}` : `Entrenamiento · ${item}: no registra entrenamientos`,
       exercises: itemExercises,
       metrics: itemMetrics,
+      session,
       hasRoutine: itemExercises.length > 0 || Boolean(session),
       isCompleted: Boolean(session),
     };
@@ -2170,21 +2171,34 @@ function DashboardScreen({
         </div>
         <WeeklyProgressSvg value={summary.volumePercentage} />
       </div>
-      <div className={`card wide dashboard-training-card ${activeDayData.metrics[0] ? getObjectiveTone(activeDayData.metrics[0].objectiveStatus) : ""}`}>
+      <div className={`card wide dashboard-training-card ${activeDayData.isCompleted ? "completed" : "pending"}`}>
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
           {carouselDays.map((item) => {
             const itemData = getDashboardDayData(item);
 
             return (
               <article className="dashboard-training-slide" key={item}>
-                <h3>{itemData.title}</h3>
+                <div className="dashboard-training-heading">
+                  <h3>{itemData.title}</h3>
+                  {itemData.hasRoutine ? (
+                    <span className={`dashboard-status-badge ${itemData.isCompleted ? "completed" : "pending"}`}>
+                      {itemData.isCompleted ? "Completado" : "Pendiente"}
+                    </span>
+                  ) : null}
+                </div>
                 {itemData.hasRoutine ? (
                   <div className="exercise-list">
-                    {itemData.metrics.length > 0
-                      ? itemData.metrics.slice(0, 4).map((entry) => <ExerciseRow key={entry.id} entry={entry} />)
-                      : itemData.exercises.slice(0, 4).map((exercise) => (
+                    {itemData.isCompleted && itemData.session
+                      ? itemData.session.entries.slice(0, 3).map((entry) => <RegisteredExerciseCard key={entry.id} entry={entry} />)
+                      : itemData.exercises.slice(0, 3).map((exercise) => (
                         <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
                       ))}
+                    {itemData.isCompleted && itemData.session && itemData.session.entries.length > 3 ? (
+                      <p className="dashboard-more-exercises">+{itemData.session.entries.length - 3} ejercicios más</p>
+                    ) : null}
+                    {!itemData.isCompleted && itemData.exercises.length > 3 ? (
+                      <p className="dashboard-more-exercises">+{itemData.exercises.length - 3} ejercicios más</p>
+                    ) : null}
                   </div>
                 ) : (
                   <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
@@ -2195,7 +2209,7 @@ function DashboardScreen({
         </div>
         {activeDayData.hasRoutine ? (
           <button
-            className="button secondary dashboard-routine-button"
+            className={`button secondary dashboard-routine-button ${activeDayData.isCompleted ? "completed" : "pending"}`}
             onClick={() => activeDayData.isCompleted ? viewSummary(activeDayData.day) : goToRoutine()}
           >
             {activeDayData.isCompleted ? "Ver resumen" : "Ir a rutina"}
@@ -3676,6 +3690,15 @@ function ProgrammedExerciseCard({ exercise, showStatus = true }: { exercise: Exe
         <span>Reps: <b>{exercise.targetReps}</b></span>
         <span>Kg: <b>{exercise.baseWeight}</b></span>
       </div>
+    </div>
+  );
+}
+
+function RegisteredExerciseCard({ entry }: { entry: ExerciseEntry }) {
+  return (
+    <div className="registered-exercise-card">
+      <strong>{entry.exerciseName}</strong>
+      <span className="registered-status">Registrado</span>
     </div>
   );
 }
