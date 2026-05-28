@@ -749,6 +749,7 @@ export function OrganizatechApp() {
     if (dataMode === "supabase" && (isSessionExpiredError(error) || message.includes("iniciar sesión"))) {
       clearUserSessionState(message);
     }
+    return message;
   }
 
   async function handleAuth(mode: "login" | "registro", formData: FormData) {
@@ -1314,6 +1315,7 @@ export function OrganizatechApp() {
     }
 
     setIsBusy(true);
+    setRoutineNotice("");
     try {
       const currentWeekDates = getCurrentSantiagoWeekDates();
       const plannedDate = currentWeekDates[visibleDay] ?? todayKey;
@@ -1360,7 +1362,10 @@ export function OrganizatechApp() {
       setHasStartedTraining(false);
       setScreen("dashboard");
     } catch (error) {
-      handlePersistenceError(error);
+      const message = handlePersistenceError(error);
+      setRoutineNotice(message === "Ya existe un entrenamiento registrado para esta rutina y fecha."
+        ? "Ya existe un entrenamiento registrado para esta rutina y fecha. Puedes revisar el resumen o editar el registro existente."
+        : message);
     } finally {
       setIsBusy(false);
     }
@@ -2188,13 +2193,13 @@ function DashboardScreen({
                 </div>
                 {itemData.hasRoutine ? (
                   <div className="exercise-list">
-                    {itemData.isCompleted && itemData.session
-                      ? itemData.session.entries.slice(0, 3).map((entry) => <RegisteredExerciseCard key={entry.id} entry={entry} />)
+                    {itemData.isCompleted
+                      ? itemData.metrics.slice(0, 3).map((entry) => <ExerciseRow key={entry.id} entry={entry} registered />)
                       : itemData.exercises.slice(0, 3).map((exercise) => (
                         <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
                       ))}
-                    {itemData.isCompleted && itemData.session && itemData.session.entries.length > 3 ? (
-                      <p className="dashboard-more-exercises">+{itemData.session.entries.length - 3} ejercicios más</p>
+                    {itemData.isCompleted && itemData.metrics.length > 3 ? (
+                      <p className="dashboard-more-exercises">+{itemData.metrics.length - 3} ejercicios más</p>
                     ) : null}
                     {!itemData.isCompleted && itemData.exercises.length > 3 ? (
                       <p className="dashboard-more-exercises">+{itemData.exercises.length - 3} ejercicios más</p>
@@ -3656,7 +3661,7 @@ function TrendValue({ value, suffix = "" }: { value: number; suffix?: string }) 
   );
 }
 
-function ExerciseRow({ entry, showVolume = false }: { entry: ExerciseMetrics; showVolume?: boolean }) {
+function ExerciseRow({ entry, showVolume = false, registered = false }: { entry: ExerciseMetrics; showVolume?: boolean; registered?: boolean }) {
   const tone = getObjectiveTone(entry.objectiveStatus);
   return (
     <div className={`exercise-row ${tone}`}>
@@ -3670,6 +3675,7 @@ function ExerciseRow({ entry, showVolume = false }: { entry: ExerciseMetrics; sh
         </div>
       </div>
       <div className="status-stack">
+        {registered ? <span className="registered-status">Registrado</span> : null}
         <StatusBadge status={entry.objectiveStatus} />
         <ChangeBadge value={entry.kgDifference} positive="Subimos kg" negative="Bajamos kg" neutral="Mismo kg" />
         <ChangeBadge value={entry.repsDifference} positive="Subimos reps" negative="Bajamos reps" neutral="Mismas reps" />
@@ -3690,15 +3696,6 @@ function ProgrammedExerciseCard({ exercise, showStatus = true }: { exercise: Exe
         <span>Reps: <b>{exercise.targetReps}</b></span>
         <span>Kg: <b>{exercise.baseWeight}</b></span>
       </div>
-    </div>
-  );
-}
-
-function RegisteredExerciseCard({ entry }: { entry: ExerciseEntry }) {
-  return (
-    <div className="registered-exercise-card">
-      <strong>{entry.exerciseName}</strong>
-      <span className="registered-status">Registrado</span>
     </div>
   );
 }

@@ -2014,6 +2014,10 @@ h3 {
   padding: clamp(14px, 4vw, 18px);
 }
 
+.dashboard-training-card.completed .exercise-row {
+  border-color: rgba(116, 223, 113, 0.5);
+}
+
 .dashboard-training-card .exercise-row strong {
   font-size: clamp(20px, 6vw, 26px);
 }
@@ -2034,26 +2038,6 @@ h3 {
 
 .dashboard-routine-button.pending {
   border-color: rgba(255, 191, 77, 0.4);
-}
-
-.registered-exercise-card {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: clamp(12px, 3.7vw, 16px);
-  border: 1px solid rgba(116, 223, 113, 0.42);
-  border-radius: 10px;
-  background: rgba(116, 223, 113, 0.08);
-}
-
-.registered-exercise-card strong {
-  min-width: 0;
-  color: white;
-  font-size: clamp(14px, 4vw, 17px);
-  line-height: 1.22;
-  overflow-wrap: anywhere;
 }
 
 .dashboard-more-exercises {
