@@ -43,7 +43,10 @@ select
   count(distinct s.id) as legacy_session_count,
   count(e.id) as entry_count,
   count(distinct e.exercise_id) as distinct_exercise_count,
-  min(ex.routine_id) as inferred_routine_id,
+  (
+    array_agg(distinct ex.routine_id::text order by ex.routine_id::text)
+      filter (where ex.routine_id is not null)
+  )[1]::uuid as inferred_routine_id,
   count(distinct ex.routine_id) filter (where ex.routine_id is not null) as routine_count,
   min(ex.day) filter (where ex.day is not null and btrim(ex.day) <> '') as inferred_planned_day,
   count(distinct ex.day) filter (where ex.day is not null and btrim(ex.day) <> '') as planned_day_count,
