@@ -2078,6 +2078,7 @@ function DashboardScreen({
       exercises: itemExercises,
       metrics: itemMetrics,
       session,
+      isToday: expectedDate === getSantiagoDateKey(new Date()),
       hasRoutine: itemExercises.length > 0 || Boolean(session),
       isCompleted: Boolean(session),
     };
@@ -2180,6 +2181,7 @@ function DashboardScreen({
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
           {carouselDays.map((item) => {
             const itemData = getDashboardDayData(item);
+            const registeredSummary = calculateRegisteredDashboardSummary(itemData.metrics);
 
             return (
               <article className="dashboard-training-slide" key={item}>
@@ -2187,14 +2189,20 @@ function DashboardScreen({
                   <h3>{itemData.title}</h3>
                   {itemData.hasRoutine ? (
                     <span className={`dashboard-status-badge ${itemData.isCompleted ? "completed" : "pending"}`}>
-                      {itemData.isCompleted ? "Completado" : "Pendiente"}
+                      {itemData.isCompleted ? `Completado${itemData.isToday ? " · Hoy" : ""}` : `Pendiente${itemData.isToday ? " · Hoy" : ""}`}
                     </span>
                   ) : null}
                 </div>
                 {itemData.hasRoutine ? (
                   <div className="exercise-list">
+                    {itemData.isCompleted ? (
+                      <div className="registered-summary-card">
+                        <span>Entrenamiento registrado</span>
+                        <strong>{registeredSummary.exerciseCount} ejercicios · {formatKg(registeredSummary.totalWeight)} · {registeredSummary.totalReps} reps</strong>
+                      </div>
+                    ) : null}
                     {itemData.isCompleted
-                      ? itemData.metrics.slice(0, 3).map((entry) => <ExerciseRow key={entry.id} entry={entry} registered />)
+                      ? itemData.metrics.slice(0, 3).map((entry) => <RegisteredExerciseCard key={entry.id} entry={entry} />)
                       : itemData.exercises.slice(0, 3).map((exercise) => (
                         <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
                       ))}
@@ -3118,7 +3126,7 @@ function GuidedTrainingScreen({
       <div className="card wide routine-summary-card">
         <h3>Entrenamiento día {day}</h3>
         <p className="eyebrow">{routine}</p>
-        {notice ? <div className="notice-banner">{notice}</div> : null}
+        {notice ? <div className={`notice-banner ${notice.includes("Ya existe un entrenamiento") ? "warning" : ""}`}>{notice}</div> : null}
         <p className="eyebrow">Ejercicio {activeIndex + 1} de {exercises.length} · {completedCount} registrados</p>
         <RoutineMetricGrid targetSummary={targetSummary} />
         <button className="button secondary" type="button" onClick={editRoutine}>
@@ -3661,7 +3669,7 @@ function TrendValue({ value, suffix = "" }: { value: number; suffix?: string }) 
   );
 }
 
-function ExerciseRow({ entry, showVolume = false, registered = false }: { entry: ExerciseMetrics; showVolume?: boolean; registered?: boolean }) {
+function ExerciseRow({ entry, showVolume = false }: { entry: ExerciseMetrics; showVolume?: boolean }) {
   const tone = getObjectiveTone(entry.objectiveStatus);
   return (
     <div className={`exercise-row ${tone}`}>
@@ -3675,7 +3683,6 @@ function ExerciseRow({ entry, showVolume = false, registered = false }: { entry:
         </div>
       </div>
       <div className="status-stack">
-        {registered ? <span className="registered-status">Registrado</span> : null}
         <StatusBadge status={entry.objectiveStatus} />
         <ChangeBadge value={entry.kgDifference} positive="Subimos kg" negative="Bajamos kg" neutral="Mismo kg" />
         <ChangeBadge value={entry.repsDifference} positive="Subimos reps" negative="Bajamos reps" neutral="Mismas reps" />
@@ -3696,6 +3703,15 @@ function ProgrammedExerciseCard({ exercise, showStatus = true }: { exercise: Exe
         <span>Reps: <b>{exercise.targetReps}</b></span>
         <span>Kg: <b>{exercise.baseWeight}</b></span>
       </div>
+    </div>
+  );
+}
+
+function RegisteredExerciseCard({ entry }: { entry: ExerciseMetrics }) {
+  return (
+    <div className="registered-exercise-card">
+      <strong>{entry.exerciseName}</strong>
+      <span className="registered-status">Registrado</span>
     </div>
   );
 }
@@ -4464,6 +4480,17 @@ function calculateTargetSummary(exercises: ExerciseTemplate[]) {
       };
     },
     { totalWeight: 0, volume: 0, reps: 0, exerciseCount: 0 },
+  );
+}
+
+function calculateRegisteredDashboardSummary(metrics: ExerciseMetrics[]) {
+  return metrics.reduce(
+    (summary, entry) => ({
+      totalWeight: summary.totalWeight + entry.weight,
+      totalReps: summary.totalReps + entry.totalReps,
+      exerciseCount: summary.exerciseCount + 1,
+    }),
+    { totalWeight: 0, totalReps: 0, exerciseCount: 0 },
   );
 }
 
