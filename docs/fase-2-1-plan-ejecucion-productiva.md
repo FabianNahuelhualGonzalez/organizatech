@@ -62,6 +62,8 @@ Recomendaciones:
 - Validar conteos antes y despues.
 - Mantener los exports disponibles hasta cerrar QA post-produccion y periodo de monitoreo.
 
+El metodo exacto de backup logico debe definirse antes de cualquier ejecucion productiva real. No es requisito para ejecutar el dry-run read-only, pero si es obligatorio antes de una consolidacion productiva.
+
 ## Freeze temporal de Training
 
 La consolidacion futura debe evitar escrituras concurrentes sobre Training. Opciones:
@@ -72,6 +74,8 @@ La consolidacion futura debe evitar escrituras concurrentes sobre Training. Opci
 - Ejecucion en horario de bajo uso.
 
 Riesgo principal: si un usuario guarda entrenamiento mientras se consolidan sesiones legacy, los conteos, auditoria o postchecks pueden quedar inconsistentes. Si se detecta escritura concurrente, se aborta y se reprograma.
+
+Antes de una ejecucion productiva real se debe definir el mecanismo de deteccion de escrituras concurrentes durante el freeze, por ejemplo conteo antes/despues de `training_sessions` y `exercise_entries`, bloqueo temporal de UI o monitoreo de registros creados durante la ventana.
 
 ## Dry-run productivo read-only
 
@@ -94,6 +98,24 @@ El dry-run debe ejecutarse primero como solo lectura y guardar evidencia de resu
 - Potencial impacto por grupo.
 
 No hardcodear usuarios, emails ni UUIDs.
+
+El primer dry-run productivo aprobado establece el baseline inicial de `group_count`, salvo que Arquitectura defina un baseline previo formal. Ese baseline debe quedar registrado junto con fecha, hora, ambiente y responsable.
+
+`trained_at` puede funcionar como dato temporal indirecto. Al compartir evidencia, tratar fechas y horarios con cuidado y mantener los resultados anonimizados.
+
+## Rol de ejecucion del dry-run
+
+El dry-run productivo debe ejecutarse con un rol administrativo controlado, idealmente desde el SQL Editor de Supabase con permisos suficientes para diagnostico global multiusuario.
+
+Esta ejecucion puede bypassear RLS, y eso es intencional solo para obtener una vista global de consistencia historica. La evidencia compartida debe mantenerse anonimizada.
+
+Reglas:
+
+- No ejecutar desde frontend.
+- No ejecutar con rol `anon`.
+- No publicar resultados con datos sensibles.
+- No incluir emails, UUIDs productivos ni datos personales en tickets, documentos o capturas compartidas.
+- Mantener el SQL en transaccion read-only.
 
 Si el dry-run informa que `training_session_consolidation_audit` existe, ejecutar ademas esta consulta read-only para confirmar auditorias activas:
 

@@ -4,6 +4,9 @@
 -- No hardcodea usuarios, emails ni UUIDs.
 -- No es una migracion y no debe moverse a supabase/migrations.
 
+begin;
+set transaction read only;
+
 with legacy_sessions as (
   select
     s.id,
@@ -240,3 +243,5 @@ from (
     dense_rank() over (order by m.user_id) as dense_rank_value
   from metrics_by_user m
 ) anonymized_users;
+
+rollback;
