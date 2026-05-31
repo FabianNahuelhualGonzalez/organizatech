@@ -14,7 +14,7 @@ import {
 } from "@/lib/training/training-cycles-repository";
 
 const isQaToolsEnabled =
-  process.env.NODE_ENV !== "production" &&
+  process.env.VERCEL_ENV === "preview" &&
   process.env.NEXT_PUBLIC_ENABLE_QA_TOOLS === "true" &&
   process.env.NEXT_PUBLIC_SUPABASE_ENV === "qa";
 
@@ -26,7 +26,7 @@ export default function TrainingCyclesQaPage() {
   const [logs, setLogs] = useState<QaLog[]>([]);
 
   const accessState = useMemo(() => ({
-    nodeEnv: process.env.NODE_ENV,
+    vercelEnv: process.env.VERCEL_ENV || "not-set",
     qaToolsEnabled: process.env.NEXT_PUBLIC_ENABLE_QA_TOOLS === "true",
     supabaseEnv: process.env.NEXT_PUBLIC_SUPABASE_ENV || "not-set",
     allowed: isQaToolsEnabled,
@@ -183,12 +183,12 @@ export default function TrainingCyclesQaPage() {
   );
 }
 
-function AccessStateView({ accessState }: { accessState: { nodeEnv: string; qaToolsEnabled: boolean; supabaseEnv: string; allowed: boolean } }) {
+function AccessStateView({ accessState }: { accessState: { vercelEnv: string; qaToolsEnabled: boolean; supabaseEnv: string; allowed: boolean } }) {
   return (
     <dl style={styles.stateGrid}>
       <div>
-        <dt>NODE_ENV</dt>
-        <dd>{accessState.nodeEnv}</dd>
+        <dt>VERCEL_ENV</dt>
+        <dd>{accessState.vercelEnv}</dd>
       </div>
       <div>
         <dt>QA tools</dt>
