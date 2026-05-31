@@ -74,6 +74,16 @@ import {
   type DataMode,
   type SupabaseSessionState,
 } from "@/lib/supabase/session";
+import {
+  cancelTrainingCycle,
+  completeTrainingCycle,
+  createTrainingCycle,
+  getActiveTrainingCycle,
+  getTrainingCycleHistory,
+  TrainingCycleRepositoryError,
+  type TrainingCycle as PersistedTrainingCycle,
+  type TrainingCycleSnapshot as PersistedTrainingCycleSnapshot,
+} from "@/lib/training/training-cycles-repository";
 
 type Screen =
   | "login"
@@ -289,7 +299,7 @@ interface TrainingCycleSnapshot {
   entries: ExerciseEntry[];
 }
 
-export function OrganizatechApp() {
+export function OrganizatechApp({ trainingCyclesRepositoryEnabled = false }: { trainingCyclesRepositoryEnabled?: boolean }) {
   const [screen, setScreen] = useState<Screen>(() => getInitialAuthScreen());
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
   const [sessionName, setSessionName] = useState("");
@@ -335,6 +345,8 @@ export function OrganizatechApp() {
   const [hasStartedTraining, setHasStartedTraining] = useState(false);
   const [routineEditorReturnScreen, setRoutineEditorReturnScreen] = useState<Screen | null>(null);
   const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>(() => loadCycleHistory());
+  const [persistedActiveCycle, setPersistedActiveCycle] = useState<PersistedTrainingCycle | null>(null);
+  const [persistedCycleHistory, setPersistedCycleHistory] = useState<PersistedTrainingCycle[]>([]);
   const [isNewCycleConfirmOpen, setIsNewCycleConfirmOpen] = useState(false);
   const [isDeleteCycleConfirmOpen, setIsDeleteCycleConfirmOpen] = useState(false);
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
@@ -623,6 +635,11 @@ export function OrganizatechApp() {
   const summary = calculateWeeklySummary(metrics, currentWeek);
   const insights = generateSmartInsights(summary, currentMetrics);
   const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
+  const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
+  const visibleCycleHistoryCount = isTrainingCyclesRepositoryActive ? persistedCycleHistory.length : cycleHistory.length;
+  const visibleCycleNumber = isTrainingCyclesRepositoryActive
+    ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
+    : cycleHistory.length + 1;
   const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
 
   function applySessionState(authState: SupabaseSessionState) {
@@ -644,6 +661,8 @@ export function OrganizatechApp() {
     setExercises([]);
     setEntries([]);
     setTrainingSessions([]);
+    setPersistedActiveCycle(null);
+    setPersistedCycleHistory([]);
     setExerciseDrafts({});
     setReadiness(null);
     setHasStartedTraining(false);
@@ -742,6 +761,29 @@ export function OrganizatechApp() {
       setIsBusy(false);
     }
   }
+
+  async function refreshPersistedTrainingCycles() {
+    if (!isTrainingCyclesRepositoryActive) {
+      setPersistedActiveCycle(null);
+      setPersistedCycleHistory([]);
+      return;
+    }
+
+    try {
+      const [activeCycle, history] = await Promise.all([
+        getActiveTrainingCycle(),
+        getTrainingCycleHistory(),
+      ]);
+      setPersistedActiveCycle(activeCycle);
+      setPersistedCycleHistory(history);
+    } catch (error) {
+      setStatusMessage(translateTrainingCycleRepositoryError(error));
+    }
+  }
+
+  useEffect(() => {
+    void refreshPersistedTrainingCycles();
+  }, [isTrainingCyclesRepositoryActive, supabaseUser?.id]);
 
   function handlePersistenceError(error: unknown) {
     const message = translatePersistenceError(error);
@@ -1219,8 +1261,56 @@ export function OrganizatechApp() {
 
   async function startNewTrainingCycle() {
     if (dataMode === "supabase") {
-      setStatusMessage("Esta acción estará disponible en el siguiente paso.");
-      setIsNewCycleConfirmOpen(false);
+      if (!isTrainingCyclesRepositoryActive) {
+        setStatusMessage("Esta acción estará disponible en el siguiente paso.");
+        setIsNewCycleConfirmOpen(false);
+        return;
+      }
+
+      setIsBusy(true);
+      try {
+        const activeCycle = persistedActiveCycle ?? await getActiveTrainingCycle();
+        const endedAt = new Date().toISOString();
+        if (activeCycle) {
+          await completeTrainingCycle({
+            endedAt,
+            summarySnapshot: createPersistedCycleSummarySnapshot(trainingPlan, exercises, entries, activeCycle.startedAt, endedAt),
+          });
+        }
+
+        const nextPlan = createDefaultTrainingPlan();
+        const nextCycleNumber = getNextPersistedCycleNumber(activeCycle, persistedCycleHistory);
+        await createTrainingCycle({
+          name: `Ciclo ${nextCycleNumber}`,
+          cycleNumber: nextCycleNumber,
+          cycleType: nextPlan.cycleType,
+          goal: getCycleObjectiveValue(nextPlan),
+          planSnapshot: createPersistedCyclePlanSnapshot(nextPlan, [], "ui-main-qa-preview"),
+        });
+
+        clearRoutineDraft(dataMode, supabaseUser?.id);
+        setSetupByDay(createSetupByDay());
+        setSetupDay("Lunes");
+        setTrainingPlan(nextPlan);
+        saveTrainingPlan(nextPlan);
+        setActiveRoutineDay("Lunes");
+        setDashboardDayOverride("");
+        setComparisonDay("Lunes");
+        setExerciseDrafts({});
+        setReadiness(null);
+        setHasStartedTraining(false);
+        setIsEditingRoutinePlan(true);
+        setScreen("registro-entrenamiento");
+        setStatusMessage(activeCycle
+          ? "Ciclo actual finalizado y nuevo ciclo creado en QA."
+          : "Nuevo ciclo creado en QA. No existía un ciclo activo previo.");
+        await refreshPersistedTrainingCycles();
+      } catch (error) {
+        setStatusMessage(translateTrainingCycleRepositoryError(error));
+      } finally {
+        setIsBusy(false);
+        setIsNewCycleConfirmOpen(false);
+      }
       return;
     }
 
@@ -1253,6 +1343,40 @@ export function OrganizatechApp() {
   async function deleteCurrentTrainingCycle() {
     setIsBusy(true);
     try {
+      if (isTrainingCyclesRepositoryActive) {
+        const activeCycle = persistedActiveCycle ?? await getActiveTrainingCycle();
+        if (!activeCycle) {
+          setStatusMessage("No existe un ciclo activo para cancelar.");
+          setIsDeleteCycleConfirmOpen(false);
+          return;
+        }
+
+        const endedAt = new Date().toISOString();
+        await cancelTrainingCycle({
+          endedAt,
+          summarySnapshot: createPersistedCycleSummarySnapshot(trainingPlan, exercises, entries, activeCycle.startedAt, endedAt),
+        });
+
+        const nextPlan = createDefaultTrainingPlan();
+        clearRoutineDraft(dataMode, supabaseUser?.id);
+        setTrainingPlan(nextPlan);
+        saveTrainingPlan(nextPlan);
+        setSetupByDay(createSetupByDay());
+        setSetupDay("Lunes");
+        setActiveRoutineDay("Lunes");
+        setDashboardDayOverride("");
+        setComparisonDay("Lunes");
+        setExerciseDrafts({});
+        setReadiness(null);
+        setHasStartedTraining(false);
+        setIsEditingRoutinePlan(true);
+        setIsDeleteCycleConfirmOpen(false);
+        setStatusMessage("Ciclo cancelado en QA. Ya puedes configurar un nuevo ciclo de entrenamiento.");
+        setScreen("registro-entrenamiento");
+        await refreshPersistedTrainingCycles();
+        return;
+      }
+
       await deactivateActiveCycle(dataMode);
       clearRoutineDraft(dataMode, supabaseUser?.id);
       await refreshData(dataMode);
@@ -1273,8 +1397,10 @@ export function OrganizatechApp() {
       setStatusMessage("Ciclo eliminado. Ya puedes configurar un nuevo ciclo de entrenamiento.");
       setScreen("registro-entrenamiento");
     } catch (error) {
-      if (isSessionExpiredError(error)) {
-        clearUserSessionState("Tu sesiÃ³n expirÃ³. Inicia sesiÃ³n nuevamente.");
+      if (error instanceof TrainingCycleRepositoryError) {
+        setStatusMessage(translateTrainingCycleRepositoryError(error));
+      } else if (isSessionExpiredError(error)) {
+        clearUserSessionState("Tu sesión expiró. Inicia sesión nuevamente.");
       } else {
         setStatusMessage(translatePersistenceError(error));
       }
@@ -1517,7 +1643,7 @@ export function OrganizatechApp() {
       item === "dashboard" ||
       item === "entrenamiento" ||
       item === "registro-entrenamiento" ||
-      (item === "historial-ciclos" && cycleHistory.length > 0)
+      (item === "historial-ciclos" && visibleCycleHistoryCount > 0)
     );
 
   return (
@@ -1650,7 +1776,8 @@ export function OrganizatechApp() {
           trainingPlan={trainingPlan}
           exercises={exercises}
           entries={entries}
-          cycleNumber={cycleHistory.length + 1}
+          cycleNumber={visibleCycleNumber}
+          activeCycleName={isTrainingCyclesRepositoryActive ? persistedActiveCycle?.name : undefined}
           editCurrentCycle={() => openRoutineEditor(visibleDay)}
           requestNewCycle={() => setIsNewCycleConfirmOpen(true)}
           requestDeleteCycle={() => setIsDeleteCycleConfirmOpen(true)}
@@ -1706,7 +1833,11 @@ export function OrganizatechApp() {
           setSelectedDay={setComparisonDay}
         />
       )}
-      {screen === "historial-ciclos" && <CycleHistoryScreen history={cycleHistory} />}
+      {screen === "historial-ciclos" && (
+        isTrainingCyclesRepositoryActive
+          ? <PersistedCycleHistoryScreen history={persistedCycleHistory} />
+          : <CycleHistoryScreen history={cycleHistory} />
+      )}
       {screen === "perfil" && <ProfileScreen name={sessionName} summary={summary} dataSource={dataSource} refreshData={refreshData} resetLocal={handleResetLocal} />}
       {isNewCycleConfirmOpen && (
         <ConfirmNewCycleModal
@@ -2421,6 +2552,7 @@ function CycleManagementScreen({
   exercises,
   entries,
   cycleNumber,
+  activeCycleName,
   editCurrentCycle,
   requestNewCycle,
   requestDeleteCycle,
@@ -2429,6 +2561,7 @@ function CycleManagementScreen({
   exercises: ExerciseTemplate[];
   entries: ExerciseEntry[];
   cycleNumber: number;
+  activeCycleName?: string;
   editCurrentCycle: () => void;
   requestNewCycle: () => void;
   requestDeleteCycle: () => void;
@@ -2445,7 +2578,7 @@ function CycleManagementScreen({
     <section className="screen">
       <div className="card wide cycle-management-card">
         <p className="eyebrow">Ciclo activo</p>
-        <h2>Ciclo {cycleNumber} - {cycleTitle}</h2>
+        <h2>{activeCycleName ?? `Ciclo ${cycleNumber}`} - {cycleTitle}</h2>
         <p className="eyebrow">{getCycleDurationLabel(trainingPlan)} - {activeDays.length} dias - {targetSummary.exerciseCount} ejercicios</p>
         <div className="cycle-summary-line">
           <div><span>Volumen registrado</span><strong>{formatKg(summary.volumeTotal)}</strong></div>
@@ -2644,6 +2777,84 @@ function CycleHistoryScreen({ history }: { history: TrainingCycleSnapshot[] }) {
                       <ul>
                         {suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}
                       </ul>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })
+      )}
+    </section>
+  );
+}
+
+function PersistedCycleHistoryScreen({ history }: { history: PersistedTrainingCycle[] }) {
+  const [expandedCycleId, setExpandedCycleId] = useState<string | null>(history[0]?.id ?? null);
+
+  return (
+    <section className="screen">
+      <div className="card wide cycle-history-hero">
+        <div>
+          <p className="eyebrow">Historial ciclo de entrenamiento</p>
+          <h2>Ciclos finalizados</h2>
+          <p>Revisa los ciclos cerrados guardados en QA desde tu cuenta conectada.</p>
+        </div>
+        <span>{history.length}</span>
+      </div>
+      {history.length === 0 ? (
+        <div className="card wide empty-cycle-history">
+          <h3>Aún no hay ciclos finalizados</h3>
+          <p>Cuando cierres tu ciclo activo, aparecerá aquí como historial persistido.</p>
+        </div>
+      ) : (
+        history.map((cycle) => {
+          const isExpanded = expandedCycleId === cycle.id;
+          const summary = cycle.summarySnapshot ?? {};
+          return (
+            <div className={`card wide cycle-history-card ${isExpanded ? "open" : ""}`} key={cycle.id}>
+              <button
+                className="cycle-history-toggle"
+                type="button"
+                aria-expanded={isExpanded}
+                onClick={() => setExpandedCycleId((current) => current === cycle.id ? null : cycle.id)}
+              >
+                <div>
+                  <h3>{cycle.name} · {cycle.status === "completed" ? "Completado" : "Cancelado"}</h3>
+                  <span>{formatDate(cycle.startedAt)} - {cycle.endedAt ? formatDate(cycle.endedAt) : "Sin cierre"}</span>
+                </div>
+                <ChevronDown className="cycle-history-chevron" size={22} />
+              </button>
+              {isExpanded ? (
+                <div className="cycle-history-details">
+                  <div className="cycle-history-metrics dashboard-metric-grid">
+                    <div className="metric">
+                      <div className="metric-title-row">
+                        <span>Días con rutina</span>
+                        <CalendarDays size={18} />
+                      </div>
+                      <strong>{readSnapshotNumber(summary, "dayCount")}</strong>
+                    </div>
+                    <div className="metric">
+                      <div className="metric-title-row">
+                        <span>Ejercicios</span>
+                        <Dumbbell size={18} />
+                      </div>
+                      <strong>{readSnapshotNumber(summary, "exerciseCount")}</strong>
+                    </div>
+                    <div className="metric">
+                      <div className="metric-title-row">
+                        <span>Volumen registrado</span>
+                        <BarChart3 size={18} />
+                      </div>
+                      <strong>{formatKg(readSnapshotNumber(summary, "volumeTotal"))}</strong>
+                    </div>
+                    <div className="metric">
+                      <div className="metric-title-row">
+                        <span>Reps registradas</span>
+                        <TrendingUp size={18} />
+                      </div>
+                      <strong>{readSnapshotNumber(summary, "totalReps")}</strong>
                     </div>
                   </div>
                 </div>
@@ -4158,6 +4369,51 @@ function createTrainingCycleSnapshot(index: number, plan: TrainingPlan, exercise
   };
 }
 
+function createPersistedCyclePlanSnapshot(plan: TrainingPlan, exercises: ExerciseTemplate[], source: string): PersistedTrainingCycleSnapshot {
+  return {
+    source,
+    cycleType: plan.cycleType,
+    goal: getCycleObjectiveValue(plan),
+    duration: getCycleDurationValue(plan),
+    trainingDays: plan.trainingDays,
+    exerciseCount: exercises.length,
+  };
+}
+
+function createPersistedCycleSummarySnapshot(
+  plan: TrainingPlan,
+  exercises: ExerciseTemplate[],
+  entries: ExerciseEntry[],
+  startedAt: string,
+  endedAt: string,
+): PersistedTrainingCycleSnapshot {
+  const metrics = calculateWeeklyComparison(entries);
+  const summary = calculateWeeklySummary(metrics, Math.max(1, ...entries.map((entry) => entry.week)));
+  const activeDays = getActiveRoutineDays(exercises, plan);
+
+  return {
+    source: "ui-main-qa-preview",
+    volumeTotal: summary.volumeTotal,
+    totalReps: summary.totalReps,
+    weekCount: Math.max(1, ...entries.map((entry) => entry.week)),
+    dayCount: activeDays.length,
+    exerciseCount: exercises.length,
+    startedAt,
+    endedAt,
+    cycleType: plan.cycleType,
+    goal: getCycleObjectiveValue(plan),
+  };
+}
+
+function getNextPersistedCycleNumber(activeCycle: PersistedTrainingCycle | null, history: PersistedTrainingCycle[]) {
+  const numbers = [
+    activeCycle?.cycleNumber,
+    ...history.map((cycle) => cycle.cycleNumber),
+  ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+  return Math.max(0, ...numbers) + 1;
+}
+
 function mergeTrainingPlanWithExercises(plan: TrainingPlan, exercises: ExerciseTemplate[]) {
   const routineDays = getRoutineDays(exercises);
   if (routineDays.length === 0) return plan;
@@ -4365,6 +4621,24 @@ function createCycleSuggestions(progress: ReturnType<typeof summarizeCycleProgre
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value));
+}
+
+function readSnapshotNumber(snapshot: PersistedTrainingCycleSnapshot, key: string) {
+  const value = snapshot[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function translateTrainingCycleRepositoryError(error: unknown) {
+  if (error instanceof TrainingCycleRepositoryError) {
+    if (error.code === "session_required") return "Debes iniciar sesión para gestionar ciclos.";
+    if (error.code === "session_expired") return "Tu sesión expiró. Inicia sesión nuevamente.";
+    if (error.code === "active_cycle_exists") return "Ya existe un ciclo activo para tu cuenta.";
+    if (error.code === "active_cycle_missing") return "No existe un ciclo activo para finalizar.";
+    if (error.code === "permission_denied") return "No tienes permisos para acceder a este ciclo.";
+    return "No pudimos completar la acción sobre ciclos.";
+  }
+
+  return translatePersistenceError(error);
 }
 
 function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<string, SetupDayState> {
