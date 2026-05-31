@@ -2811,6 +2811,10 @@ function PersistedCycleHistoryScreen({ history }: { history: PersistedTrainingCy
         history.map((cycle) => {
           const isExpanded = expandedCycleId === cycle.id;
           const summary = cycle.summarySnapshot ?? {};
+          const improvedExercises = readSnapshotStringList(summary, "improvedExercises", 4);
+          const stagnantExercises = readSnapshotStringList(summary, "stagnantExercises", 4);
+          const moodSummary = readSnapshotMoodSummary(summary);
+          const suggestions = readSnapshotStringList(summary, "suggestions", 3);
           return (
             <div className={`card wide cycle-history-card ${isExpanded ? "open" : ""}`} key={cycle.id}>
               <button
@@ -2855,6 +2859,40 @@ function PersistedCycleHistoryScreen({ history }: { history: PersistedTrainingCy
                         <TrendingUp size={18} />
                       </div>
                       <strong>{readSnapshotNumber(summary, "totalReps")}</strong>
+                    </div>
+                  </div>
+                  <div className="cycle-result-grid">
+                    <div className="cycle-result-card success">
+                      <div className="cycle-result-title">
+                        <span><TrendingUp size={20} /></span>
+                        <h3>Subieron reps o peso</h3>
+                      </div>
+                      <p>{formatSnapshotList(improvedExercises, "Aún no hay ejercicios con mejora clara.")}</p>
+                    </div>
+                    <div className="cycle-result-card warning">
+                      <div className="cycle-result-title">
+                        <span><Minus size={20} /></span>
+                        <h3>Estancados</h3>
+                      </div>
+                      <p>{formatSnapshotList(stagnantExercises, "No detectamos estancamientos relevantes.")}</p>
+                    </div>
+                    <div className="cycle-result-card info">
+                      <div className="cycle-result-title">
+                        <span><Smile size={20} /></span>
+                        <h3>Estado de ánimo</h3>
+                      </div>
+                      <p>{moodSummary.message}</p>
+                    </div>
+                    <div className="cycle-result-card suggestion">
+                      <div className="cycle-result-title">
+                        <span><Sparkles size={20} /></span>
+                        <h3>Sugerencias</h3>
+                      </div>
+                      <ul>
+                        {suggestions.length > 0
+                          ? suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)
+                          : <li>Mantén el registro del ciclo para recibir sugerencias más precisas.</li>}
+                      </ul>
                     </div>
                   </div>
                 </div>
@@ -4390,6 +4428,10 @@ function createPersistedCycleSummarySnapshot(
   const metrics = calculateWeeklyComparison(entries);
   const summary = calculateWeeklySummary(metrics, Math.max(1, ...entries.map((entry) => entry.week)));
   const activeDays = getActiveRoutineDays(exercises, plan);
+  const legacyCycle = createTrainingCycleSnapshot(0, plan, exercises, entries);
+  const progress = summarizeCycleProgress(legacyCycle);
+  const moodSummary = summarizeCycleMood(entries);
+  const suggestions = createCycleSuggestions(progress, moodSummary);
 
   return {
     source: "ui-main-qa-preview",
@@ -4402,6 +4444,13 @@ function createPersistedCycleSummarySnapshot(
     endedAt,
     cycleType: plan.cycleType,
     goal: getCycleObjectiveValue(plan),
+    improvedExercises: progress.improved,
+    stagnantExercises: progress.stagnant,
+    moodSummary: {
+      score: moodSummary.score > 0 ? moodSummary.score : null,
+      message: moodSummary.message,
+    },
+    suggestions,
   };
 }
 
@@ -4626,6 +4675,36 @@ function formatDate(value: string) {
 function readSnapshotNumber(snapshot: PersistedTrainingCycleSnapshot, key: string) {
   const value = snapshot[key];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function readSnapshotStringList(snapshot: PersistedTrainingCycleSnapshot, key: string, limit: number) {
+  const value = snapshot[key];
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .slice(0, limit);
+}
+
+function readSnapshotMoodSummary(snapshot: PersistedTrainingCycleSnapshot) {
+  const fallback = {
+    score: null as number | null,
+    message: "No hay suficientes formularios de motivación para resumir el estado de ánimo.",
+  };
+  const value = snapshot.moodSummary;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
+
+  const score = "score" in value && typeof value.score === "number" && Number.isFinite(value.score)
+    ? value.score
+    : null;
+  const message = "message" in value && typeof value.message === "string" && value.message.trim().length > 0
+    ? value.message
+    : fallback.message;
+
+  return { score, message };
+}
+
+function formatSnapshotList(items: string[], fallback: string) {
+  return items.length > 0 ? items.join(", ") : fallback;
 }
 
 function translateTrainingCycleRepositoryError(error: unknown) {
