@@ -17,6 +17,44 @@ Esta guia no autoriza ejecucion en Produccion.
 - Sin tocar `exercise_entries`.
 - Sin conectar todavia la UI principal.
 
+## Helper QA temporal
+
+Ruta:
+
+```text
+/qa/training-cycles
+```
+
+Archivo:
+
+```text
+src/app/qa/training-cycles/page.tsx
+```
+
+El helper solo debe renderizar controles si se cumplen todas estas condiciones:
+
+```text
+process.env.NODE_ENV !== "production"
+process.env.NEXT_PUBLIC_ENABLE_QA_TOOLS === "true"
+process.env.NEXT_PUBLIC_SUPABASE_ENV === "qa"
+```
+
+Para habilitarlo en QA:
+
+```text
+NEXT_PUBLIC_ENABLE_QA_TOOLS=true
+NEXT_PUBLIC_SUPABASE_ENV=qa
+```
+
+Advertencias:
+
+- No usar en Produccion.
+- No enlazar desde navegacion principal.
+- No usar service role.
+- No ingresar `user_id`, emails ni UUIDs.
+- Usar siempre sesion real del navegador.
+- Recordar desactivar o eliminar el helper antes de conectar la UI real si Arquitectura lo decide.
+
 ## Precondiciones
 
 - Preview o Development apuntan a Supabase QA.
@@ -30,25 +68,39 @@ Esta guia no autoriza ejecucion en Produccion.
 ## Checklist Usuario A
 
 1. Iniciar sesion como Usuario A.
-2. Crear un ciclo activo usando el repository de ciclos desde un flujo autenticado controlado.
-3. Confirmar que `getActiveTrainingCycle()` retorna 1 ciclo.
-4. Confirmar que `getTrainingCycleHistory()` no muestra ciclos activos.
-5. Intentar crear un segundo ciclo activo para Usuario A.
-6. Confirmar error claro: ya existe un ciclo activo para este usuario.
-7. Completar el ciclo activo con `completeTrainingCycle()`.
-8. Confirmar que `getActiveTrainingCycle()` retorna `null`.
-9. Confirmar que `getTrainingCycleHistory()` muestra el ciclo completado.
-10. Confirmar que `updated_at` cambio despues del update.
+2. Abrir `/qa/training-cycles`.
+3. Confirmar que el helper indica acceso permitido y sesion activa.
+4. Presionar "Cargar ciclos".
+5. Crear un ciclo activo usando "Crear ciclo QA active".
+6. Confirmar que `getActiveTrainingCycle()` retorna 1 ciclo.
+7. Confirmar que `getTrainingCycleHistory()` no muestra ciclos activos.
+8. Intentar crear un segundo ciclo activo para Usuario A.
+9. Confirmar error claro: ya existe un ciclo activo para este usuario.
+10. Completar el ciclo activo con "Completar ciclo active".
+11. Confirmar que `getActiveTrainingCycle()` retorna `null`.
+12. Confirmar que `getTrainingCycleHistory()` muestra el ciclo completado.
+13. Confirmar que `updated_at` cambio despues del update.
+
+Checklist opcional de cancelacion:
+
+1. Crear un nuevo ciclo activo de Usuario A.
+2. Presionar "Cancelar ciclo active".
+3. Confirmar que queda en historial con status `cancelled`.
+4. Confirmar que no hubo delete fisico.
 
 ## Checklist Usuario B
 
 1. Cerrar sesion de Usuario A.
 2. Iniciar sesion como Usuario B.
-3. Confirmar que `getActiveTrainingCycle()` no muestra ciclos de Usuario A.
-4. Confirmar que `getTrainingCycleHistory()` no muestra ciclos de Usuario A.
-5. Crear un ciclo activo de Usuario B.
-6. Confirmar que Usuario B ve solo su ciclo.
-7. Confirmar que Usuario A no ve ciclos de Usuario B al volver a iniciar sesion.
+3. Abrir `/qa/training-cycles`.
+4. Presionar "Cargar ciclos".
+5. Confirmar que `getActiveTrainingCycle()` no muestra ciclos de Usuario A.
+6. Confirmar que `getTrainingCycleHistory()` no muestra ciclos de Usuario A.
+7. Crear un ciclo activo de Usuario B.
+8. Confirmar que Usuario B ve solo su ciclo.
+9. Cerrar sesion de Usuario B.
+10. Volver a iniciar sesion como Usuario A.
+11. Confirmar que Usuario A no ve ciclos de Usuario B.
 
 ## Validaciones RLS esperadas
 
@@ -58,6 +110,8 @@ Esta guia no autoriza ejecucion en Produccion.
 - Usuario autenticado no puede hacer delete fisico desde frontend.
 - Usuario sin sesion recibe error de sesion requerida.
 - Usuario con sesion expirada recibe error de sesion expirada.
+- Reload mantiene historial visible para el usuario autenticado.
+- Logout/login mantiene historial visible para el mismo usuario.
 
 ## Validaciones de integridad
 
@@ -76,6 +130,7 @@ Esta guia no autoriza ejecucion en Produccion.
 - Usuario B: ciclo propio creado, ciclos de Usuario A no visibles.
 - Confirmacion de que no existe delete fisico desde frontend.
 - Confirmacion de que `updated_at` cambia al actualizar.
+- Confirmacion de reload y logout/login.
 - Capturas o logs anonimizados sin emails, user_id ni UUIDs reales.
 
 ## Criterios de aprobacion
