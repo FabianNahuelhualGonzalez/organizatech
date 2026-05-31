@@ -34,7 +34,7 @@ src/app/qa/training-cycles/page.tsx
 El helper solo debe renderizar controles si se cumplen todas estas condiciones:
 
 ```text
-process.env.NODE_ENV !== "production"
+process.env.VERCEL_ENV === "preview"
 process.env.NEXT_PUBLIC_ENABLE_QA_TOOLS === "true"
 process.env.NEXT_PUBLIC_SUPABASE_ENV === "qa"
 ```
@@ -42,6 +42,7 @@ process.env.NEXT_PUBLIC_SUPABASE_ENV === "qa"
 Para habilitarlo en QA:
 
 ```text
+VERCEL_ENV=preview
 NEXT_PUBLIC_ENABLE_QA_TOOLS=true
 NEXT_PUBLIC_SUPABASE_ENV=qa
 ```
@@ -49,6 +50,8 @@ NEXT_PUBLIC_SUPABASE_ENV=qa
 Advertencias:
 
 - No usar en Produccion.
+- Produccion queda bloqueada porque `VERCEL_ENV` no es `preview`.
+- Development local puede quedar bloqueado por diseno.
 - No enlazar desde navegacion principal.
 - No usar service role.
 - No ingresar `user_id`, emails ni UUIDs.
