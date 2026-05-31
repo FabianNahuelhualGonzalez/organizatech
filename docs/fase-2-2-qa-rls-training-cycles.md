@@ -29,15 +29,20 @@ Archivo:
 
 ```text
 src/app/qa/training-cycles/page.tsx
+src/app/qa/training-cycles/training-cycles-qa-client.tsx
 ```
 
-El helper solo debe renderizar controles si se cumplen todas estas condiciones:
+`page.tsx` es server component y evalua `VERCEL_ENV` del lado servidor. El componente cliente contiene solo acciones, botones y logs, y no depende de `process.env.VERCEL_ENV`.
+
+El helper solo debe montar controles si se cumplen todas estas condiciones:
 
 ```text
 process.env.VERCEL_ENV === "preview"
 process.env.NEXT_PUBLIC_ENABLE_QA_TOOLS === "true"
 process.env.NEXT_PUBLIC_SUPABASE_ENV === "qa"
 ```
+
+Si cualquiera falla, `page.tsx` muestra pantalla bloqueada y no monta `training-cycles-qa-client.tsx`.
 
 Para habilitarlo en QA:
 
