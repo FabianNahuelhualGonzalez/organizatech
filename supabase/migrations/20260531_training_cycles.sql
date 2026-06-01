@@ -1,4 +1,5 @@
--- Fase 2.2C - Migracion aditiva para ciclos de Training.
+-- Fase 2.2J - Migracion productiva controlada para ciclos de Training.
+-- Validada previamente en QA durante Fase 2.2C.
 -- No toca public.training_sessions.
 -- No toca public.exercise_entries.
 -- No migra localStorage.
