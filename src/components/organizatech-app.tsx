@@ -1293,7 +1293,7 @@ export function OrganizatechApp({
           });
         }
 
-        const nextPlan = createDefaultTrainingPlan();
+        const nextPlan = createControlledNextTrainingPlan();
         const nextCycleNumber = getNextPersistedCycleNumber(activeCycle, persistedCycleHistory);
         await createTrainingCycle({
           name: `Ciclo ${nextCycleNumber}`,
@@ -4120,6 +4120,16 @@ function createDefaultTrainingPlan(): TrainingPlan {
     trainingDays: ["Lunes"],
     microFocus: "Progresión",
     sessionFocus: "Técnica",
+  };
+}
+
+function createControlledNextTrainingPlan(): TrainingPlan {
+  return {
+    ...createDefaultTrainingPlan(),
+    // 2.2AK controlled validation path; replace with explicit UI selection in the final product flow.
+    cycleType: "micro",
+    microFocus: "Descarga",
+    microDurationWeeks: 1,
   };
 }
 
