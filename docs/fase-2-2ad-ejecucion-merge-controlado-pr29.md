@@ -161,7 +161,7 @@ Interpretacion:
 - `main` no cambio.
 - No se genero deployment Production nuevo asociado al merge.
 
-### Estado posterior del PR
+### Estado posterior inicial del PR desde Codex
 
 Verificacion posterior al bloqueo:
 
@@ -173,41 +173,73 @@ Verificacion posterior al bloqueo:
 | Mergeable | `true` |
 | Head SHA | `fddae835d542eb4b4e8bc362124d5c77b2de3a96` |
 
-## 4. Vercel Production
+### Postcheck manual posterior al merge
 
-No se genero deployment Production nuevo porque el merge no se ejecuto.
-
-Production permanece en el deployment observado antes del intento:
+TI reporto evidencia manual posterior a la ejecucion desde GitHub.com:
 
 ```text
-dpl_8gWk9GkYQL61WmrLawus3bGB7dvc
-target=production
-branch=main
-commit=f6c00ebc0a27bc46d810d67519bdb5fd7d3c0610
-state=READY
+PR #29 fue mergeado manualmente en GitHub.
+GitHub main muestra: Merge pull request #29.
+Commit visible en main: d615a83.
+main actualizado correctamente.
 ```
 
-No hubo redeploy manual. No se cambiaron variables Vercel.
+Lectura TI:
+
+- El merge manual fue ejecutado correctamente.
+- La autorizacion de 2.2AD cubria esta ejecucion manual.
+- La limitacion de Codex quedo acotada a permisos de integracion, no al estado tecnico del PR.
+
+## 4. Vercel Production
+
+Postcheck manual posterior al merge:
+
+```text
+Vercel Deployments revisado con filtro Production.
+No aparece deployment Production nuevo asociado al PR #29.
+GitHub repo sidebar muestra Preview reciente y Production hace 3 dias.
+```
+
+Ultimo Production visible reportado por TI:
+
+```text
+Merge pull request #28
+commit f6c00eb
+hace 3 dias
+```
+
+Lectura TI:
+
+- Merge GitHub: OK.
+- Autodeploy Production Vercel: no observado / pendiente.
+- Production sigue en el deployment anterior.
+- No hubo redeploy manual.
+- No se cambiaron variables Vercel.
+- No se activo `ENABLE_TRAINING_CYCLES_REPOSITORY`.
 
 ## 5. Postchecks
 
-Como el merge fue abortado por permisos, los postchecks posteriores al merge no aplican como validacion de un nuevo deployment.
+Postchecks posteriores al merge manual:
 
 Estado confirmado:
 
-- App productiva cargaba antes del intento: `HTTP 200 OK`.
-- Training Cycles seguia bloqueado antes del intento: `trainingCyclesRepositoryEnabled=false`.
-- `/qa/training-cycles` seguia bloqueado en Production antes del intento.
-- Feature flag Production seguia OFF/no configurada segun evidencia runtime.
+- GitHub main contiene el merge manual del PR #29 segun evidencia TI.
+- Commit visible en main: `d615a83`.
+- Vercel Production deployment nuevo: no observado / pendiente.
+- Production sigue en deployment anterior asociado a PR #28 (`f6c00eb`).
+- No se hizo redeploy manual.
+- No se cambiaron variables Vercel.
+- No se activo `ENABLE_TRAINING_CYCLES_REPOSITORY`.
+- Training Cycles sigue bloqueado para usuarios finales.
+- No se creo microciclo productivo real.
 - `public.training_cycles` no fue consultada en esta fase para evitar SQL.
 - `training_sessions` y `exercise_entries` no fueron consultadas en esta fase para evitar SQL.
-- No se crearon ciclos productivos reales.
 
 Estado de `public.training_cycles`:
 
 - Estado esperado segun cierre 2.2P: existe y vacia.
 - No se revalido con SQL en 2.2AD por restriccion vigente.
-- No hubo acciones de merge/SQL/Supabase que pudieran modificarla desde Codex en esta fase.
+- No hubo acciones SQL/Supabase que pudieran modificarla desde Codex en esta fase.
 
 ## 6. Seguridad
 
@@ -232,36 +264,64 @@ Confirmaciones de seguridad de la fase:
 Resultado final de 2.2AD:
 
 ```text
-Merge ejecutado: no
-Resultado: abortado por permisos de integracion GitHub/Codex
-PR #29: abierto, Draft, mergeable, no mergeado
-Production: intacta
+Merge ejecutado: si, manualmente en GitHub.com
+Commit visible en main: d615a83
+Resultado Codex: intentos Ready/merge bloqueados por permisos de integracion
+Resultado manual: merge GitHub OK
+Autodeploy Production Vercel: no observado / pendiente
+Production: sigue en deployment anterior
 Feature flag: OFF/no configurada
 Training Cycles: bloqueado en UI productiva
 ```
 
-La causa de aborto no es tecnica del PR ni del deployment. La causa es falta de permisos de la integracion para:
+La causa de aborto desde Codex no fue tecnica del PR ni del deployment. La causa fue falta de permisos de la integracion para:
 
 1. Cambiar Draft a Ready for review.
 2. Ejecutar merge del PR.
+
+La ejecucion manual posterior resolvio el merge en GitHub, pero no se observo autodeploy Production nuevo en Vercel.
+
+Consecuencia operacional:
+
+- GitHub `main` contiene el merge del PR #29 y el commit visible `d615a83`.
+- Vercel Production nuevo no fue observado.
+- Production sigue en el deployment anterior asociado a PR #28 / `f6c00eb`.
+- Ese deployment es anterior a 2.2S.
+- Production actualmente ejecuta el codigo de deployment anterior, pre-2.2S.
+- El gating `ENABLE_TRAINING_CYCLES_REPOSITORY` fue introducido en la fase 2.2S.
+- Mientras Production no sea actualizado con el deployment del merge del PR #29, configurar `ENABLE_TRAINING_CYCLES_REPOSITORY=true` en Vercel no activaria Training Cycles, porque el codigo desplegado actualmente no lee esa variable.
+- Activar la variable ahora seria inefectivo y no debe hacerse.
+- La activacion de Training Cycles requiere primero resolver el autodeploy/deployment pendiente de Production.
 
 ## 8. Siguiente paso recomendado
 
 Ruta recomendada para Arquitectura:
 
-1. Mantener PR #29 sin merge desde Codex.
-2. Ejecutar manualmente en GitHub.com, con usuario autorizado:
-   - cambiar PR #29 de Draft a Ready for review;
-   - ejecutar merge a `main`.
-3. No activar `ENABLE_TRAINING_CYCLES_REPOSITORY`.
-4. No cambiar variables Vercel.
-5. No hacer redeploy manual salvo que Vercel no genere autodeploy y Arquitectura lo autorice.
-6. Monitorear el autodeployment Production desde `main`.
-7. Devolver evidencia de merge/deployment a TI/Codex/Claude para documentar cierre o postchecks.
+1. Mantener activacion Training Cycles bloqueada.
+2. No activar `ENABLE_TRAINING_CYCLES_REPOSITORY`.
+3. No cambiar variables Vercel.
+4. No hacer redeploy manual sin aprobacion explicita de Arquitectura.
+5. Preparar una fase separada para una de estas rutas:
+   - diagnostico read-only de por que Vercel no genero Production deployment tras el merge;
+   - redeploy controlado de Production, solo si Arquitectura lo autoriza explicitamente.
+6. Mantener evidencia de que Production sigue en el deployment anterior hasta resolver el punto Vercel.
 
-La autorizacion de Arquitectura para 2.2AD cubre la ejecucion manual en GitHub.com. No se requiere una nueva aprobacion de Arquitectura para la ejecucion manual, ya que el alcance autorizado incluye cambiar el PR de Draft a Ready si GitHub lo exige y ejecutar el merge a `main`.
+Fase siguiente recomendada:
 
-Si Arquitectura prefiere resolverlo desde Codex, se requiere una fase previa para habilitar permisos de la integracion GitHub o instalar/autenticar `gh` localmente. En el entorno actual, `gh` no esta disponible:
+```text
+Fase 2.2AE - Diagnostico read-only de Vercel/autodeploy Production
+```
+
+Objetivo propuesto:
+
+1. Confirmar si el commit `d615a83` tiene algun deployment en Vercel, en cualquier estado.
+2. Confirmar si el webhook de GitHub a Vercel fue recibido/procesado.
+3. Revisar si existe regla de Ignored Build Step o condicion que omitio deployment.
+4. Confirmar si se requiere redeploy manual controlado o re-disparo controlado, sin ejecutarlo todavia.
+
+La autorizacion de Arquitectura para 2.2AD cubria la ejecucion manual en GitHub.com. No se requirio una nueva aprobacion de Arquitectura para la ejecucion manual, ya que el alcance autorizado incluia cambiar el PR de Draft a Ready si GitHub lo exigia y ejecutar el merge a `main`.
+
+Si Arquitectura prefiere resolver futuras acciones de GitHub desde Codex, se requiere una fase previa para habilitar permisos de la integracion GitHub o instalar/autenticar `gh` localmente. En el entorno actual, `gh` no esta disponible:
 
 ```text
 gh: no reconocido como comando
@@ -270,14 +330,17 @@ gh: no reconocido como comando
 ## 9. Confirmaciones finales
 
 - Gate pre-merge final ejecutado.
-- PR #29 seguia abierto, Draft, `merged=false`, `mergeable=true`.
+- PR #29 seguia abierto, Draft, `merged=false`, `mergeable=true` antes del intento desde Codex.
 - Checks OK.
 - Preview QA OK.
 - Production intacta antes del intento.
 - Intento de Ready ejecutado y bloqueado por permisos.
 - Merge intentado y bloqueado por permisos.
-- No se ejecuto merge.
-- No se genero Production deployment nuevo.
+- Merge manual posterior ejecutado en GitHub.com.
+- Main muestra `Merge pull request #29`.
+- Commit visible en main: `d615a83`.
+- No se observo Production deployment nuevo.
+- Production sigue en deployment anterior (`f6c00eb`, PR #28).
 - No se activo feature flag.
 - No se cambiaron variables Vercel.
 - No se hizo redeploy manual.
