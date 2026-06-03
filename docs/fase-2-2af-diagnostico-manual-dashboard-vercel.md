@@ -268,7 +268,217 @@ Estado manual:
 Pendiente de revision manual.
 ```
 
-## 6. Resultado A/B/C
+## 6. Evidencia manual recopilada
+
+La revision manual read-only en Dashboard Vercel y GitHub registro la siguiente evidencia.
+
+### 6.1 Vercel -> Project Settings -> Git
+
+```text
+Repositorio conectado:
+FabianNahuelhualGonzalez/organizatech
+
+Git integration:
+Activa
+
+Pull Request Comments:
+ON
+
+deployment_status Events:
+ON
+
+repository_dispatch Events:
+ON
+
+Commit Status:
+ON
+
+Commit Comments:
+OFF
+
+Consolidated Commit Status:
+OFF
+
+Require Verified Commits:
+Inherit from Team / Disabled
+
+Git LFS:
+Disabled
+
+Deploy Hooks:
+No hay hooks creados.
+```
+
+Lectura:
+
+- La integracion GitHub-Vercel esta activa.
+- El repositorio conectado corresponde al repositorio esperado.
+- No se observaron Deploy Hooks manuales creados.
+- Production Branch no fue visible explicitamente en las pantallas revisadas.
+- Production Branch se mantiene inferido como `main` por evidencia historica de deployments Production desde `main`.
+
+### 6.2 Vercel -> Build and Deployment
+
+```text
+Framework Preset:
+Next.js
+
+Build Command:
+default / sin override
+
+Output Directory:
+default / sin override
+
+Install Command:
+default / sin override
+
+Development Command:
+next / sin override
+
+Root Directory:
+./
+
+Include files outside root directory in Build Step:
+Enabled
+
+Skip deployments when there are no changes to the root directory or its dependencies:
+Disabled
+
+Ignored Build Step:
+Behavior = Automatic
+
+Node.js Version:
+24.x
+
+On-Demand Concurrent Builds:
+Disable on-demand concurrent builds
+Builds are queued, maximum of one at a time
+
+Build Machine:
+Inherited from Team / Standard
+
+Deployment Checks:
+No checks configured
+
+Rolling Releases:
+Disabled
+
+Prioritize Production Builds:
+Enabled
+```
+
+Lectura:
+
+- No se observo Ignored Build Step personalizado.
+- No se observo regla local que omita deploys por cambios documentales.
+- `Skip deployments when there are no changes to the root directory or its dependencies` esta Disabled.
+- La configuracion visible no explica por si sola la ausencia de deployment Production para `d615a83`.
+- Con `Skip deployments when there are no changes to the root directory or its dependencies` = Disabled y sin Ignored Build Step personalizado, la configuracion visible no contiene un mecanismo activo que justifique el skip de `d615a83`.
+- La causa mas probable es que la GitHub App de Vercel no recibio o no proceso el evento de merge para el commit `d615a83` en la rama `main`.
+
+### 6.3 Vercel -> General
+
+```text
+Project Name:
+organizatech
+
+Estado paused del proyecto:
+No se observo estado paused en las capturas revisadas.
+
+Vercel Toolbar:
+Default controlled at team level
+
+Data Preferences:
+Enabled
+
+Transfer/Delete:
+Visibles, no utilizados.
+```
+
+Lectura:
+
+- No se observo que el proyecto este pausado.
+- Las acciones destructivas o de transferencia estaban visibles pero no fueron utilizadas.
+
+### 6.4 GitHub -> Settings -> Webhooks
+
+```text
+Webhooks manuales visibles:
+No hay webhooks manuales visibles en el repositorio.
+
+Delivery logs desde Webhooks:
+No disponibles en esta seccion.
+```
+
+### 6.5 GitHub -> Settings -> GitHub Apps
+
+```text
+GitHub App Vercel:
+Instalada para el repositorio.
+
+Lectura:
+La integracion GitHub -> Vercel existe como GitHub App, no como webhook manual visible.
+Por eso no hay delivery logs en Settings -> Webhooks del repo.
+```
+
+Lectura:
+
+- La integracion GitHub -> Vercel existe como GitHub App instalada para el repositorio.
+- No se pudieron revisar delivery logs desde Settings -> Webhooks porque no existe webhook manual visible.
+
+### 6.6 Vercel -> Deployments
+
+```text
+Filtros usados:
+All Branches
+All Environments
+Status visible: todos los estados disponibles
+
+Busqueda:
+Ctrl+F d615a83
+
+Resultado:
+0/0
+
+Deployment para d615a83:
+No visible.
+
+Deployments recientes observados:
+Previews de la rama feature/training-sessions-fuente-verdad para commits posteriores como 97073e1, b3d95ca y 16ccdec.
+
+Production nuevo asociado a PR #29 / d615a83:
+No observado.
+```
+
+Lectura:
+
+- No se observo deployment visible para `d615a83`.
+- No se observo deployment ignored, failed o cancelled visible para `d615a83`.
+- Vercel siguio generando Previews para la rama `feature/training-sessions-fuente-verdad`.
+- No se observo Production nuevo asociado al merge del PR #29.
+
+### 6.7 Conclusion manual preliminar
+
+```text
+Resultado B:
+Causa no encontrada visualmente y no existe deployment visible para d615a83.
+```
+
+No se observo:
+
+- Ignored Build Step personalizado.
+- Regla local que omita deploys por cambios documentales.
+- Proyecto pausado.
+- Deployment ignored/failed/cancelled visible para `d615a83`.
+- Webhook manual con delivery logs.
+
+Si se observo:
+
+- GitHub App Vercel instalada.
+- Integracion GitHub-Vercel operativa para Preview.
+- Production sigue sin deployment para `d615a83`.
+
+## 7. Resultado A/B/C
 
 Completar despues de la revision manual.
 
@@ -302,11 +512,11 @@ Se confirma que no hay bloqueo visible y se requiere redeploy manual controlado.
 Completar:
 
 ```text
-Production Branch:
-Ignored Build Step:
-Autodeploy:
-Webhook/logs:
-Razon para redeploy controlado:
+Production Branch: main esperado; no se documento override visible en la evidencia manual recibida.
+Ignored Build Step: Automatic; no se observo Ignored Build Step personalizado.
+Autodeploy: sin bloqueo visible en Build and Deployment; Production para d615a83 no se genero.
+Webhook/logs: no hay webhook manual visible; integracion Vercel existe como GitHub App.
+Razon para redeploy controlado: no hay deployment visible para d615a83 y la causa no fue encontrada visualmente.
 ```
 
 ### Opcion C - Production ya se actualizo
@@ -329,13 +539,14 @@ Status:
 Postchecks pendientes:
 ```
 
-Estado actual de 2.2AF desde Codex:
+Estado actual de 2.2AF:
 
 ```text
-Resultado A/B/C pendiente de revision manual.
+Resultado B documentado:
+Causa no encontrada visualmente; requiere autorizacion separada para redeploy manual controlado o revision avanzada de configuracion Vercel/GitHub App.
 ```
 
-## 7. Recomendacion TI segun resultado
+## 8. Recomendacion TI segun resultado
 
 Si A:
 
@@ -349,6 +560,8 @@ Si B:
 - Solicitar autorizacion separada para redeploy manual controlado.
 - Mantener Training Cycles bloqueado hasta que Production ejecute codigo 2.2S.
 - No activar feature flag hasta postchecks posteriores.
+- Mantener `ENABLE_TRAINING_CYCLES_REPOSITORY` OFF/no configurada.
+- Considerar revision avanzada de configuracion Vercel/GitHub App si Arquitectura prefiere resolver causa raiz antes de redeploy.
 
 Si C:
 
@@ -356,11 +569,45 @@ Si C:
 - Mantener feature flag OFF hasta fase separada.
 - Confirmar que Production corre `d615a83` o commit posterior que incluya 2.2S.
 
-## 8. Confirmaciones de 2.2AF
+Recomendacion TI actual:
+
+```text
+Mantener Training Cycles bloqueado.
+No activar feature flag.
+No hacer redeploy manual todavia sin autorizacion explicita.
+Resultado probable: B) Causa no encontrada visualmente; requiere autorizacion separada para redeploy manual controlado o revision avanzada de configuracion Vercel/GitHub App.
+```
+
+## 9. Siguiente fase recomendada
+
+Recomendacion para Arquitectura:
+
+```text
+Fase 2.2AG - Redeploy manual controlado de Production con autorizacion explicita de Arquitectura.
+```
+
+Alcance sugerido:
+
+1. Autorizar explicitamente redeploy manual en Vercel Production apuntando a `d615a83` o al ultimo commit de `main`.
+2. Ejecutar redeploy sin modificar variables.
+3. Monitorear `target=production` y `state=READY`.
+4. Confirmar que el commit desplegado contiene `20a67651` o posterior.
+5. Confirmar runtime `trainingCyclesRepositoryEnabled=false`.
+6. Confirmar que `ENABLE_TRAINING_CYCLES_REPOSITORY` sigue OFF/no configurada.
+
+Aclaracion:
+
+```text
+El redeploy manual no activa Training Cycles.
+Solo actualiza el codigo desplegado en Production al codigo 2.2S o posterior.
+La activacion de la feature flag queda para una fase posterior separada.
+```
+
+## 10. Confirmaciones de 2.2AF
 
 - Documento/checklist preparado.
 - La revision manual debe hacerla un usuario con acceso Dashboard Vercel.
-- Resultado A/B/C queda pendiente hasta completar revision manual.
+- Resultado A/B/C documentado como B segun evidencia manual.
 - No se hizo redeploy manual.
 - No se activo `ENABLE_TRAINING_CYCLES_REPOSITORY`.
 - No se cambiaron variables Vercel.
