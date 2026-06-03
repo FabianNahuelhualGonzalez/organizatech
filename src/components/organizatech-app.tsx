@@ -299,7 +299,15 @@ interface TrainingCycleSnapshot {
   entries: ExerciseEntry[];
 }
 
-export function OrganizatechApp({ trainingCyclesRepositoryEnabled = false }: { trainingCyclesRepositoryEnabled?: boolean }) {
+interface OrganizatechAppProps {
+  trainingCyclesRepositoryEnabled?: boolean;
+  trainingCyclesSnapshotSource?: "ui-main-production" | "ui-main-qa";
+}
+
+export function OrganizatechApp({
+  trainingCyclesRepositoryEnabled = false,
+  trainingCyclesSnapshotSource = "ui-main-qa",
+}: OrganizatechAppProps) {
   const [screen, setScreen] = useState<Screen>(() => getInitialAuthScreen());
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
   const [sessionName, setSessionName] = useState("");
@@ -1274,7 +1282,14 @@ export function OrganizatechApp({ trainingCyclesRepositoryEnabled = false }: { t
         if (activeCycle) {
           await completeTrainingCycle({
             endedAt,
-            summarySnapshot: createPersistedCycleSummarySnapshot(trainingPlan, exercises, entries, activeCycle.startedAt, endedAt),
+            summarySnapshot: createPersistedCycleSummarySnapshot(
+              trainingPlan,
+              exercises,
+              entries,
+              activeCycle.startedAt,
+              endedAt,
+              trainingCyclesSnapshotSource,
+            ),
           });
         }
 
@@ -1285,7 +1300,7 @@ export function OrganizatechApp({ trainingCyclesRepositoryEnabled = false }: { t
           cycleNumber: nextCycleNumber,
           cycleType: nextPlan.cycleType,
           goal: getCycleObjectiveValue(nextPlan),
-          planSnapshot: createPersistedCyclePlanSnapshot(nextPlan, [], "ui-main-qa-preview"),
+          planSnapshot: createPersistedCyclePlanSnapshot(nextPlan, [], trainingCyclesSnapshotSource),
         });
 
         clearRoutineDraft(dataMode, supabaseUser?.id);
@@ -1302,8 +1317,8 @@ export function OrganizatechApp({ trainingCyclesRepositoryEnabled = false }: { t
         setIsEditingRoutinePlan(true);
         setScreen("registro-entrenamiento");
         setStatusMessage(activeCycle
-          ? "Ciclo actual finalizado y nuevo ciclo creado en QA."
-          : "Nuevo ciclo creado en QA. No existía un ciclo activo previo.");
+          ? "Ciclo actual finalizado y nuevo ciclo creado correctamente."
+          : "Nuevo ciclo creado correctamente. No existía un ciclo activo previo.");
         await refreshPersistedTrainingCycles();
       } catch (error) {
         setStatusMessage(translateTrainingCycleRepositoryError(error));
@@ -1354,7 +1369,14 @@ export function OrganizatechApp({ trainingCyclesRepositoryEnabled = false }: { t
         const endedAt = new Date().toISOString();
         await cancelTrainingCycle({
           endedAt,
-          summarySnapshot: createPersistedCycleSummarySnapshot(trainingPlan, exercises, entries, activeCycle.startedAt, endedAt),
+          summarySnapshot: createPersistedCycleSummarySnapshot(
+            trainingPlan,
+            exercises,
+            entries,
+            activeCycle.startedAt,
+            endedAt,
+            trainingCyclesSnapshotSource,
+          ),
         });
 
         const nextPlan = createDefaultTrainingPlan();
@@ -1371,7 +1393,7 @@ export function OrganizatechApp({ trainingCyclesRepositoryEnabled = false }: { t
         setHasStartedTraining(false);
         setIsEditingRoutinePlan(true);
         setIsDeleteCycleConfirmOpen(false);
-        setStatusMessage("Ciclo cancelado en QA. Ya puedes configurar un nuevo ciclo de entrenamiento.");
+        setStatusMessage("Ciclo cancelado. Ya puedes configurar un nuevo ciclo de entrenamiento.");
         setScreen("registro-entrenamiento");
         await refreshPersistedTrainingCycles();
         return;
@@ -2798,7 +2820,7 @@ function PersistedCycleHistoryScreen({ history }: { history: PersistedTrainingCy
         <div>
           <p className="eyebrow">Historial ciclo de entrenamiento</p>
           <h2>Ciclos finalizados</h2>
-          <p>Revisa los ciclos cerrados guardados en QA desde tu cuenta conectada.</p>
+          <p>Revisa los ciclos cerrados guardados desde tu cuenta conectada.</p>
         </div>
         <span>{history.length}</span>
       </div>
@@ -4424,6 +4446,7 @@ function createPersistedCycleSummarySnapshot(
   entries: ExerciseEntry[],
   startedAt: string,
   endedAt: string,
+  source: string,
 ): PersistedTrainingCycleSnapshot {
   const metrics = calculateWeeklyComparison(entries);
   const summary = calculateWeeklySummary(metrics, Math.max(1, ...entries.map((entry) => entry.week)));
@@ -4434,7 +4457,7 @@ function createPersistedCycleSummarySnapshot(
   const suggestions = createCycleSuggestions(progress, moodSummary);
 
   return {
-    source: "ui-main-qa-preview",
+    source,
     volumeTotal: summary.volumeTotal,
     totalReps: summary.totalReps,
     weekCount: Math.max(1, ...entries.map((entry) => entry.week)),
