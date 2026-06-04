@@ -1425,15 +1425,33 @@ export function OrganizatechApp({
       try {
         const activeCycle = await getActiveTrainingCycle();
         const nextPlan = createControlledNextTrainingPlan();
-        const setupState = hasSetupDraftContent(setupByDay) ? setupByDay : createSetupByDay();
-        const created = await createCycleScopedTrainingCycleFromSetup(nextPlan, setupState, activeCycle);
-        if (!created) return;
+        const freshSetup = createSetupByDay();
+        const activeCycleToClose = activeCycle?.status === "active" ? activeCycle : null;
 
+        if (activeCycleToClose) {
+          const endedAt = new Date().toISOString();
+          await completeTrainingCycle({
+            endedAt,
+            summarySnapshot: createPersistedCycleSummarySnapshot(
+              trainingPlan,
+              exercises,
+              entries,
+              activeCycleToClose.startedAt,
+              endedAt,
+              trainingCyclesSnapshotSource,
+            ),
+          });
+        }
+
+        clearActiveFlow(dataMode, supabaseUser?.id);
         clearRoutineDraft(dataMode, supabaseUser?.id);
-        setSetupByDay(setupState);
+        clearWorkoutDraft(dataMode, supabaseUser?.id);
+        setPersistedActiveCycle(null);
+        setSetupByDay(freshSetup);
         setSetupDay("Lunes");
         setTrainingPlan(nextPlan);
         saveTrainingPlan(nextPlan);
+        setExercises([]);
         setEntries([]);
         setTrainingSessions([]);
         setActiveRoutineDay("Lunes");
@@ -1442,11 +1460,11 @@ export function OrganizatechApp({
         setExerciseDrafts({});
         setReadiness(null);
         setHasStartedTraining(false);
-        setIsEditingRoutinePlan(false);
-        setScreen("entrenamiento");
+        setIsEditingRoutinePlan(true);
+        setScreen("registro-entrenamiento");
         setStatusMessage(activeCycle
-          ? "Ciclo actual finalizado y nuevo plan cycle-scoped creado correctamente."
-          : "Nuevo plan cycle-scoped creado correctamente.");
+          ? "Ciclo actual finalizado. Configura el nuevo plan antes de crearlo."
+          : "Configura el plan del nuevo ciclo antes de crearlo.");
       } catch (error) {
         setStatusMessage(translateTrainingCycleRepositoryError(error));
       } finally {
