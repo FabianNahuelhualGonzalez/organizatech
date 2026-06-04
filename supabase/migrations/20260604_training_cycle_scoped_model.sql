@@ -178,6 +178,26 @@ create trigger training_cycle_exercises_set_updated_at
 alter table public.training_cycle_routines enable row level security;
 alter table public.training_cycle_days enable row level security;
 alter table public.training_cycle_exercises enable row level security;
+alter table public.training_cycles enable row level security;
+
+drop policy if exists "training cycles select own rows" on public.training_cycles;
+create policy "training cycles select own rows" on public.training_cycles
+  for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists "training cycles insert own rows" on public.training_cycles;
+create policy "training cycles insert own rows" on public.training_cycles
+  for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "training cycles update own rows" on public.training_cycles;
+create policy "training cycles update own rows" on public.training_cycles
+  for update
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 drop policy if exists "training cycle routines select own rows" on public.training_cycle_routines;
 create policy "training cycle routines select own rows" on public.training_cycle_routines
@@ -472,12 +492,14 @@ create policy "entries own rows" on public.exercise_entries
 -- 2.2AP detecto grants amplios existentes en tablas legacy de ejecucion.
 revoke all on table public.training_sessions from anon;
 revoke all on table public.exercise_entries from anon;
+revoke all on table public.training_cycles from anon;
 revoke all on table public.training_cycle_routines from anon;
 revoke all on table public.training_cycle_days from anon;
 revoke all on table public.training_cycle_exercises from anon;
 
 revoke delete, truncate, references, trigger on table public.training_sessions from authenticated;
 revoke delete, truncate, references, trigger on table public.exercise_entries from authenticated;
+revoke delete, truncate, references, trigger on table public.training_cycles from authenticated;
 revoke delete, truncate, references, trigger on table public.training_cycle_routines from authenticated;
 revoke delete, truncate, references, trigger on table public.training_cycle_days from authenticated;
 revoke delete, truncate, references, trigger on table public.training_cycle_exercises from authenticated;

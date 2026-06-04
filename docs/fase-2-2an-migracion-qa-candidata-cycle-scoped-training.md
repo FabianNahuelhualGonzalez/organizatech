@@ -200,9 +200,33 @@ drop policy if exists "entries own rows" on public.exercise_entries;
 
 CO-01 queda resuelta: no se requieren nombres adicionales para reemplazar las policies reales de estas dos tablas.
 
+### 7.2 Resultado 2.2AP-b sobre training_cycles
+
+La revision manual read-only de 2.2AP-b confirmo que `public.training_cycles` tiene estas policies reales:
+
+- `"training cycles insert own rows"`.
+- `"training cycles select own rows"`.
+- `"training cycles update own rows"`.
+
+Todas validan `auth.uid() = user_id`, pero Arquitectura indico que en el modelo nuevo es preferible que queden explicitamente `to authenticated`.
+
+La migracion candidata ahora:
+
+1. Ejecuta `drop policy if exists` para esos tres nombres reales.
+2. Recrea las tres policies `for select`, `for insert` y `for update`.
+3. Declara `to authenticated`.
+4. Mantiene `auth.uid() = user_id`.
+5. No crea policy de delete.
+
+Esto evita coexistencia accidental entre policies antiguas `roles = {public}` y policies nuevas explicitamente scopeadas a `authenticated`.
+
 ## 8. GRANTs minimos
 
-La revision manual read-only de 2.2AP detecto grants amplios existentes en QA sobre `public.training_sessions` y `public.exercise_entries` para `anon` y `authenticated`, incluyendo permisos no deseados:
+La revision manual read-only de 2.2AP detecto grants amplios existentes en QA sobre `public.training_sessions` y `public.exercise_entries` para `anon` y `authenticated`, incluyendo permisos no deseados.
+
+La revision manual read-only de 2.2AP-b detecto el mismo patron de grants amplios en `public.training_cycles`.
+
+Permisos no deseados observados:
 
 ```text
 DELETE
@@ -223,12 +247,12 @@ Por eso la migracion candidata normaliza permisos explicitamente:
 
 Permisos esperados despues de aplicar en QA:
 
-- `anon`: sin permisos sobre `training_sessions`, `exercise_entries` ni tablas `training_cycle_*`.
+- `anon`: sin permisos sobre `training_cycles`, `training_sessions`, `exercise_entries` ni tablas `training_cycle_*`.
 - `authenticated`: solo `select`, `insert`, `update` sobre tablas necesarias.
 - `authenticated`: sin `delete`, `truncate`, `references` ni `trigger`.
 - `authenticated`: `execute` sobre RPCs candidatas.
 
-CO-02 queda resuelta en la candidata mediante REVOKE explicitos antes de los GRANT minimos.
+CO-02 queda resuelta en la candidata mediante REVOKE explicitos antes de los GRANT minimos. Hm-07 queda cerrado preventivamente al incluir tambien `public.training_cycles` en la normalizacion de permisos.
 
 ## 9. Plan QA
 
