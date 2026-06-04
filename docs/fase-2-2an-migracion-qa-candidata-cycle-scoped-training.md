@@ -184,15 +184,51 @@ exists (
 
 No se proponen policies abiertas. No se propone delete fisico para usuarios autenticados; se mantiene soft delete por `deleted_at`.
 
+### 7.1 Resultado 2.2AP sobre policies reales QA
+
+La revision manual read-only de 2.2AP confirmo que las policies reales existentes en QA para tablas de ejecucion son:
+
+- `public.training_sessions`: `"sessions own rows"`.
+- `public.exercise_entries`: `"entries own rows"`.
+
+Estos nombres coinciden con los `drop policy if exists` de la migracion candidata:
+
+```sql
+drop policy if exists "sessions own rows" on public.training_sessions;
+drop policy if exists "entries own rows" on public.exercise_entries;
+```
+
+CO-01 queda resuelta: no se requieren nombres adicionales para reemplazar las policies reales de estas dos tablas.
+
 ## 8. GRANTs minimos
 
-La migracion candidata propone solo privilegios necesarios para `authenticated`:
+La revision manual read-only de 2.2AP detecto grants amplios existentes en QA sobre `public.training_sessions` y `public.exercise_entries` para `anon` y `authenticated`, incluyendo permisos no deseados:
 
-- `select`, `insert`, `update` sobre tablas cycle-scoped.
-- `select`, `insert`, `update` sobre columnas/tablas de ejecucion existentes donde aplica.
-- `execute` sobre RPCs candidatas.
+```text
+DELETE
+INSERT
+REFERENCES
+SELECT
+TRIGGER
+TRUNCATE
+UPDATE
+```
 
-No se concede `delete` a usuarios autenticados. No se conceden privilegios a `anon` para el modelo nuevo.
+Por eso la migracion candidata normaliza permisos explicitamente:
+
+1. Revoca todo a `anon` en tablas de ejecucion y tablas cycle-scoped.
+2. Revoca `delete`, `truncate`, `references` y `trigger` a `authenticated`.
+3. Concede solo `select`, `insert`, `update` a `authenticated`.
+4. Concede `execute` solo sobre las RPCs candidatas a `authenticated`.
+
+Permisos esperados despues de aplicar en QA:
+
+- `anon`: sin permisos sobre `training_sessions`, `exercise_entries` ni tablas `training_cycle_*`.
+- `authenticated`: solo `select`, `insert`, `update` sobre tablas necesarias.
+- `authenticated`: sin `delete`, `truncate`, `references` ni `trigger`.
+- `authenticated`: `execute` sobre RPCs candidatas.
+
+CO-02 queda resuelta en la candidata mediante REVOKE explicitos antes de los GRANT minimos.
 
 ## 9. Plan QA
 

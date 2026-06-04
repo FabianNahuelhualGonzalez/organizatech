@@ -468,12 +468,26 @@ create policy "entries own rows" on public.exercise_entries
     )
   );
 
-grant select, insert, update on public.training_cycle_routines to authenticated;
-grant select, insert, update on public.training_cycle_days to authenticated;
-grant select, insert, update on public.training_cycle_exercises to authenticated;
-grant select, insert, update on public.training_cycles to authenticated;
-grant select, insert, update on public.training_sessions to authenticated;
-grant select, insert, update on public.exercise_entries to authenticated;
+-- Normalizacion explicita de permisos QA.
+-- 2.2AP detecto grants amplios existentes en tablas legacy de ejecucion.
+revoke all on table public.training_sessions from anon;
+revoke all on table public.exercise_entries from anon;
+revoke all on table public.training_cycle_routines from anon;
+revoke all on table public.training_cycle_days from anon;
+revoke all on table public.training_cycle_exercises from anon;
+
+revoke delete, truncate, references, trigger on table public.training_sessions from authenticated;
+revoke delete, truncate, references, trigger on table public.exercise_entries from authenticated;
+revoke delete, truncate, references, trigger on table public.training_cycle_routines from authenticated;
+revoke delete, truncate, references, trigger on table public.training_cycle_days from authenticated;
+revoke delete, truncate, references, trigger on table public.training_cycle_exercises from authenticated;
+
+grant select, insert, update on table public.training_cycle_routines to authenticated;
+grant select, insert, update on table public.training_cycle_days to authenticated;
+grant select, insert, update on table public.training_cycle_exercises to authenticated;
+grant select, insert, update on table public.training_cycles to authenticated;
+grant select, insert, update on table public.training_sessions to authenticated;
+grant select, insert, update on table public.exercise_entries to authenticated;
 
 create or replace function public.create_training_cycle_with_plan(
   p_name text,
