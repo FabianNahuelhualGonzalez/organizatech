@@ -848,16 +848,18 @@ export function OrganizatechApp({
     const plannedStartDate = getSantiagoDateKey(new Date());
     const durationWeeks = getCycleDurationWeeks(plan);
     const plannedEndDate = addDaysToDateKey(plannedStartDate, durationWeeks * 7 - 1);
+    const activeCycleToClose = activeCycle?.status === "active" ? activeCycle : null;
+    const nextCycleNumber = getNextPersistedCycleNumber(activeCycleToClose, persistedCycleHistory);
     const endedAt = new Date().toISOString();
 
-    if (activeCycle) {
+    if (activeCycleToClose) {
       await completeTrainingCycle({
         endedAt,
         summarySnapshot: createPersistedCycleSummarySnapshot(
           trainingPlan,
           exercises,
           entries,
-          activeCycle.startedAt,
+          activeCycleToClose.startedAt,
           endedAt,
           trainingCyclesSnapshotSource,
         ),
@@ -865,8 +867,8 @@ export function OrganizatechApp({
     }
 
     const cycleId = await createTrainingCycleWithPlan({
-      name: `Ciclo ${getNextPersistedCycleNumber(activeCycle, persistedCycleHistory)}`,
-      cycleNumber: getNextPersistedCycleNumber(activeCycle, persistedCycleHistory),
+      name: `Ciclo ${nextCycleNumber}`,
+      cycleNumber: nextCycleNumber,
       cycleType: plan.cycleType,
       goal: getCycleObjectiveValue(plan),
       durationWeeks,
@@ -1313,7 +1315,7 @@ export function OrganizatechApp({
 
       setIsBusy(true);
       try {
-        const activeCycle = persistedActiveCycle ?? await getActiveTrainingCycle();
+        const activeCycle = await getActiveTrainingCycle();
         if (activeCycle && isCycleScopedTrainingCycle(activeCycle)) {
           setStatusMessage("La edicion de planes cycle-scoped existentes queda fuera de 2.2AT.");
           return;
@@ -1421,7 +1423,7 @@ export function OrganizatechApp({
 
       setIsBusy(true);
       try {
-        const activeCycle = persistedActiveCycle ?? await getActiveTrainingCycle();
+        const activeCycle = await getActiveTrainingCycle();
         const nextPlan = createControlledNextTrainingPlan();
         const setupState = hasSetupDraftContent(setupByDay) ? setupByDay : createSetupByDay();
         const created = await createCycleScopedTrainingCycleFromSetup(nextPlan, setupState, activeCycle);
