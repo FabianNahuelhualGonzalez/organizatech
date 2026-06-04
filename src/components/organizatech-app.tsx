@@ -618,22 +618,36 @@ export function OrganizatechApp({
     }
   }, [dataMode, hasStartedTraining, screen, supabaseUser?.id]);
 
-  const metrics = useMemo(() => calculateWeeklyComparison(entries), [entries]);
+  const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
+  const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
+  const persistedActiveCyclePlan = isTrainingCyclesRepositoryActive && persistedActiveCycle
+    ? createTrainingPlanFromPersistedCycle(persistedActiveCycle, trainingPlan)
+    : null;
+  const displayTrainingPlan = persistedActiveCyclePlan ?? trainingPlan;
+  const shouldIsolatePersistedCycleLegacyState = Boolean(
+    isTrainingCyclesRepositoryActive &&
+    persistedActiveCycle &&
+    readSnapshotNumber(persistedActiveCycle.planSnapshot, "exerciseCount") === 0,
+  );
+  const displayExercises = shouldIsolatePersistedCycleLegacyState ? [] : exercises;
+  const displayEntries = shouldIsolatePersistedCycleLegacyState ? [] : entries;
+  const displayTrainingSessions = shouldIsolatePersistedCycleLegacyState ? [] : trainingSessions;
+  const metrics = useMemo(() => calculateWeeklyComparison(displayEntries), [displayEntries]);
   const todayKey = getSantiagoDateKey(new Date());
-  const currentWeek = getLegacyWeekNumberForTrainingDate(trainingSessions, entries, todayKey);
-  const hasTrainingEntries = trainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
-  const hasRoutinePlan = exercises.length > 0;
-  const routineDays = getActiveRoutineDays(exercises, trainingPlan);
+  const currentWeek = getLegacyWeekNumberForTrainingDate(displayTrainingSessions, displayEntries, todayKey);
+  const hasTrainingEntries = displayTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
+  const hasRoutinePlan = displayExercises.length > 0;
+  const routineDays = getActiveRoutineDays(displayExercises, displayTrainingPlan);
   const dashboardCarouselDays = hasRoutinePlan ? routineDays : setupDays;
-  const visibleDay = getVisibleTrainingDay(exercises, activeRoutineDay);
+  const visibleDay = getVisibleTrainingDay(displayExercises, activeRoutineDay);
   const calendarDashboardDay = getCalendarTrainingDay();
   const dashboardDay = dashboardCarouselDays.includes(dashboardDayOverride)
     ? dashboardDayOverride
     : dashboardCarouselDays.includes(calendarDashboardDay)
       ? calendarDashboardDay
       : dashboardCarouselDays[0] ?? calendarDashboardDay;
-  const dayExercises = exercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay);
-  const dashboardExercises = exercises.filter((exercise) => (exercise.day ?? dashboardDay) === dashboardDay);
+  const dayExercises = displayExercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay);
+  const dashboardExercises = displayExercises.filter((exercise) => (exercise.day ?? dashboardDay) === dashboardDay);
   const visibleRoutine = dayExercises[0]?.routine ?? setupByDay[visibleDay]?.routineName ?? visibleDay;
   const dashboardRoutine = dashboardExercises[0]?.routine ?? setupByDay[dashboardDay]?.routineName ?? dashboardDay;
   const targetSummary = calculateTargetSummary(dayExercises);
@@ -642,8 +656,6 @@ export function OrganizatechApp({
   const dashboardCurrentMetrics = currentMetrics.filter((entry) => dashboardExerciseIds.has(entry.exerciseId));
   const summary = calculateWeeklySummary(metrics, currentWeek);
   const insights = generateSmartInsights(summary, currentMetrics);
-  const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
-  const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
   const visibleCycleHistoryCount = isTrainingCyclesRepositoryActive ? persistedCycleHistory.length : cycleHistory.length;
   const visibleCycleNumber = isTrainingCyclesRepositoryActive
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
@@ -784,6 +796,13 @@ export function OrganizatechApp({
       ]);
       setPersistedActiveCycle(activeCycle);
       setPersistedCycleHistory(history);
+      if (activeCycle) {
+        setTrainingPlan((current) => {
+          const next = createTrainingPlanFromPersistedCycle(activeCycle, current);
+          saveTrainingPlan(next);
+          return next;
+        });
+      }
     } catch (error) {
       setStatusMessage(translateTrainingCycleRepositoryError(error));
     }
@@ -1292,7 +1311,6 @@ export function OrganizatechApp({
             ),
           });
         }
-
         const nextPlan = createControlledNextTrainingPlan();
         const nextCycleNumber = getNextPersistedCycleNumber(activeCycle, persistedCycleHistory);
         await createTrainingCycle({
@@ -1308,6 +1326,9 @@ export function OrganizatechApp({
         setSetupDay("Lunes");
         setTrainingPlan(nextPlan);
         saveTrainingPlan(nextPlan);
+        setExercises([]);
+        setEntries([]);
+        setTrainingSessions([]);
         setActiveRoutineDay("Lunes");
         setDashboardDayOverride("");
         setComparisonDay("Lunes");
@@ -1752,7 +1773,7 @@ export function OrganizatechApp({
 
       {screen === "dashboard" && (
         <DashboardScreen
-          exercises={exercises}
+          exercises={displayExercises}
           hasTrainingEntries={hasTrainingEntries}
           hasRoutinePlan={hasRoutinePlan}
           day={dashboardDay}
@@ -1764,8 +1785,8 @@ export function OrganizatechApp({
           currentMetrics={dashboardCurrentMetrics}
           insights={insights}
           currentWeek={currentWeek}
-          entries={entries}
-          sessions={trainingSessions}
+          entries={displayEntries}
+          sessions={displayTrainingSessions}
           startRegistration={() => navigateTo("registro-entrenamiento")}
           goToRoutine={() => openRoutineDay(dashboardDay)}
           viewSummary={(selectedDay) => {
@@ -1795,9 +1816,9 @@ export function OrganizatechApp({
       )}
       {screen === "registro-entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && (
         <CycleManagementScreen
-          trainingPlan={trainingPlan}
-          exercises={exercises}
-          entries={entries}
+          trainingPlan={displayTrainingPlan}
+          exercises={displayExercises}
+          entries={displayEntries}
           cycleNumber={visibleCycleNumber}
           activeCycleName={isTrainingCyclesRepositoryActive ? persistedActiveCycle?.name : undefined}
           editCurrentCycle={() => openRoutineEditor(visibleDay)}
@@ -1847,7 +1868,7 @@ export function OrganizatechApp({
       )}
       {screen === "comparacion" && (
         <ComparisonScreenV2
-          exercises={exercises}
+          exercises={displayExercises}
           metrics={metrics}
           currentWeek={currentWeek}
           routineDays={routineDays}
@@ -4133,6 +4154,40 @@ function createControlledNextTrainingPlan(): TrainingPlan {
   };
 }
 
+function createTrainingPlanFromPersistedCycle(cycle: PersistedTrainingCycle, fallback: TrainingPlan): TrainingPlan {
+  const snapshot = cycle.planSnapshot;
+  const snapshotCycleType = readSnapshotString(snapshot, "cycleType");
+  const cycleType = isTrainingCycleId(snapshotCycleType)
+    ? snapshotCycleType
+    : isTrainingCycleId(cycle.cycleType)
+      ? cycle.cycleType
+      : fallback.cycleType;
+  const goal = readNonEmptyString(cycle.goal) ?? readSnapshotString(snapshot, "goal") ?? getCycleObjectiveValue(fallback);
+  const duration = readSnapshotNumber(snapshot, "duration");
+  const trainingDays = readSnapshotStringList(snapshot, "trainingDays", setupDays.length);
+  const next: TrainingPlan = {
+    ...fallback,
+    cycleType,
+    trainingDays: trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
+  };
+
+  if (cycleType === "macro") {
+    next.macroObjective = goal;
+    if (duration > 0) next.macroDurationMonths = duration;
+  } else if (cycleType === "meso") {
+    next.mesoObjective = goal;
+    if (duration > 0) next.mesoDurationWeeks = duration;
+  } else if (cycleType === "micro") {
+    next.microFocus = goal;
+    if (duration > 0) next.microDurationWeeks = duration;
+  } else {
+    next.sessionFocus = goal;
+    if (duration > 0) next.sessionDurationDays = duration;
+  }
+
+  return next;
+}
+
 function normalizeTrainingPlan(value: unknown): TrainingPlan {
   const fallback = createDefaultTrainingPlan();
   if (!value || typeof value !== "object") return fallback;
@@ -4708,6 +4763,14 @@ function formatDate(value: string) {
 function readSnapshotNumber(snapshot: PersistedTrainingCycleSnapshot, key: string) {
   const value = snapshot[key];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function readSnapshotString(snapshot: PersistedTrainingCycleSnapshot, key: string) {
+  return readNonEmptyString(snapshot[key]);
+}
+
+function readNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function readSnapshotStringList(snapshot: PersistedTrainingCycleSnapshot, key: string, limit: number) {
