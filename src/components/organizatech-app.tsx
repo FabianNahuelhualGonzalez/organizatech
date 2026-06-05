@@ -341,6 +341,9 @@ export function OrganizatechApp({
   const [isBusy, setIsBusy] = useState(false);
   const passwordUpdateSuccessRef = useRef(false);
   const [exercises, setExercises] = useState<ExerciseTemplate[]>([]);
+  const [cycleScopedPlan, setCycleScopedPlan] = useState<CycleScopedTrainingPlan | null>(null);
+  const [cycleScopedExercises, setCycleScopedExercises] = useState<ExerciseTemplate[] | null>(null);
+  const [cycleScopedLoadError, setCycleScopedLoadError] = useState("");
   const [entries, setEntries] = useState<ExerciseEntry[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -361,10 +364,17 @@ export function OrganizatechApp({
   const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>(() => loadCycleHistory());
   const [persistedActiveCycle, setPersistedActiveCycle] = useState<PersistedTrainingCycle | null>(null);
   const [persistedCycleHistory, setPersistedCycleHistory] = useState<PersistedTrainingCycle[]>([]);
+  const [isPersistedCyclesLoading, setIsPersistedCyclesLoading] = useState(false);
   const [isNewCycleConfirmOpen, setIsNewCycleConfirmOpen] = useState(false);
   const [isDeleteCycleConfirmOpen, setIsDeleteCycleConfirmOpen] = useState(false);
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
+
+  function clearCycleScopedPlanState() {
+    setCycleScopedPlan(null);
+    setCycleScopedExercises(null);
+    setCycleScopedLoadError("");
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -631,15 +641,34 @@ export function OrganizatechApp({
     : null;
   const displayTrainingPlan = persistedActiveCyclePlan ?? trainingPlan;
   const isCycleScopedActiveCycle = Boolean(persistedActiveCycle && isCycleScopedTrainingCycle(persistedActiveCycle));
+  const isCycleScopedLookupPending = isTrainingCyclesRepositoryActive && isPersistedCyclesLoading && !persistedActiveCycle;
   const shouldIsolatePersistedCycleLegacyState = Boolean(
     isTrainingCyclesRepositoryActive &&
     persistedActiveCycle &&
     !isCycleScopedActiveCycle &&
     readSnapshotNumber(persistedActiveCycle.planSnapshot, "exerciseCount") === 0,
   );
-  const displayExercises = shouldIsolatePersistedCycleLegacyState ? [] : exercises;
-  const displayEntries = shouldIsolatePersistedCycleLegacyState ? [] : entries;
-  const displayTrainingSessions = shouldIsolatePersistedCycleLegacyState ? [] : trainingSessions;
+  const displayExercises = isCycleScopedLookupPending
+    ? []
+    : isCycleScopedActiveCycle
+    ? (cycleScopedExercises ?? [])
+    : shouldIsolatePersistedCycleLegacyState
+      ? []
+      : exercises;
+  const displayEntries = isCycleScopedLookupPending || isCycleScopedActiveCycle || shouldIsolatePersistedCycleLegacyState ? [] : entries;
+  const displayTrainingSessions = isCycleScopedLookupPending || isCycleScopedActiveCycle || shouldIsolatePersistedCycleLegacyState ? [] : trainingSessions;
+  const isCycleScopedPlanLoading = (isCycleScopedLookupPending || isCycleScopedActiveCycle) && cycleScopedExercises === null && !cycleScopedLoadError;
+  const isCycleScopedPlanEmpty = isCycleScopedActiveCycle && cycleScopedExercises !== null && (
+    cycleScopedExercises.length === 0 ||
+    cycleScopedPlan?.routines.length === 0
+  );
+  const isCycleScopedPlanBlocked = isCycleScopedLookupPending || (isCycleScopedActiveCycle && (isCycleScopedPlanLoading || isCycleScopedPlanEmpty || Boolean(cycleScopedLoadError)));
+  const cycleScopedPlanBlockerMessage = cycleScopedLoadError ||
+    (isCycleScopedLookupPending
+      ? "Verificando el ciclo activo antes de mostrar rutinas."
+      : isCycleScopedPlanLoading
+      ? "Cargando el plan operativo del ciclo activo."
+      : "El ciclo activo no tiene rutina, dia y ejercicio cycle-scoped cargados. No se mostraran datos legacy.");
   const metrics = useMemo(() => calculateWeeklyComparison(displayEntries), [displayEntries]);
   const todayKey = getSantiagoDateKey(new Date());
   const currentWeek = getLegacyWeekNumberForTrainingDate(displayTrainingSessions, displayEntries, todayKey);
@@ -794,9 +823,12 @@ export function OrganizatechApp({
     if (!isTrainingCyclesRepositoryActive) {
       setPersistedActiveCycle(null);
       setPersistedCycleHistory([]);
+      setIsPersistedCyclesLoading(false);
+      clearCycleScopedPlanState();
       return;
     }
 
+    setIsPersistedCyclesLoading(true);
     try {
       const [activeCycle, history] = await Promise.all([
         getActiveTrainingCycle(),
@@ -812,21 +844,42 @@ export function OrganizatechApp({
         });
         if (isCycleScopedTrainingCycle(activeCycle)) {
           await loadCycleScopedPlanIntoState(activeCycle.id);
+        } else {
+          clearCycleScopedPlanState();
         }
+      } else {
+        clearCycleScopedPlanState();
       }
     } catch (error) {
       setStatusMessage(translateTrainingCycleRepositoryError(error));
+    } finally {
+      setIsPersistedCyclesLoading(false);
     }
   }
 
   async function loadCycleScopedPlanIntoState(cycleId: string) {
-    const scopedPlan = await getCycleScopedTrainingPlan(cycleId);
-    const scopedExercises = createExerciseTemplatesFromCycleScopedPlan(scopedPlan);
-    setExercises(scopedExercises);
-    setEntries([]);
-    setTrainingSessions([]);
-    setActiveRoutineDay((current) => getVisibleTrainingDay(scopedExercises, current));
-    setComparisonDay((current) => getVisibleTrainingDay(scopedExercises, current));
+    setCycleScopedPlan(null);
+    setCycleScopedExercises(null);
+    setCycleScopedLoadError("");
+    try {
+      const scopedPlan = await getCycleScopedTrainingPlan(cycleId);
+      const scopedExercises = createExerciseTemplatesFromCycleScopedPlan(scopedPlan);
+      setCycleScopedPlan(scopedPlan);
+      setCycleScopedExercises(scopedExercises);
+      setEntries([]);
+      setTrainingSessions([]);
+      if (scopedExercises.length === 0) {
+        setCycleScopedLoadError("El ciclo activo no tiene ejercicios cycle-scoped asociados. Se bloquea el fallback legacy.");
+        return;
+      }
+      setActiveRoutineDay((current) => getVisibleTrainingDay(scopedExercises, current));
+      setComparisonDay((current) => getVisibleTrainingDay(scopedExercises, current));
+    } catch (error) {
+      setCycleScopedPlan(null);
+      setCycleScopedExercises([]);
+      setCycleScopedLoadError(translateTrainingCycleRepositoryError(error));
+      throw error;
+    }
   }
 
   async function createCycleScopedTrainingCycleFromSetup(
@@ -857,8 +910,8 @@ export function OrganizatechApp({
         endedAt,
         summarySnapshot: createPersistedCycleSummarySnapshot(
           trainingPlan,
-          exercises,
-          entries,
+          displayExercises,
+          displayEntries,
           activeCycleToClose.startedAt,
           endedAt,
           trainingCyclesSnapshotSource,
@@ -881,7 +934,11 @@ export function OrganizatechApp({
     const scopedExercises = createExerciseTemplatesFromCycleScopedPlan(scopedPlan);
     setTrainingPlan(plan);
     saveTrainingPlan(plan);
-    setExercises(scopedExercises);
+    setCycleScopedPlan(scopedPlan);
+    setCycleScopedExercises(scopedExercises);
+    setCycleScopedLoadError(scopedExercises.length === 0
+      ? "El ciclo creado no tiene ejercicios cycle-scoped asociados. Se bloquea el fallback legacy."
+      : "");
     setEntries([]);
     setTrainingSessions([]);
     setDataSource("supabase");
@@ -1244,7 +1301,7 @@ export function OrganizatechApp({
   }
 
   function openRoutineEditor(day = visibleDay) {
-    setSetupByDay(createSetupByDayFromExercises(exercises));
+    setSetupByDay(createSetupByDayFromExercises(displayExercises));
     setSetupDay(day);
     setIsEditingRoutinePlan(true);
     setRoutineEditorReturnScreen(screen);
@@ -1434,8 +1491,8 @@ export function OrganizatechApp({
             endedAt,
             summarySnapshot: createPersistedCycleSummarySnapshot(
               trainingPlan,
-              exercises,
-              entries,
+              displayExercises,
+              displayEntries,
               activeCycleToClose.startedAt,
               endedAt,
               trainingCyclesSnapshotSource,
@@ -1447,6 +1504,7 @@ export function OrganizatechApp({
         clearRoutineDraft(dataMode, supabaseUser?.id);
         clearWorkoutDraft(dataMode, supabaseUser?.id);
         setPersistedActiveCycle(null);
+        clearCycleScopedPlanState();
         setSetupByDay(freshSetup);
         setSetupDay("Lunes");
         setTrainingPlan(nextPlan);
@@ -1516,8 +1574,8 @@ export function OrganizatechApp({
           endedAt,
           summarySnapshot: createPersistedCycleSummarySnapshot(
             trainingPlan,
-            exercises,
-            entries,
+            displayExercises,
+            displayEntries,
             activeCycle.startedAt,
             endedAt,
             trainingCyclesSnapshotSource,
@@ -1526,6 +1584,7 @@ export function OrganizatechApp({
 
         const nextPlan = createDefaultTrainingPlan();
         clearRoutineDraft(dataMode, supabaseUser?.id);
+        clearCycleScopedPlanState();
         setTrainingPlan(nextPlan);
         saveTrainingPlan(nextPlan);
         setSetupByDay(createSetupByDay());
@@ -1901,31 +1960,38 @@ export function OrganizatechApp({
       )}
 
       {screen === "dashboard" && (
-        <DashboardScreen
-          exercises={displayExercises}
-          hasTrainingEntries={hasTrainingEntries}
-          hasRoutinePlan={hasRoutinePlan}
-          day={dashboardDay}
-          weekDays={dashboardCarouselDays}
-          routineDays={routineDays}
-          routine={dashboardRoutine}
-          dayExercises={dashboardExercises}
-          summary={summary}
-          currentMetrics={dashboardCurrentMetrics}
-          insights={insights}
-          currentWeek={currentWeek}
-          entries={displayEntries}
-          sessions={displayTrainingSessions}
-          startRegistration={() => navigateTo("registro-entrenamiento")}
-          goToRoutine={() => openRoutineDay(dashboardDay)}
-          viewSummary={(selectedDay) => {
-            setComparisonDay(selectedDay);
-            navigateTo("comparacion");
-          }}
-          switchDay={setDashboardDayOverride}
-        />
+        isCycleScopedPlanBlocked ? (
+          <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
+        ) : (
+          <DashboardScreen
+            exercises={displayExercises}
+            hasTrainingEntries={hasTrainingEntries}
+            hasRoutinePlan={hasRoutinePlan}
+            day={dashboardDay}
+            weekDays={dashboardCarouselDays}
+            routineDays={routineDays}
+            routine={dashboardRoutine}
+            dayExercises={dashboardExercises}
+            summary={summary}
+            currentMetrics={dashboardCurrentMetrics}
+            insights={insights}
+            currentWeek={currentWeek}
+            entries={displayEntries}
+            sessions={displayTrainingSessions}
+            startRegistration={() => navigateTo("registro-entrenamiento")}
+            goToRoutine={() => openRoutineDay(dashboardDay)}
+            viewSummary={(selectedDay) => {
+              setComparisonDay(selectedDay);
+              navigateTo("comparacion");
+            }}
+            switchDay={setDashboardDayOverride}
+          />
+        )
       )}
-      {screen === "registro-entrenamiento" && (!hasRoutinePlan || isEditingRoutinePlan) && (
+      {screen === "registro-entrenamiento" && isCycleScopedPlanBlocked && !isEditingRoutinePlan && (
+        <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
+      )}
+      {screen === "registro-entrenamiento" && !isCycleScopedPlanBlocked && (!hasRoutinePlan || isEditingRoutinePlan) && (
         <InitialTrainingScreen
           day={setupDay}
           setDay={setSetupDay}
@@ -1943,7 +2009,7 @@ export function OrganizatechApp({
           configuredDays={getConfiguredSetupDays(setupByDay)}
         />
       )}
-      {screen === "registro-entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && (
+      {screen === "registro-entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && (
         <CycleManagementScreen
           trainingPlan={displayTrainingPlan}
           exercises={displayExercises}
@@ -1955,10 +2021,13 @@ export function OrganizatechApp({
           requestDeleteCycle={() => setIsDeleteCycleConfirmOpen(true)}
         />
       )}
-      {screen === "entrenamiento" && !hasRoutinePlan && (
+      {screen === "entrenamiento" && isCycleScopedPlanBlocked && (
+        <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
+      )}
+      {screen === "entrenamiento" && !isCycleScopedPlanBlocked && !hasRoutinePlan && (
         <EmptyDashboard startRegistration={() => navigateTo("registro-entrenamiento")} />
       )}
-      {screen === "entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && !hasStartedTraining && (
+      {screen === "entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && !hasStartedTraining && (
         <TrainingStartScreen
           day={visibleDay}
           routine={visibleRoutine}
@@ -1970,13 +2039,13 @@ export function OrganizatechApp({
           startTraining={() => setHasStartedTraining(true)}
         />
       )}
-      {screen === "entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && hasStartedTraining && !readiness && (
+      {screen === "entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && hasStartedTraining && !readiness && (
         <TrainingReadinessScreen
           onSubmit={(value) => setReadiness({ ...value, skipped: false })}
           onSkip={() => setReadiness({ skipped: true })}
         />
       )}
-      {screen === "entrenamiento" && hasRoutinePlan && !isEditingRoutinePlan && hasStartedTraining && readiness && (
+      {screen === "entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && hasStartedTraining && readiness && (
         <GuidedTrainingScreen
           day={visibleDay}
           routine={visibleRoutine}
@@ -1996,14 +2065,18 @@ export function OrganizatechApp({
         />
       )}
       {screen === "comparacion" && (
-        <ComparisonScreenV2
-          exercises={displayExercises}
-          metrics={metrics}
-          currentWeek={currentWeek}
-          routineDays={routineDays}
-          selectedDay={comparisonDay}
-          setSelectedDay={setComparisonDay}
-        />
+        isCycleScopedPlanBlocked ? (
+          <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
+        ) : (
+          <ComparisonScreenV2
+            exercises={displayExercises}
+            metrics={metrics}
+            currentWeek={currentWeek}
+            routineDays={routineDays}
+            selectedDay={comparisonDay}
+            setSelectedDay={setComparisonDay}
+          />
+        )
       )}
       {screen === "historial-ciclos" && (
         isTrainingCyclesRepositoryActive
@@ -2715,6 +2788,18 @@ function EmptyDashboard({ startRegistration }: { startRegistration: () => void }
       <button className="start-button" onClick={startRegistration}>
         Empecemos a registrar
       </button>
+    </section>
+  );
+}
+
+function CycleScopedPlanBlocker({ message }: { message: string }) {
+  return (
+    <section className="screen">
+      <div className="card wide cycle-management-card">
+        <p className="eyebrow">Plan cycle-scoped</p>
+        <h2>Plan operativo no disponible</h2>
+        <p>{message}</p>
+      </div>
     </section>
   );
 }
