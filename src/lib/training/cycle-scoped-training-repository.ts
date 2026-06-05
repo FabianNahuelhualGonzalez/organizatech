@@ -1,5 +1,5 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { TrainingDayCode } from "@/lib/progress/types";
+import type { TrainingDayCode, TrainingSessionStatus } from "@/lib/progress/types";
 
 export interface CycleScopedTrainingCycleInput {
   name: string;
@@ -43,6 +43,29 @@ export interface CycleScopedExerciseInput {
   sortOrder: number;
   notes?: string | null;
   sourceLegacyExerciseId?: string | null;
+}
+
+export interface CycleScopedTrainingSessionInput {
+  cycleId: string;
+  cycleDayId: string;
+  plannedDay: TrainingDayCode;
+  plannedDate: string;
+  trainedDate: string;
+  status: TrainingSessionStatus;
+  weekNumber: number;
+  notes?: string | null;
+  entries: CycleScopedTrainingSessionEntryInput[];
+}
+
+export interface CycleScopedTrainingSessionEntryInput {
+  id: string;
+  trainingCycleExerciseId: string;
+  exerciseId?: string | null;
+  weight: number;
+  previousWeight: number;
+  reps: number[];
+  rir?: string | null;
+  notes?: string | null;
 }
 
 export interface CycleScopedTrainingPlan {
@@ -123,6 +146,42 @@ export async function createTrainingCycleWithPlan(input: CycleScopedTrainingCycl
     throw new CycleScopedTrainingRepositoryError(
       "unexpected",
       "No pudimos confirmar el ciclo creado.",
+    );
+  }
+
+  return data;
+}
+
+export async function createTrainingSessionWithCycleEntries(input: CycleScopedTrainingSessionInput): Promise<string> {
+  validateTrainingSessionInput(input);
+  const { supabase } = await getAuthenticatedCycleScopedRepository();
+
+  const { data, error } = await supabase.rpc("create_training_session_with_cycle_entries", {
+    p_cycle_id: input.cycleId,
+    p_cycle_day_id: input.cycleDayId,
+    p_planned_day: input.plannedDay,
+    p_planned_date: input.plannedDate,
+    p_trained_date: input.trainedDate,
+    p_status: input.status,
+    p_week_number: input.weekNumber,
+    p_notes: input.notes ?? null,
+    p_entries: input.entries.map((entry) => ({
+      id: entry.id,
+      training_cycle_exercise_id: entry.trainingCycleExerciseId,
+      exercise_id: entry.exerciseId ?? null,
+      weight: entry.weight,
+      previous_weight: entry.previousWeight,
+      reps: entry.reps,
+      rir: entry.rir ?? "",
+      notes: entry.notes ?? "",
+    })),
+  });
+
+  if (error) throw mapCycleScopedRepositoryError(error);
+  if (typeof data !== "string" || data.length === 0) {
+    throw new CycleScopedTrainingRepositoryError(
+      "unexpected",
+      "No pudimos confirmar el entrenamiento guardado.",
     );
   }
 
@@ -255,6 +314,38 @@ function validatePlanInput(input: CycleScopedTrainingCycleInput) {
       "invalid_plan",
       "Configura al menos un dia y un ejercicio antes de crear el ciclo.",
     );
+  }
+}
+
+function validateTrainingSessionInput(input: CycleScopedTrainingSessionInput) {
+  if (!input.cycleId || !input.cycleDayId) {
+    throw new CycleScopedTrainingRepositoryError(
+      "invalid_plan",
+      "El ciclo y el dia del ciclo son obligatorios para guardar el entrenamiento.",
+    );
+  }
+
+  if (input.status === "completed" && input.entries.length === 0) {
+    throw new CycleScopedTrainingRepositoryError(
+      "invalid_plan",
+      "Registra al menos un ejercicio antes de guardar el entrenamiento.",
+    );
+  }
+
+  for (const entry of input.entries) {
+    if (!entry.trainingCycleExerciseId) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        "Cada ejercicio debe estar vinculado al plan cycle-scoped.",
+      );
+    }
+
+    if (entry.reps.length === 0) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        "Cada ejercicio requiere al menos una serie registrada.",
+      );
+    }
   }
 }
 
