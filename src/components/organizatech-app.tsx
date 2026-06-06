@@ -86,6 +86,7 @@ import {
 import {
   createTrainingCycleWithPlan,
   createTrainingSessionWithCycleEntries,
+  getCycleScopedTrainingSessionData,
   getCycleScopedTrainingPlan,
   CycleScopedTrainingRepositoryError,
   type CycleScopedDay,
@@ -658,8 +659,8 @@ export function OrganizatechApp({
     : shouldIsolatePersistedCycleLegacyState
       ? []
       : exercises;
-  const displayEntries = isCycleScopedLookupPending || isCycleScopedActiveCycle || shouldIsolatePersistedCycleLegacyState ? [] : entries;
-  const displayTrainingSessions = isCycleScopedLookupPending || isCycleScopedActiveCycle || shouldIsolatePersistedCycleLegacyState ? [] : trainingSessions;
+  const displayEntries = isCycleScopedLookupPending || shouldIsolatePersistedCycleLegacyState ? [] : entries;
+  const displayTrainingSessions = isCycleScopedLookupPending || shouldIsolatePersistedCycleLegacyState ? [] : trainingSessions;
   const isCycleScopedPlanLoading = (isCycleScopedLookupPending || isCycleScopedActiveCycle) && cycleScopedExercises === null && !cycleScopedLoadError;
   const isCycleScopedPlanEmpty = isCycleScopedActiveCycle && cycleScopedExercises !== null && (
     cycleScopedExercises.length === 0 ||
@@ -867,10 +868,11 @@ export function OrganizatechApp({
     try {
       const scopedPlan = await getCycleScopedTrainingPlan(cycleId);
       const scopedExercises = createExerciseTemplatesFromCycleScopedPlan(scopedPlan);
+      const scopedSessionData = await getCycleScopedTrainingSessionData(cycleId, scopedPlan);
       setCycleScopedPlan(scopedPlan);
       setCycleScopedExercises(scopedExercises);
-      setEntries([]);
-      setTrainingSessions([]);
+      setEntries(scopedSessionData.entries);
+      setTrainingSessions(scopedSessionData.sessions);
       if (scopedExercises.length === 0) {
         setCycleScopedLoadError("El ciclo activo no tiene ejercicios cycle-scoped asociados. Se bloquea el fallback legacy.");
         return;
@@ -880,6 +882,8 @@ export function OrganizatechApp({
     } catch (error) {
       setCycleScopedPlan(null);
       setCycleScopedExercises([]);
+      setEntries([]);
+      setTrainingSessions([]);
       setCycleScopedLoadError(translateTrainingCycleRepositoryError(error));
       throw error;
     }
@@ -1721,19 +1725,33 @@ export function OrganizatechApp({
           notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${formatReadinessNote(readiness)}`,
           entries: entriesInput,
         });
-
-        setExerciseDrafts((current) => {
-          const next = { ...current };
-          for (const exercise of validExercises) delete next[exercise.id];
-          return next;
-        });
-        setStatusMessage("Entrenamiento guardado.");
-        clearWorkoutDraft(dataMode, supabaseUser?.id);
-        setReadiness(null);
-        setHasStartedTraining(false);
-        setScreen("dashboard");
       } catch (error) {
         setRoutineNotice(handlePersistenceError(error));
+        setIsBusy(false);
+        return;
+      }
+
+      setExerciseDrafts((current) => {
+        const next = { ...current };
+        for (const exercise of validExercises) delete next[exercise.id];
+        return next;
+      });
+      setStatusMessage("Entrenamiento guardado.");
+      try {
+        clearWorkoutDraft(dataMode, supabaseUser?.id);
+      } catch {
+        // El entrenamiento ya fue persistido; un fallo local de limpieza no debe habilitar duplicados.
+      }
+      setReadiness(null);
+      setHasStartedTraining(false);
+      setScreen("dashboard");
+
+      try {
+        const scopedSessionData = await getCycleScopedTrainingSessionData(persistedActiveCycle.id, cycleScopedPlan);
+        setEntries(scopedSessionData.entries);
+        setTrainingSessions(scopedSessionData.sessions);
+      } catch {
+        setCycleScopedLoadError("Entrenamiento guardado. Recarga el panel para ver la sesion registrada.");
       } finally {
         setIsBusy(false);
       }

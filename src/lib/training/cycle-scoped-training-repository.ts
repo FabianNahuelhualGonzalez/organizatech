@@ -1,5 +1,5 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { TrainingDayCode, TrainingSessionStatus } from "@/lib/progress/types";
+import type { ExerciseEntry, TrainingDayCode, TrainingSession, TrainingSessionStatus } from "@/lib/progress/types";
 
 export interface CycleScopedTrainingCycleInput {
   name: string;
@@ -70,6 +70,11 @@ export interface CycleScopedTrainingSessionEntryInput {
 
 export interface CycleScopedTrainingPlan {
   routines: CycleScopedRoutine[];
+}
+
+export interface CycleScopedTrainingSessionData {
+  sessions: TrainingSession[];
+  entries: ExerciseEntry[];
 }
 
 export interface CycleScopedRoutine {
@@ -228,6 +233,45 @@ export async function getCycleScopedTrainingPlan(cycleId: string): Promise<Cycle
     (routines ?? []) as unknown as CycleScopedRoutineRow[],
     (days ?? []) as unknown as CycleScopedDayRow[],
     (exercises ?? []) as unknown as CycleScopedExerciseRow[],
+  );
+}
+
+export async function getCycleScopedTrainingSessionData(
+  cycleId: string,
+  plan: CycleScopedTrainingPlan,
+): Promise<CycleScopedTrainingSessionData> {
+  const { supabase, userId } = await getAuthenticatedCycleScopedRepository();
+  const planIndex = createCycleScopedPlanIndex(plan);
+
+  const { data: sessions, error: sessionsError } = await supabase
+    .from("training_sessions")
+    .select("id,cycle_id,cycle_day_id,week_number,trained_at,calendar_week_start,planned_day,planned_date,trained_date,status,completed_at,deleted_at,notes,created_at")
+    .eq("user_id", userId)
+    .eq("cycle_id", cycleId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+
+  if (sessionsError) throw mapCycleScopedRepositoryError(sessionsError);
+
+  const sessionRows = (sessions ?? []) as unknown as CycleScopedTrainingSessionRow[];
+  if (sessionRows.length === 0) {
+    return { sessions: [], entries: [] };
+  }
+
+  const sessionIds = sessionRows.map((session) => session.id);
+  const { data: entries, error: entriesError } = await supabase
+    .from("exercise_entries")
+    .select("id,session_id,exercise_id,training_cycle_exercise_id,weight,previous_weight,reps,rir,notes,created_at")
+    .eq("user_id", userId)
+    .in("session_id", sessionIds)
+    .order("created_at", { ascending: true });
+
+  if (entriesError) throw mapCycleScopedRepositoryError(entriesError);
+
+  return mapCycleScopedTrainingSessionData(
+    sessionRows,
+    (entries ?? []) as unknown as CycleScopedTrainingSessionEntryRow[],
+    planIndex,
   );
 }
 
@@ -401,6 +445,123 @@ function mapCycleScopedTrainingPlan(
   };
 }
 
+function createCycleScopedPlanIndex(plan: CycleScopedTrainingPlan) {
+  const daysById = new Map<string, CycleScopedDay>();
+  const routinesByDayId = new Map<string, CycleScopedRoutine>();
+  const exercisesById = new Map<string, CycleScopedExercise>();
+
+  for (const routine of plan.routines) {
+    for (const day of routine.days) {
+      daysById.set(day.id, day);
+      routinesByDayId.set(day.id, routine);
+      for (const exercise of day.exercises) {
+        exercisesById.set(exercise.id, exercise);
+      }
+    }
+  }
+
+  return { daysById, routinesByDayId, exercisesById };
+}
+
+function mapCycleScopedTrainingSessionData(
+  sessionRows: CycleScopedTrainingSessionRow[],
+  entryRows: CycleScopedTrainingSessionEntryRow[],
+  planIndex: ReturnType<typeof createCycleScopedPlanIndex>,
+): CycleScopedTrainingSessionData {
+  const entriesBySessionId = new Map<string, ExerciseEntry[]>();
+  const sessionsById = new Map(sessionRows.map((session) => [session.id, session]));
+
+  for (const entry of entryRows) {
+    const session = sessionsById.get(entry.session_id);
+    if (!session) continue;
+
+    const cycleExerciseId = entry.training_cycle_exercise_id;
+    if (!cycleExerciseId) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        "Una serie cycle-scoped no tiene training_cycle_exercise_id.",
+      );
+    }
+
+    const exercise = planIndex.exercisesById.get(cycleExerciseId);
+    const day = session.cycle_day_id ? planIndex.daysById.get(session.cycle_day_id) : undefined;
+    const routine = day ? planIndex.routinesByDayId.get(day.id) : undefined;
+    if (!exercise || !day || !routine) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        "No pudimos asociar una serie guardada con el plan cycle-scoped activo.",
+      );
+    }
+
+    const trainedDate = session.trained_date ?? session.trained_at;
+    const sessionEntries = entriesBySessionId.get(entry.session_id) ?? [];
+    sessionEntries.push({
+      id: entry.id,
+      sessionId: entry.session_id,
+      exerciseId: cycleExerciseId,
+      exerciseName: exercise.name,
+      routine: routine.name,
+      week: session.week_number,
+      date: trainedDate,
+      targetSets: exercise.targetSets,
+      targetReps: exercise.targetReps,
+      weight: Number(entry.weight),
+      previousWeight: Number(entry.previous_weight),
+      reps: readRepsArray(entry.reps),
+      notes: entry.notes ?? exercise.notes ?? undefined,
+      rir: entry.rir ?? undefined,
+    });
+    entriesBySessionId.set(entry.session_id, sessionEntries);
+  }
+
+  const mappedSessions = sessionRows.map((session) => {
+    const day = session.cycle_day_id ? planIndex.daysById.get(session.cycle_day_id) : undefined;
+    const routine = day ? planIndex.routinesByDayId.get(day.id) : undefined;
+    if (!day || !routine) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        "No pudimos asociar una sesion guardada con el plan cycle-scoped activo.",
+      );
+    }
+
+    const trainedDate = session.trained_date ?? session.trained_at;
+    return {
+      id: session.id,
+      routineId: routine.id,
+      routine: routine.name,
+      weekNumber: session.week_number,
+      calendarWeekStart: session.calendar_week_start,
+      plannedDay: readTrainingDayCode(session.planned_day ?? day.dayCode),
+      plannedDate: session.planned_date,
+      trainedDate,
+      trainedAt: session.trained_at,
+      status: readTrainingSessionStatus(session.status),
+      completedAt: session.completed_at ?? undefined,
+      deletedAt: session.deleted_at ?? undefined,
+      notes: session.notes ?? undefined,
+      entries: entriesBySessionId.get(session.id) ?? [],
+    } satisfies TrainingSession;
+  });
+
+  const chronologicalEntries = [...mappedSessions]
+    .reverse()
+    .flatMap((session) => session.entries);
+
+  return {
+    sessions: mappedSessions,
+    entries: chronologicalEntries,
+  };
+}
+
+function readTrainingSessionStatus(value: string): TrainingSessionStatus {
+  return value === "skipped" ? "skipped" : "completed";
+}
+
+function readRepsArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => Number(item) || 0);
+}
+
 function mapCycleScopedRepositoryError(error: unknown) {
   const code = readSupabaseErrorCode(error);
   const message = readSupabaseErrorMessage(error).toLowerCase();
@@ -493,4 +654,34 @@ interface CycleScopedExerciseRow {
   sort_order: number;
   notes: string | null;
   source_legacy_exercise_id: string | null;
+}
+
+interface CycleScopedTrainingSessionRow {
+  id: string;
+  cycle_id: string;
+  cycle_day_id: string | null;
+  week_number: number;
+  trained_at: string;
+  calendar_week_start: string | null;
+  planned_day: string | null;
+  planned_date: string | null;
+  trained_date: string | null;
+  status: string;
+  completed_at: string | null;
+  deleted_at: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+interface CycleScopedTrainingSessionEntryRow {
+  id: string;
+  session_id: string;
+  exercise_id: string | null;
+  training_cycle_exercise_id: string | null;
+  weight: number | string;
+  previous_weight: number | string;
+  reps: unknown;
+  rir: string | null;
+  notes: string | null;
+  created_at: string;
 }
