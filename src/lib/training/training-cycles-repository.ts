@@ -11,6 +11,8 @@ export interface TrainingCycle {
   goal: string | null;
   startedAt: string;
   endedAt: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   status: TrainingCycleStatus;
   planSnapshot: TrainingCycleSnapshot;
   summarySnapshot: TrainingCycleSnapshot | null;
@@ -231,6 +233,8 @@ function mapTrainingCycleRow(row: TrainingCycleRow): TrainingCycle {
     goal: row.goal,
     startedAt: row.started_at,
     endedAt: row.ended_at,
+    plannedStartDate: row.planned_start_date,
+    plannedEndDate: row.planned_end_date,
     status: readTrainingCycleStatus(row.status),
     planSnapshot: readSnapshot(row.plan_snapshot),
     summarySnapshot: row.summary_snapshot === null ? null : readSnapshot(row.summary_snapshot),
@@ -278,6 +282,8 @@ const TRAINING_CYCLE_COLUMNS = [
   "goal",
   "started_at",
   "ended_at",
+  "planned_start_date",
+  "planned_end_date",
   "status",
   "plan_snapshot",
   "summary_snapshot",
@@ -294,6 +300,8 @@ interface TrainingCycleRow {
   goal: string | null;
   started_at: string;
   ended_at: string | null;
+  planned_start_date: string | null;
+  planned_end_date: string | null;
   status: string;
   plan_snapshot: unknown;
   summary_snapshot: unknown | null;

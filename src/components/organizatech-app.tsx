@@ -94,6 +94,7 @@ import {
   type CycleScopedTrainingSessionEntryInput,
   type CycleScopedTrainingPlan,
 } from "@/lib/training/cycle-scoped-training-repository";
+import { getCycleScopedPlannedDate } from "@/lib/training/cycle-scoped-planned-date";
 
 type Screen =
   | "login"
@@ -1679,14 +1680,30 @@ export function OrganizatechApp({
         return;
       }
 
-      const currentWeekDates = getCurrentSantiagoWeekDates();
-      const plannedDate = currentWeekDates[visibleDay] ?? todayKey;
       const trainedDate = todayKey;
       const plannedDay = getTrainingDayCode(visibleDay);
       const cycleDay = findCycleScopedDayForTrainingDay(cycleScopedPlan, persistedActiveCycle.id, plannedDay);
 
       if (!cycleDay) {
         setStatusMessage("No se encontro el dia cycle-scoped activo. No se guardaran datos legacy.");
+        return;
+      }
+
+      if (!persistedActiveCycle.plannedStartDate || !persistedActiveCycle.plannedEndDate) {
+        setStatusMessage("El ciclo activo no tiene un rango planificado valido. No se guardaran datos legacy.");
+        return;
+      }
+
+      let plannedDate: string;
+      try {
+        plannedDate = getCycleScopedPlannedDate({
+          cyclePlannedStartDate: persistedActiveCycle.plannedStartDate,
+          cyclePlannedEndDate: persistedActiveCycle.plannedEndDate,
+          weekIndex: cycleDay.weekIndex,
+          dayCode: cycleDay.dayCode,
+        });
+      } catch {
+        setStatusMessage("No se pudo resolver la fecha planificada dentro del rango del ciclo. No se guardaran datos legacy.");
         return;
       }
 
@@ -2531,7 +2548,7 @@ function DashboardScreen({
     const expectedDate = currentWeekDates[item] ?? "";
     const plannedDay = getTrainingDayCode(item);
     const session = activeSessions.find((candidate) => (
-      candidate.plannedDate ? candidate.plannedDate === expectedDate : candidate.plannedDay === plannedDay
+      candidate.plannedDate === expectedDate || candidate.plannedDay === plannedDay
     ));
     const legacyEntries = session ? [] : findLegacyDashboardEntries(entries, itemExercises, expectedDate);
     const itemEntries = session ? session.entries : legacyEntries;
