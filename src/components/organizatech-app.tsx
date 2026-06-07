@@ -2071,6 +2071,7 @@ export function OrganizatechApp({
             exercises={displayExercises}
             hasTrainingEntries={hasTrainingEntries}
             hasRoutinePlan={hasRoutinePlan}
+            usesCycleScopedSessions={isCycleScopedActiveCycle}
             day={dashboardDay}
             weekDays={dashboardCarouselDays}
             routineDays={routineDays}
@@ -2480,6 +2481,7 @@ function DashboardScreen({
   exercises,
   hasTrainingEntries,
   hasRoutinePlan,
+  usesCycleScopedSessions,
   day,
   weekDays,
   routineDays,
@@ -2499,6 +2501,7 @@ function DashboardScreen({
   exercises: ExerciseTemplate[];
   hasTrainingEntries: boolean;
   hasRoutinePlan: boolean;
+  usesCycleScopedSessions: boolean;
   day: string;
   weekDays: string[];
   routineDays: string[];
@@ -2527,9 +2530,9 @@ function DashboardScreen({
     () => sessions.filter((session) => (
       session.status === "completed" &&
       !session.deletedAt &&
-      session.calendarWeekStart === currentWeekStart
+      (usesCycleScopedSessions || session.calendarWeekStart === currentWeekStart)
     )),
-    [sessions, currentWeekStart],
+    [sessions, currentWeekStart, usesCycleScopedSessions],
   );
 
   useEffect(() => {
