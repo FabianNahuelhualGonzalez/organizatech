@@ -4589,7 +4589,8 @@ function findCycleScopedDayForTrainingDay(
 }
 
 function isCycleScopedTrainingCycle(cycle: PersistedTrainingCycle) {
-  return readSnapshotString(cycle.planSnapshot, "source") === "cycle-scoped-qa";
+  const snapshotSource = readSnapshotString(cycle.planSnapshot, "source");
+  return snapshotSource === "cycle-scoped-qa" || snapshotSource === "cycle-scoped";
 }
 
 function getCycleDurationWeeks(plan: TrainingPlan) {
