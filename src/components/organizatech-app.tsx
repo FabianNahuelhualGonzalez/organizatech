@@ -677,7 +677,9 @@ export function OrganizatechApp({
   const metrics = useMemo(() => calculateWeeklyComparison(displayEntries), [displayEntries]);
   const todayKey = getSantiagoDateKey(new Date());
   const currentWeek = getLegacyWeekNumberForTrainingDate(displayTrainingSessions, displayEntries, todayKey);
-  const hasTrainingEntries = displayTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
+  const hasTrainingEntries = isCycleScopedActiveCycle
+    ? displayEntries.length > 0 || displayTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0)
+    : displayTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
   const hasRoutinePlan = displayExercises.length > 0;
   const routineDays = getActiveRoutineDays(displayExercises, displayTrainingPlan);
   const dashboardCarouselDays = hasRoutinePlan ? routineDays : setupDays;
@@ -2550,13 +2552,12 @@ function DashboardScreen({
     const itemExercises = exercises.filter((exercise) => (exercise.day ?? item) === item);
     const expectedDate = currentWeekDates[item] ?? "";
     const plannedDay = getTrainingDayCode(item);
-    const session = activeSessions.find((candidate) => (
-      candidate.plannedDate === expectedDate || candidate.plannedDay === plannedDay
-    ));
-    const legacyEntries = session ? [] : findLegacyDashboardEntries(entries, itemExercises, expectedDate);
-    const itemEntries = session ? session.entries : legacyEntries;
+    const session = findDashboardSessionForDay(activeSessions, itemExercises, expectedDate, plannedDay, usesCycleScopedSessions);
+    const sessionEntries = session ? findDashboardEntries(session.entries, itemExercises, expectedDate, usesCycleScopedSessions) : [];
+    const fallbackEntries = sessionEntries.length > 0 ? [] : findDashboardEntries(entries, itemExercises, expectedDate, usesCycleScopedSessions);
+    const itemEntries = sessionEntries.length > 0 ? sessionEntries : fallbackEntries;
     const itemMetrics = itemEntries.length > 0 ? calculateWeeklyComparison(itemEntries) : [];
-    const isCompleted = Boolean(session) || legacyEntries.length > 0;
+    const isCompleted = usesCycleScopedSessions ? itemEntries.length > 0 : Boolean(session) || fallbackEntries.length > 0;
 
     return {
       day: item,
@@ -4566,6 +4567,10 @@ function createExerciseTemplatesFromCycleScopedPlan(plan: CycleScopedTrainingPla
     routine.days.flatMap((day) =>
       day.exercises.map((exercise) => ({
         id: exercise.id,
+        cycleId: exercise.cycleId,
+        cycleDayId: day.id,
+        trainingCycleExerciseId: exercise.id,
+        sourceLegacyExerciseId: exercise.sourceLegacyExerciseId,
         routine: routine.name,
         day: getSetupDayFromTrainingDayCode(day.dayCode),
         name: exercise.name,
@@ -5383,13 +5388,46 @@ function calculateRegisteredDashboardSummary(metrics: ExerciseMetrics[]) {
   );
 }
 
-function findLegacyDashboardEntries(entries: ExerciseEntry[], dayExercises: ExerciseTemplate[], expectedDate: string) {
+function findDashboardSessionForDay(
+  sessions: TrainingSession[],
+  dayExercises: ExerciseTemplate[],
+  expectedDate: string,
+  plannedDay: TrainingDayCode,
+  usesCycleScopedSessions: boolean,
+) {
+  return sessions.find((candidate) => {
+    if (!usesCycleScopedSessions) {
+      return candidate.plannedDate === expectedDate || candidate.plannedDay === plannedDay;
+    }
+
+    const candidateEntries = findDashboardEntries(candidate.entries, dayExercises, expectedDate, true);
+    if (candidateEntries.length > 0) return true;
+
+    const cycleDayIds = new Set(dayExercises.map((exercise) => exercise.cycleDayId).filter(Boolean));
+    return Boolean(candidate.cycleDayId && cycleDayIds.has(candidate.cycleDayId)) || candidate.plannedDay === plannedDay;
+  });
+}
+
+function findDashboardEntries(
+  entries: ExerciseEntry[],
+  dayExercises: ExerciseTemplate[],
+  expectedDate: string,
+  usesCycleScopedSessions: boolean,
+) {
   if (!expectedDate || dayExercises.length === 0) return [];
-  const dayExerciseIds = new Set(dayExercises.map((exercise) => exercise.id));
+  const dayExerciseIds = new Set(dayExercises.map((exercise) => getDashboardExerciseIdentity(exercise, usesCycleScopedSessions)));
   return entries.filter((entry) => (
-    normalizeEntryDateKey(entry.date) === expectedDate &&
-    dayExerciseIds.has(entry.exerciseId)
+    (usesCycleScopedSessions || normalizeEntryDateKey(entry.date) === expectedDate) &&
+    dayExerciseIds.has(getDashboardEntryExerciseIdentity(entry, usesCycleScopedSessions))
   ));
+}
+
+function getDashboardExerciseIdentity(exercise: ExerciseTemplate, usesCycleScopedSessions: boolean) {
+  return usesCycleScopedSessions ? exercise.trainingCycleExerciseId ?? exercise.id : exercise.id;
+}
+
+function getDashboardEntryExerciseIdentity(entry: ExerciseEntry, usesCycleScopedSessions: boolean) {
+  return usesCycleScopedSessions ? entry.trainingCycleExerciseId ?? entry.exerciseId : entry.exerciseId;
 }
 
 function normalizeEntryDateKey(value: string) {

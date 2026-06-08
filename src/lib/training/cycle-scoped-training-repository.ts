@@ -498,6 +498,9 @@ function mapCycleScopedTrainingSessionData(
     sessionEntries.push({
       id: entry.id,
       sessionId: entry.session_id,
+      cycleId: session.cycle_id,
+      cycleDayId: session.cycle_day_id,
+      trainingCycleExerciseId: cycleExerciseId,
       exerciseId: cycleExerciseId,
       exerciseName: exercise.name,
       routine: routine.name,
@@ -527,6 +530,8 @@ function mapCycleScopedTrainingSessionData(
     const trainedDate = session.trained_date ?? session.trained_at;
     return {
       id: session.id,
+      cycleId: session.cycle_id,
+      cycleDayId: session.cycle_day_id,
       routineId: routine.id,
       routine: routine.name,
       weekNumber: session.week_number,

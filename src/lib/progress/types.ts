@@ -7,6 +7,10 @@ export type TrainingSessionStatus = "completed" | "skipped";
 
 export interface ExerciseTemplate {
   id: string;
+  cycleId?: string;
+  cycleDayId?: string;
+  trainingCycleExerciseId?: string;
+  sourceLegacyExerciseId?: string | null;
   routine: RoutineName;
   day?: string;
   name: string;
@@ -20,6 +24,9 @@ export interface ExerciseTemplate {
 export interface ExerciseEntry {
   id: string;
   sessionId?: string;
+  cycleId?: string;
+  cycleDayId?: string | null;
+  trainingCycleExerciseId?: string;
   exerciseId: string;
   exerciseName: string;
   routine: RoutineName;
@@ -36,6 +43,8 @@ export interface ExerciseEntry {
 
 export interface TrainingSession {
   id: string;
+  cycleId?: string;
+  cycleDayId?: string | null;
   routineId: string | null;
   routine: RoutineName;
   weekNumber: number;
