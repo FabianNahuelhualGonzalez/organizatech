@@ -349,6 +349,7 @@ export function OrganizatechApp({
   const [cycleScopedPlan, setCycleScopedPlan] = useState<CycleScopedTrainingPlan | null>(null);
   const [cycleScopedExercises, setCycleScopedExercises] = useState<ExerciseTemplate[] | null>(null);
   const [cycleScopedLoadError, setCycleScopedLoadError] = useState("");
+  const isCycleScopedDisplayLockedRef = useRef(false);
   const [entries, setEntries] = useState<ExerciseEntry[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -376,6 +377,7 @@ export function OrganizatechApp({
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
 
   function clearCycleScopedPlanState() {
+    isCycleScopedDisplayLockedRef.current = false;
     setCycleScopedPlan(null);
     setCycleScopedExercises(null);
     setCycleScopedLoadError("");
@@ -727,6 +729,7 @@ export function OrganizatechApp({
     setTrainingSessions([]);
     setPersistedActiveCycle(null);
     setPersistedCycleHistory([]);
+    clearCycleScopedPlanState();
     setExerciseDrafts({});
     setReadiness(null);
     setHasStartedTraining(false);
@@ -809,13 +812,19 @@ export function OrganizatechApp({
     setIsBusy(true);
     try {
       const next = await loadAppData(mode);
-      setExercises(next.exercises);
-      setEntries(next.entries);
-      setTrainingSessions(next.sessions);
+      const shouldPreserveCycleScopedDisplay =
+        mode === "supabase" &&
+        trainingCyclesRepositoryEnabled &&
+        isCycleScopedDisplayLockedRef.current;
+      if (!shouldPreserveCycleScopedDisplay) {
+        setExercises(next.exercises);
+        setEntries(next.entries);
+        setTrainingSessions(next.sessions);
+        setActiveRoutineDay((current) => getVisibleTrainingDay(next.exercises, current));
+        setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
+        setTrainingPlan((current) => mergeTrainingPlanWithExercises(current, next.exercises));
+      }
       setDataSource(next.source);
-      setActiveRoutineDay((current) => getVisibleTrainingDay(next.exercises, current));
-      setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
-      setTrainingPlan((current) => mergeTrainingPlanWithExercises(current, next.exercises));
       setStatusMessage(next.source === "supabase" ? "Progreso actualizado." : "Modo de prueba activo.");
       return next;
     } catch (error) {
@@ -865,6 +874,7 @@ export function OrganizatechApp({
   }
 
   async function loadCycleScopedPlanIntoState(cycleId: string) {
+    isCycleScopedDisplayLockedRef.current = true;
     setCycleScopedPlan(null);
     setCycleScopedExercises(null);
     setCycleScopedLoadError("");
@@ -883,6 +893,7 @@ export function OrganizatechApp({
       setActiveRoutineDay((current) => getVisibleTrainingDay(scopedExercises, current));
       setComparisonDay((current) => getVisibleTrainingDay(scopedExercises, current));
     } catch (error) {
+      isCycleScopedDisplayLockedRef.current = false;
       setCycleScopedPlan(null);
       setCycleScopedExercises([]);
       setEntries([]);
@@ -942,6 +953,7 @@ export function OrganizatechApp({
 
     const scopedPlan = await getCycleScopedTrainingPlan(cycleId);
     const scopedExercises = createExerciseTemplatesFromCycleScopedPlan(scopedPlan);
+    isCycleScopedDisplayLockedRef.current = true;
     setTrainingPlan(plan);
     saveTrainingPlan(plan);
     setCycleScopedPlan(scopedPlan);
