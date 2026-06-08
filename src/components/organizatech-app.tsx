@@ -349,6 +349,7 @@ export function OrganizatechApp({
   const [cycleScopedPlan, setCycleScopedPlan] = useState<CycleScopedTrainingPlan | null>(null);
   const [cycleScopedExercises, setCycleScopedExercises] = useState<ExerciseTemplate[] | null>(null);
   const [cycleScopedLoadError, setCycleScopedLoadError] = useState("");
+  const isCycleScopedDisplayLockedRef = useRef(false);
   const [entries, setEntries] = useState<ExerciseEntry[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -376,6 +377,7 @@ export function OrganizatechApp({
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
 
   function clearCycleScopedPlanState() {
+    isCycleScopedDisplayLockedRef.current = false;
     setCycleScopedPlan(null);
     setCycleScopedExercises(null);
     setCycleScopedLoadError("");
@@ -677,7 +679,9 @@ export function OrganizatechApp({
   const metrics = useMemo(() => calculateWeeklyComparison(displayEntries), [displayEntries]);
   const todayKey = getSantiagoDateKey(new Date());
   const currentWeek = getLegacyWeekNumberForTrainingDate(displayTrainingSessions, displayEntries, todayKey);
-  const hasTrainingEntries = displayTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
+  const hasTrainingEntries = isCycleScopedActiveCycle
+    ? displayEntries.length > 0 || displayTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0)
+    : displayTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
   const hasRoutinePlan = displayExercises.length > 0;
   const routineDays = getActiveRoutineDays(displayExercises, displayTrainingPlan);
   const dashboardCarouselDays = hasRoutinePlan ? routineDays : setupDays;
@@ -725,6 +729,7 @@ export function OrganizatechApp({
     setTrainingSessions([]);
     setPersistedActiveCycle(null);
     setPersistedCycleHistory([]);
+    clearCycleScopedPlanState();
     setExerciseDrafts({});
     setReadiness(null);
     setHasStartedTraining(false);
@@ -807,13 +812,19 @@ export function OrganizatechApp({
     setIsBusy(true);
     try {
       const next = await loadAppData(mode);
-      setExercises(next.exercises);
-      setEntries(next.entries);
-      setTrainingSessions(next.sessions);
+      const shouldPreserveCycleScopedDisplay =
+        mode === "supabase" &&
+        trainingCyclesRepositoryEnabled &&
+        isCycleScopedDisplayLockedRef.current;
+      if (!shouldPreserveCycleScopedDisplay) {
+        setExercises(next.exercises);
+        setEntries(next.entries);
+        setTrainingSessions(next.sessions);
+        setActiveRoutineDay((current) => getVisibleTrainingDay(next.exercises, current));
+        setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
+        setTrainingPlan((current) => mergeTrainingPlanWithExercises(current, next.exercises));
+      }
       setDataSource(next.source);
-      setActiveRoutineDay((current) => getVisibleTrainingDay(next.exercises, current));
-      setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
-      setTrainingPlan((current) => mergeTrainingPlanWithExercises(current, next.exercises));
       setStatusMessage(next.source === "supabase" ? "Progreso actualizado." : "Modo de prueba activo.");
       return next;
     } catch (error) {
@@ -863,6 +874,7 @@ export function OrganizatechApp({
   }
 
   async function loadCycleScopedPlanIntoState(cycleId: string) {
+    isCycleScopedDisplayLockedRef.current = true;
     setCycleScopedPlan(null);
     setCycleScopedExercises(null);
     setCycleScopedLoadError("");
@@ -881,6 +893,7 @@ export function OrganizatechApp({
       setActiveRoutineDay((current) => getVisibleTrainingDay(scopedExercises, current));
       setComparisonDay((current) => getVisibleTrainingDay(scopedExercises, current));
     } catch (error) {
+      isCycleScopedDisplayLockedRef.current = false;
       setCycleScopedPlan(null);
       setCycleScopedExercises([]);
       setEntries([]);
@@ -940,6 +953,7 @@ export function OrganizatechApp({
 
     const scopedPlan = await getCycleScopedTrainingPlan(cycleId);
     const scopedExercises = createExerciseTemplatesFromCycleScopedPlan(scopedPlan);
+    isCycleScopedDisplayLockedRef.current = true;
     setTrainingPlan(plan);
     saveTrainingPlan(plan);
     setCycleScopedPlan(scopedPlan);
@@ -2550,13 +2564,12 @@ function DashboardScreen({
     const itemExercises = exercises.filter((exercise) => (exercise.day ?? item) === item);
     const expectedDate = currentWeekDates[item] ?? "";
     const plannedDay = getTrainingDayCode(item);
-    const session = activeSessions.find((candidate) => (
-      candidate.plannedDate === expectedDate || candidate.plannedDay === plannedDay
-    ));
-    const legacyEntries = session ? [] : findLegacyDashboardEntries(entries, itemExercises, expectedDate);
-    const itemEntries = session ? session.entries : legacyEntries;
+    const session = findDashboardSessionForDay(activeSessions, itemExercises, expectedDate, plannedDay, usesCycleScopedSessions);
+    const sessionEntries = session ? findDashboardEntries(session.entries, itemExercises, expectedDate, usesCycleScopedSessions) : [];
+    const fallbackEntries = sessionEntries.length > 0 ? [] : findDashboardEntries(entries, itemExercises, expectedDate, usesCycleScopedSessions);
+    const itemEntries = sessionEntries.length > 0 ? sessionEntries : fallbackEntries;
     const itemMetrics = itemEntries.length > 0 ? calculateWeeklyComparison(itemEntries) : [];
-    const isCompleted = Boolean(session) || legacyEntries.length > 0;
+    const isCompleted = usesCycleScopedSessions ? itemEntries.length > 0 : Boolean(session) || fallbackEntries.length > 0;
 
     return {
       day: item,
@@ -4566,6 +4579,10 @@ function createExerciseTemplatesFromCycleScopedPlan(plan: CycleScopedTrainingPla
     routine.days.flatMap((day) =>
       day.exercises.map((exercise) => ({
         id: exercise.id,
+        cycleId: exercise.cycleId,
+        cycleDayId: day.id,
+        trainingCycleExerciseId: exercise.id,
+        sourceLegacyExerciseId: exercise.sourceLegacyExerciseId,
         routine: routine.name,
         day: getSetupDayFromTrainingDayCode(day.dayCode),
         name: exercise.name,
@@ -5383,13 +5400,46 @@ function calculateRegisteredDashboardSummary(metrics: ExerciseMetrics[]) {
   );
 }
 
-function findLegacyDashboardEntries(entries: ExerciseEntry[], dayExercises: ExerciseTemplate[], expectedDate: string) {
+function findDashboardSessionForDay(
+  sessions: TrainingSession[],
+  dayExercises: ExerciseTemplate[],
+  expectedDate: string,
+  plannedDay: TrainingDayCode,
+  usesCycleScopedSessions: boolean,
+) {
+  return sessions.find((candidate) => {
+    if (!usesCycleScopedSessions) {
+      return candidate.plannedDate === expectedDate || candidate.plannedDay === plannedDay;
+    }
+
+    const candidateEntries = findDashboardEntries(candidate.entries, dayExercises, expectedDate, true);
+    if (candidateEntries.length > 0) return true;
+
+    const cycleDayIds = new Set(dayExercises.map((exercise) => exercise.cycleDayId).filter(Boolean));
+    return Boolean(candidate.cycleDayId && cycleDayIds.has(candidate.cycleDayId)) || candidate.plannedDay === plannedDay;
+  });
+}
+
+function findDashboardEntries(
+  entries: ExerciseEntry[],
+  dayExercises: ExerciseTemplate[],
+  expectedDate: string,
+  usesCycleScopedSessions: boolean,
+) {
   if (!expectedDate || dayExercises.length === 0) return [];
-  const dayExerciseIds = new Set(dayExercises.map((exercise) => exercise.id));
+  const dayExerciseIds = new Set(dayExercises.map((exercise) => getDashboardExerciseIdentity(exercise, usesCycleScopedSessions)));
   return entries.filter((entry) => (
-    normalizeEntryDateKey(entry.date) === expectedDate &&
-    dayExerciseIds.has(entry.exerciseId)
+    (usesCycleScopedSessions || normalizeEntryDateKey(entry.date) === expectedDate) &&
+    dayExerciseIds.has(getDashboardEntryExerciseIdentity(entry, usesCycleScopedSessions))
   ));
+}
+
+function getDashboardExerciseIdentity(exercise: ExerciseTemplate, usesCycleScopedSessions: boolean) {
+  return usesCycleScopedSessions ? exercise.trainingCycleExerciseId ?? exercise.id : exercise.id;
+}
+
+function getDashboardEntryExerciseIdentity(entry: ExerciseEntry, usesCycleScopedSessions: boolean) {
+  return usesCycleScopedSessions ? entry.trainingCycleExerciseId ?? entry.exerciseId : entry.exerciseId;
 }
 
 function normalizeEntryDateKey(value: string) {
