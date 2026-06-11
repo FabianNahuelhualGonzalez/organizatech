@@ -1,6 +1,6 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
-  isProtectedTrainingCycle,
+  canFinishTrainingCycle,
   PROTECTED_ACTIVE_CYCLE_MESSAGE,
 } from "@/lib/training/training-cycle-protection";
 
@@ -37,6 +37,7 @@ export interface CreateTrainingCycleInput {
 export interface CompleteTrainingCycleInput {
   endedAt?: string;
   summarySnapshot?: TrainingCycleSnapshot;
+  explicitlyConfirmed?: boolean;
 }
 
 export interface CancelTrainingCycleInput {
@@ -101,11 +102,16 @@ export async function createTrainingCycle(input: CreateTrainingCycleInput): Prom
 }
 
 export async function completeTrainingCycle(input: CompleteTrainingCycleInput = {}): Promise<TrainingCycle> {
-  return finishActiveTrainingCycle("completed", input.endedAt, input.summarySnapshot ?? {});
+  return finishActiveTrainingCycle(
+    "completed",
+    input.endedAt,
+    input.summarySnapshot ?? {},
+    input.explicitlyConfirmed ?? false,
+  );
 }
 
 export async function cancelTrainingCycle(input: CancelTrainingCycleInput = {}): Promise<TrainingCycle> {
-  return finishActiveTrainingCycle("cancelled", input.endedAt, input.summarySnapshot ?? {});
+  return finishActiveTrainingCycle("cancelled", input.endedAt, input.summarySnapshot ?? {}, false);
 }
 
 export async function getTrainingCycleHistory(): Promise<TrainingCycle[]> {
@@ -127,6 +133,7 @@ async function finishActiveTrainingCycle(
   status: Exclude<TrainingCycleStatus, "active">,
   endedAt = new Date().toISOString(),
   summarySnapshot: TrainingCycleSnapshot,
+  explicitlyConfirmed: boolean,
 ) {
   const { supabase, userId } = await getAuthenticatedCycleRepository();
   const { data: activeCycleData, error: activeCycleError } = await supabase
@@ -147,7 +154,7 @@ async function finishActiveTrainingCycle(
   }
 
   const activeCycle = mapTrainingCycleRow(activeCycleData as unknown as TrainingCycleRow);
-  if (isProtectedTrainingCycle(activeCycle)) {
+  if (!canFinishTrainingCycle(activeCycle, status, explicitlyConfirmed)) {
     throw new TrainingCycleRepositoryError(
       "protected_cycle",
       PROTECTED_ACTIVE_CYCLE_MESSAGE,

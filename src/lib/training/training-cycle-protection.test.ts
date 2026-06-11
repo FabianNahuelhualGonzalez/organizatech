@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { isProtectedTrainingCycle } from "./training-cycle-protection";
+import {
+  canFinishTrainingCycle,
+  isProtectedTrainingCycle,
+} from "./training-cycle-protection";
 
 assert.equal(
   isProtectedTrainingCycle({
@@ -35,6 +38,29 @@ assert.equal(
   }),
   false,
   "el marcador QA cycle-scoped mantiene compatibilidad",
+);
+
+const protectedCycle = {
+  cycleNumber: 1,
+  planSnapshot: { source: "ui-main-production" },
+};
+
+assert.equal(
+  canFinishTrainingCycle(protectedCycle, "completed"),
+  false,
+  "un ciclo protegido no se completa sin confirmacion explicita",
+);
+
+assert.equal(
+  canFinishTrainingCycle(protectedCycle, "completed", true),
+  true,
+  "un ciclo protegido se puede completar tras confirmacion explicita",
+);
+
+assert.equal(
+  canFinishTrainingCycle(protectedCycle, "cancelled", true),
+  false,
+  "la confirmacion de nuevo ciclo no habilita cancelar el ciclo protegido",
 );
 
 console.log("Pruebas de proteccion de ciclos OK");

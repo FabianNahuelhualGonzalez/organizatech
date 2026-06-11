@@ -376,6 +376,7 @@ export function OrganizatechApp({
   const [persistedCycleHistory, setPersistedCycleHistory] = useState<PersistedTrainingCycle[]>([]);
   const [isPersistedCyclesLoading, setIsPersistedCyclesLoading] = useState(false);
   const [isNewCycleConfirmOpen, setIsNewCycleConfirmOpen] = useState(false);
+  const isNewCycleTransitionRef = useRef(false);
   const [isDeleteCycleConfirmOpen, setIsDeleteCycleConfirmOpen] = useState(false);
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
@@ -1502,6 +1503,8 @@ export function OrganizatechApp({
   }
 
   async function startNewTrainingCycle() {
+    if (isNewCycleTransitionRef.current) return;
+
     if (dataMode === "supabase") {
       if (!isTrainingCyclesRepositoryActive) {
         setStatusMessage("Esta acción estará disponible en el siguiente paso.");
@@ -1509,13 +1512,10 @@ export function OrganizatechApp({
         return;
       }
 
+      isNewCycleTransitionRef.current = true;
       setIsBusy(true);
       try {
         const activeCycle = await getActiveTrainingCycle();
-        if (activeCycle && isProtectedTrainingCycle(activeCycle)) {
-          setStatusMessage(PROTECTED_ACTIVE_CYCLE_MESSAGE);
-          return;
-        }
 
         const nextPlan = createControlledNextTrainingPlan();
         const freshSetup = createSetupByDay();
@@ -1525,6 +1525,7 @@ export function OrganizatechApp({
           const endedAt = new Date().toISOString();
           await completeTrainingCycle({
             endedAt,
+            explicitlyConfirmed: true,
             summarySnapshot: createPersistedCycleSummarySnapshot(
               trainingPlan,
               displayExercises,
@@ -1562,6 +1563,7 @@ export function OrganizatechApp({
       } catch (error) {
         setStatusMessage(translateTrainingCycleRepositoryError(error));
       } finally {
+        isNewCycleTransitionRef.current = false;
         setIsBusy(false);
         setIsNewCycleConfirmOpen(false);
       }
@@ -2224,6 +2226,7 @@ export function OrganizatechApp({
       {screen === "perfil" && <ProfileScreen name={sessionName} summary={summary} dataSource={dataSource} refreshData={refreshData} resetLocal={handleResetLocal} />}
       {isNewCycleConfirmOpen && (
         <ConfirmNewCycleModal
+          isBusy={isBusy}
           onCancel={() => setIsNewCycleConfirmOpen(false)}
           onConfirm={() => void startNewTrainingCycle()}
         />
@@ -3031,15 +3034,25 @@ function ConfirmDeleteCycleModal({
   );
 }
 
-function ConfirmNewCycleModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+function ConfirmNewCycleModal({
+  isBusy,
+  onCancel,
+  onConfirm,
+}: {
+  isBusy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirmar nuevo ciclo">
       <div className="card confirm-modal">
         <h2>¿Estas seguro?</h2>
         <p>Si decides crear un nuevo ciclo de entrenamiento, finalizaremos el ciclo actual que tienes registrado.</p>
         <div className="modal-actions">
-          <button className="button danger-solid" type="button" onClick={onCancel}>No</button>
-          <button className="button success-solid" type="button" onClick={onConfirm}>Si</button>
+          <button className="button danger-solid" type="button" onClick={onCancel} disabled={isBusy}>No</button>
+          <button className="button success-solid" type="button" onClick={onConfirm} disabled={isBusy}>
+            {isBusy ? "Finalizando..." : "Si"}
+          </button>
         </div>
       </div>
     </div>

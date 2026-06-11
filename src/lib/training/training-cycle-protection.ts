@@ -12,3 +12,12 @@ export function isProtectedTrainingCycle(cycle: TrainingCycleProtectionCandidate
   const source = cycle.planSnapshot.source;
   return source !== "cycle-scoped" && source !== "cycle-scoped-qa";
 }
+
+export function canFinishTrainingCycle(
+  cycle: TrainingCycleProtectionCandidate,
+  status: "completed" | "cancelled",
+  explicitlyConfirmed = false,
+) {
+  if (!isProtectedTrainingCycle(cycle)) return true;
+  return status === "completed" && explicitlyConfirmed;
+}
