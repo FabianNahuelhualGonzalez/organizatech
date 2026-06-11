@@ -654,21 +654,13 @@ export function OrganizatechApp({
   const displayTrainingPlan = persistedActiveCyclePlan ?? trainingPlan;
   const isCycleScopedActiveCycle = Boolean(persistedActiveCycle && isCycleScopedTrainingCycle(persistedActiveCycle));
   const isCycleScopedLookupPending = isTrainingCyclesRepositoryActive && isPersistedCyclesLoading && !persistedActiveCycle;
-  const shouldIsolatePersistedCycleLegacyState = Boolean(
-    isTrainingCyclesRepositoryActive &&
-    persistedActiveCycle &&
-    !isCycleScopedActiveCycle &&
-    readSnapshotNumber(persistedActiveCycle.planSnapshot, "exerciseCount") === 0,
-  );
   const displayExercises = isCycleScopedLookupPending
     ? []
     : isCycleScopedActiveCycle
     ? (cycleScopedExercises ?? [])
-    : shouldIsolatePersistedCycleLegacyState
-      ? []
-      : exercises;
-  const displayEntries = isCycleScopedLookupPending || shouldIsolatePersistedCycleLegacyState ? [] : entries;
-  const displayTrainingSessions = isCycleScopedLookupPending || shouldIsolatePersistedCycleLegacyState ? [] : trainingSessions;
+    : exercises;
+  const displayEntries = isCycleScopedLookupPending ? [] : entries;
+  const displayTrainingSessions = isCycleScopedLookupPending ? [] : trainingSessions;
   const isCycleScopedPlanLoading = (isCycleScopedLookupPending || isCycleScopedActiveCycle) && cycleScopedExercises === null && !cycleScopedLoadError;
   const isCycleScopedPlanEmpty = isCycleScopedActiveCycle && cycleScopedExercises !== null && (
     cycleScopedExercises.length === 0 ||
