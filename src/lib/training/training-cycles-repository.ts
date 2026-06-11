@@ -1,4 +1,8 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import {
+  isProtectedTrainingCycle,
+  PROTECTED_ACTIVE_CYCLE_MESSAGE,
+} from "@/lib/training/training-cycle-protection";
 
 export type TrainingCycleStatus = "active" | "completed" | "cancelled";
 export type TrainingCycleSnapshot = Record<string, unknown>;
@@ -45,6 +49,7 @@ export type TrainingCycleRepositoryErrorCode =
   | "session_expired"
   | "active_cycle_exists"
   | "active_cycle_missing"
+  | "protected_cycle"
   | "permission_denied"
   | "unexpected";
 
@@ -142,6 +147,12 @@ async function finishActiveTrainingCycle(
   }
 
   const activeCycle = mapTrainingCycleRow(activeCycleData as unknown as TrainingCycleRow);
+  if (isProtectedTrainingCycle(activeCycle)) {
+    throw new TrainingCycleRepositoryError(
+      "protected_cycle",
+      PROTECTED_ACTIVE_CYCLE_MESSAGE,
+    );
+  }
 
   const { data, error } = await supabase
     .from("training_cycles")

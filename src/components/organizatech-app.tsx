@@ -84,6 +84,10 @@ import {
   type TrainingCycleSnapshot as PersistedTrainingCycleSnapshot,
 } from "@/lib/training/training-cycles-repository";
 import {
+  isProtectedTrainingCycle,
+  PROTECTED_ACTIVE_CYCLE_MESSAGE,
+} from "@/lib/training/training-cycle-protection";
+import {
   createTrainingCycleWithPlan,
   createTrainingSessionWithCycleEntries,
   getCycleScopedTrainingSessionData,
@@ -908,6 +912,11 @@ export function OrganizatechApp({
     setupState: Record<string, SetupDayState>,
     activeCycle: PersistedTrainingCycle | null,
   ) {
+    if (activeCycle && isProtectedTrainingCycle(activeCycle)) {
+      setStatusMessage(PROTECTED_ACTIVE_CYCLE_MESSAGE);
+      return false;
+    }
+
     const planInput = createCycleScopedPlanInput(plan, setupState, trainingCyclesSnapshotSource);
     if (!planInput) {
       setTrainingPlan(plan);
@@ -1503,6 +1512,11 @@ export function OrganizatechApp({
       setIsBusy(true);
       try {
         const activeCycle = await getActiveTrainingCycle();
+        if (activeCycle && isProtectedTrainingCycle(activeCycle)) {
+          setStatusMessage(PROTECTED_ACTIVE_CYCLE_MESSAGE);
+          return;
+        }
+
         const nextPlan = createControlledNextTrainingPlan();
         const freshSetup = createSetupByDay();
         const activeCycleToClose = activeCycle?.status === "active" ? activeCycle : null;
@@ -1587,6 +1601,11 @@ export function OrganizatechApp({
         const activeCycle = persistedActiveCycle ?? await getActiveTrainingCycle();
         if (!activeCycle) {
           setStatusMessage("No existe un ciclo activo para cancelar.");
+          setIsDeleteCycleConfirmOpen(false);
+          return;
+        }
+        if (isProtectedTrainingCycle(activeCycle)) {
+          setStatusMessage(PROTECTED_ACTIVE_CYCLE_MESSAGE);
           setIsDeleteCycleConfirmOpen(false);
           return;
         }
@@ -5263,6 +5282,7 @@ function translateTrainingCycleRepositoryError(error: unknown) {
     if (error.code === "session_expired") return "Tu sesión expiró. Inicia sesión nuevamente.";
     if (error.code === "active_cycle_exists") return "Ya existe un ciclo activo para tu cuenta.";
     if (error.code === "active_cycle_missing") return "No existe un ciclo activo para finalizar.";
+    if (error.code === "protected_cycle") return PROTECTED_ACTIVE_CYCLE_MESSAGE;
     if (error.code === "permission_denied") return "No tienes permisos para acceder a este ciclo.";
     return "No pudimos completar la acción sobre ciclos.";
   }
