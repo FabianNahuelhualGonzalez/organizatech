@@ -78,6 +78,7 @@ import {
   cancelTrainingCycle,
   completeTrainingCycle,
   getActiveTrainingCycle,
+  getNextTrainingCycleNumber,
   getTrainingCycleHistory,
   TrainingCycleRepositoryError,
   type TrainingCycle as PersistedTrainingCycle,
@@ -925,7 +926,7 @@ export function OrganizatechApp({
     const durationWeeks = getCycleDurationWeeks(plan);
     const plannedEndDate = addDaysToDateKey(plannedStartDate, durationWeeks * 7 - 1);
     const activeCycleToClose = activeCycle?.status === "active" ? activeCycle : null;
-    const nextCycleNumber = getNextPersistedCycleNumber(activeCycleToClose, persistedCycleHistory);
+    const nextCycleNumber = await getNextTrainingCycleNumber();
     const endedAt = new Date().toISOString();
 
     if (activeCycleToClose) {

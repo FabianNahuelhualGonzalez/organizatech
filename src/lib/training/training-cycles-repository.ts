@@ -3,6 +3,7 @@ import {
   canFinishTrainingCycle,
   PROTECTED_ACTIVE_CYCLE_MESSAGE,
 } from "@/lib/training/training-cycle-protection";
+import { calculateNextTrainingCycleNumber } from "@/lib/training/training-cycle-number";
 
 export type TrainingCycleStatus = "active" | "completed" | "cancelled";
 export type TrainingCycleSnapshot = Record<string, unknown>;
@@ -77,6 +78,22 @@ export async function getActiveTrainingCycle(): Promise<TrainingCycle | null> {
 
   if (error) throw mapCycleRepositoryError(error);
   return data ? mapTrainingCycleRow(data as unknown as TrainingCycleRow) : null;
+}
+
+export async function getNextTrainingCycleNumber(): Promise<number> {
+  const { supabase, userId } = await getAuthenticatedCycleRepository();
+  const { data, error } = await supabase
+    .from("training_cycles")
+    .select("cycle_number")
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (error) throw mapCycleRepositoryError(error);
+  return calculateNextTrainingCycleNumber(
+    ((data ?? []) as Array<{ cycle_number: number }>).map((cycle) => ({
+      cycleNumber: cycle.cycle_number,
+    })),
+  );
 }
 
 export async function createTrainingCycle(input: CreateTrainingCycleInput): Promise<TrainingCycle> {
