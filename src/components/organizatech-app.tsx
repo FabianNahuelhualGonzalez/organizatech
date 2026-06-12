@@ -41,6 +41,7 @@ import {
 } from "recharts";
 import {
   deactivateActiveCycle,
+  deleteExercise,
   loadAppData,
   replaceLocalData,
   resetLocalData,
@@ -100,6 +101,12 @@ import {
   type CycleScopedTrainingPlan,
 } from "@/lib/training/cycle-scoped-training-repository";
 import { getCycleScopedPlannedDate } from "@/lib/training/cycle-scoped-planned-date";
+import {
+  dedupeExerciseRowsByName,
+  dedupeExercisesByDayAndRoutine,
+  getExercisesForTrainingDay,
+  getRemovedExerciseIds,
+} from "@/lib/training/training-exercise-selection";
 
 type Screen =
   | "login"
@@ -655,11 +662,12 @@ export function OrganizatechApp({
   const displayTrainingPlan = persistedActiveCyclePlan ?? trainingPlan;
   const isCycleScopedActiveCycle = Boolean(persistedActiveCycle && isCycleScopedTrainingCycle(persistedActiveCycle));
   const isCycleScopedLookupPending = isTrainingCyclesRepositoryActive && isPersistedCyclesLoading && !persistedActiveCycle;
-  const displayExercises = isCycleScopedLookupPending
+  const selectedExercises = isCycleScopedLookupPending
     ? []
     : isCycleScopedActiveCycle
     ? (cycleScopedExercises ?? [])
     : exercises;
+  const displayExercises = dedupeExercisesByDayAndRoutine(selectedExercises);
   const displayEntries = isCycleScopedLookupPending ? [] : entries;
   const displayTrainingSessions = isCycleScopedLookupPending ? [] : trainingSessions;
   const isCycleScopedPlanLoading = (isCycleScopedLookupPending || isCycleScopedActiveCycle) && cycleScopedExercises === null && !cycleScopedLoadError;
@@ -1351,7 +1359,7 @@ export function OrganizatechApp({
   async function saveInitialRoutine(confirmedRoutineUpdate = false) {
     const dayState = setupByDay[setupDay] ?? createSetupDayState();
     const routineName = dayState.routineName.trim() || setupDay;
-    const validRows = dayState.rows.filter((row) => row.name.trim());
+    const validRows = dedupeExerciseRowsByName(dayState.rows.filter((row) => row.name.trim()));
     const plannedDays = trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [setupDay];
     const currentRoutineDays = getRoutineDays(exercises);
     const isChangingRoutineDays = hasRoutinePlan && isEditingRoutinePlan && !sameDayList(plannedDays, currentRoutineDays);
@@ -1428,7 +1436,17 @@ export function OrganizatechApp({
       for (const dayToPersist of daysToPersist) {
         const state = nextSetupByDay[dayToPersist] ?? createSetupDayState();
         const currentRoutineName = state.routineName.trim() || dayToPersist;
-        const rowsToPersist = state.rows.filter((row) => row.name.trim());
+        const rowsToPersist = dedupeExerciseRowsByName(state.rows.filter((row) => row.name.trim()));
+        const persistedIds = new Set(
+          rowsToPersist
+            .map((row) => row.sourceExerciseId)
+            .filter((id): id is string => Boolean(id)),
+        );
+        const removedExerciseIds = getRemovedExerciseIds(exercises, dayToPersist, persistedIds);
+
+        for (const exerciseId of removedExerciseIds) {
+          await deleteExercise(exerciseId, dataMode);
+        }
 
         for (const row of rowsToPersist) {
           await saveExercise({
@@ -1444,7 +1462,8 @@ export function OrganizatechApp({
         }
       }
 
-      await refreshData(dataMode);
+      const refreshedData = await refreshData(dataMode);
+      if (!refreshedData) return;
       setActiveRoutineDay(setupDay);
       setSetupByDay(nextSetupByDay);
       const successMessage = `Rutina de ${setupDay} guardada.`;
@@ -3923,8 +3942,9 @@ function ComparisonScreenV2({
   const [selectedExerciseId, setSelectedExerciseId] = useState("");
   const [isExercisePickerOpen, setIsExercisePickerOpen] = useState(false);
   const activeDay = routineDays.includes(selectedDay) ? selectedDay : routineDays[0];
-  const dayExercises = exercises.filter((exercise) => (exercise.day ?? "Lunes") === activeDay);
-  const dayExerciseIds = new Set(dayExercises.map((exercise) => exercise.id));
+  const dayExerciseCandidates = exercises.filter((exercise) => (exercise.day ?? "Lunes") === activeDay);
+  const dayExercises = getExercisesForTrainingDay(exercises, activeDay);
+  const dayExerciseIds = new Set(dayExerciseCandidates.map((exercise) => exercise.id));
   const dayMetrics = dedupeMetricsByWeekAndExercise(metrics.filter((entry) => dayExerciseIds.has(entry.exerciseId)));
   const weekNumbers = getWeekNumbers(dayMetrics);
   const selectedWeek = activeView === "week" ? getSafeSelectedWeek(weekNumbers, activeWeek, currentWeek) : 0;
@@ -3939,10 +3959,10 @@ function ComparisonScreenV2({
   const listTitle = activeView === "plan"
     ? `Listado de rutina registrada día ${activeDay} | ${routineName}`
     : `Ejercicios comparados | Semana ${selectedWeek}`;
-  const allComparableExercises = exercises.filter((exercise) => exercise.name.trim().length > 0);
+  const allComparableExercises = dayExercises.filter((exercise) => exercise.name.trim().length > 0);
   const selectedExercise = allComparableExercises.find((exercise) => exercise.id === selectedExerciseId) ?? allComparableExercises[0];
   const selectedHistory = selectedExercise
-    ? getExerciseHistory(dedupeMetricsByWeekAndExercise(metrics), selectedExercise.id)
+    ? getExerciseHistory(dayMetrics, selectedExercise.name)
     : [];
   const historySummary = buildExerciseComparisonSummary(selectedHistory, selectedExercise?.name);
   const chartData = historySummary?.history.map((entry) => ({
@@ -5299,7 +5319,7 @@ function translateTrainingCycleRepositoryError(error: unknown) {
 function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<string, SetupDayState> {
   const byDay = createSetupByDay();
 
-  for (const exercise of exercises) {
+  for (const exercise of dedupeExercisesByDayAndRoutine(exercises)) {
     const day = exercise.day && setupDays.includes(exercise.day) ? exercise.day : "Lunes";
     const current = byDay[day];
     const isEmpty = current.rows.every((row) => !row.name.trim());

@@ -125,8 +125,16 @@ export async function deleteExercise(exerciseId: string, mode: RepositoryMode = 
   }
 
   const { supabase, userId } = auth;
-  const { error } = await supabase.from("exercises").delete().eq("id", exerciseId).eq("user_id", userId);
+  const { data, error } = await supabase
+    .from("exercises")
+    .delete()
+    .eq("id", exerciseId)
+    .eq("user_id", userId)
+    .select("id");
   if (error) throw error;
+  if (!data?.some((exercise) => exercise.id === exerciseId)) {
+    throw new Error("No pudimos confirmar la eliminacion del ejercicio.");
+  }
 }
 
 export async function deactivateActiveCycle(mode: RepositoryMode = "demo"): Promise<void> {
