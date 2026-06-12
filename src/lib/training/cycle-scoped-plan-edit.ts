@@ -1,4 +1,4 @@
-import type { ExerciseEntry } from "@/lib/progress/types";
+import type { ExerciseEntry, TrainingDayCode } from "@/lib/progress/types";
 
 export interface ExistingCycleScopedExercise {
   id: string;
@@ -24,6 +24,18 @@ export interface CycleScopedExerciseAddition {
 }
 
 export type CycleScopedDayStatus = "pending" | "partial" | "completed";
+
+const trainingDayCodeOrder: TrainingDayCode[] = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
+
+const cycleScopedRoutineNameNoteKey = "cycleScopedRoutineName";
 
 export function analyzeCycleScopedDayEdit(
   existingExercises: ExistingCycleScopedExercise[],
@@ -112,6 +124,33 @@ export function getCycleScopedDayCoverage(
     registeredIds,
     status,
   };
+}
+
+export function getCycleScopedDayCodesToAdd(
+  existingDayCodes: readonly TrainingDayCode[],
+  requestedDayCodes: readonly TrainingDayCode[],
+) {
+  const existing = new Set(existingDayCodes);
+  const requested = new Set(requestedDayCodes);
+  return trainingDayCodeOrder.filter((dayCode) => requested.has(dayCode) && !existing.has(dayCode));
+}
+
+export function createCycleScopedDayNotes(routineName: string) {
+  return JSON.stringify({
+    [cycleScopedRoutineNameNoteKey]: routineName.trim(),
+  });
+}
+
+export function getCycleScopedDayRoutineName(notes: string | null, fallback: string) {
+  if (!notes) return fallback;
+
+  try {
+    const parsed = JSON.parse(notes) as Record<string, unknown>;
+    const routineName = parsed[cycleScopedRoutineNameNoteKey];
+    return typeof routineName === "string" && routineName.trim() ? routineName.trim() : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export function normalizeCycleScopedExerciseName(value: string) {

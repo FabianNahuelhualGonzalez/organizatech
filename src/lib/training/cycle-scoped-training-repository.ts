@@ -69,18 +69,30 @@ export interface CycleScopedTrainingSessionEntryInput {
   notes?: string | null;
 }
 
-export interface AddCycleScopedTrainingExercisesInput {
+export interface AddCycleScopedTrainingPlanInput {
   cycleId: string;
-  additions: Array<{
-    dayId: string;
-    name: string;
-    targetSets: number;
-    targetReps: number;
-    baseWeight: number;
-    sideWeight?: number | null;
+  days: Array<{
+    existingDayId?: string;
+    routineId: string;
+    weekIndex: number;
+    dayCode: TrainingDayCode;
     sortOrder: number;
     notes?: string | null;
+    exercises: Array<{
+      name: string;
+      targetSets: number;
+      targetReps: number;
+      baseWeight: number;
+      sideWeight?: number | null;
+      sortOrder: number;
+      notes?: string | null;
+    }>;
   }>;
+}
+
+export interface AddCycleScopedTrainingPlanResult {
+  daysAdded: number;
+  exercisesAdded: number;
 }
 
 export interface CycleScopedTrainingPlan {
@@ -208,18 +220,17 @@ export async function createTrainingSessionWithCycleEntries(input: CycleScopedTr
   return data;
 }
 
-export async function addCycleScopedTrainingExercises(
-  input: AddCycleScopedTrainingExercisesInput,
-): Promise<number> {
-  if (!input.cycleId || input.additions.length === 0) {
+export async function addCycleScopedTrainingDaysAndExercises(
+  input: AddCycleScopedTrainingPlanInput,
+): Promise<AddCycleScopedTrainingPlanResult> {
+  if (!input.cycleId || input.days.length === 0 || input.days.some((day) => day.exercises.length === 0)) {
     throw new CycleScopedTrainingRepositoryError(
       "invalid_plan",
-      "Agrega al menos un ejercicio nuevo al plan activo.",
+      "Agrega al menos un dia con ejercicios nuevos al plan activo.",
     );
   }
 
   const { supabase, userId } = await getAuthenticatedCycleScopedRepository();
-  const dayIds = Array.from(new Set(input.additions.map((addition) => addition.dayId)));
 
   const { data: activeCycle, error: cycleError } = await supabase
     .from("training_cycles")
@@ -238,21 +249,102 @@ export async function addCycleScopedTrainingExercises(
     );
   }
 
-  const { data: days, error: daysError } = await supabase
-    .from("training_cycle_days")
+  const routineIds = Array.from(new Set(input.days.map((day) => day.routineId)));
+  const { data: routines, error: routinesError } = await supabase
+    .from("training_cycle_routines")
     .select("id")
     .eq("user_id", userId)
     .eq("cycle_id", input.cycleId)
-    .in("id", dayIds)
+    .in("id", routineIds)
+    .is("deleted_at", null);
+
+  if (routinesError) throw mapCycleScopedRepositoryError(routinesError);
+  if ((routines ?? []).length !== routineIds.length) {
+    throw new CycleScopedTrainingRepositoryError(
+      "invalid_plan",
+      "Una de las rutinas seleccionadas no pertenece al ciclo activo.",
+    );
+  }
+
+  const { data: currentDays, error: daysError } = await supabase
+    .from("training_cycle_days")
+    .select("id,routine_id,week_index,day_code")
+    .eq("user_id", userId)
+    .eq("cycle_id", input.cycleId)
     .is("deleted_at", null);
 
   if (daysError) throw mapCycleScopedRepositoryError(daysError);
-  if ((days ?? []).length !== dayIds.length) {
-    throw new CycleScopedTrainingRepositoryError(
-      "invalid_plan",
-      "Uno de los dias seleccionados no pertenece al ciclo activo.",
-    );
+
+  const currentDaysByKey = new Map(
+    (currentDays ?? []).map((day) => [`${day.week_index}:${day.day_code}`, day]),
+  );
+  const requestedDayKeys = new Set<string>();
+  for (const day of input.days) {
+    const key = `${day.weekIndex}:${day.dayCode}`;
+    if (requestedDayKeys.has(key)) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        "El mismo dia aparece mas de una vez en la actualizacion.",
+      );
+    }
+    requestedDayKeys.add(key);
+
+    const existingDay = currentDaysByKey.get(key);
+    if (day.existingDayId && existingDay?.id !== day.existingDayId) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        "Uno de los dias seleccionados no pertenece al ciclo activo.",
+      );
+    }
   }
+
+  const missingDays = input.days.filter((day) =>
+    !currentDaysByKey.has(`${day.weekIndex}:${day.dayCode}`),
+  );
+  let insertedDays: Array<{ id: string; routine_id: string; week_index: number; day_code: string }> = [];
+  if (missingDays.length > 0) {
+    const { data, error } = await supabase
+      .from("training_cycle_days")
+      .insert(missingDays.map((day) => ({
+        user_id: userId,
+        cycle_id: input.cycleId,
+        routine_id: day.routineId,
+        week_index: Math.max(1, day.weekIndex),
+        day_code: day.dayCode,
+        sort_order: Math.max(0, day.sortOrder),
+        notes: day.notes ?? null,
+      })))
+      .select("id,routine_id,week_index,day_code");
+
+    if (error) throw mapCycleScopedRepositoryError(error);
+    insertedDays = data ?? [];
+    if (insertedDays.length !== missingDays.length) {
+      throw new CycleScopedTrainingRepositoryError(
+        "unexpected",
+        "No pudimos confirmar todos los dias agregados.",
+      );
+    }
+  }
+
+  const allDays = [...(currentDays ?? []), ...insertedDays];
+  const allDaysByKey = new Map(
+    allDays.map((day) => [`${day.week_index}:${day.day_code}`, day]),
+  );
+  const additions = input.days.flatMap((day) => {
+    const persistedDay = allDaysByKey.get(`${day.weekIndex}:${day.dayCode}`);
+    if (!persistedDay) {
+      throw new CycleScopedTrainingRepositoryError(
+        "unexpected",
+        "No pudimos resolver uno de los dias del plan actualizado.",
+      );
+    }
+
+    return day.exercises.map((exercise) => ({
+      ...exercise,
+      dayId: persistedDay.id,
+    }));
+  });
+  const dayIds = Array.from(new Set(additions.map((addition) => addition.dayId)));
 
   const { data: existingExercises, error: existingError } = await supabase
     .from("training_cycle_exercises")
@@ -269,43 +361,52 @@ export async function addCycleScopedTrainingExercises(
       `${exercise.day_id}:${normalizeCycleScopedExerciseName(exercise.name)}`),
   );
   const additionKeys = new Set<string>();
-  for (const addition of input.additions) {
+  const uniqueAdditions = additions.filter((addition) => {
     const key = `${addition.dayId}:${normalizeCycleScopedExerciseName(addition.name)}`;
-    if (!normalizeCycleScopedExerciseName(addition.name) || existingKeys.has(key) || additionKeys.has(key)) {
+    if (!normalizeCycleScopedExerciseName(addition.name)) {
       throw new CycleScopedTrainingRepositoryError(
         "invalid_plan",
-        `El ejercicio "${addition.name.trim()}" ya existe en ese dia.`,
+        "Cada ejercicio nuevo requiere un nombre.",
       );
     }
+    if (existingKeys.has(key) || additionKeys.has(key)) return false;
     additionKeys.add(key);
+    return true;
+  });
+
+  let insertedExercises: Array<{ id: string }> = [];
+  if (uniqueAdditions.length > 0) {
+    const { data, error } = await supabase
+      .from("training_cycle_exercises")
+      .insert(uniqueAdditions.map((addition) => ({
+        user_id: userId,
+        cycle_id: input.cycleId,
+        day_id: addition.dayId,
+        name: addition.name.trim(),
+        target_sets: Math.max(1, addition.targetSets),
+        target_reps: Math.max(1, addition.targetReps),
+        base_weight: Math.max(0, addition.baseWeight),
+        side_weight: addition.sideWeight ?? null,
+        sort_order: Math.max(0, addition.sortOrder),
+        notes: addition.notes ?? null,
+        source_legacy_exercise_id: null,
+      })))
+      .select("id");
+
+    if (error) throw mapCycleScopedRepositoryError(error);
+    insertedExercises = data ?? [];
+    if (insertedExercises.length !== uniqueAdditions.length) {
+      throw new CycleScopedTrainingRepositoryError(
+        "unexpected",
+        "No pudimos confirmar todos los ejercicios agregados.",
+      );
+    }
   }
 
-  const { data: inserted, error: insertError } = await supabase
-    .from("training_cycle_exercises")
-    .insert(input.additions.map((addition) => ({
-      user_id: userId,
-      cycle_id: input.cycleId,
-      day_id: addition.dayId,
-      name: addition.name.trim(),
-      target_sets: Math.max(1, addition.targetSets),
-      target_reps: Math.max(1, addition.targetReps),
-      base_weight: Math.max(0, addition.baseWeight),
-      side_weight: addition.sideWeight ?? null,
-      sort_order: Math.max(0, addition.sortOrder),
-      notes: addition.notes ?? null,
-      source_legacy_exercise_id: null,
-    })))
-    .select("id");
-
-  if (insertError) throw mapCycleScopedRepositoryError(insertError);
-  if ((inserted ?? []).length !== input.additions.length) {
-    throw new CycleScopedTrainingRepositoryError(
-      "unexpected",
-      "No pudimos confirmar todos los ejercicios agregados.",
-    );
-  }
-
-  return inserted?.length ?? 0;
+  return {
+    daysAdded: insertedDays.length,
+    exercisesAdded: insertedExercises.length,
+  };
 }
 
 export async function getCycleScopedTrainingPlan(cycleId: string): Promise<CycleScopedTrainingPlan> {

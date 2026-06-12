@@ -3,7 +3,10 @@ import type { ExerciseEntry } from "@/lib/progress/types";
 import type { CycleScopedExercise } from "./cycle-scoped-training-repository";
 import {
   analyzeCycleScopedDayEdit,
+  createCycleScopedDayNotes,
   getCycleScopedDayCoverage,
+  getCycleScopedDayCodesToAdd,
+  getCycleScopedDayRoutineName,
 } from "./cycle-scoped-plan-edit";
 
 const existingExercises = [
@@ -71,6 +74,35 @@ assert.equal(
   getCycleScopedDayCoverage(existingExercises, []).status,
   "pending",
   "el dia queda Pendiente cuando ningun ejercicio tiene entry",
+);
+
+assert.deepEqual(
+  getCycleScopedDayCodesToAdd(
+    ["monday"],
+    ["friday", "monday", "wednesday", "tuesday", "thursday"],
+  ),
+  ["tuesday", "wednesday", "thursday", "friday"],
+  "detecta solo dias faltantes y los devuelve en orden semanal",
+);
+assert.deepEqual(
+  getCycleScopedDayCodesToAdd(
+    ["monday", "tuesday"],
+    ["tuesday", "monday", "tuesday"],
+  ),
+  [],
+  "no duplica dias existentes ni repetidos en la seleccion",
+);
+
+const newDayNotes = createCycleScopedDayNotes("Espalda biceps");
+assert.equal(
+  getCycleScopedDayRoutineName(newDayNotes, "Rutina existente"),
+  "Espalda biceps",
+  "conserva el nombre visible de la rutina para un dia nuevo",
+);
+assert.equal(
+  getCycleScopedDayRoutineName("nota legacy", "Rutina existente"),
+  "Rutina existente",
+  "mantiene compatibilidad con notas existentes",
 );
 
 console.log("Pruebas de edicion de plan cycle-scoped OK");

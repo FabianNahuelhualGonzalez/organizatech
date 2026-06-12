@@ -90,7 +90,7 @@ import {
   PROTECTED_ACTIVE_CYCLE_MESSAGE,
 } from "@/lib/training/training-cycle-protection";
 import {
-  addCycleScopedTrainingExercises,
+  addCycleScopedTrainingDaysAndExercises,
   createTrainingCycleWithPlan,
   createTrainingSessionWithCycleEntries,
   getCycleScopedTrainingSessionData,
@@ -104,7 +104,10 @@ import {
 import { getCycleScopedPlannedDate } from "@/lib/training/cycle-scoped-planned-date";
 import {
   analyzeCycleScopedDayEdit,
+  createCycleScopedDayNotes,
   getCycleScopedDayCoverage,
+  getCycleScopedDayCodesToAdd,
+  getCycleScopedDayRoutineName,
   normalizeCycleScopedExerciseName,
 } from "@/lib/training/cycle-scoped-plan-edit";
 import {
@@ -1452,57 +1455,92 @@ export function OrganizatechApp({
             return;
           }
 
-          if (isChangingRoutineDays) {
-            setStatusMessage("La edicion del ciclo activo solo permite agregar ejercicios a dias existentes.");
-            return;
-          }
-
           const registeredExerciseIds = new Set(
             displayEntries
               .map((entry) => entry.trainingCycleExerciseId ?? entry.exerciseId)
               .filter(Boolean),
           );
-          const additions: Parameters<typeof addCycleScopedTrainingExercises>[0]["additions"] = [];
+          const existingDayRecords = cycleScopedPlan.routines.flatMap((routine) =>
+            routine.days
+              .filter((cycleDay) => cycleDay.weekIndex === 1)
+              .map((cycleDay) => ({ routine, cycleDay })),
+          );
+          const existingDayCodes = existingDayRecords.map(({ cycleDay }) => cycleDay.dayCode);
+          const requestedDayCodes = plannedDays.map(getTrainingDayCode);
+          const newDayCodes = new Set(
+            getCycleScopedDayCodesToAdd(existingDayCodes, requestedDayCodes),
+          );
+          const removedExistingDay = existingDayRecords.find(({ cycleDay }) =>
+            !requestedDayCodes.includes(cycleDay.dayCode),
+          );
+          if (removedExistingDay) {
+            setStatusMessage("La edicion del ciclo activo no elimina dias existentes.");
+            return;
+          }
 
-          for (const routine of cycleScopedPlan.routines) {
-            for (const cycleDay of routine.days) {
-              const day = getSetupDayFromTrainingDayCode(cycleDay.dayCode);
-              const state = nextSetupByDay[day] ?? createSetupDayState();
+          const fallbackRoutine = cycleScopedPlan.routines[0];
+          if (!fallbackRoutine) {
+            setStatusMessage("El ciclo activo no tiene una rutina base valida para agregar dias.");
+            return;
+          }
 
-              if (
-                normalizeCycleScopedExerciseName(state.routineName || routine.name) !==
-                normalizeCycleScopedExerciseName(routine.name)
-              ) {
-                setStatusMessage("En esta fase no se puede modificar el nombre de una rutina cycle-scoped existente.");
-                return;
-              }
+          const days: Parameters<typeof addCycleScopedTrainingDaysAndExercises>[0]["days"] = [];
+          for (const day of plannedDays) {
+            const dayCode = getTrainingDayCode(day);
+            const existingRecord = existingDayRecords.find(({ cycleDay }) => cycleDay.dayCode === dayCode);
+            const state = nextSetupByDay[day] ?? createSetupDayState();
+            const routineName = state.routineName.trim() || day;
+            const existingExercises = existingRecord?.cycleDay.exercises ?? [];
 
-              const analysis = analyzeCycleScopedDayEdit(
-                cycleDay.exercises,
-                state.rows,
-                registeredExerciseIds,
-              );
+            if (
+              existingRecord &&
+              normalizeCycleScopedExerciseName(routineName) !==
+                normalizeCycleScopedExerciseName(
+                  getCycleScopedDayRoutineName(existingRecord.cycleDay.notes, existingRecord.routine.name),
+                )
+            ) {
+              setStatusMessage("En esta fase no se puede modificar el nombre de una rutina cycle-scoped existente.");
+              return;
+            }
 
-              if (analysis.removedRegisteredExerciseIds.length > 0) {
-                setStatusMessage("No puedes eliminar un ejercicio que ya tiene registros asociados.");
-                return;
-              }
-              if (analysis.removedExerciseIds.length > 0) {
-                setStatusMessage("La edicion del ciclo activo solo permite agregar ejercicios nuevos; no elimina ejercicios existentes.");
-                return;
-              }
-              if (analysis.modifiedExerciseIds.length > 0) {
-                setStatusMessage("La edicion del ciclo activo solo permite agregar ejercicios nuevos; no modifica ejercicios existentes.");
-                return;
-              }
-              if (analysis.duplicateNames.length > 0) {
-                setStatusMessage(`El ejercicio "${analysis.duplicateNames[0]}" ya existe en ${day}.`);
-                return;
-              }
+            const analysis = analyzeCycleScopedDayEdit(
+              existingExercises,
+              state.rows,
+              registeredExerciseIds,
+            );
 
-              const nextSortOrder = Math.max(-1, ...cycleDay.exercises.map((exercise) => exercise.sortOrder)) + 1;
-              additions.push(...analysis.additions.map((exercise, index) => ({
-                dayId: cycleDay.id,
+            if (analysis.removedRegisteredExerciseIds.length > 0) {
+              setStatusMessage("No puedes eliminar un ejercicio que ya tiene registros asociados.");
+              return;
+            }
+            if (analysis.removedExerciseIds.length > 0) {
+              setStatusMessage("La edicion del ciclo activo solo agrega contenido; no elimina ejercicios existentes.");
+              return;
+            }
+            if (analysis.modifiedExerciseIds.length > 0) {
+              setStatusMessage("La edicion del ciclo activo solo agrega contenido; no modifica ejercicios existentes.");
+              return;
+            }
+            if (analysis.duplicateNames.length > 0) {
+              setStatusMessage(`El ejercicio "${analysis.duplicateNames[0]}" ya existe en ${day}.`);
+              return;
+            }
+
+            const isNewDay = newDayCodes.has(dayCode);
+            if (!isNewDay && analysis.additions.length === 0) continue;
+
+            const nextSortOrder = Math.max(
+              -1,
+              ...existingExercises.map((exercise) => exercise.sortOrder),
+            ) + 1;
+            days.push({
+              existingDayId: existingRecord?.cycleDay.id,
+              routineId: existingRecord?.routine.id ?? fallbackRoutine.id,
+              weekIndex: existingRecord?.cycleDay.weekIndex ?? 1,
+              dayCode,
+              sortOrder: setupDays.indexOf(day),
+              notes: existingRecord?.cycleDay.notes ?? createCycleScopedDayNotes(routineName),
+              exercises: analysis.additions.map((exercise, index) => ({
                 name: exercise.name,
                 targetSets: exercise.targetSets,
                 targetReps: exercise.targetReps,
@@ -1510,25 +1548,27 @@ export function OrganizatechApp({
                 sideWeight: null,
                 sortOrder: nextSortOrder + index,
                 notes: `Ejercicio agregado al plan activo para ${day}.`,
-              })));
-            }
+              })),
+            });
           }
 
-          if (additions.length === 0) {
-            setStatusMessage("No hay ejercicios nuevos para agregar al ciclo activo.");
+          if (days.length === 0) {
+            setStatusMessage("No hay dias ni ejercicios nuevos para agregar al ciclo activo.");
             return;
           }
 
-          const addedCount = await addCycleScopedTrainingExercises({
+          const result = await addCycleScopedTrainingDaysAndExercises({
             cycleId: activeCycle.id,
-            additions,
+            days,
           });
           await loadCycleScopedPlanIntoState(activeCycle.id);
           clearRoutineDraft(dataMode, supabaseUser?.id);
           setIsEditingRoutinePlan(false);
           setActiveRoutineDay(setupDay);
-          setRoutineNotice(`${addedCount} ejercicio${addedCount === 1 ? "" : "s"} agregado${addedCount === 1 ? "" : "s"} al plan activo.`);
-          setStatusMessage("Plan cycle-scoped actualizado. Los ejercicios nuevos quedan pendientes.");
+          setRoutineNotice(
+            `${result.daysAdded} dia${result.daysAdded === 1 ? "" : "s"} y ${result.exercisesAdded} ejercicio${result.exercisesAdded === 1 ? "" : "s"} agregado${result.exercisesAdded === 1 ? "" : "s"} al plan activo.`,
+          );
+          setStatusMessage("Plan cycle-scoped actualizado. Los dias y ejercicios nuevos quedan pendientes.");
           setIsRoutineSuccessOpen(true);
           setScreen("entrenamiento");
           return;
@@ -4819,7 +4859,7 @@ function createExerciseTemplatesFromCycleScopedPlan(plan: CycleScopedTrainingPla
         cycleDayId: day.id,
         trainingCycleExerciseId: exercise.id,
         sourceLegacyExerciseId: exercise.sourceLegacyExerciseId,
-        routine: routine.name,
+        routine: getCycleScopedDayRoutineName(day.notes, routine.name),
         day: getSetupDayFromTrainingDayCode(day.dayCode),
         name: exercise.name,
         targetSets: exercise.targetSets,
@@ -5819,7 +5859,10 @@ function getActiveRoutineDays(exercises: ExerciseTemplate[], plan: TrainingPlan)
   if (plannedDays.length === 0) return routineDays;
 
   const activeDays = plannedDays.filter((day) => exercises.some((exercise) => (exercise.day ?? "Lunes") === day));
-  return sortTrainingDaysByWeekOrder(activeDays.length > 0 ? activeDays : plannedDays);
+  const persistedRoutineDays = routineDays.filter((day) => !activeDays.includes(day));
+  return sortTrainingDaysByWeekOrder(
+    activeDays.length > 0 ? [...activeDays, ...persistedRoutineDays] : routineDays,
+  );
 }
 
 function sameDayList(left: string[], right: string[]) {
