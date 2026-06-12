@@ -107,6 +107,10 @@ import {
   getExercisesForTrainingDay,
   getRemovedExerciseIds,
 } from "@/lib/training/training-exercise-selection";
+import {
+  sortTrainingDaysByWeekOrder,
+  TRAINING_DAY_LABELS,
+} from "@/lib/training/training-day-order";
 
 type Screen =
   | "login"
@@ -122,7 +126,7 @@ type Screen =
   | "perfil";
 
 const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "registro-entrenamiento", "historial-ciclos", "comparacion"];
-const setupDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+const setupDays: string[] = [...TRAINING_DAY_LABELS];
 const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
 const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
 const ROUTINE_DRAFT_KEY_PREFIX = "organizatech:routine-draft";
@@ -1310,7 +1314,9 @@ export function OrganizatechApp({
     setTrainingPlan((current) => {
       const next = { ...current, ...patch };
       if (patch.trainingDays) {
-        const days = patch.trainingDays.length > 0 ? patch.trainingDays : [setupDay];
+        const days = sortTrainingDaysByWeekOrder(
+          patch.trainingDays.length > 0 ? patch.trainingDays : [setupDay],
+        );
         next.trainingDays = days;
         if (!days.includes(setupDay)) setSetupDay(days[0]);
       }
@@ -1360,7 +1366,9 @@ export function OrganizatechApp({
     const dayState = setupByDay[setupDay] ?? createSetupDayState();
     const routineName = dayState.routineName.trim() || setupDay;
     const validRows = dedupeExerciseRowsByName(dayState.rows.filter((row) => row.name.trim()));
-    const plannedDays = trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [setupDay];
+    const plannedDays = sortTrainingDaysByWeekOrder(
+      trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [setupDay],
+    );
     const currentRoutineDays = getRoutineDays(exercises);
     const isChangingRoutineDays = hasRoutinePlan && isEditingRoutinePlan && !sameDayList(plannedDays, currentRoutineDays);
     const savedDayState = {
@@ -3390,7 +3398,9 @@ function InitialTrainingScreen({
   isBusy: boolean;
   configuredDays: string[];
 }) {
-  const plannedDays = trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [day];
+  const plannedDays = sortTrainingDaysByWeekOrder(
+    trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [day],
+  );
   const completedPlannedDays = plannedDays.filter((item) => configuredDays.includes(item));
   const currentStep = Math.max(1, plannedDays.indexOf(day) + 1);
   const remainingDays = plannedDays.filter((item) => item !== day && !configuredDays.includes(item));
@@ -3411,8 +3421,9 @@ function InitialTrainingScreen({
         ? plannedDays
         : [...plannedDays, item];
 
-    updateTrainingPlan({ trainingDays: nextDays });
-    setDay(nextDays.includes(item) ? item : nextDays[0]);
+    const sortedDays = sortTrainingDaysByWeekOrder(nextDays);
+    updateTrainingPlan({ trainingDays: sortedDays });
+    setDay(sortedDays.includes(item) ? item : sortedDays[0]);
   }
 
   function updateCycleObjective(value: string) {
@@ -4550,7 +4561,9 @@ function createTrainingPlanFromPersistedCycle(cycle: PersistedTrainingCycle, fal
   const next: TrainingPlan = {
     ...fallback,
     cycleType,
-    trainingDays: trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
+    trainingDays: sortTrainingDaysByWeekOrder(
+      trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
+    ),
   };
 
   if (cycleType === "macro") {
@@ -4575,8 +4588,10 @@ function createCycleScopedPlanInput(
   setupByDay: Record<string, SetupDayState>,
   source: string,
 ): CycleScopedPlanInput | null {
-  const plannedDays = (plan.trainingDays.length > 0 ? plan.trainingDays : ["Lunes"])
-    .filter((day) => setupDays.includes(day));
+  const plannedDays = sortTrainingDaysByWeekOrder(
+    (plan.trainingDays.length > 0 ? plan.trainingDays : ["Lunes"])
+      .filter((day) => setupDays.includes(day)),
+  );
   const routines = plannedDays.flatMap((day, dayIndex) => {
     const state = setupByDay[day] ?? createSetupDayState();
     const rows = state.rows.filter((row) => row.name.trim());
@@ -4688,7 +4703,9 @@ function normalizeTrainingPlan(value: unknown): TrainingPlan {
     mesoDurationWeeks: mesoDurations.includes(Number(parsed.mesoDurationWeeks)) ? Number(parsed.mesoDurationWeeks) : fallback.mesoDurationWeeks,
     microDurationWeeks: Number(parsed.microDurationWeeks) === 1 ? 1 : fallback.microDurationWeeks,
     sessionDurationDays: Number(parsed.sessionDurationDays) === 1 ? 1 : fallback.sessionDurationDays,
-    trainingDays: trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
+    trainingDays: sortTrainingDaysByWeekOrder(
+      trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
+    ),
     microFocus: parsed.microFocus || fallback.microFocus,
     sessionFocus: parsed.sessionFocus || fallback.sessionFocus,
   };
@@ -4739,7 +4756,9 @@ function loadTrainingPlan(): TrainingPlan {
       mesoDurationWeeks: mesoDurations.includes(Number(parsed.mesoDurationWeeks)) ? Number(parsed.mesoDurationWeeks) : fallback.mesoDurationWeeks,
       microDurationWeeks: Number(parsed.microDurationWeeks) === 1 ? 1 : fallback.microDurationWeeks,
       sessionDurationDays: Number(parsed.sessionDurationDays) === 1 ? 1 : fallback.sessionDurationDays,
-      trainingDays: trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
+      trainingDays: sortTrainingDaysByWeekOrder(
+        trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
+      ),
       microFocus: parsed.microFocus || fallback.microFocus,
       sessionFocus: parsed.sessionFocus || fallback.sessionFocus,
     };
@@ -4750,7 +4769,10 @@ function loadTrainingPlan(): TrainingPlan {
 
 function saveTrainingPlan(plan: TrainingPlan) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(LOCAL_TRAINING_PLAN_KEY, JSON.stringify(plan));
+  window.localStorage.setItem(LOCAL_TRAINING_PLAN_KEY, JSON.stringify({
+    ...plan,
+    trainingDays: sortTrainingDaysByWeekOrder(plan.trainingDays),
+  }));
 }
 
 function loadCycleHistory(): TrainingCycleSnapshot[] {
@@ -4983,7 +5005,7 @@ function createPersistedCyclePlanSnapshot(plan: TrainingPlan, exercises: Exercis
     cycleType: plan.cycleType,
     goal: getCycleObjectiveValue(plan),
     duration: getCycleDurationValue(plan),
-    trainingDays: plan.trainingDays,
+    trainingDays: sortTrainingDaysByWeekOrder(plan.trainingDays),
     exerciseCount: exercises.length,
   };
 }
@@ -5039,7 +5061,12 @@ function mergeTrainingPlanWithExercises(plan: TrainingPlan, exercises: ExerciseT
   if (routineDays.length === 0) return plan;
   const hasDefaultDays = sameDayList(plan.trainingDays, createDefaultTrainingPlan().trainingDays);
   if (hasDefaultDays) return { ...plan, trainingDays: routineDays };
-  return { ...plan, trainingDays: plan.trainingDays.filter((day) => setupDays.includes(day)) };
+  return {
+    ...plan,
+    trainingDays: sortTrainingDaysByWeekOrder(
+      plan.trainingDays.filter((day) => setupDays.includes(day)),
+    ),
+  };
 }
 
 function isTrainingCycleId(value: unknown): value is TrainingCycleId {
@@ -5610,16 +5637,18 @@ function getRoutineDays(exercises: ExerciseTemplate[]) {
 
 function getActiveRoutineDays(exercises: ExerciseTemplate[], plan: TrainingPlan) {
   const routineDays = getRoutineDays(exercises);
-  const plannedDays = plan.trainingDays.filter((day) => setupDays.includes(day));
+  const plannedDays = sortTrainingDaysByWeekOrder(
+    plan.trainingDays.filter((day) => setupDays.includes(day)),
+  );
   if (plannedDays.length === 0) return routineDays;
 
   const activeDays = plannedDays.filter((day) => exercises.some((exercise) => (exercise.day ?? "Lunes") === day));
-  return activeDays.length > 0 ? activeDays : plannedDays;
+  return sortTrainingDaysByWeekOrder(activeDays.length > 0 ? activeDays : plannedDays);
 }
 
 function sameDayList(left: string[], right: string[]) {
-  const normalizedLeft = left.filter((day) => setupDays.includes(day));
-  const normalizedRight = right.filter((day) => setupDays.includes(day));
+  const normalizedLeft = sortTrainingDaysByWeekOrder(left.filter((day) => setupDays.includes(day)));
+  const normalizedRight = sortTrainingDaysByWeekOrder(right.filter((day) => setupDays.includes(day)));
   if (normalizedLeft.length !== normalizedRight.length) return false;
   return normalizedLeft.every((day, index) => day === normalizedRight[index]);
 }
