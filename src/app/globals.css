@@ -1974,7 +1974,8 @@ h3 {
     linear-gradient(180deg, rgba(18, 32, 50, 0.96), rgba(8, 19, 34, 0.96));
 }
 
-.dashboard-training-card.pending {
+.dashboard-training-card.pending,
+.dashboard-training-card.partial {
   border-color: rgba(255, 191, 77, 0.42);
 }
 
@@ -2010,7 +2011,8 @@ h3 {
   background: rgba(116, 223, 113, 0.1);
 }
 
-.dashboard-status-badge.pending {
+.dashboard-status-badge.pending,
+.dashboard-status-badge.partial {
   color: var(--yellow);
   background: rgba(255, 191, 77, 0.1);
 }
@@ -2038,7 +2040,8 @@ h3 {
   color: var(--green);
 }
 
-.dashboard-routine-button.pending {
+.dashboard-routine-button.pending,
+.dashboard-routine-button.partial {
   border-color: rgba(255, 191, 77, 0.4);
 }
 

@@ -90,6 +90,7 @@ import {
   PROTECTED_ACTIVE_CYCLE_MESSAGE,
 } from "@/lib/training/training-cycle-protection";
 import {
+  addCycleScopedTrainingExercises,
   createTrainingCycleWithPlan,
   createTrainingSessionWithCycleEntries,
   getCycleScopedTrainingSessionData,
@@ -101,6 +102,11 @@ import {
   type CycleScopedTrainingPlan,
 } from "@/lib/training/cycle-scoped-training-repository";
 import { getCycleScopedPlannedDate } from "@/lib/training/cycle-scoped-planned-date";
+import {
+  analyzeCycleScopedDayEdit,
+  getCycleScopedDayCoverage,
+  normalizeCycleScopedExerciseName,
+} from "@/lib/training/cycle-scoped-plan-edit";
 import {
   dedupeExerciseRowsByName,
   dedupeExercisesByDayAndRoutine,
@@ -704,6 +710,10 @@ export function OrganizatechApp({
       : dashboardCarouselDays[0] ?? calendarDashboardDay;
   const dayExercises = displayExercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay);
   const dashboardExercises = displayExercises.filter((exercise) => (exercise.day ?? dashboardDay) === dashboardDay);
+  const visibleDayCoverage = isCycleScopedActiveCycle
+    ? getCycleScopedDayCoverage(dayExercises, displayEntries)
+    : null;
+  const registeredCycleScopedExerciseIds = visibleDayCoverage?.registeredIds ?? new Set<string>();
   const visibleRoutine = dayExercises[0]?.routine ?? setupByDay[visibleDay]?.routineName ?? visibleDay;
   const dashboardRoutine = dashboardExercises[0]?.routine ?? setupByDay[dashboardDay]?.routineName ?? dashboardDay;
   const targetSummary = calculateTargetSummary(dayExercises);
@@ -1331,6 +1341,21 @@ export function OrganizatechApp({
   }
 
   function removeSetupRow(id: string) {
+    const row = setupByDay[setupDay]?.rows.find((item) => item.id === id);
+    if (
+      isTrainingCyclesRepositoryActive &&
+      persistedActiveCycle &&
+      isCycleScopedTrainingCycle(persistedActiveCycle) &&
+      row?.sourceExerciseId
+    ) {
+      const hasRegisteredEntry = displayEntries.some((entry) =>
+        (entry.trainingCycleExerciseId ?? entry.exerciseId) === row.sourceExerciseId);
+      setStatusMessage(hasRegisteredEntry
+        ? "No puedes eliminar un ejercicio que ya tiene registros asociados."
+        : "La edicion del ciclo activo solo permite agregar ejercicios nuevos en esta fase.");
+      return;
+    }
+
     setSetupByDay((current) =>
       updateSetupDay(current, setupDay, (state) => ({
         ...state,
@@ -1365,17 +1390,24 @@ export function OrganizatechApp({
   async function saveInitialRoutine(confirmedRoutineUpdate = false) {
     const dayState = setupByDay[setupDay] ?? createSetupDayState();
     const routineName = dayState.routineName.trim() || setupDay;
-    const validRows = dedupeExerciseRowsByName(dayState.rows.filter((row) => row.name.trim()));
+    const nonEmptyRows = dayState.rows.filter((row) => row.name.trim());
+    const validRows = isTrainingCyclesRepositoryActive
+      ? nonEmptyRows
+      : dedupeExerciseRowsByName(nonEmptyRows);
     const plannedDays = sortTrainingDaysByWeekOrder(
       trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [setupDay],
     );
-    const currentRoutineDays = getRoutineDays(exercises);
+    const currentRoutineDays = getRoutineDays(
+      isTrainingCyclesRepositoryActive ? displayExercises : exercises,
+    );
     const isChangingRoutineDays = hasRoutinePlan && isEditingRoutinePlan && !sameDayList(plannedDays, currentRoutineDays);
     const savedDayState = {
       routineName,
       rows: validRows.map((row) => ({
         ...row,
-        sourceExerciseId: row.sourceExerciseId ?? row.id,
+        sourceExerciseId: isTrainingCyclesRepositoryActive
+          ? row.sourceExerciseId
+          : row.sourceExerciseId ?? row.id,
       })),
     };
     const nextSetupByDay = {
@@ -1392,7 +1424,7 @@ export function OrganizatechApp({
       return;
     }
 
-    if (isChangingRoutineDays && !confirmedRoutineUpdate) {
+    if (isChangingRoutineDays && !isTrainingCyclesRepositoryActive && !confirmedRoutineUpdate) {
       setIsRoutineUpdateConfirmOpen(true);
       return;
     }
@@ -1415,7 +1447,90 @@ export function OrganizatechApp({
       try {
         const activeCycle = await getActiveTrainingCycle();
         if (activeCycle && isCycleScopedTrainingCycle(activeCycle)) {
-          setStatusMessage("La edicion de planes cycle-scoped existentes queda fuera de 2.2AT.");
+          if (!cycleScopedPlan || activeCycle.id !== persistedActiveCycle?.id) {
+            setStatusMessage("No se pudo cargar el plan cycle-scoped activo. No se guardaron cambios.");
+            return;
+          }
+
+          if (isChangingRoutineDays) {
+            setStatusMessage("La edicion del ciclo activo solo permite agregar ejercicios a dias existentes.");
+            return;
+          }
+
+          const registeredExerciseIds = new Set(
+            displayEntries
+              .map((entry) => entry.trainingCycleExerciseId ?? entry.exerciseId)
+              .filter(Boolean),
+          );
+          const additions: Parameters<typeof addCycleScopedTrainingExercises>[0]["additions"] = [];
+
+          for (const routine of cycleScopedPlan.routines) {
+            for (const cycleDay of routine.days) {
+              const day = getSetupDayFromTrainingDayCode(cycleDay.dayCode);
+              const state = nextSetupByDay[day] ?? createSetupDayState();
+
+              if (
+                normalizeCycleScopedExerciseName(state.routineName || routine.name) !==
+                normalizeCycleScopedExerciseName(routine.name)
+              ) {
+                setStatusMessage("En esta fase no se puede modificar el nombre de una rutina cycle-scoped existente.");
+                return;
+              }
+
+              const analysis = analyzeCycleScopedDayEdit(
+                cycleDay.exercises,
+                state.rows,
+                registeredExerciseIds,
+              );
+
+              if (analysis.removedRegisteredExerciseIds.length > 0) {
+                setStatusMessage("No puedes eliminar un ejercicio que ya tiene registros asociados.");
+                return;
+              }
+              if (analysis.removedExerciseIds.length > 0) {
+                setStatusMessage("La edicion del ciclo activo solo permite agregar ejercicios nuevos; no elimina ejercicios existentes.");
+                return;
+              }
+              if (analysis.modifiedExerciseIds.length > 0) {
+                setStatusMessage("La edicion del ciclo activo solo permite agregar ejercicios nuevos; no modifica ejercicios existentes.");
+                return;
+              }
+              if (analysis.duplicateNames.length > 0) {
+                setStatusMessage(`El ejercicio "${analysis.duplicateNames[0]}" ya existe en ${day}.`);
+                return;
+              }
+
+              const nextSortOrder = Math.max(-1, ...cycleDay.exercises.map((exercise) => exercise.sortOrder)) + 1;
+              additions.push(...analysis.additions.map((exercise, index) => ({
+                dayId: cycleDay.id,
+                name: exercise.name,
+                targetSets: exercise.targetSets,
+                targetReps: exercise.targetReps,
+                baseWeight: exercise.baseWeight,
+                sideWeight: null,
+                sortOrder: nextSortOrder + index,
+                notes: `Ejercicio agregado al plan activo para ${day}.`,
+              })));
+            }
+          }
+
+          if (additions.length === 0) {
+            setStatusMessage("No hay ejercicios nuevos para agregar al ciclo activo.");
+            return;
+          }
+
+          const addedCount = await addCycleScopedTrainingExercises({
+            cycleId: activeCycle.id,
+            additions,
+          });
+          await loadCycleScopedPlanIntoState(activeCycle.id);
+          clearRoutineDraft(dataMode, supabaseUser?.id);
+          setIsEditingRoutinePlan(false);
+          setActiveRoutineDay(setupDay);
+          setRoutineNotice(`${addedCount} ejercicio${addedCount === 1 ? "" : "s"} agregado${addedCount === 1 ? "" : "s"} al plan activo.`);
+          setStatusMessage("Plan cycle-scoped actualizado. Los ejercicios nuevos quedan pendientes.");
+          setIsRoutineSuccessOpen(true);
+          setScreen("entrenamiento");
           return;
         }
 
@@ -1712,6 +1827,13 @@ export function OrganizatechApp({
   function registerCurrentExercise() {
     const exercise = dayExercises[activeExerciseIndex];
     if (!exercise) return;
+    if (registeredCycleScopedExerciseIds.has(exercise.trainingCycleExerciseId ?? exercise.id)) {
+      const nextPendingIndex = dayExercises.findIndex((item, index) =>
+        index > activeExerciseIndex &&
+        !registeredCycleScopedExerciseIds.has(item.trainingCycleExerciseId ?? item.id));
+      if (nextPendingIndex >= 0) setActiveExerciseIndex(nextPendingIndex);
+      return;
+    }
     const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
     const requiredReps = draft.reps.slice(0, exercise.targetSets);
     if (draft.weight === "" || requiredReps.some((value) => value === "")) {
@@ -1723,13 +1845,26 @@ export function OrganizatechApp({
   }
 
   async function saveCompletedTraining() {
-    const validExercises = dayExercises.filter((exercise) => exerciseDrafts[exercise.id]?.registered);
-    if (validExercises.length !== dayExercises.length) {
+    const isCycleScopedSave = Boolean(
+      isTrainingCyclesRepositoryActive &&
+      persistedActiveCycle &&
+      isCycleScopedTrainingCycle(persistedActiveCycle),
+    );
+    const exercisesToRegister = isCycleScopedSave
+      ? dayExercises.filter((exercise) =>
+        !registeredCycleScopedExerciseIds.has(exercise.trainingCycleExerciseId ?? exercise.id))
+      : dayExercises;
+    const validExercises = exercisesToRegister.filter((exercise) => exerciseDrafts[exercise.id]?.registered);
+    if (exercisesToRegister.length === 0) {
+      setStatusMessage("Todos los ejercicios planificados para este dia ya estan registrados.");
+      return;
+    }
+    if (validExercises.length !== exercisesToRegister.length) {
       setStatusMessage("Registra todos los ejercicios antes de guardar el entrenamiento.");
       return;
     }
 
-    if (isTrainingCyclesRepositoryActive && persistedActiveCycle && isCycleScopedTrainingCycle(persistedActiveCycle)) {
+    if (isCycleScopedSave && persistedActiveCycle) {
       if (!cycleScopedPlan) {
         setStatusMessage("No se pudo cargar el plan cycle-scoped del ciclo activo. No se guardaran datos legacy.");
         return;
@@ -2196,7 +2331,12 @@ export function OrganizatechApp({
           routineDays={routineDays}
           switchDay={(day) => openRoutineDay(day)}
           editRoutine={() => openRoutineEditor(visibleDay)}
-          startTraining={() => setHasStartedTraining(true)}
+          startTraining={() => {
+            const firstPendingIndex = dayExercises.findIndex((exercise) =>
+              !registeredCycleScopedExerciseIds.has(exercise.trainingCycleExerciseId ?? exercise.id));
+            setActiveExerciseIndex(firstPendingIndex >= 0 ? firstPendingIndex : 0);
+            setHasStartedTraining(true);
+          }}
         />
       )}
       {screen === "entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && hasStartedTraining && !readiness && (
@@ -2214,6 +2354,7 @@ export function OrganizatechApp({
           activeIndex={activeExerciseIndex}
           setActiveIndex={setActiveExerciseIndex}
           drafts={exerciseDrafts}
+          registeredExerciseIds={registeredCycleScopedExerciseIds}
           updateDraft={updateExerciseDraft}
           registerExercise={registerCurrentExercise}
           saveCompletedTraining={saveCompletedTraining}
@@ -2608,10 +2749,25 @@ function DashboardScreen({
     const plannedDay = getTrainingDayCode(item);
     const session = findDashboardSessionForDay(activeSessions, itemExercises, expectedDate, plannedDay, usesCycleScopedSessions);
     const sessionEntries = session ? findDashboardEntries(session.entries, itemExercises, expectedDate, usesCycleScopedSessions) : [];
-    const fallbackEntries = sessionEntries.length > 0 ? [] : findDashboardEntries(entries, itemExercises, expectedDate, usesCycleScopedSessions);
-    const itemEntries = sessionEntries.length > 0 ? sessionEntries : fallbackEntries;
+    const allMatchingEntries = findDashboardEntries(entries, itemExercises, expectedDate, usesCycleScopedSessions);
+    const fallbackEntries = sessionEntries.length > 0 ? [] : allMatchingEntries;
+    const itemEntries = usesCycleScopedSessions
+      ? allMatchingEntries
+      : sessionEntries.length > 0
+        ? sessionEntries
+        : fallbackEntries;
     const itemMetrics = itemEntries.length > 0 ? calculateWeeklyComparison(itemEntries) : [];
-    const isCompleted = usesCycleScopedSessions ? itemEntries.length > 0 : Boolean(session) || fallbackEntries.length > 0;
+    const coverage = usesCycleScopedSessions
+      ? getCycleScopedDayCoverage(itemExercises, itemEntries)
+      : null;
+    const status = coverage?.status ?? (Boolean(session) || fallbackEntries.length > 0 ? "completed" : "pending");
+    const isCompleted = status === "completed";
+    const pendingExercises = coverage
+      ? itemExercises.filter((exercise) =>
+        !coverage.registeredIds.has(exercise.trainingCycleExerciseId ?? exercise.id))
+      : isCompleted
+        ? []
+        : itemExercises;
 
     return {
       day: item,
@@ -2619,6 +2775,10 @@ function DashboardScreen({
       exercises: itemExercises,
       metrics: itemMetrics,
       session,
+      status,
+      registeredCount: coverage?.registeredCount ?? itemMetrics.length,
+      plannedCount: coverage?.plannedCount ?? itemExercises.length,
+      pendingExercises,
       isToday: expectedDate === getSantiagoDateKey(new Date()),
       hasRoutine: itemExercises.length > 0 || isCompleted,
       isCompleted,
@@ -2718,7 +2878,7 @@ function DashboardScreen({
         </div>
         <WeeklyProgressSvg value={summary.volumePercentage} />
       </div>
-      <div className={`card wide dashboard-training-card ${activeDayData.isCompleted ? "completed" : "pending"}`}>
+      <div className={`card wide dashboard-training-card ${activeDayData.status}`}>
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
           {carouselDays.map((item) => {
             const itemData = getDashboardDayData(item);
@@ -2729,29 +2889,33 @@ function DashboardScreen({
                 <div className="dashboard-training-heading">
                   <h3>{itemData.title}</h3>
                   {itemData.hasRoutine ? (
-                    <span className={`dashboard-status-badge ${itemData.isCompleted ? "completed" : "pending"}`}>
-                      {itemData.isCompleted ? `Completado${itemData.isToday ? " · Hoy" : ""}` : `Pendiente${itemData.isToday ? " · Hoy" : ""}`}
+                    <span className={`dashboard-status-badge ${itemData.status}`}>
+                      {itemData.status === "completed"
+                        ? `Completado · ${itemData.registeredCount} de ${itemData.plannedCount}${itemData.isToday ? " · Hoy" : ""}`
+                        : itemData.status === "partial"
+                          ? `Parcial · ${itemData.registeredCount} de ${itemData.plannedCount}${itemData.isToday ? " · Hoy" : ""}`
+                          : `Pendiente · ${itemData.registeredCount} de ${itemData.plannedCount}${itemData.isToday ? " · Hoy" : ""}`}
                     </span>
                   ) : null}
                 </div>
                 {itemData.hasRoutine ? (
                   <div className="exercise-list">
-                    {itemData.isCompleted ? (
+                    {itemData.metrics.length > 0 ? (
                       <div className="registered-summary-card">
                         <span>Entrenamiento registrado</span>
                         <strong>{registeredSummary.exerciseCount} ejercicios · {formatKg(registeredSummary.totalWeight)} · {registeredSummary.totalReps} reps</strong>
                       </div>
                     ) : null}
-                    {itemData.isCompleted
-                      ? itemData.metrics.slice(0, 3).map((entry) => <RegisteredExerciseCard key={entry.id} entry={entry} />)
-                      : itemData.exercises.slice(0, 3).map((exercise) => (
-                        <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
-                      ))}
-                    {itemData.isCompleted && itemData.metrics.length > 3 ? (
-                      <p className="dashboard-more-exercises">+{itemData.metrics.length - 3} ejercicios más</p>
-                    ) : null}
-                    {!itemData.isCompleted && itemData.exercises.length > 3 ? (
-                      <p className="dashboard-more-exercises">+{itemData.exercises.length - 3} ejercicios más</p>
+                    {itemData.metrics.slice(0, 3).map((entry) => (
+                      <RegisteredExerciseCard key={entry.id} entry={entry} />
+                    ))}
+                    {itemData.pendingExercises.slice(0, Math.max(0, 3 - itemData.metrics.length)).map((exercise) => (
+                      <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
+                    ))}
+                    {itemData.metrics.length + itemData.pendingExercises.length > 3 ? (
+                      <p className="dashboard-more-exercises">
+                        +{itemData.metrics.length + itemData.pendingExercises.length - 3} ejercicios más
+                      </p>
                     ) : null}
                   </div>
                 ) : (
@@ -2763,7 +2927,7 @@ function DashboardScreen({
         </div>
         {activeDayData.hasRoutine ? (
           <button
-            className={`button secondary dashboard-routine-button ${activeDayData.isCompleted ? "completed" : "pending"}`}
+            className={`button secondary dashboard-routine-button ${activeDayData.status}`}
             onClick={() => activeDayData.isCompleted ? viewSummary(activeDayData.day) : goToRoutine()}
           >
             {activeDayData.isCompleted ? "Ver resumen" : "Ir a rutina"}
@@ -3728,6 +3892,7 @@ function GuidedTrainingScreen({
   activeIndex,
   setActiveIndex,
   drafts,
+  registeredExerciseIds,
   updateDraft,
   registerExercise,
   saveCompletedTraining,
@@ -3744,6 +3909,7 @@ function GuidedTrainingScreen({
   activeIndex: number;
   setActiveIndex: (index: number) => void;
   drafts: Record<string, ExerciseDraft>;
+  registeredExerciseIds: ReadonlySet<string>;
   updateDraft: (exercise: ExerciseTemplate, patch: Partial<ExerciseDraft>) => void;
   registerExercise: () => void;
   saveCompletedTraining: () => void;
@@ -3755,8 +3921,14 @@ function GuidedTrainingScreen({
 }) {
   const activeExercise = exercises[activeIndex] ?? exercises[0];
   const draft = activeExercise ? normalizeExerciseDraft(activeExercise, drafts[activeExercise.id]) : null;
-  const completedCount = exercises.filter((exercise) => drafts[exercise.id]?.registered).length;
+  const isExerciseRegistered = (exercise: ExerciseTemplate) =>
+    registeredExerciseIds.has(exercise.trainingCycleExerciseId ?? exercise.id) ||
+    Boolean(drafts[exercise.id]?.registered);
+  const completedCount = exercises.filter(isExerciseRegistered).length;
   const allRegistered = exercises.length > 0 && completedCount === exercises.length;
+  const activeExerciseAlreadyRegistered = activeExercise
+    ? registeredExerciseIds.has(activeExercise.trainingCycleExerciseId ?? activeExercise.id)
+    : false;
   const preview = activeExercise && draft
     ? calculateExerciseMetrics({
         id: `preview-${activeExercise.id}`,
@@ -3829,7 +4001,7 @@ function GuidedTrainingScreen({
         <div className="routine-list">
           {exercises.map((exercise, index) => {
             const isActive = index === activeIndex;
-            const isDone = Boolean(drafts[exercise.id]?.registered);
+            const isDone = isExerciseRegistered(exercise);
 
             return (
               <button
@@ -3896,10 +4068,14 @@ function GuidedTrainingScreen({
           </div>
         </div>
         <SeriesResult entry={preview} />
-        {!allRegistered ? (
+        {!allRegistered && !activeExerciseAlreadyRegistered ? (
           <button className="button" type="button" onClick={registerExercise}>
             <Save size={17} />
             Registrar serie
+          </button>
+        ) : !allRegistered ? (
+          <button className="button secondary" type="button" disabled>
+            Ejercicio ya registrado
           </button>
         ) : (
           <button className="start-button compact" type="button" onClick={saveCompletedTraining} disabled={isBusy}>

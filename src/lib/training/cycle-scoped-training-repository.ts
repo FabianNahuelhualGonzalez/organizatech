@@ -1,5 +1,6 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ExerciseEntry, TrainingDayCode, TrainingSession, TrainingSessionStatus } from "@/lib/progress/types";
+import { normalizeCycleScopedExerciseName } from "@/lib/training/cycle-scoped-plan-edit";
 
 export interface CycleScopedTrainingCycleInput {
   name: string;
@@ -66,6 +67,20 @@ export interface CycleScopedTrainingSessionEntryInput {
   reps: number[];
   rir?: string | null;
   notes?: string | null;
+}
+
+export interface AddCycleScopedTrainingExercisesInput {
+  cycleId: string;
+  additions: Array<{
+    dayId: string;
+    name: string;
+    targetSets: number;
+    targetReps: number;
+    baseWeight: number;
+    sideWeight?: number | null;
+    sortOrder: number;
+    notes?: string | null;
+  }>;
 }
 
 export interface CycleScopedTrainingPlan {
@@ -191,6 +206,106 @@ export async function createTrainingSessionWithCycleEntries(input: CycleScopedTr
   }
 
   return data;
+}
+
+export async function addCycleScopedTrainingExercises(
+  input: AddCycleScopedTrainingExercisesInput,
+): Promise<number> {
+  if (!input.cycleId || input.additions.length === 0) {
+    throw new CycleScopedTrainingRepositoryError(
+      "invalid_plan",
+      "Agrega al menos un ejercicio nuevo al plan activo.",
+    );
+  }
+
+  const { supabase, userId } = await getAuthenticatedCycleScopedRepository();
+  const dayIds = Array.from(new Set(input.additions.map((addition) => addition.dayId)));
+
+  const { data: activeCycle, error: cycleError } = await supabase
+    .from("training_cycles")
+    .select("id")
+    .eq("id", input.cycleId)
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (cycleError) throw mapCycleScopedRepositoryError(cycleError);
+  if (!activeCycle) {
+    throw new CycleScopedTrainingRepositoryError(
+      "invalid_plan",
+      "El ciclo cycle-scoped ya no esta activo.",
+    );
+  }
+
+  const { data: days, error: daysError } = await supabase
+    .from("training_cycle_days")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("cycle_id", input.cycleId)
+    .in("id", dayIds)
+    .is("deleted_at", null);
+
+  if (daysError) throw mapCycleScopedRepositoryError(daysError);
+  if ((days ?? []).length !== dayIds.length) {
+    throw new CycleScopedTrainingRepositoryError(
+      "invalid_plan",
+      "Uno de los dias seleccionados no pertenece al ciclo activo.",
+    );
+  }
+
+  const { data: existingExercises, error: existingError } = await supabase
+    .from("training_cycle_exercises")
+    .select("day_id,name")
+    .eq("user_id", userId)
+    .eq("cycle_id", input.cycleId)
+    .in("day_id", dayIds)
+    .is("deleted_at", null);
+
+  if (existingError) throw mapCycleScopedRepositoryError(existingError);
+
+  const existingKeys = new Set(
+    (existingExercises ?? []).map((exercise) =>
+      `${exercise.day_id}:${normalizeCycleScopedExerciseName(exercise.name)}`),
+  );
+  const additionKeys = new Set<string>();
+  for (const addition of input.additions) {
+    const key = `${addition.dayId}:${normalizeCycleScopedExerciseName(addition.name)}`;
+    if (!normalizeCycleScopedExerciseName(addition.name) || existingKeys.has(key) || additionKeys.has(key)) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        `El ejercicio "${addition.name.trim()}" ya existe en ese dia.`,
+      );
+    }
+    additionKeys.add(key);
+  }
+
+  const { data: inserted, error: insertError } = await supabase
+    .from("training_cycle_exercises")
+    .insert(input.additions.map((addition) => ({
+      user_id: userId,
+      cycle_id: input.cycleId,
+      day_id: addition.dayId,
+      name: addition.name.trim(),
+      target_sets: Math.max(1, addition.targetSets),
+      target_reps: Math.max(1, addition.targetReps),
+      base_weight: Math.max(0, addition.baseWeight),
+      side_weight: addition.sideWeight ?? null,
+      sort_order: Math.max(0, addition.sortOrder),
+      notes: addition.notes ?? null,
+      source_legacy_exercise_id: null,
+    })))
+    .select("id");
+
+  if (insertError) throw mapCycleScopedRepositoryError(insertError);
+  if ((inserted ?? []).length !== input.additions.length) {
+    throw new CycleScopedTrainingRepositoryError(
+      "unexpected",
+      "No pudimos confirmar todos los ejercicios agregados.",
+    );
+  }
+
+  return inserted?.length ?? 0;
 }
 
 export async function getCycleScopedTrainingPlan(cycleId: string): Promise<CycleScopedTrainingPlan> {
