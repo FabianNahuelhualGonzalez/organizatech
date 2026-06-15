@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { calculateExerciseMetrics, calculateObjectiveStatus, calculateWeeklySummary } from "./calculations";
 import { buildExerciseComparisonSummary } from "./exercise-history";
+import { formatKg, formatSignedKg, parseDecimalWeightInput } from "./weight-format";
 
 assert.equal(calculateObjectiveStatus(2, 0), "Cumplimos", "clasifica Cumplimos si suben repeticiones");
 
@@ -25,6 +26,31 @@ const result = calculateExerciseMetrics({
 assert.equal(result.totalReps, 42, "calcula total de repeticiones");
 assert.equal(result.volumeTotal, 3780, "calcula volumen como reps por peso");
 assert.equal(result.objectiveStatus, "Cumplimos", "clasifica progreso combinado");
+
+const decimalMetric = calculateExerciseMetrics({
+  id: "decimal",
+  exerciseId: "press-decimal",
+  exerciseName: "Press decimal",
+  routine: "Pecho",
+  week: 1,
+  date: "2026-06-15",
+  targetSets: 2,
+  targetReps: 10,
+  weight: 12.5,
+  previousWeight: 12,
+  reps: [10, 10],
+});
+
+assert.equal(parseDecimalWeightInput("2.5"), 2.5, "acepta punto decimal");
+assert.equal(parseDecimalWeightInput("2,5"), 2.5, "acepta coma decimal");
+assert.equal(parseDecimalWeightInput("12,25"), 12.25, "preserva dos decimales con coma");
+assert.equal(parseDecimalWeightInput("2,5,5"), null, "rechaza mas de un separador decimal");
+assert.equal(parseDecimalWeightInput("abc"), null, "rechaza texto no numerico");
+assert.equal(decimalMetric.kgDifference, 0.5, "calcula subida decimal de peso");
+assert.equal(decimalMetric.volumeTotal, 250, "calcula volumen con peso decimal");
+assert.equal(formatKg(12.5), "12,5 kg", "formatea peso decimal con coma");
+assert.equal(formatKg(2), "2 kg", "evita ceros decimales innecesarios");
+assert.equal(formatSignedKg(-0.5), "-0,5 kg", "formatea bajada decimal sin error de precision");
 
 const maintained = calculateExerciseMetrics({
   id: "2",

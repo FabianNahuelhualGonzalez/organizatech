@@ -6,19 +6,22 @@ import type {
   SmartInsight,
   WeeklySummary,
 } from "./types";
+import { formatSignedDecimal, roundDecimal } from "./weight-format";
 
 export function calculateKgStatus(kgDifference: number): KgStatus {
-  if (kgDifference > 0) return "Kg aumentado";
-  if (kgDifference < 0) return "Kg disminuido";
+  const rounded = roundDecimal(kgDifference);
+  if (rounded > 0) return "Kg aumentado";
+  if (rounded < 0) return "Kg disminuido";
   return "Mismo kg";
 }
 
 export function calculateObjectiveStatus(repsDifference: number, kgDifference: number): ObjectiveStatus {
+  const roundedKgDifference = roundDecimal(kgDifference);
   if (repsDifference > 0) return "Cumplimos";
-  if (kgDifference > 0) return "Cumplimos";
-  if (repsDifference === 0 && kgDifference === 0) return "Mantenemos esfuerzo";
-  if (repsDifference < 0 && kgDifference === 0) return "No cumplimos";
-  if (kgDifference < 0) return "No cumplimos";
+  if (roundedKgDifference > 0) return "Cumplimos";
+  if (repsDifference === 0 && roundedKgDifference === 0) return "Mantenemos esfuerzo";
+  if (repsDifference < 0 && roundedKgDifference === 0) return "No cumplimos";
+  if (roundedKgDifference < 0) return "No cumplimos";
   return "Mantenemos esfuerzo";
 }
 
@@ -26,11 +29,11 @@ export function calculateExerciseMetrics(entry: ExerciseEntry, previous?: Exerci
   const totalReps = entry.reps.reduce((total, reps) => total + reps, 0);
   const targetTotalReps = entry.targetSets * entry.targetReps;
   const repsDifference = totalReps === 0 ? 0 : totalReps - targetTotalReps;
-  const kgDifference = entry.weight - entry.previousWeight;
-  const volumeTotal = totalReps * entry.weight;
-  const previousVolume = previous?.volumeTotal ?? targetTotalReps * entry.previousWeight;
-  const volumeDifference = volumeTotal - previousVolume;
-  const volumePercentage = previousVolume > 0 ? (volumeDifference / previousVolume) * 100 : 0;
+  const kgDifference = roundDecimal(entry.weight - entry.previousWeight);
+  const volumeTotal = roundDecimal(totalReps * entry.weight);
+  const previousVolume = previous?.volumeTotal ?? roundDecimal(targetTotalReps * entry.previousWeight);
+  const volumeDifference = roundDecimal(volumeTotal - previousVolume);
+  const volumePercentage = previousVolume > 0 ? roundDecimal((volumeDifference / previousVolume) * 100) : 0;
 
   return {
     ...entry,
@@ -72,7 +75,7 @@ export function calculateWeeklySummary(metrics: ExerciseMetrics[], week: number)
   const objectivesOk = current.filter((entry) => entry.objectiveStatus === "Cumplimos").length;
   const objectivesFailed = current.filter((entry) => entry.objectiveStatus === "No cumplimos").length;
   const objectivesMaintained = current.filter((entry) => entry.objectiveStatus === "Mantenemos esfuerzo").length;
-  const volumeDifference = hasPreviousWeek ? volumeTotal - previousVolume : fallbackVolumeDifference;
+  const volumeDifference = roundDecimal(hasPreviousWeek ? volumeTotal - previousVolume : fallbackVolumeDifference);
   const comparisonVolume = hasPreviousWeek ? previousVolume : fallbackPreviousVolume;
 
   return {
@@ -84,7 +87,7 @@ export function calculateWeeklySummary(metrics: ExerciseMetrics[], week: number)
     objectivesFailed,
     objectivesMaintained,
     volumeDifference,
-    volumePercentage: comparisonVolume > 0 ? (volumeDifference / comparisonVolume) * 100 : 0,
+    volumePercentage: comparisonVolume > 0 ? roundDecimal((volumeDifference / comparisonVolume) * 100) : 0,
     repsDifference: hasPreviousWeek ? totalReps - previousReps : fallbackRepsDifference,
     exerciseDifference: hasPreviousWeek ? current.length - previous.length : 0,
     complianceRate: current.length > 0 ? Math.round((objectivesOk / current.length) * 100) : 0,
@@ -152,6 +155,6 @@ export function generateSmartInsights(summary: WeeklySummary, current: ExerciseM
 }
 
 export function formatSigned(value: number, digits = 0) {
-  const rounded = Number(value.toFixed(digits));
-  return `${rounded > 0 ? "+" : ""}${rounded}`;
+  const rounded = roundDecimal(Number(value.toFixed(digits)));
+  return formatSignedDecimal(rounded);
 }

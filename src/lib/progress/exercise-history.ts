@@ -4,6 +4,7 @@ import type {
   ExerciseMetrics,
   ExerciseTrend,
 } from "./types";
+import { formatSignedKg, roundDecimal } from "./weight-format";
 
 export function getExerciseHistory(records: ExerciseMetrics[], exerciseIdOrName: string): ExerciseMetrics[] {
   const key = normalizeExerciseKey(exerciseIdOrName);
@@ -23,7 +24,7 @@ export function getLatestExerciseRecord(history: ExerciseMetrics[]) {
 
 export function calculateExerciseWeightGain(firstRecord?: ExerciseMetrics, latestRecord?: ExerciseMetrics) {
   if (!firstRecord || !latestRecord) return 0;
-  return latestRecord.weight - firstRecord.weight;
+  return roundDecimal(latestRecord.weight - firstRecord.weight);
 }
 
 export function calculateBestExerciseWeight(history: ExerciseMetrics[]) {
@@ -127,8 +128,4 @@ function compareExerciseHistoryRecords(a: ExerciseMetrics, b: ExerciseMetrics) {
 
 function normalizeExerciseKey(value: string) {
   return value.trim().toLowerCase();
-}
-
-function formatSignedKg(value: number) {
-  return `${value > 0 ? "+" : ""}${value} kg`;
 }

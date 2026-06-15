@@ -2,11 +2,18 @@ import assert from "node:assert/strict";
 import type { ExerciseEntry } from "@/lib/progress/types";
 import type { CycleScopedExercise } from "./cycle-scoped-training-repository";
 import {
+  addFuturePlanRetiredMarker,
   analyzeCycleScopedDayEdit,
   createCycleScopedDayNotes,
+  createCycleScopedRetiredExerciseNotes,
+  futurePlanRetiredMarker,
+  getCycleScopedExerciseDisplayNotes,
   getCycleScopedDayCoverage,
   getCycleScopedDayCodesToAdd,
   getCycleScopedDayRoutineName,
+  hasFuturePlanRetiredMarker,
+  isCycleScopedExerciseRetired,
+  removeTechnicalMarkersForDisplay,
 } from "./cycle-scoped-plan-edit";
 
 const existingExercises = [
@@ -33,15 +40,16 @@ const edit = analyzeCycleScopedDayEdit(
 assert.deepEqual(
   edit.additions,
   [
-    { name: "Prensa", targetSets: 4, targetReps: 12, baseWeight: 40 },
-    { name: "Soleo", targetSets: 3, targetReps: 15, baseWeight: 15 },
-    { name: "Pantorrilla sentado", targetSets: 3, targetReps: 12, baseWeight: 25 },
+    { name: "Prensa", targetSets: 4, targetReps: 12, baseWeight: 40, sortOrder: -1, notes: undefined },
+    { name: "Soleo", targetSets: 3, targetReps: 15, baseWeight: 15, sortOrder: -1, notes: undefined },
+    { name: "Pantorrilla sentado", targetSets: 3, targetReps: 12, baseWeight: 25, sortOrder: -1, notes: undefined },
   ],
   "agrega solo los ejercicios nuevos al dia cycle-scoped",
 );
 assert.deepEqual(edit.duplicateNames, ["prensa"], "no duplica ejercicios por nombre normalizado y dia");
 assert.deepEqual(edit.removedExerciseIds, [], "mantiene el ejercicio ya registrado");
-assert.deepEqual(edit.modifiedExerciseIds, [], "no modifica el ejercicio existente");
+assert.deepEqual(edit.updates, [], "no modifica el ejercicio existente sin cambios");
+assert.deepEqual(edit.replacements, [], "no versiona el ejercicio existente sin cambios");
 
 const coverage = getCycleScopedDayCoverage(
   [
@@ -60,9 +68,88 @@ assert.deepEqual(existingEntries, entriesBefore, "no modifica entries existentes
 
 const removal = analyzeCycleScopedDayEdit(existingExercises, [], new Set(["registered"]));
 assert.deepEqual(
-  removal.removedRegisteredExerciseIds,
+  removal.registeredRetirements,
   ["registered"],
-  "detecta y bloquea la eliminacion de un ejercicio con entry asociada",
+  "retira de la planificacion futura un ejercicio con entry asociada",
+);
+
+const pendingEdit = analyzeCycleScopedDayEdit(
+  [createExercise("pending", "Press plano")],
+  [{ sourceExerciseId: "pending", name: "Press plano libre", sets: 4, reps: 10, weight: 45.5 }],
+  new Set(),
+);
+assert.deepEqual(
+  pendingEdit.updates,
+  [{
+    exerciseId: "pending",
+    name: "Press plano libre",
+    targetSets: 4,
+    targetReps: 10,
+    baseWeight: 45.5,
+    sortOrder: 0,
+    notes: null,
+  }],
+  "edita directamente un ejercicio pendiente",
+);
+
+const registeredEdit = analyzeCycleScopedDayEdit(
+  existingExercises,
+  [{ sourceExerciseId: "registered", name: "Gemelos hack", sets: 3, reps: 13, weight: 120 }],
+  new Set(["registered"]),
+);
+assert.deepEqual(
+  registeredEdit.replacements,
+  [{
+    previousExerciseId: "registered",
+    name: "Gemelos hack",
+    targetSets: 3,
+    targetReps: 13,
+    baseWeight: 120,
+    sortOrder: 0,
+    notes: null,
+  }],
+  "versiona la planificacion futura de un ejercicio registrado",
+);
+
+const pendingRemoval = analyzeCycleScopedDayEdit([createExercise("pending", "Press plano")], [], new Set());
+assert.deepEqual(pendingRemoval.pendingDeletes, ["pending"], "soft-delete para pendiente sin entries");
+
+const retiredNotes = createCycleScopedRetiredExerciseNotes("nota previa", "2026-06-15T00:00:00.000Z");
+assert.equal(isCycleScopedExerciseRetired(retiredNotes), true, "marca retiro futuro sin deleted_at para registrados");
+assert.equal(
+  createCycleScopedRetiredExerciseNotes(null, "2026-06-15T00:00:00.000Z"),
+  futurePlanRetiredMarker,
+  "agrega el marcador tecnico cuando notes es null",
+);
+assert.equal(
+  retiredNotes,
+  `nota previa\n${futurePlanRetiredMarker}`,
+  "preserva la nota funcional y agrega el marcador en una linea separada",
+);
+assert.equal(
+  addFuturePlanRetiredMarker(retiredNotes),
+  retiredNotes,
+  "no duplica el marcador tecnico",
+);
+assert.equal(
+  hasFuturePlanRetiredMarker(`texto con palabra retirado pero sin marcador`),
+  false,
+  "no interpreta palabras genericas como retiro tecnico",
+);
+assert.equal(
+  hasFuturePlanRetiredMarker(`[organizatech:future-plan-retired-extra]`),
+  false,
+  "detecta solo el marcador namespaced exacto",
+);
+assert.equal(
+  getCycleScopedExerciseDisplayNotes(retiredNotes),
+  "nota previa",
+  "oculta el marcador en la UI y conserva visible la nota funcional",
+);
+assert.equal(
+  removeTechnicalMarkersForDisplay(futurePlanRetiredMarker),
+  null,
+  "no muestra metadata tecnica cuando no hay nota funcional",
 );
 
 assert.equal(

@@ -57,6 +57,7 @@ import {
   generateSmartInsights,
 } from "@/lib/progress/calculations";
 import { buildExerciseComparisonSummary, getExerciseHistory } from "@/lib/progress/exercise-history";
+import { formatKg, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import type {
   ExerciseComparisonSummary,
   ExerciseEntry,
@@ -1310,7 +1311,7 @@ export function OrganizatechApp({
         ...state,
         rows: state.rows.map((row) => (
           row.id === id
-            ? { ...row, [field]: field === "name" ? value : readSetupNumber(value) }
+            ? { ...row, [field]: field === "name" ? value : field === "weight" ? readWeightNumber(value) : readSetupNumber(value) }
             : row
         )),
       })),
@@ -1353,17 +1354,26 @@ export function OrganizatechApp({
     ) {
       const hasRegisteredEntry = displayEntries.some((entry) =>
         (entry.trainingCycleExerciseId ?? entry.exerciseId) === row.sourceExerciseId);
-      setStatusMessage(hasRegisteredEntry
-        ? "No puedes eliminar un ejercicio que ya tiene registros asociados."
-        : "La edicion del ciclo activo solo permite agregar ejercicios nuevos en esta fase.");
-      return;
+      const confirmed = window.confirm(hasRegisteredEntry
+        ? "¿Eliminar este ejercicio de la planificacion? El historial anterior se conservara."
+        : "¿Eliminar este ejercicio de la planificacion?");
+      if (!confirmed) return;
     }
 
     setSetupByDay((current) =>
-      updateSetupDay(current, setupDay, (state) => ({
-        ...state,
-        rows: state.rows.length > 1 ? state.rows.filter((row) => row.id !== id) : state.rows,
-      })),
+      updateSetupDay(current, setupDay, (state) => {
+        const isCycleScopedEdit = Boolean(
+          isTrainingCyclesRepositoryActive &&
+          persistedActiveCycle &&
+          isCycleScopedTrainingCycle(persistedActiveCycle),
+        );
+        return {
+          ...state,
+          rows: isCycleScopedEdit || state.rows.length > 1
+            ? state.rows.filter((row) => row.id !== id)
+            : state.rows,
+        };
+      }),
     );
   }
 
@@ -1404,6 +1414,12 @@ export function OrganizatechApp({
       isTrainingCyclesRepositoryActive ? displayExercises : exercises,
     );
     const isChangingRoutineDays = hasRoutinePlan && isEditingRoutinePlan && !sameDayList(plannedDays, currentRoutineDays);
+    const isCycleScopedRoutineEdit = Boolean(
+      isTrainingCyclesRepositoryActive &&
+      isEditingRoutinePlan &&
+      persistedActiveCycle &&
+      isCycleScopedTrainingCycle(persistedActiveCycle),
+    );
     const savedDayState = {
       routineName,
       rows: validRows.map((row) => ({
@@ -1422,7 +1438,7 @@ export function OrganizatechApp({
     const allPlannedDaysComplete = plannedDays.every((day) => completedDays.includes(day));
     const daysToPersist = plannedDays.filter((day) => nextSetupByDay[day]?.rows.some((row) => row.name.trim()));
 
-    if (validRows.length === 0) {
+    if (validRows.length === 0 && !isCycleScopedRoutineEdit) {
       setStatusMessage("Agrega al menos un ejercicio para crear la rutina.");
       return;
     }
@@ -1509,16 +1525,8 @@ export function OrganizatechApp({
               registeredExerciseIds,
             );
 
-            if (analysis.removedRegisteredExerciseIds.length > 0) {
-              setStatusMessage("No puedes eliminar un ejercicio que ya tiene registros asociados.");
-              return;
-            }
-            if (analysis.removedExerciseIds.length > 0) {
-              setStatusMessage("La edicion del ciclo activo solo agrega contenido; no elimina ejercicios existentes.");
-              return;
-            }
-            if (analysis.modifiedExerciseIds.length > 0) {
-              setStatusMessage("La edicion del ciclo activo solo agrega contenido; no modifica ejercicios existentes.");
+            if (analysis.unknownExerciseIds.length > 0) {
+              setStatusMessage("Uno de los ejercicios editados ya no pertenece al plan activo.");
               return;
             }
             if (analysis.duplicateNames.length > 0) {
@@ -1527,7 +1535,18 @@ export function OrganizatechApp({
             }
 
             const isNewDay = newDayCodes.has(dayCode);
-            if (!isNewDay && analysis.additions.length === 0) continue;
+            if (isNewDay && analysis.additions.length === 0) {
+              setStatusMessage(`Agrega al menos un ejercicio para crear ${day} en el ciclo activo.`);
+              return;
+            }
+            const hasChanges = (
+              analysis.additions.length > 0 ||
+              analysis.updates.length > 0 ||
+              analysis.replacements.length > 0 ||
+              analysis.pendingDeletes.length > 0 ||
+              analysis.registeredRetirements.length > 0
+            );
+            if (!isNewDay && !hasChanges) continue;
 
             const nextSortOrder = Math.max(
               -1,
@@ -1549,11 +1568,33 @@ export function OrganizatechApp({
                 sortOrder: nextSortOrder + index,
                 notes: `Ejercicio agregado al plan activo para ${day}.`,
               })),
+              updates: analysis.updates.map((exercise) => ({
+                exerciseId: exercise.exerciseId,
+                name: exercise.name,
+                targetSets: exercise.targetSets,
+                targetReps: exercise.targetReps,
+                baseWeight: exercise.baseWeight,
+                sideWeight: null,
+                sortOrder: exercise.sortOrder,
+                notes: exercise.notes ?? `Ejercicio actualizado para ${day}.`,
+              })),
+              replacements: analysis.replacements.map((exercise) => ({
+                previousExerciseId: exercise.previousExerciseId,
+                name: exercise.name,
+                targetSets: exercise.targetSets,
+                targetReps: exercise.targetReps,
+                baseWeight: exercise.baseWeight,
+                sideWeight: null,
+                sortOrder: exercise.sortOrder,
+                notes: `Planificacion futura para ${day}; historial anterior conservado.`,
+              })),
+              pendingDeleteExerciseIds: analysis.pendingDeletes,
+              registeredRetireExerciseIds: analysis.registeredRetirements,
             });
           }
 
           if (days.length === 0) {
-            setStatusMessage("No hay dias ni ejercicios nuevos para agregar al ciclo activo.");
+            setStatusMessage("No hay cambios para guardar en el ciclo activo.");
             return;
           }
 
@@ -1566,9 +1607,9 @@ export function OrganizatechApp({
           setIsEditingRoutinePlan(false);
           setActiveRoutineDay(setupDay);
           setRoutineNotice(
-            `${result.daysAdded} dia${result.daysAdded === 1 ? "" : "s"} y ${result.exercisesAdded} ejercicio${result.exercisesAdded === 1 ? "" : "s"} agregado${result.exercisesAdded === 1 ? "" : "s"} al plan activo.`,
+            `${result.daysAdded} dia${result.daysAdded === 1 ? "" : "s"}, ${result.exercisesAdded} ejercicio${result.exercisesAdded === 1 ? "" : "s"} nuevo${result.exercisesAdded === 1 ? "" : "s"}, ${result.exercisesUpdated} editado${result.exercisesUpdated === 1 ? "" : "s"} y ${result.exercisesRetired} retirado${result.exercisesRetired === 1 ? "" : "s"}.`,
           );
-          setStatusMessage("Plan cycle-scoped actualizado. Los dias y ejercicios nuevos quedan pendientes.");
+          setStatusMessage("Plan cycle-scoped actualizado. El historial anterior se conserva.");
           setIsRoutineSuccessOpen(true);
           setScreen("entrenamiento");
           return;
@@ -3764,7 +3805,7 @@ function InitialTrainingScreen({
               <input placeholder={`Ejercicio ${index + 1}`} value={row.name} onChange={(event) => updateRow(row.id, "name", event.target.value)} />
               <input type="number" min={1} placeholder="Series" value={row.sets || ""} onChange={(event) => updateRow(row.id, "sets", event.target.value)} />
               <input type="number" min={1} placeholder="Reps" value={row.reps || ""} onChange={(event) => updateRow(row.id, "reps", event.target.value)} />
-              <input type="number" min={0} placeholder="Kg" value={row.weight || ""} onChange={(event) => updateRow(row.id, "weight", event.target.value)} />
+              <input inputMode="decimal" placeholder="Kg" value={row.weight || ""} onChange={(event) => updateRow(row.id, "weight", event.target.value)} />
               <button className="row-delete" type="button" aria-label="Eliminar ejercicio" onClick={() => removeRow(row.id)}>
                 <Trash2 size={13} />
               </button>
@@ -3910,7 +3951,7 @@ function TrainingStartScreen({
           {exercises.slice(0, 3).map((exercise) => (
             <div key={exercise.id}>
               <strong>{exercise.name}</strong>
-              <span>{exercise.targetSets} series · {exercise.targetReps} reps · {exercise.baseWeight} kg</span>
+              <span>{exercise.targetSets} series · {exercise.targetReps} reps · {formatKg(exercise.baseWeight)}</span>
             </div>
           ))}
         </div>
@@ -4052,7 +4093,7 @@ function GuidedTrainingScreen({
                 <span className="routine-item-index">{index + 1}</span>
                 <span className="routine-item-main">
                   <strong>{exercise.name}</strong>
-                  <small>{exercise.targetSets} series · {exercise.targetReps} reps · {exercise.baseWeight} kg</small>
+                  <small>{exercise.targetSets} series · {exercise.targetReps} reps · {formatKg(exercise.baseWeight)}</small>
                 </span>
                 <span className="routine-item-status">
                   {isDone ? "Registrado" : isActive ? "Actual" : "Pendiente"}
@@ -4072,17 +4113,16 @@ function GuidedTrainingScreen({
           <div className="series-exercise-top">
             <div>
               <span>Objetivo de tu rutina</span>
-              <strong>{activeExercise.baseWeight} kg · {activeExercise.targetReps} reps</strong>
+              <strong>{formatKg(activeExercise.baseWeight)} · {activeExercise.targetReps} reps</strong>
             </div>
             <span>{activeExercise.targetSets} series</span>
           </div>
           <label className="series-weight-field">
             <span>Peso usado</span>
             <input
-              type="number"
-              min={0}
+              type="text"
               inputMode="decimal"
-              placeholder={`${activeExercise.baseWeight} kg`}
+              placeholder={formatKg(activeExercise.baseWeight)}
               value={draft.weight}
               onChange={(event) => updateDraft(activeExercise, { weight: readOptionalNumber(event.target.value) })}
             />
@@ -4367,7 +4407,7 @@ function ExerciseHistorySummaryCard({ summary }: { summary: ExerciseComparisonSu
       <div className="history-gain-row">
         <span>Ganancia total</span>
         <strong className={summary.weightGain > 0 ? "positive" : summary.weightGain < 0 ? "danger" : "neutral"}>
-          {formatSigned(summary.weightGain)} kg en {summary.exerciseName.toLowerCase()}
+          {formatSigned(summary.weightGain, 2)} kg en {summary.exerciseName.toLowerCase()}
         </strong>
       </div>
       <p>{summary.insight}</p>
@@ -4602,7 +4642,7 @@ function ProgrammedExerciseCard({ exercise, showStatus = true }: { exercise: Exe
       <div className="programmed-exercise-values">
         <span>Series: <b>{exercise.targetSets}</b></span>
         <span>Reps: <b>{exercise.targetReps}</b></span>
-        <span>Kg: <b>{exercise.baseWeight}</b></span>
+        <span>Kg: <b>{formatKg(exercise.baseWeight)}</b></span>
       </div>
     </div>
   );
@@ -6039,10 +6079,13 @@ function readSetupNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function readWeightNumber(value: string) {
+  return parseDecimalWeightInput(value) ?? 0;
+}
+
 function readOptionalNumber(value: string): number | "" {
   if (value.trim() === "") return "";
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : "";
+  return parseDecimalWeightInput(value) ?? "";
 }
 
 function screenLabel(screen: Screen) {
@@ -6060,10 +6103,6 @@ function screenLabel(screen: Screen) {
     perfil: "Perfil",
   };
   return labels[screen];
-}
-
-function formatKg(value: number) {
-  return `${Math.round(value).toLocaleString("es-CL")} kg`;
 }
 
 function formatReadinessNote(value: TrainingReadiness | null) {

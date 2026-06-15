@@ -6,6 +6,8 @@ export interface ExistingCycleScopedExercise {
   targetSets: number;
   targetReps: number;
   baseWeight: number;
+  sortOrder: number;
+  notes?: string | null;
 }
 
 export interface CycleScopedExerciseDraft {
@@ -23,6 +25,19 @@ export interface CycleScopedExerciseAddition {
   baseWeight: number;
 }
 
+export interface CycleScopedExercisePlanPayload extends CycleScopedExerciseAddition {
+  sortOrder: number;
+  notes?: string | null;
+}
+
+export interface CycleScopedExerciseUpdate extends CycleScopedExercisePlanPayload {
+  exerciseId: string;
+}
+
+export interface CycleScopedExerciseReplacement extends CycleScopedExercisePlanPayload {
+  previousExerciseId: string;
+}
+
 export type CycleScopedDayStatus = "pending" | "partial" | "completed";
 
 const trainingDayCodeOrder: TrainingDayCode[] = [
@@ -36,6 +51,7 @@ const trainingDayCodeOrder: TrainingDayCode[] = [
 ];
 
 const cycleScopedRoutineNameNoteKey = "cycleScopedRoutineName";
+export const futurePlanRetiredMarker = "[organizatech:future-plan-retired]";
 
 export function analyzeCycleScopedDayEdit(
   existingExercises: ExistingCycleScopedExercise[],
@@ -43,60 +59,79 @@ export function analyzeCycleScopedDayEdit(
   registeredExerciseIds: ReadonlySet<string>,
 ) {
   const existingById = new Map(existingExercises.map((exercise) => [exercise.id, exercise]));
-  const existingNames = new Set(existingExercises.map((exercise) => normalizeCycleScopedExerciseName(exercise.name)));
   const retainedIds = new Set(
     draftRows
       .map((row) => row.sourceExerciseId)
       .filter((id): id is string => Boolean(id)),
   );
   const additions: CycleScopedExerciseAddition[] = [];
+  const updates: CycleScopedExerciseUpdate[] = [];
+  const replacements: CycleScopedExerciseReplacement[] = [];
+  const pendingDeletes: string[] = [];
+  const registeredRetirements: string[] = [];
   const duplicateNames: string[] = [];
-  const modifiedExerciseIds: string[] = [];
+  const unknownExerciseIds: string[] = [];
   const candidateNames = new Set<string>();
 
   for (const row of draftRows) {
     const normalizedName = normalizeCycleScopedExerciseName(row.name);
     if (!normalizedName) continue;
 
+    if (candidateNames.has(normalizedName)) {
+      duplicateNames.push(row.name.trim());
+      continue;
+    }
+    candidateNames.add(normalizedName);
+
     if (row.sourceExerciseId) {
       const existing = existingById.get(row.sourceExerciseId);
+      if (!existing) {
+        unknownExerciseIds.push(row.sourceExerciseId);
+        continue;
+      }
+
+      const payload = toCycleScopedExercisePlanPayload(row, existing.sortOrder, existing.notes);
       if (
-        !existing ||
         normalizeCycleScopedExerciseName(existing.name) !== normalizedName ||
         existing.targetSets !== row.sets ||
         existing.targetReps !== row.reps ||
         existing.baseWeight !== row.weight
       ) {
-        modifiedExerciseIds.push(row.sourceExerciseId);
+        if (registeredExerciseIds.has(row.sourceExerciseId)) {
+          replacements.push({
+            previousExerciseId: row.sourceExerciseId,
+            ...payload,
+          });
+        } else {
+          updates.push({
+            exerciseId: row.sourceExerciseId,
+            ...payload,
+          });
+        }
       }
       continue;
     }
 
-    if (existingNames.has(normalizedName) || candidateNames.has(normalizedName)) {
-      duplicateNames.push(row.name.trim());
-      continue;
-    }
-
-    candidateNames.add(normalizedName);
-    additions.push({
-      name: row.name.trim(),
-      targetSets: Math.max(1, row.sets || 1),
-      targetReps: Math.max(1, row.reps || 1),
-      baseWeight: Math.max(0, row.weight || 0),
-    });
+    additions.push(toCycleScopedExercisePlanPayload(row, -1));
   }
 
   const removedExerciseIds = existingExercises
     .filter((exercise) => !retainedIds.has(exercise.id))
     .map((exercise) => exercise.id);
-  const removedRegisteredExerciseIds = removedExerciseIds.filter((id) => registeredExerciseIds.has(id));
+  for (const exerciseId of removedExerciseIds) {
+    if (registeredExerciseIds.has(exerciseId)) registeredRetirements.push(exerciseId);
+    else pendingDeletes.push(exerciseId);
+  }
 
   return {
     additions,
+    updates,
+    replacements,
+    pendingDeletes,
+    registeredRetirements,
     duplicateNames,
-    modifiedExerciseIds,
+    unknownExerciseIds,
     removedExerciseIds,
-    removedRegisteredExerciseIds,
   };
 }
 
@@ -153,6 +188,54 @@ export function getCycleScopedDayRoutineName(notes: string | null, fallback: str
   }
 }
 
+export function addFuturePlanRetiredMarker(notes: string | null) {
+  const visibleNotes = removeTechnicalMarkersForDisplay(notes);
+  return visibleNotes ? `${visibleNotes}\n${futurePlanRetiredMarker}` : futurePlanRetiredMarker;
+}
+
+export function hasFuturePlanRetiredMarker(notes: string | null) {
+  if (!notes) return false;
+  return notes.split(/\r?\n/).some((line) => line.trim() === futurePlanRetiredMarker);
+}
+
+export function createCycleScopedRetiredExerciseNotes(notes: string | null, _retiredAt: string) {
+  return addFuturePlanRetiredMarker(notes);
+}
+
+export function isCycleScopedExerciseRetired(notes: string | null) {
+  return hasFuturePlanRetiredMarker(notes);
+}
+
+export function removeTechnicalMarkersForDisplay(notes: string | null) {
+  if (!notes) return null;
+  const visibleNotes = notes
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== futurePlanRetiredMarker)
+    .join("\n")
+    .trimEnd();
+
+  return visibleNotes || null;
+}
+
+export function getCycleScopedExerciseDisplayNotes(notes: string | null) {
+  return removeTechnicalMarkersForDisplay(notes);
+}
+
 export function normalizeCycleScopedExerciseName(value: string) {
-  return value.trim().toLocaleLowerCase("es");
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("es");
+}
+
+function toCycleScopedExercisePlanPayload(
+  row: CycleScopedExerciseDraft,
+  sortOrder: number,
+  notes?: string | null,
+): CycleScopedExercisePlanPayload {
+  return {
+    name: row.name.trim(),
+    targetSets: Math.max(1, row.sets || 1),
+    targetReps: Math.max(1, row.reps || 1),
+    baseWeight: Math.max(0, row.weight || 0),
+    sortOrder,
+    notes,
+  };
 }

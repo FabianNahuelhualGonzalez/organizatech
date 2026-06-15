@@ -1,6 +1,11 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ExerciseEntry, TrainingDayCode, TrainingSession, TrainingSessionStatus } from "@/lib/progress/types";
-import { normalizeCycleScopedExerciseName } from "@/lib/training/cycle-scoped-plan-edit";
+import {
+  createCycleScopedRetiredExerciseNotes,
+  getCycleScopedExerciseDisplayNotes,
+  isCycleScopedExerciseRetired,
+  normalizeCycleScopedExerciseName,
+} from "@/lib/training/cycle-scoped-plan-edit";
 
 export interface CycleScopedTrainingCycleInput {
   name: string;
@@ -79,6 +84,7 @@ export interface AddCycleScopedTrainingPlanInput {
     sortOrder: number;
     notes?: string | null;
     exercises: Array<{
+      sourceExerciseId?: string;
       name: string;
       targetSets: number;
       targetReps: number;
@@ -87,12 +93,36 @@ export interface AddCycleScopedTrainingPlanInput {
       sortOrder: number;
       notes?: string | null;
     }>;
+    updates?: Array<{
+      exerciseId: string;
+      name: string;
+      targetSets: number;
+      targetReps: number;
+      baseWeight: number;
+      sideWeight?: number | null;
+      sortOrder: number;
+      notes?: string | null;
+    }>;
+    replacements?: Array<{
+      previousExerciseId: string;
+      name: string;
+      targetSets: number;
+      targetReps: number;
+      baseWeight: number;
+      sideWeight?: number | null;
+      sortOrder: number;
+      notes?: string | null;
+    }>;
+    pendingDeleteExerciseIds?: string[];
+    registeredRetireExerciseIds?: string[];
   }>;
 }
 
 export interface AddCycleScopedTrainingPlanResult {
   daysAdded: number;
   exercisesAdded: number;
+  exercisesUpdated: number;
+  exercisesRetired: number;
 }
 
 export interface CycleScopedTrainingPlan {
@@ -223,10 +253,10 @@ export async function createTrainingSessionWithCycleEntries(input: CycleScopedTr
 export async function addCycleScopedTrainingDaysAndExercises(
   input: AddCycleScopedTrainingPlanInput,
 ): Promise<AddCycleScopedTrainingPlanResult> {
-  if (!input.cycleId || input.days.length === 0 || input.days.some((day) => day.exercises.length === 0)) {
+  if (!input.cycleId || input.days.length === 0) {
     throw new CycleScopedTrainingRepositoryError(
       "invalid_plan",
-      "Agrega al menos un dia con ejercicios nuevos al plan activo.",
+      "Agrega al menos un cambio al plan activo.",
     );
   }
 
@@ -330,7 +360,7 @@ export async function addCycleScopedTrainingDaysAndExercises(
   const allDaysByKey = new Map(
     allDays.map((day) => [`${day.week_index}:${day.day_code}`, day]),
   );
-  const additions = input.days.flatMap((day) => {
+  const daysWithIds = input.days.map((day) => {
     const persistedDay = allDaysByKey.get(`${day.weekIndex}:${day.dayCode}`);
     if (!persistedDay) {
       throw new CycleScopedTrainingRepositoryError(
@@ -339,16 +369,51 @@ export async function addCycleScopedTrainingDaysAndExercises(
       );
     }
 
-    return day.exercises.map((exercise) => ({
-      ...exercise,
+    return {
+      ...day,
       dayId: persistedDay.id,
-    }));
+    };
   });
-  const dayIds = Array.from(new Set(additions.map((addition) => addition.dayId)));
+  const additions = daysWithIds.flatMap((day) =>
+    day.exercises.map((exercise) => ({
+      ...exercise,
+      dayId: day.dayId,
+    })),
+  );
+  const updates = daysWithIds.flatMap((day) =>
+    (day.updates ?? []).map((exercise) => ({
+      ...exercise,
+      dayId: day.dayId,
+    })),
+  );
+  const replacements = daysWithIds.flatMap((day) =>
+    (day.replacements ?? []).map((exercise) => ({
+      ...exercise,
+      dayId: day.dayId,
+    })),
+  );
+  const retiredIds = Array.from(new Set([
+    ...daysWithIds.flatMap((day) => [
+      ...(day.pendingDeleteExerciseIds ?? []),
+      ...(day.registeredRetireExerciseIds ?? []),
+    ]),
+    ...replacements.map((replacement) => replacement.previousExerciseId),
+  ]));
+  const affectedExerciseIds = Array.from(new Set([
+    ...updates.map((exercise) => exercise.exerciseId),
+    ...replacements.map((exercise) => exercise.previousExerciseId),
+    ...retiredIds,
+  ]));
+  const dayIds = Array.from(new Set([
+    ...additions.map((addition) => addition.dayId),
+    ...updates.map((update) => update.dayId),
+    ...replacements.map((replacement) => replacement.dayId),
+    ...daysWithIds.map((day) => day.dayId),
+  ]));
 
   const { data: existingExercises, error: existingError } = await supabase
     .from("training_cycle_exercises")
-    .select("day_id,name")
+    .select("id,day_id,name,notes")
     .eq("user_id", userId)
     .eq("cycle_id", input.cycleId)
     .in("day_id", dayIds)
@@ -356,12 +421,58 @@ export async function addCycleScopedTrainingDaysAndExercises(
 
   if (existingError) throw mapCycleScopedRepositoryError(existingError);
 
+  const existingById = new Map((existingExercises ?? []).map((exercise) => [exercise.id, exercise]));
+  for (const exerciseId of affectedExerciseIds) {
+    if (!existingById.has(exerciseId)) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        "Uno de los ejercicios seleccionados no pertenece al ciclo activo.",
+      );
+    }
+  }
+
+  const { data: linkedEntries, error: entriesError } = affectedExerciseIds.length > 0
+    ? await supabase
+      .from("exercise_entries")
+      .select("training_cycle_exercise_id")
+      .eq("user_id", userId)
+      .in("training_cycle_exercise_id", affectedExerciseIds)
+    : { data: [], error: null };
+
+  if (entriesError) throw mapCycleScopedRepositoryError(entriesError);
+  const registeredExerciseIds = new Set(
+    (linkedEntries ?? [])
+      .map((entry) => entry.training_cycle_exercise_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const invalidPendingUpdates = updates.filter((update) => registeredExerciseIds.has(update.exerciseId));
+  if (invalidPendingUpdates.length > 0) {
+    throw new CycleScopedTrainingRepositoryError(
+      "invalid_plan",
+      "Un ejercicio con historial debe versionarse, no actualizarse directamente.",
+    );
+  }
+
   const existingKeys = new Set(
-    (existingExercises ?? []).map((exercise) =>
-      `${exercise.day_id}:${normalizeCycleScopedExerciseName(exercise.name)}`),
+    (existingExercises ?? [])
+      .filter((exercise) => !retiredIds.includes(exercise.id) && !isCycleScopedExerciseRetired(exercise.notes))
+      .map((exercise) => `${exercise.day_id}:${normalizeCycleScopedExerciseName(exercise.name)}`),
   );
   const additionKeys = new Set<string>();
-  const uniqueAdditions = additions.filter((addition) => {
+  const insertions = [
+    ...additions,
+    ...replacements.map((replacement) => ({
+      dayId: replacement.dayId,
+      name: replacement.name,
+      targetSets: replacement.targetSets,
+      targetReps: replacement.targetReps,
+      baseWeight: replacement.baseWeight,
+      sideWeight: replacement.sideWeight,
+      sortOrder: replacement.sortOrder,
+      notes: replacement.notes,
+    })),
+  ];
+  const uniqueAdditions = insertions.filter((addition) => {
     const key = `${addition.dayId}:${normalizeCycleScopedExerciseName(addition.name)}`;
     if (!normalizeCycleScopedExerciseName(addition.name)) {
       throw new CycleScopedTrainingRepositoryError(
@@ -373,6 +484,53 @@ export async function addCycleScopedTrainingDaysAndExercises(
     additionKeys.add(key);
     return true;
   });
+
+  for (const update of updates) {
+    const current = existingById.get(update.exerciseId);
+    if (!current) continue;
+    const key = `${update.dayId}:${normalizeCycleScopedExerciseName(update.name)}`;
+    const currentKey = `${current.day_id}:${normalizeCycleScopedExerciseName(current.name)}`;
+    if (key !== currentKey && (existingKeys.has(key) || additionKeys.has(key))) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        `El ejercicio "${update.name.trim()}" ya existe en ese dia.`,
+      );
+    }
+    existingKeys.delete(currentKey);
+    existingKeys.add(key);
+  }
+
+  let updatedExercises: Array<{ id: string }> = [];
+  if (updates.length > 0) {
+    for (const update of updates) {
+      const { data, error } = await supabase
+        .from("training_cycle_exercises")
+        .update({
+          name: update.name.trim(),
+          target_sets: Math.max(1, update.targetSets),
+          target_reps: Math.max(1, update.targetReps),
+          base_weight: Math.max(0, update.baseWeight),
+          side_weight: update.sideWeight ?? null,
+          sort_order: Math.max(0, update.sortOrder),
+          notes: update.notes ?? null,
+        })
+        .eq("id", update.exerciseId)
+        .eq("user_id", userId)
+        .eq("cycle_id", input.cycleId)
+        .eq("day_id", update.dayId)
+        .is("deleted_at", null)
+        .select("id");
+
+      if (error) throw mapCycleScopedRepositoryError(error);
+      if ((data ?? []).length !== 1) {
+        throw new CycleScopedTrainingRepositoryError(
+          "unexpected",
+          "No pudimos confirmar la actualizacion de un ejercicio.",
+        );
+      }
+      updatedExercises.push(data[0]);
+    }
+  }
 
   let insertedExercises: Array<{ id: string }> = [];
   if (uniqueAdditions.length > 0) {
@@ -403,9 +561,41 @@ export async function addCycleScopedTrainingDaysAndExercises(
     }
   }
 
+  const retiredAt = new Date().toISOString();
+  let retiredExercises: Array<{ id: string }> = [];
+  if (retiredIds.length > 0) {
+    for (const exerciseId of retiredIds) {
+      const current = existingById.get(exerciseId);
+      if (!current) continue;
+      const hasEntries = registeredExerciseIds.has(exerciseId);
+      const updatePayload = hasEntries
+        ? { notes: createCycleScopedRetiredExerciseNotes(current.notes ?? null, retiredAt) }
+        : { deleted_at: retiredAt };
+      const { data, error } = await supabase
+        .from("training_cycle_exercises")
+        .update(updatePayload)
+        .eq("id", exerciseId)
+        .eq("user_id", userId)
+        .eq("cycle_id", input.cycleId)
+        .is("deleted_at", null)
+        .select("id");
+
+      if (error) throw mapCycleScopedRepositoryError(error);
+      if ((data ?? []).length !== 1) {
+        throw new CycleScopedTrainingRepositoryError(
+          "unexpected",
+          "No pudimos confirmar el retiro de un ejercicio.",
+        );
+      }
+      retiredExercises.push(data[0]);
+    }
+  }
+
   return {
     daysAdded: insertedDays.length,
     exercisesAdded: insertedExercises.length,
+    exercisesUpdated: updatedExercises.length,
+    exercisesRetired: retiredExercises.length,
   };
 }
 
@@ -483,10 +673,30 @@ export async function getCycleScopedTrainingSessionData(
     .order("created_at", { ascending: true });
 
   if (entriesError) throw mapCycleScopedRepositoryError(entriesError);
+  const entryRows = (entries ?? []) as unknown as CycleScopedTrainingSessionEntryRow[];
+  const historicalExerciseIds = Array.from(new Set(
+    entryRows
+      .map((entry) => entry.training_cycle_exercise_id)
+      .filter((id): id is string => typeof id === "string" && !planIndex.exercisesById.has(id)),
+  ));
+
+  if (historicalExerciseIds.length > 0) {
+    const { data: historicalExercises, error: historicalError } = await supabase
+      .from("training_cycle_exercises")
+      .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,notes,source_legacy_exercise_id")
+      .eq("user_id", userId)
+      .eq("cycle_id", cycleId)
+      .in("id", historicalExerciseIds);
+
+    if (historicalError) throw mapCycleScopedRepositoryError(historicalError);
+    for (const exercise of (historicalExercises ?? []) as unknown as CycleScopedExerciseRow[]) {
+      planIndex.exercisesById.set(exercise.id, mapCycleScopedExerciseRow(exercise));
+    }
+  }
 
   return mapCycleScopedTrainingSessionData(
     sessionRows,
-    (entries ?? []) as unknown as CycleScopedTrainingSessionEntryRow[],
+    entryRows,
     planIndex,
   );
 }
@@ -616,20 +826,9 @@ function mapCycleScopedTrainingPlan(
 ): CycleScopedTrainingPlan {
   const exercisesByDay = new Map<string, CycleScopedExercise[]>();
   for (const exercise of exercises) {
+    if (isCycleScopedExerciseRetired(exercise.notes)) continue;
     const list = exercisesByDay.get(exercise.day_id) ?? [];
-    list.push({
-      id: exercise.id,
-      cycleId: exercise.cycle_id,
-      dayId: exercise.day_id,
-      name: exercise.name,
-      targetSets: exercise.target_sets,
-      targetReps: exercise.target_reps,
-      baseWeight: Number(exercise.base_weight),
-      sideWeight: exercise.side_weight === null ? null : Number(exercise.side_weight),
-      sortOrder: exercise.sort_order,
-      notes: exercise.notes,
-      sourceLegacyExerciseId: exercise.source_legacy_exercise_id,
-    });
+    list.push(mapCycleScopedExerciseRow(exercise));
     exercisesByDay.set(exercise.day_id, list);
   }
 
@@ -658,6 +857,22 @@ function mapCycleScopedTrainingPlan(
       notes: routine.notes,
       days: daysByRoutine.get(routine.id) ?? [],
     })),
+  };
+}
+
+function mapCycleScopedExerciseRow(exercise: CycleScopedExerciseRow): CycleScopedExercise {
+  return {
+    id: exercise.id,
+    cycleId: exercise.cycle_id,
+    dayId: exercise.day_id,
+    name: exercise.name,
+    targetSets: exercise.target_sets,
+    targetReps: exercise.target_reps,
+    baseWeight: Number(exercise.base_weight),
+    sideWeight: exercise.side_weight === null ? null : Number(exercise.side_weight),
+    sortOrder: exercise.sort_order,
+    notes: getCycleScopedExerciseDisplayNotes(exercise.notes),
+    sourceLegacyExerciseId: exercise.source_legacy_exercise_id,
   };
 }
 
