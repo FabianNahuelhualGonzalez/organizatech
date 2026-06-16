@@ -93,6 +93,12 @@ import {
   PROTECTED_ACTIVE_CYCLE_MESSAGE,
 } from "@/lib/training/training-cycle-protection";
 import {
+  getDailyTrainingReadiness,
+  saveDailyTrainingReadiness,
+  TrainingDailyReadinessRepositoryError,
+  type TrainingDailyReadinessRecord,
+} from "@/lib/training/training-daily-readiness-repository";
+import {
   addCycleScopedTrainingDaysAndExercises,
   createTrainingCycleWithPlan,
   createTrainingSessionWithCycleEntries,
@@ -393,6 +399,10 @@ export function OrganizatechApp({
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
   const [exerciseDrafts, setExerciseDrafts] = useState<Record<string, ExerciseDraft>>({});
   const [readiness, setReadiness] = useState<TrainingReadiness | null>(null);
+  const [dailyReadinessRecord, setDailyReadinessRecord] = useState<TrainingDailyReadinessRecord | null>(null);
+  const [checkingDailyReadiness, setCheckingDailyReadiness] = useState(false);
+  const [savingDailyReadiness, setSavingDailyReadiness] = useState(false);
+  const [dailyReadinessError, setDailyReadinessError] = useState("");
   const [hasStartedTraining, setHasStartedTraining] = useState(false);
   const [routineEditorReturnScreen, setRoutineEditorReturnScreen] = useState<Screen | null>(null);
   const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>(() => loadCycleHistory());
@@ -758,6 +768,10 @@ export function OrganizatechApp({
     clearCycleScopedPlanState();
     setExerciseDrafts({});
     setReadiness(null);
+    setDailyReadinessRecord(null);
+    setDailyReadinessError("");
+    setCheckingDailyReadiness(false);
+    setSavingDailyReadiness(false);
     setHasStartedTraining(false);
     setScreenHistory([]);
     setIsMenuOpen(false);
@@ -1912,6 +1926,64 @@ export function OrganizatechApp({
     }));
   }
 
+  async function startTrainingWithDailyReadiness() {
+    if (checkingDailyReadiness || savingDailyReadiness) return;
+
+    const firstPendingIndex = dayExercises.findIndex((exercise) =>
+      !registeredCycleScopedExerciseIds.has(exercise.trainingCycleExerciseId ?? exercise.id));
+    setActiveExerciseIndex(firstPendingIndex >= 0 ? firstPendingIndex : 0);
+    setDailyReadinessError("");
+    setRoutineNotice("");
+
+    if (dataMode !== "supabase" || !hasSupabaseSession) {
+      setHasStartedTraining(true);
+      return;
+    }
+
+    setCheckingDailyReadiness(true);
+    try {
+      const record = await getDailyTrainingReadiness();
+      setDailyReadinessRecord(record);
+      setReadiness(record?.payload ?? null);
+      setHasStartedTraining(true);
+    } catch (error) {
+      const message = translateDailyReadinessError(error);
+      setDailyReadinessError(message);
+      setRoutineNotice(message);
+    } finally {
+      setCheckingDailyReadiness(false);
+    }
+  }
+
+  async function submitDailyReadiness(value: Omit<TrainingReadiness, "skipped">) {
+    await persistDailyReadiness({ ...value, skipped: false });
+  }
+
+  async function skipDailyReadiness() {
+    await persistDailyReadiness({ skipped: true });
+  }
+
+  async function persistDailyReadiness(value: TrainingReadiness) {
+    if (savingDailyReadiness) return;
+    setDailyReadinessError("");
+
+    if (dataMode !== "supabase" || !hasSupabaseSession) {
+      setReadiness(value);
+      return;
+    }
+
+    setSavingDailyReadiness(true);
+    try {
+      const record = await saveDailyTrainingReadiness(value);
+      setDailyReadinessRecord(record);
+      setReadiness(record.payload);
+    } catch (error) {
+      setDailyReadinessError(translateDailyReadinessError(error));
+    } finally {
+      setSavingDailyReadiness(false);
+    }
+  }
+
   function registerCurrentExercise() {
     const exercise = dayExercises[activeExerciseIndex];
     if (!exercise) return;
@@ -2419,18 +2491,17 @@ export function OrganizatechApp({
           routineDays={routineDays}
           switchDay={(day) => openRoutineDay(day)}
           editRoutine={() => openRoutineEditor(visibleDay)}
-          startTraining={() => {
-            const firstPendingIndex = dayExercises.findIndex((exercise) =>
-              !registeredCycleScopedExerciseIds.has(exercise.trainingCycleExerciseId ?? exercise.id));
-            setActiveExerciseIndex(firstPendingIndex >= 0 ? firstPendingIndex : 0);
-            setHasStartedTraining(true);
-          }}
+          startTraining={startTrainingWithDailyReadiness}
+          isStartingTraining={checkingDailyReadiness}
+          notice={dailyReadinessError || routineNotice}
         />
       )}
       {screen === "entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && hasStartedTraining && !readiness && (
         <TrainingReadinessScreen
-          onSubmit={(value) => setReadiness({ ...value, skipped: false })}
-          onSkip={() => setReadiness({ skipped: true })}
+          onSubmit={submitDailyReadiness}
+          onSkip={skipDailyReadiness}
+          isSaving={savingDailyReadiness}
+          error={dailyReadinessError}
         />
       )}
       {screen === "entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && hasStartedTraining && readiness && (
@@ -3834,9 +3905,13 @@ function InitialTrainingScreen({
 function TrainingReadinessScreen({
   onSubmit,
   onSkip,
+  isSaving,
+  error,
 }: {
-  onSubmit: (value: Omit<TrainingReadiness, "skipped">) => void;
-  onSkip: () => void;
+  onSubmit: (value: Omit<TrainingReadiness, "skipped">) => void | Promise<void>;
+  onSkip: () => void | Promise<void>;
+  isSaving: boolean;
+  error: string;
 }) {
   const [values, setValues] = useState({
     motivation: 4,
@@ -3872,6 +3947,7 @@ function TrainingReadinessScreen({
                 <input
                   aria-label={question.label}
                   className="readiness-slider"
+                  disabled={isSaving}
                   max={7}
                   min={1}
                   type="range"
@@ -3888,13 +3964,14 @@ function TrainingReadinessScreen({
           ))}
         </div>
         <div className="two-cols">
-          <button className="button secondary" type="button" onClick={onSkip}>
-            Omitir por hoy
+          <button className="button secondary" type="button" onClick={onSkip} disabled={isSaving}>
+            {isSaving ? "Guardando..." : "Omitir por hoy"}
           </button>
-          <button className="button" type="button" onClick={() => onSubmit(values)}>
-            Empezar entrenamiento
+          <button className="button" type="button" onClick={() => onSubmit(values)} disabled={isSaving}>
+            {isSaving ? "Guardando..." : "Empezar entrenamiento"}
           </button>
         </div>
+        {error ? <p className="setup-message">{error}</p> : null}
       </div>
     </section>
   );
@@ -3909,6 +3986,8 @@ function TrainingStartScreen({
   switchDay,
   editRoutine,
   startTraining,
+  isStartingTraining,
+  notice,
 }: {
   day: string;
   routine: string;
@@ -3918,6 +3997,8 @@ function TrainingStartScreen({
   switchDay: (day: string) => void;
   editRoutine: () => void;
   startTraining: () => void;
+  isStartingTraining: boolean;
+  notice: string;
 }) {
   return (
     <section className="screen">
@@ -3963,10 +4044,11 @@ function TrainingStartScreen({
           ))}
         </div>
         <div className="training-start-actions">
-          <button className="start-button" type="button" onClick={startTraining}>
-            Iniciar entrenamiento
+          <button className="start-button" type="button" onClick={startTraining} disabled={isStartingTraining}>
+            {isStartingTraining ? "Verificando..." : "Iniciar entrenamiento"}
           </button>
         </div>
+        {notice ? <p className="setup-message">{notice}</p> : null}
       </div>
     </section>
   );
@@ -5612,6 +5694,18 @@ function translateTrainingCycleRepositoryError(error: unknown) {
     if (error.code === "protected_cycle") return PROTECTED_ACTIVE_CYCLE_MESSAGE;
     if (error.code === "permission_denied") return "No tienes permisos para acceder a este ciclo.";
     return "No pudimos completar la acción sobre ciclos.";
+  }
+
+  return translatePersistenceError(error);
+}
+
+function translateDailyReadinessError(error: unknown) {
+  if (error instanceof TrainingDailyReadinessRepositoryError) {
+    if (error.code === "session_required") return "Debes iniciar sesion para registrar tu formulario diario.";
+    if (error.code === "session_expired") return "Tu sesion expiro. Inicia sesion nuevamente.";
+    if (error.code === "invalid_payload") return error.message;
+    if (error.code === "permission_denied") return "No tienes permisos para registrar este formulario.";
+    return "No pudimos confirmar tu formulario diario. Intentalo nuevamente.";
   }
 
   return translatePersistenceError(error);
