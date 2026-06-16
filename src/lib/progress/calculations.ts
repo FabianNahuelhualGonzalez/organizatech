@@ -15,34 +15,108 @@ export function calculateKgStatus(kgDifference: number): KgStatus {
   return "Mismo kg";
 }
 
+export interface ObjectiveEvaluationInput {
+  targetSets: number;
+  targetReps: number;
+  targetWeight: number;
+  actualReps: number[];
+  actualWeight: number;
+}
+
 export function calculateObjectiveStatus(repsDifference: number, kgDifference: number): ObjectiveStatus {
   const roundedKgDifference = roundDecimal(kgDifference);
-  if (repsDifference > 0) return "Cumplimos";
-  if (roundedKgDifference > 0) return "Cumplimos";
-  if (repsDifference === 0 && roundedKgDifference === 0) return "Mantenemos esfuerzo";
-  if (repsDifference < 0 && roundedKgDifference === 0) return "No cumplimos";
-  if (roundedKgDifference < 0) return "No cumplimos";
-  return "Mantenemos esfuerzo";
+  if (repsDifference < 0 || roundedKgDifference < 0) return "No cumplimos";
+  if (repsDifference > 0 || roundedKgDifference > 0) return "Mejoramos";
+  return "Cumplimos";
+}
+
+export function evaluateExerciseObjective(input: ObjectiveEvaluationInput): ObjectiveStatus {
+  const targetSets = Math.max(0, input.targetSets);
+  const targetReps = Math.max(0, input.targetReps);
+  const plannedReps = input.actualReps.slice(0, targetSets);
+  const completedSets = plannedReps.filter((reps) => reps > 0).length;
+  const setsDifference = completedSets - targetSets;
+  const repsShortfall = plannedReps.some((reps) => reps < targetReps);
+  const kgDifference = roundDecimal(input.actualWeight - input.targetWeight);
+
+  if (setsDifference < 0 || repsShortfall || kgDifference < 0) return "No cumplimos";
+
+  const repsImproved = plannedReps.some((reps) => reps > targetReps);
+  const setsImproved = input.actualReps.length > targetSets;
+  if (kgDifference > 0 || repsImproved || setsImproved) return "Mejoramos";
+
+  return "Cumplimos";
+}
+
+export function getObjectiveStatusLabel(status: ObjectiveStatus) {
+  if (status === "Mejoramos") return "Cumplimos · Mejoramos";
+  return status;
+}
+
+export function isObjectiveMet(status: ObjectiveStatus) {
+  return status === "Cumplimos" || status === "Mejoramos";
+}
+
+export function isObjectiveImproved(status: ObjectiveStatus) {
+  return status === "Mejoramos";
+}
+
+export function calculateSetDifference(actualReps: number[], targetSets: number) {
+  return actualReps.filter((reps) => reps > 0).length - targetSets;
+}
+
+export function calculateRepDifference(actualReps: number[], targetReps: number, targetSets: number) {
+  return actualReps.slice(0, targetSets).reduce((total, reps) => total + (reps - targetReps), 0);
+}
+
+export function calculateKgDifference(actualWeight: number, targetWeight: number) {
+  return roundDecimal(actualWeight - targetWeight);
+}
+
+export function calculateVolume(totalReps: number, weight: number) {
+  return roundDecimal(totalReps * weight);
+}
+
+export function calculateVolumePercentage(volumeDifference: number, previousVolume: number) {
+  return previousVolume > 0 ? roundDecimal((volumeDifference / previousVolume) * 100) : 0;
+}
+
+export function calculateLegacyObjectiveStatus(repsDifference: number, kgDifference: number): ObjectiveStatus {
+  const roundedKgDifference = roundDecimal(kgDifference);
+  if (repsDifference < 0 || roundedKgDifference < 0) return "No cumplimos";
+  if (repsDifference > 0 || roundedKgDifference > 0) return "Mejoramos";
+  return "Cumplimos";
 }
 
 export function calculateExerciseMetrics(entry: ExerciseEntry, previous?: ExerciseMetrics): ExerciseMetrics {
   const totalReps = entry.reps.reduce((total, reps) => total + reps, 0);
   const targetTotalReps = entry.targetSets * entry.targetReps;
-  const repsDifference = totalReps === 0 ? 0 : totalReps - targetTotalReps;
-  const kgDifference = roundDecimal(entry.weight - entry.previousWeight);
-  const volumeTotal = roundDecimal(totalReps * entry.weight);
-  const previousVolume = previous?.volumeTotal ?? roundDecimal(targetTotalReps * entry.previousWeight);
+  const completedSets = entry.reps.filter((reps) => reps > 0).length;
+  const setsDifference = calculateSetDifference(entry.reps, entry.targetSets);
+  const repsDifference = calculateRepDifference(entry.reps, entry.targetReps, entry.targetSets);
+  const kgDifference = calculateKgDifference(entry.weight, entry.previousWeight);
+  const volumeTotal = calculateVolume(totalReps, entry.weight);
+  const previousVolume = previous?.volumeTotal ?? calculateVolume(targetTotalReps, entry.previousWeight);
   const volumeDifference = roundDecimal(volumeTotal - previousVolume);
-  const volumePercentage = previousVolume > 0 ? roundDecimal((volumeDifference / previousVolume) * 100) : 0;
+  const volumePercentage = calculateVolumePercentage(volumeDifference, previousVolume);
+  const objectiveStatus = evaluateExerciseObjective({
+    targetSets: entry.targetSets,
+    targetReps: entry.targetReps,
+    targetWeight: entry.previousWeight,
+    actualReps: entry.reps,
+    actualWeight: entry.weight,
+  });
 
   return {
     ...entry,
     targetTotalReps,
     totalReps,
+    completedSets,
+    setsDifference,
     repsDifference,
     kgDifference,
     kgStatus: calculateKgStatus(kgDifference),
-    objectiveStatus: calculateObjectiveStatus(repsDifference, kgDifference),
+    objectiveStatus,
     volumeTotal,
     volumeDifference,
     volumePercentage,
@@ -72,9 +146,9 @@ export function calculateWeeklySummary(metrics: ExerciseMetrics[], week: number)
   const fallbackPreviousVolume = volumeTotal - fallbackVolumeDifference;
   const fallbackRepsDifference = current.reduce((total, entry) => total + entry.repsDifference, 0);
   const hasPreviousWeek = previous.length > 0;
-  const objectivesOk = current.filter((entry) => entry.objectiveStatus === "Cumplimos").length;
+  const objectivesOk = current.filter((entry) => isObjectiveMet(entry.objectiveStatus)).length;
   const objectivesFailed = current.filter((entry) => entry.objectiveStatus === "No cumplimos").length;
-  const objectivesMaintained = current.filter((entry) => entry.objectiveStatus === "Mantenemos esfuerzo").length;
+  const objectivesMaintained = current.filter((entry) => entry.objectiveStatus === "Cumplimos").length;
   const volumeDifference = roundDecimal(hasPreviousWeek ? volumeTotal - previousVolume : fallbackVolumeDifference);
   const comparisonVolume = hasPreviousWeek ? previousVolume : fallbackPreviousVolume;
 
@@ -87,7 +161,7 @@ export function calculateWeeklySummary(metrics: ExerciseMetrics[], week: number)
     objectivesFailed,
     objectivesMaintained,
     volumeDifference,
-    volumePercentage: comparisonVolume > 0 ? roundDecimal((volumeDifference / comparisonVolume) * 100) : 0,
+    volumePercentage: calculateVolumePercentage(volumeDifference, comparisonVolume),
     repsDifference: hasPreviousWeek ? totalReps - previousReps : fallbackRepsDifference,
     exerciseDifference: hasPreviousWeek ? current.length - previous.length : 0,
     complianceRate: current.length > 0 ? Math.round((objectivesOk / current.length) * 100) : 0,

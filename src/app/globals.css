@@ -828,6 +828,7 @@ h3 {
 .comparison-hero {
   display: grid;
   gap: 10px;
+  overflow: hidden;
 }
 
 .comparison-chip-row {
@@ -840,6 +841,7 @@ h3 {
   display: inline-flex;
   min-height: 32px;
   align-items: center;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--muted);
@@ -847,6 +849,8 @@ h3 {
   padding: 0 12px;
   font-size: 11px;
   font-weight: 900;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .compare-chip.active {
@@ -863,6 +867,8 @@ h3 {
 .exercise-week-card {
   display: grid;
   gap: 14px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .custom-select {
@@ -1977,6 +1983,33 @@ h3 {
 .dashboard-training-card.pending,
 .dashboard-training-card.partial {
   border-color: rgba(255, 191, 77, 0.42);
+}
+
+.series-result-status {
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid rgba(255, 191, 77, 0.58);
+  border-radius: 999px;
+  color: var(--yellow);
+  background: rgba(255, 191, 77, 0.12);
+  padding: 7px 11px;
+  font-size: clamp(13px, 4vw, 16px);
+  font-weight: 950;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.series-result-status.ok {
+  border-color: rgba(116, 223, 113, 0.66);
+  color: var(--green);
+  background: rgba(116, 223, 113, 0.12);
+}
+
+.series-result-status.fail {
+  border-color: rgba(255, 93, 105, 0.7);
+  color: var(--red);
+  background: rgba(255, 93, 105, 0.14);
 }
 
 .dashboard-training-heading {
@@ -3222,8 +3255,8 @@ h3 {
   }
 
   .exercise-row,
-  .insight-row,
-  .history-row {
+.insight-row,
+.history-row {
     grid-template-columns: 1fr;
     align-items: flex-start;
   }
@@ -3292,6 +3325,18 @@ h3 {
   }
 }
 
+.insight-row.tone-positive {
+  border-color: rgba(116, 223, 113, 0.54);
+}
+
+.insight-row.tone-warning {
+  border-color: rgba(255, 191, 77, 0.5);
+}
+
+.insight-row.tone-negative {
+  border-color: rgba(255, 93, 105, 0.6);
+}
+
 @media (max-width: 360px) {
   .series-rep-grid,
   .cycle-result-grid {
@@ -3302,6 +3347,43 @@ h3 {
   .routine-metric-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
+  }
+
+  .comparison-hero,
+  .exercise-week-card {
+    gap: 10px;
+  }
+
+  .comparison-chip-row {
+    gap: 6px;
+  }
+
+  .compare-chip {
+    min-height: 30px;
+    padding: 0 9px;
+    font-size: 10px;
+    line-height: 1.15;
+  }
+
+  .routine-metric-grid .metric,
+  .cycle-history-metrics.dashboard-metric-grid .metric {
+    min-height: 92px;
+    padding: 9px 7px;
+  }
+
+  .routine-metric-grid .metric-title-row,
+  .cycle-history-metrics.dashboard-metric-grid .metric-title-row {
+    gap: 5px;
+  }
+
+  .routine-metric-grid .metric-title-row span,
+  .cycle-history-metrics.dashboard-metric-grid .metric-title-row span {
+    overflow-wrap: anywhere;
+  }
+
+  .series-result-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .dashboard-metric-grid {

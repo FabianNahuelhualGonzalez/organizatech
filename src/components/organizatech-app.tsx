@@ -55,9 +55,11 @@ import {
   calculateWeeklySummary,
   formatSigned,
   generateSmartInsights,
+  getObjectiveStatusLabel,
 } from "@/lib/progress/calculations";
 import { buildExerciseComparisonSummary, getExerciseHistory } from "@/lib/progress/exercise-history";
-import { formatKg, parseDecimalWeightInput } from "@/lib/progress/weight-format";
+import { formatDecimalEs, formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
+import { getWeeklyProgressDayIndex, weeklyProgressLabels } from "@/lib/progress/week-day";
 import type {
   ExerciseComparisonSummary,
   ExerciseEntry,
@@ -240,7 +242,7 @@ interface SetupExerciseRow {
   name: string;
   sets: number;
   reps: number;
-  weight: number;
+  weight: string;
 }
 
 interface SetupDayState {
@@ -307,7 +309,7 @@ interface TrainingPlan {
 }
 
 interface ExerciseDraft {
-  weight: number | "";
+  weight: string;
   rir: string;
   reps: Array<number | "">;
   registered: boolean;
@@ -1311,7 +1313,7 @@ export function OrganizatechApp({
         ...state,
         rows: state.rows.map((row) => (
           row.id === id
-            ? { ...row, [field]: field === "name" ? value : field === "weight" ? readWeightNumber(value) : readSetupNumber(value) }
+            ? { ...row, [field]: field === "name" ? value : field === "weight" ? readWeightInput(value, row.weight) : readSetupNumber(value) }
             : row
         )),
       })),
@@ -1407,6 +1409,11 @@ export function OrganizatechApp({
     const validRows = isTrainingCyclesRepositoryActive
       ? nonEmptyRows
       : dedupeExerciseRowsByName(nonEmptyRows);
+    const invalidWeightRow = nonEmptyRows.find((row) => row.weight.trim() !== "" && parseDecimalWeightInput(row.weight) === null);
+    if (invalidWeightRow) {
+      setStatusMessage(`Completa el peso de "${invalidWeightRow.name.trim()}" con un decimal valido.`);
+      return;
+    }
     const plannedDays = sortTrainingDaysByWeekOrder(
       trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [setupDay],
     );
@@ -1521,7 +1528,7 @@ export function OrganizatechApp({
 
             const analysis = analyzeCycleScopedDayEdit(
               existingExercises,
-              state.rows,
+              state.rows.map((row) => ({ ...row, weight: readRequiredWeight(row.weight) })),
               registeredExerciseIds,
             );
 
@@ -1660,7 +1667,7 @@ export function OrganizatechApp({
             name: row.name.trim(),
             targetSets: Math.max(1, row.sets || 1),
             targetReps: Math.max(1, row.reps || 1),
-            baseWeight: Math.max(0, row.weight || 0),
+            baseWeight: readRequiredWeight(row.weight),
             notes: `Rutina creada para ${dayToPersist}.`,
           }, dataMode);
         }
@@ -1917,7 +1924,7 @@ export function OrganizatechApp({
     }
     const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
     const requiredReps = draft.reps.slice(0, exercise.targetSets);
-    if (draft.weight === "" || requiredReps.some((value) => value === "")) {
+    if (draft.weight.trim() === "" || parseDecimalWeightInput(draft.weight) === null || requiredReps.some((value) => value === "")) {
       setStatusMessage("Completa peso y series antes de registrar el ejercicio.");
       return;
     }
@@ -1991,7 +1998,7 @@ export function OrganizatechApp({
           id: createId(),
           trainingCycleExerciseId: cycleExercise.id,
           exerciseId: cycleExercise.sourceLegacyExerciseId ?? null,
-          weight: Number(draft.weight) || 0,
+          weight: readRequiredWeight(draft.weight),
           previousWeight: exercise.baseWeight,
           reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
           rir: draft.rir,
@@ -2072,7 +2079,7 @@ export function OrganizatechApp({
           routine: exercise.routine,
           targetSets: exercise.targetSets,
           targetReps: exercise.targetReps,
-          weight: Number(draft.weight) || 0,
+          weight: readRequiredWeight(draft.weight),
           previousWeight: previous?.weight ?? exercise.baseWeight,
           reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
           rir: draft.rir,
@@ -3041,10 +3048,10 @@ function IndexDots({ activeIndex, count }: { activeIndex: number; count: number 
   );
 }
 function WeeklyProgressSvg({ value }: { value: number }) {
-  const [activeIndex, setActiveIndex] = useState(6);
+  const [activeIndex, setActiveIndex] = useState(getCurrentTrainingDayIndex);
   const clampedValue = Math.max(-4, Math.min(4, value));
   const values = [-0.8, -0.5, 0.2, 1.2, 0.5, 0.8, clampedValue];
-  const labels = ["L", "M", "X", "J", "V", "S", "D"];
+  const labels = weeklyProgressLabels;
   const points = values.map((item, index) => {
     const x = 18 + index * 69;
     const y = 84 - ((item + 4) / 8) * 66;
@@ -3124,7 +3131,7 @@ function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof gene
       </div>
       <div className="insight-list">
         {visibleInsights.map((insight) => (
-          <div className="insight-row smart-insight-row" key={insight.id}>
+          <div className={`insight-row smart-insight-row ${getInsightToneClass(insight.tone)}`} key={insight.id}>
             <span className={`insight-icon ${insight.tone === "positivo" ? "ok" : insight.tone === "riesgo" ? "fail" : "keep"}`}>
               {insight.tone === "positivo" ? <ArrowUp size={18} /> : insight.tone === "riesgo" ? <ArrowDown size={18} /> : <Activity size={18} />}
             </span>
@@ -3167,7 +3174,7 @@ function DashboardMotivationSummary({
           const label = signal.label.replace(` ${signal.toneLabel}`, "");
 
           return (
-            <div className="insight-row smart-insight-row compact-insight-row" key={signal.label}>
+            <div className={`insight-row smart-insight-row compact-insight-row ${signal.tone === "ok" ? "tone-positive" : signal.tone === "fail" ? "tone-negative" : "tone-warning"}`} key={signal.label}>
               <div>
                 <strong>{label}</strong>
                 <p className="eyebrow">{signal.value}</p>
@@ -4020,7 +4027,7 @@ function GuidedTrainingScreen({
         date: new Date().toISOString().slice(0, 10),
         targetSets: activeExercise.targetSets,
         targetReps: activeExercise.targetReps,
-        weight: Number(draft.weight) || 0,
+        weight: readPreviewWeight(draft.weight, activeExercise.baseWeight),
         previousWeight: activeExercise.baseWeight,
         reps: draft.reps.map((value) => Number(value) || 0),
         rir: draft.rir,
@@ -4124,7 +4131,7 @@ function GuidedTrainingScreen({
               inputMode="decimal"
               placeholder={formatKg(activeExercise.baseWeight)}
               value={draft.weight}
-              onChange={(event) => updateDraft(activeExercise, { weight: readOptionalNumber(event.target.value) })}
+              onChange={(event) => updateDraft(activeExercise, { weight: readWeightInput(event.target.value, draft.weight) })}
             />
           </label>
           <div className="series-rep-grid">
@@ -4169,22 +4176,26 @@ function GuidedTrainingScreen({
 
 function SeriesResult({ entry }: { entry: ExerciseMetrics }) {
   const tone = getObjectiveTone(entry.objectiveStatus);
+  const statusLabel = getObjectiveStatusLabel(entry.objectiveStatus);
 
   return (
     <div className={`series-result ${tone}`}>
-      <p className="series-result-label">Nuevo registro</p>
+      <p className="series-result-label">Resultado del ejercicio</p>
+      <div className={`series-result-status ${tone}`}>{statusLabel}</div>
       <div className="series-result-header">
         <span>kg actual</span>
-        <strong>{entry.weight} kg</strong>
+        <strong>{formatKg(entry.weight)}</strong>
       </div>
       <div className="series-result-deltas">
         <DeltaValue value={entry.repsDifference} suffix="reps" />
         <DeltaValue value={entry.kgDifference} suffix="kg" />
+        <DeltaValue value={entry.setsDifference} suffix="series" />
       </div>
       <div className="series-result-badges">
         <StatusBadge status={entry.objectiveStatus} />
         <ChangeBadge value={entry.kgDifference} positive="Subimos kg" negative="Bajamos kg" neutral="Mismo kg" />
         <ChangeBadge value={entry.repsDifference} positive="Subimos reps" negative="Bajamos reps" neutral="Mismas reps" />
+        <ChangeBadge value={entry.setsDifference} positive="Mas series" negative="Menos series" neutral="Mismas series" />
       </div>
     </div>
   );
@@ -4658,17 +4669,18 @@ function RegisteredExerciseCard({ entry }: { entry: ExerciseMetrics }) {
 }
 
 function WeightValue({ value, label }: { value: number; label: string }) {
-  return <span className="current-weight-value">{label}: {value} kg</span>;
+  return <span className="current-weight-value">{label}: {formatKg(value)}</span>;
 }
 
 function DeltaValue({ value, suffix, neutralWhenZero = true }: { value: number; suffix: string; neutralWhenZero?: boolean }) {
   const tone = value > 0 ? "positive" : value < 0 ? "danger" : neutralWhenZero ? "neutral" : "positive";
   const Icon = value > 0 ? ArrowUp : value < 0 ? ArrowDown : ArrowRight;
+  const formattedValue = suffix === "kg" ? formatSigned(value, 2) : formatSigned(value);
 
   return (
     <span className={`delta-value ${tone}`}>
       <Icon size={12} strokeWidth={3} />
-      {neutralWhenZero ? formatSigned(value) : value}
+      {neutralWhenZero ? formattedValue : value}
       {suffix ? ` ${suffix}` : ""}
     </span>
   );
@@ -4676,7 +4688,7 @@ function DeltaValue({ value, suffix, neutralWhenZero = true }: { value: number; 
 
 function StatusBadge({ status }: { status: ObjectiveStatus }) {
   const className = getObjectiveTone(status);
-  return <span className={`badge ${className}`}>{status}</span>;
+  return <span className={`badge ${className}`}>{getObjectiveStatusLabel(status)}</span>;
 }
 
 function ChangeBadge({ value, positive, negative, neutral }: { value: number; positive: string; negative: string; neutral: string }) {
@@ -4686,9 +4698,15 @@ function ChangeBadge({ value, positive, negative, neutral }: { value: number; po
 }
 
 function getObjectiveTone(status: ObjectiveStatus) {
-  if (status === "Cumplimos") return "ok";
+  if (status === "Cumplimos" || status === "Mejoramos") return "ok";
   if (status === "No cumplimos") return "fail";
   return "keep";
+}
+
+function getInsightToneClass(tone: "positivo" | "alerta" | "riesgo" | "info") {
+  if (tone === "positivo") return "tone-positive";
+  if (tone === "riesgo") return "tone-negative";
+  return "tone-warning";
 }
 
 function ProgressLine({ label, value }: { label: string; value: number }) {
@@ -4866,7 +4884,7 @@ function createCycleScopedPlanInput(
           name: row.name.trim(),
           targetSets: Math.max(1, row.sets || 1),
           targetReps: Math.max(1, row.reps || 1),
-          baseWeight: Math.max(0, row.weight || 0),
+          baseWeight: readRequiredWeight(row.weight),
           sideWeight: null,
           sortOrder: exerciseIndex,
           notes: `Ejercicio planificado para ${day}.`,
@@ -4981,7 +4999,7 @@ function normalizeSetupByDay(value: unknown) {
         name: typeof row.name === "string" ? row.name : "",
         sets: Number(row.sets) || 0,
         reps: Number(row.reps) || 0,
-        weight: Number(row.weight) || 0,
+        weight: formatDecimalEs(readRequiredWeight(row.weight ?? "")),
       }))
       : fallback[day].rows;
 
@@ -5617,7 +5635,7 @@ function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<st
           name: exercise.name,
           sets: exercise.targetSets,
           reps: exercise.targetReps,
-          weight: exercise.baseWeight,
+          weight: formatDecimalEs(exercise.baseWeight),
         },
       ],
     };
@@ -5643,7 +5661,7 @@ function createSetupRow(): SetupExerciseRow {
     name: "",
     sets: 0,
     reps: 0,
-    weight: 0,
+    weight: "",
   };
 }
 
@@ -5678,7 +5696,11 @@ function normalizeExerciseDrafts(value: unknown): Record<string, ExerciseDraft> 
       : [];
 
     return [[id, {
-      weight: draft.weight === "" ? "" : Number(draft.weight) || 0,
+      weight: typeof draft.weight === "string"
+        ? readWeightInput(draft.weight, "")
+        : draft.weight === undefined
+          ? ""
+          : formatDecimalEs(Number(draft.weight) || 0),
       rir: typeof draft.rir === "string" ? draft.rir : "",
       reps,
       registered: Boolean(draft.registered),
@@ -5827,6 +5849,10 @@ function getTrainingDayFromDate(value: string) {
     timeZone: "America/Santiago",
   }).format(date);
   return setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(weekday.toLowerCase())) ?? "";
+}
+
+function getCurrentTrainingDayIndex() {
+  return getWeeklyProgressDayIndex(getSantiagoDateKey(new Date()));
 }
 
 function parseDateKeyAsLocalNoon(value: string) {
@@ -6079,8 +6105,16 @@ function readSetupNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function readWeightNumber(value: string) {
+function readWeightInput(value: string, fallback: string) {
+  return isDecimalWeightDraftInput(value) ? value : fallback;
+}
+
+function readRequiredWeight(value: string | number | "") {
   return parseDecimalWeightInput(value) ?? 0;
+}
+
+function readPreviewWeight(value: string, fallback: number) {
+  return parseDecimalWeightInput(value) ?? fallback;
 }
 
 function readOptionalNumber(value: string): number | "" {

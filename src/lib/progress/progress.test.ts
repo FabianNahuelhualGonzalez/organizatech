@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { calculateExerciseMetrics, calculateObjectiveStatus, calculateWeeklySummary } from "./calculations";
 import { buildExerciseComparisonSummary } from "./exercise-history";
-import { formatKg, formatSignedKg, parseDecimalWeightInput } from "./weight-format";
+import { formatKg, formatSignedKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "./weight-format";
+import { getWeeklyProgressDayIndex, getWeeklyProgressDayLabel } from "./week-day";
 
-assert.equal(calculateObjectiveStatus(2, 0), "Cumplimos", "clasifica Cumplimos si suben repeticiones");
+assert.equal(calculateObjectiveStatus(2, 0), "Mejoramos", "clasifica Mejoramos si suben repeticiones");
 
-assert.equal(calculateObjectiveStatus(-2, 5), "Cumplimos", "clasifica Cumplimos si sube carga aunque bajen repeticiones");
+assert.equal(calculateObjectiveStatus(-2, 5), "No cumplimos", "no compensa reps menores solo con subir carga");
 
 assert.equal(calculateObjectiveStatus(0, -5), "No cumplimos", "clasifica No cumplimos si baja la carga");
 
@@ -20,12 +21,12 @@ const result = calculateExerciseMetrics({
   targetReps: 10,
   weight: 90,
   previousWeight: 85,
-  reps: [12, 11, 10, 9],
+  reps: [12, 11, 10, 10],
 });
 
-assert.equal(result.totalReps, 42, "calcula total de repeticiones");
-assert.equal(result.volumeTotal, 3780, "calcula volumen como reps por peso");
-assert.equal(result.objectiveStatus, "Cumplimos", "clasifica progreso combinado");
+assert.equal(result.totalReps, 43, "calcula total de repeticiones");
+assert.equal(result.volumeTotal, 3870, "calcula volumen como reps por peso");
+assert.equal(result.objectiveStatus, "Mejoramos", "clasifica progreso combinado sin incumplimientos");
 
 const decimalMetric = calculateExerciseMetrics({
   id: "decimal",
@@ -44,6 +45,8 @@ const decimalMetric = calculateExerciseMetrics({
 assert.equal(parseDecimalWeightInput("2.5"), 2.5, "acepta punto decimal");
 assert.equal(parseDecimalWeightInput("2,5"), 2.5, "acepta coma decimal");
 assert.equal(parseDecimalWeightInput("12,25"), 12.25, "preserva dos decimales con coma");
+assert.equal(isDecimalWeightDraftInput("12,"), true, "permite estado intermedio con coma mientras se edita");
+assert.equal(isDecimalWeightDraftInput("12."), true, "permite estado intermedio con punto mientras se edita");
 assert.equal(parseDecimalWeightInput("2,5,5"), null, "rechaza mas de un separador decimal");
 assert.equal(parseDecimalWeightInput("abc"), null, "rechaza texto no numerico");
 assert.equal(decimalMetric.kgDifference, 0.5, "calcula subida decimal de peso");
@@ -51,6 +54,14 @@ assert.equal(decimalMetric.volumeTotal, 250, "calcula volumen con peso decimal")
 assert.equal(formatKg(12.5), "12,5 kg", "formatea peso decimal con coma");
 assert.equal(formatKg(2), "2 kg", "evita ceros decimales innecesarios");
 assert.equal(formatSignedKg(-0.5), "-0,5 kg", "formatea bajada decimal sin error de precision");
+assert.equal(getWeeklyProgressDayLabel("2026-06-15"), "L", "lunes se mapea a L");
+assert.equal(getWeeklyProgressDayLabel("2026-06-16"), "M", "martes se mapea a M");
+assert.equal(getWeeklyProgressDayLabel("2026-06-17"), "X", "miercoles se mapea a X");
+assert.equal(getWeeklyProgressDayLabel("2026-06-18"), "J", "jueves se mapea a J");
+assert.equal(getWeeklyProgressDayLabel("2026-06-19"), "V", "viernes se mapea a V");
+assert.equal(getWeeklyProgressDayLabel("2026-06-20"), "S", "sabado se mapea a S");
+assert.equal(getWeeklyProgressDayLabel("2026-06-21"), "D", "domingo se mapea a D");
+assert.equal(getWeeklyProgressDayIndex("2026-06-16"), 1, "martes no usa el indice final de domingo");
 
 const maintained = calculateExerciseMetrics({
   id: "2",
@@ -65,9 +76,40 @@ const maintained = calculateExerciseMetrics({
   previousWeight: 45,
   reps: [10, 10, 10, 10],
 });
+assert.equal(maintained.objectiveStatus, "Cumplimos", "mismas series, reps y kg se reconocen como cumplimiento");
+
+const missedReps = calculateExerciseMetrics({
+  id: "missed-reps",
+  exerciseId: "crossover",
+  exerciseName: "Inclinado crossover",
+  routine: "Pecho Hombro Triceps",
+  week: 1,
+  date: "2026-05-13",
+  targetSets: 3,
+  targetReps: 12,
+  weight: 36,
+  previousWeight: 36,
+  reps: [12, 12, 11],
+});
+assert.equal(missedReps.objectiveStatus, "No cumplimos", "menos reps marca No cumplimos");
+
+const missedSets = calculateExerciseMetrics({
+  id: "missed-sets",
+  exerciseId: "crossover",
+  exerciseName: "Inclinado crossover",
+  routine: "Pecho Hombro Triceps",
+  week: 1,
+  date: "2026-05-13",
+  targetSets: 3,
+  targetReps: 12,
+  weight: 36,
+  previousWeight: 36,
+  reps: [12, 12],
+});
+assert.equal(missedSets.objectiveStatus, "No cumplimos", "menos series marca No cumplimos");
 
 const firstWeekSummary = calculateWeeklySummary([result, maintained], 4);
-assert.equal(firstWeekSummary.repsDifference, 2, "compara reps contra objetivo cuando no hay semana anterior");
+assert.equal(firstWeekSummary.repsDifference, 3, "compara reps contra objetivo cuando no hay semana anterior");
 assert.equal(firstWeekSummary.exerciseDifference, 0, "no cuenta objetivos cumplidos como ejercicios nuevos");
 
 const improvedHistory = buildExerciseComparisonSummary([

@@ -1,4 +1,4 @@
-export type ObjectiveStatus = "Cumplimos" | "Mantenemos esfuerzo" | "No cumplimos";
+export type ObjectiveStatus = "Cumplimos" | "Mejoramos" | "No cumplimos";
 export type KgStatus = "Kg aumentado" | "Mismo kg" | "Kg disminuido";
 
 export type RoutineName = string;
@@ -63,6 +63,8 @@ export interface TrainingSession {
 export interface ExerciseMetrics extends ExerciseEntry {
   targetTotalReps: number;
   totalReps: number;
+  completedSets: number;
+  setsDifference: number;
   repsDifference: number;
   kgDifference: number;
   kgStatus: KgStatus;

@@ -13,6 +13,11 @@ export function parseDecimalWeightInput(value: string | number): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? roundDecimal(parsed) : null;
 }
 
+export function isDecimalWeightDraftInput(value: string) {
+  const normalized = value.trim().replace(/\s+/g, "");
+  return normalized === "" || /^\d+(?:[,.]\d*)?$/.test(normalized);
+}
+
 export function roundDecimal(value: number) {
   const rounded = Math.round((value + Number.EPSILON) * decimalFactor) / decimalFactor;
   return Object.is(rounded, -0) ? 0 : rounded;
