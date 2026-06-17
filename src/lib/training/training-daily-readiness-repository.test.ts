@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   getCalendarDateInTimeZone,
   normalizeDailyReadinessPayload,
@@ -6,6 +8,60 @@ import {
   type TrainingDailyReadinessPayload,
   type TrainingDailyReadinessRecord,
 } from "./training-daily-readiness-repository";
+
+const baseMigration = readFileSync("supabase/migrations/20260608_training_daily_readiness.sql", "utf8");
+const ambiguityPatch = readFileSync(
+  "supabase/migrations/20260609_fix_training_daily_readiness_rpc_ambiguity.sql",
+  "utf8",
+);
+const repositorySource = readFileSync("src/lib/training/training-daily-readiness-repository.ts", "utf8");
+
+assert.equal(
+  createHash("sha256").update(baseMigration).digest("hex").toUpperCase(),
+  "A06186A518F35C423D583C537A2839C0A545A66F62DA40C2C0D5D6768E413839",
+  "la migracion original de readiness diaria no debe cambiar",
+);
+assert.match(
+  ambiguityPatch,
+  /create or replace function public\.save_daily_training_readiness\(\s*p_payload jsonb\s*\)/i,
+  "el patch conserva la firma publica solo con p_payload jsonb",
+);
+assert.match(
+  ambiguityPatch,
+  /returns table \(\s*id uuid,\s*local_date date,\s*payload jsonb,\s*created_at timestamptz,\s*updated_at timestamptz\s*\)/i,
+  "el patch conserva el retorno de la RPC",
+);
+assert.match(ambiguityPatch, /security definer/i, "el patch conserva SECURITY DEFINER");
+assert.match(ambiguityPatch, /set search_path = public, pg_temp/i, "el patch fija search_path");
+assert.match(ambiguityPatch, /America\/Santiago/i, "la fecha local sigue calculandose server-side en Santiago");
+assert.match(ambiguityPatch, /auth\.uid\(\)/i, "el user_id se deriva de auth.uid()");
+assert.match(
+  ambiguityPatch,
+  /on conflict on constraint training_daily_readiness_user_local_date_key\s+do nothing/i,
+  "el patch evita ambiguedad usando el constraint nominal",
+);
+assert.doesNotMatch(ambiguityPatch, /do update/i, "la respuesta diaria sigue siendo inmutable");
+assert.doesNotMatch(ambiguityPatch, /\bp_user_id\b|\bp_local_date\b/i, "la RPC no acepta user_id ni local_date externos");
+assert.doesNotMatch(
+  ambiguityPatch,
+  /training_sessions|exercise_entries|training_cycles/i,
+  "el patch no toca tablas de sesiones, entries ni ciclos",
+);
+assert.match(
+  ambiguityPatch,
+  /select\s+readiness\.id,\s*readiness\.payload,\s*readiness\.created_at,\s*readiness\.updated_at\s+into/i,
+  "el SELECT de la fila persistida califica columnas con alias de tabla",
+);
+assert.match(
+  ambiguityPatch,
+  /where readiness\.user_id = v_user_id\s+and readiness\.local_date = v_local_date/i,
+  "la busqueda idempotente usa variables locales inequivocas",
+);
+assert.match(
+  repositorySource,
+  /supabase\.rpc\("save_daily_training_readiness",\s*\{\s*p_payload: normalizedPayload,\s*\}\)/,
+  "el repositorio invoca la RPC unicamente con p_payload",
+);
 
 assert.equal(
   getCalendarDateInTimeZone(new Date("2026-06-16T02:30:00.000Z"), "America/Santiago"),
