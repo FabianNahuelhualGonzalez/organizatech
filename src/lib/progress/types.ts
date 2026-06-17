@@ -10,6 +10,7 @@ export interface ExerciseTemplate {
   cycleId?: string;
   cycleDayId?: string;
   trainingCycleExerciseId?: string;
+  exerciseLineageId?: string | null;
   sourceLegacyExerciseId?: string | null;
   routine: RoutineName;
   day?: string;
@@ -27,6 +28,7 @@ export interface ExerciseEntry {
   cycleId?: string;
   cycleDayId?: string | null;
   trainingCycleExerciseId?: string;
+  exerciseLineageId?: string | null;
   exerciseId: string;
   exerciseName: string;
   routine: RoutineName;

@@ -207,6 +207,7 @@ function createExercise(id: string, name: string): CycleScopedExercise {
     sortOrder: 0,
     notes: null,
     sourceLegacyExerciseId: null,
+    exerciseLineageId: null,
   };
 }
 

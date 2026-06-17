@@ -245,6 +245,7 @@ const mesoDurations = [3, 4, 5, 6];
 interface SetupExerciseRow {
   id: string;
   sourceExerciseId?: string;
+  exerciseLineageId?: string | null;
   name: string;
   sets: number;
   reps: number;
@@ -1321,7 +1322,7 @@ export function OrganizatechApp({
     setIsMenuOpen(false);
   }
 
-  function updateSetupRow(id: string, field: keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId">, value: string) {
+  function updateSetupRow(id: string, field: keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId" | "exerciseLineageId">, value: string) {
     setSetupByDay((current) =>
       updateSetupDay(current, setupDay, (state) => ({
         ...state,
@@ -1601,6 +1602,7 @@ export function OrganizatechApp({
               })),
               replacements: analysis.replacements.map((exercise) => ({
                 previousExerciseId: exercise.previousExerciseId,
+                exerciseLineageId: existingExercises.find((item) => item.id === exercise.previousExerciseId)?.exerciseLineageId ?? null,
                 name: exercise.name,
                 targetSets: exercise.targetSets,
                 targetReps: exercise.targetReps,
@@ -2070,6 +2072,7 @@ export function OrganizatechApp({
           id: createId(),
           trainingCycleExerciseId: cycleExercise.id,
           exerciseId: cycleExercise.sourceLegacyExerciseId ?? null,
+          exerciseLineageId: cycleExercise.exerciseLineageId,
           weight: readRequiredWeight(draft.weight),
           previousWeight: exercise.baseWeight,
           reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
@@ -3711,7 +3714,7 @@ function InitialTrainingScreen({
   routineName: string;
   setRoutineName: (value: string) => void;
   rows: SetupExerciseRow[];
-  updateRow: (id: string, field: keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId">, value: string) => void;
+  updateRow: (id: string, field: keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId" | "exerciseLineageId">, value: string) => void;
   addRow: () => void;
   removeRow: (id: string) => void;
   saveRoutine: () => void;
@@ -4970,7 +4973,8 @@ function createCycleScopedPlanInput(
           sideWeight: null,
           sortOrder: exerciseIndex,
           notes: `Ejercicio planificado para ${day}.`,
-          sourceLegacyExerciseId: null,
+          sourceLegacyExerciseId: row.exerciseLineageId ? null : row.sourceExerciseId ?? null,
+          exerciseLineageId: row.exerciseLineageId ?? null,
         })),
       }],
     }];
@@ -4998,6 +5002,7 @@ function createExerciseTemplatesFromCycleScopedPlan(plan: CycleScopedTrainingPla
         cycleId: exercise.cycleId,
         cycleDayId: day.id,
         trainingCycleExerciseId: exercise.id,
+        exerciseLineageId: exercise.exerciseLineageId,
         sourceLegacyExerciseId: exercise.sourceLegacyExerciseId,
         routine: getCycleScopedDayRoutineName(day.notes, routine.name),
         day: getSetupDayFromTrainingDayCode(day.dayCode),
@@ -5078,6 +5083,7 @@ function normalizeSetupByDay(value: unknown) {
       ? state.rows.map((row) => ({
         id: typeof row.id === "string" ? row.id : createId(),
         sourceExerciseId: typeof row.sourceExerciseId === "string" ? row.sourceExerciseId : undefined,
+        exerciseLineageId: typeof row.exerciseLineageId === "string" ? row.exerciseLineageId : null,
         name: typeof row.name === "string" ? row.name : "",
         sets: Number(row.sets) || 0,
         reps: Number(row.reps) || 0,
@@ -5726,6 +5732,7 @@ function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<st
         {
           id: exercise.id,
           sourceExerciseId: exercise.id,
+          exerciseLineageId: exercise.exerciseLineageId,
           name: exercise.name,
           sets: exercise.targetSets,
           reps: exercise.targetReps,
