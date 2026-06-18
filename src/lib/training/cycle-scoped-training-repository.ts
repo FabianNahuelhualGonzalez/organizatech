@@ -6,6 +6,11 @@ import {
   isCycleScopedExerciseRetired,
   normalizeCycleScopedExerciseName,
 } from "@/lib/training/cycle-scoped-plan-edit";
+import {
+  createExerciseLineageInsertPayload,
+  resolveExerciseLineageIdForReplacement,
+  resolveExerciseLineageIdForSessionEntry,
+} from "@/lib/training/training-exercise-lineage";
 
 export interface CycleScopedTrainingCycleInput {
   name: string;
@@ -49,6 +54,7 @@ export interface CycleScopedExerciseInput {
   sortOrder: number;
   notes?: string | null;
   sourceLegacyExerciseId?: string | null;
+  exerciseLineageId?: string | null;
 }
 
 export interface CycleScopedTrainingSessionInput {
@@ -67,6 +73,7 @@ export interface CycleScopedTrainingSessionEntryInput {
   id: string;
   trainingCycleExerciseId: string;
   exerciseId?: string | null;
+  exerciseLineageId?: string | null;
   weight: number;
   previousWeight: number;
   reps: number[];
@@ -85,6 +92,7 @@ export interface AddCycleScopedTrainingPlanInput {
     notes?: string | null;
     exercises: Array<{
       sourceExerciseId?: string;
+      exerciseLineageId?: string | null;
       name: string;
       targetSets: number;
       targetReps: number;
@@ -95,6 +103,7 @@ export interface AddCycleScopedTrainingPlanInput {
     }>;
     updates?: Array<{
       exerciseId: string;
+      exerciseLineageId?: string | null;
       name: string;
       targetSets: number;
       targetReps: number;
@@ -105,6 +114,7 @@ export interface AddCycleScopedTrainingPlanInput {
     }>;
     replacements?: Array<{
       previousExerciseId: string;
+      exerciseLineageId?: string | null;
       name: string;
       targetSets: number;
       targetReps: number;
@@ -166,6 +176,7 @@ export interface CycleScopedExercise {
   sortOrder: number;
   notes: string | null;
   sourceLegacyExerciseId: string | null;
+  exerciseLineageId: string | null;
 }
 
 export type CycleScopedTrainingRepositoryErrorCode =
@@ -231,6 +242,7 @@ export async function createTrainingSessionWithCycleEntries(input: CycleScopedTr
       id: entry.id,
       training_cycle_exercise_id: entry.trainingCycleExerciseId,
       exercise_id: entry.exerciseId ?? null,
+      exercise_lineage_id: resolveExerciseLineageIdForSessionEntry(entry),
       weight: entry.weight,
       previous_weight: entry.previousWeight,
       reps: entry.reps,
@@ -413,7 +425,7 @@ export async function addCycleScopedTrainingDaysAndExercises(
 
   const { data: existingExercises, error: existingError } = await supabase
     .from("training_cycle_exercises")
-    .select("id,day_id,name,notes")
+    .select("id,day_id,name,notes,source_legacy_exercise_id,exercise_lineage_id")
     .eq("user_id", userId)
     .eq("cycle_id", input.cycleId)
     .in("day_id", dayIds)
@@ -470,6 +482,8 @@ export async function addCycleScopedTrainingDaysAndExercises(
       sideWeight: replacement.sideWeight,
       sortOrder: replacement.sortOrder,
       notes: replacement.notes,
+      exerciseLineageId: replacement.exerciseLineageId ??
+        resolveExerciseLineageIdForReplacement(existingById.get(replacement.previousExerciseId)),
     })),
   ];
   const uniqueAdditions = insertions.filter((addition) => {
@@ -534,9 +548,18 @@ export async function addCycleScopedTrainingDaysAndExercises(
 
   let insertedExercises: Array<{ id: string }> = [];
   if (uniqueAdditions.length > 0) {
+    const additionsWithLineage = [];
+    for (const addition of uniqueAdditions) {
+      additionsWithLineage.push({
+        ...addition,
+        exerciseLineageId: addition.exerciseLineageId ??
+          await createTrainingExerciseLineage(supabase, userId, null),
+      });
+    }
+
     const { data, error } = await supabase
       .from("training_cycle_exercises")
-      .insert(uniqueAdditions.map((addition) => ({
+      .insert(additionsWithLineage.map((addition) => ({
         user_id: userId,
         cycle_id: input.cycleId,
         day_id: addition.dayId,
@@ -548,6 +571,7 @@ export async function addCycleScopedTrainingDaysAndExercises(
         sort_order: Math.max(0, addition.sortOrder),
         notes: addition.notes ?? null,
         source_legacy_exercise_id: null,
+        exercise_lineage_id: addition.exerciseLineageId,
       })))
       .select("id");
 
@@ -626,7 +650,7 @@ export async function getCycleScopedTrainingPlan(cycleId: string): Promise<Cycle
 
   const { data: exercises, error: exercisesError } = await supabase
     .from("training_cycle_exercises")
-    .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,notes,source_legacy_exercise_id")
+    .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,notes,source_legacy_exercise_id,exercise_lineage_id")
     .eq("user_id", userId)
     .eq("cycle_id", cycleId)
     .is("deleted_at", null)
@@ -667,7 +691,7 @@ export async function getCycleScopedTrainingSessionData(
   const sessionIds = sessionRows.map((session) => session.id);
   const { data: entries, error: entriesError } = await supabase
     .from("exercise_entries")
-    .select("id,session_id,exercise_id,training_cycle_exercise_id,weight,previous_weight,reps,rir,notes,created_at")
+    .select("id,session_id,exercise_id,training_cycle_exercise_id,exercise_lineage_id,weight,previous_weight,reps,rir,notes,created_at")
     .eq("user_id", userId)
     .in("session_id", sessionIds)
     .order("created_at", { ascending: true });
@@ -683,7 +707,7 @@ export async function getCycleScopedTrainingSessionData(
   if (historicalExerciseIds.length > 0) {
     const { data: historicalExercises, error: historicalError } = await supabase
       .from("training_cycle_exercises")
-      .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,notes,source_legacy_exercise_id")
+      .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,notes,source_legacy_exercise_id,exercise_lineage_id")
       .eq("user_id", userId)
       .eq("cycle_id", cycleId)
       .in("id", historicalExerciseIds);
@@ -724,6 +748,7 @@ function toCreateTrainingCycleWithPlanPayload(plan: CycleScopedPlanInput) {
           sort_order: exercise.sortOrder,
           notes: exercise.notes ?? null,
           source_legacy_exercise_id: exercise.sourceLegacyExerciseId ?? null,
+          exercise_lineage_id: exercise.exerciseLineageId ?? null,
         })),
       })),
     })),
@@ -757,6 +782,47 @@ async function getAuthenticatedCycleScopedRepository() {
   }
 
   return { supabase, userId };
+}
+
+async function createTrainingExerciseLineage(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  userId: string,
+  sourceLegacyExerciseId: string | null,
+) {
+  if (!supabase) {
+    throw new CycleScopedTrainingRepositoryError(
+      "session_required",
+      "Debes iniciar sesion para gestionar el plan del ciclo.",
+    );
+  }
+
+  if (sourceLegacyExerciseId) {
+    const { data: existing, error: existingError } = await supabase
+      .from("training_exercise_lineages")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("source_legacy_exercise_id", sourceLegacyExerciseId)
+      .maybeSingle();
+
+    if (existingError) throw mapCycleScopedRepositoryError(existingError);
+    if (existing?.id) return existing.id as string;
+  }
+
+  const { data, error } = await supabase
+    .from("training_exercise_lineages")
+    .insert(createExerciseLineageInsertPayload({ userId, sourceLegacyExerciseId }))
+    .select("id")
+    .single();
+
+  if (error) throw mapCycleScopedRepositoryError(error);
+  if (!data?.id) {
+    throw new CycleScopedTrainingRepositoryError(
+      "unexpected",
+      "No pudimos confirmar la identidad historica del ejercicio.",
+    );
+  }
+
+  return data.id as string;
 }
 
 function validatePlanInput(input: CycleScopedTrainingCycleInput) {
@@ -873,6 +939,7 @@ function mapCycleScopedExerciseRow(exercise: CycleScopedExerciseRow): CycleScope
     sortOrder: exercise.sort_order,
     notes: getCycleScopedExerciseDisplayNotes(exercise.notes),
     sourceLegacyExerciseId: exercise.source_legacy_exercise_id,
+    exerciseLineageId: exercise.exercise_lineage_id,
   };
 }
 
@@ -932,6 +999,7 @@ function mapCycleScopedTrainingSessionData(
       cycleId: session.cycle_id,
       cycleDayId: session.cycle_day_id,
       trainingCycleExerciseId: cycleExerciseId,
+      exerciseLineageId: entry.exercise_lineage_id ?? exercise.exerciseLineageId,
       exerciseId: cycleExerciseId,
       exerciseName: exercise.name,
       routine: routine.name,
@@ -1090,6 +1158,7 @@ interface CycleScopedExerciseRow {
   sort_order: number;
   notes: string | null;
   source_legacy_exercise_id: string | null;
+  exercise_lineage_id: string | null;
 }
 
 interface CycleScopedTrainingSessionRow {
@@ -1114,6 +1183,7 @@ interface CycleScopedTrainingSessionEntryRow {
   session_id: string;
   exercise_id: string | null;
   training_cycle_exercise_id: string | null;
+  exercise_lineage_id: string | null;
   weight: number | string;
   previous_weight: number | string;
   reps: unknown;
