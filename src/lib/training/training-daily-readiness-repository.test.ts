@@ -20,8 +20,14 @@ const perCycleDayMigration = readFileSync(
   "supabase/migrations/20260611_training_readiness_per_cycle_day.sql",
   "utf8",
 );
+const variableConflictPatch = readFileSync(
+  "supabase/migrations/20260612_fix_training_readiness_rpc_variable_conflict.sql",
+  "utf8",
+);
 const repositorySource = readFileSync("src/lib/training/training-daily-readiness-repository.ts", "utf8");
 const perCycleDayReturnsTable = perCycleDayMigration.match(/returns table \([\s\S]*?\)\s*language plpgsql/i)?.[0] ?? "";
+const variableConflictReturnsTable =
+  variableConflictPatch.match(/returns table \([\s\S]*?\)\s*language plpgsql/i)?.[0] ?? "";
 
 assert.equal(
   createHash("sha256").update(baseMigration).digest("hex").toUpperCase(),
@@ -131,6 +137,64 @@ assert.match(
 assert.doesNotMatch(perCycleDayMigration, /on conflict on constraint training_daily_readiness_user_local_date_key/i, "la RPC nueva no usa el constraint global reemplazado");
 assert.doesNotMatch(perCycleDayMigration, /do update/i, "readiness sigue siendo inmutable");
 assert.doesNotMatch(perCycleDayMigration, /delete from|drop table/i, "la migracion no borra datos");
+assert.match(
+  variableConflictPatch,
+  /create or replace function public\.save_daily_training_readiness\(\s*p_payload jsonb\s*\)/i,
+  "el patch de conflicto redefine la misma firma publica",
+);
+assert.equal(
+  (variableConflictPatch.match(/create or replace function public\.save_daily_training_readiness/gi) ?? []).length,
+  1,
+  "el patch de conflicto no crea overloads",
+);
+assert.match(
+  variableConflictReturnsTable,
+  /returns table \(\s*id uuid,\s*local_date date,\s*payload jsonb,\s*created_at timestamptz,\s*updated_at timestamptz\s*\)/i,
+  "el patch de conflicto preserva el retorno historico",
+);
+assert.match(
+  variableConflictPatch,
+  /as \$function\$\s*#variable_conflict use_column\s*declare/i,
+  "la directiva resuelve ambiguedad entre RETURNS TABLE local_date y columnas SQL",
+);
+assert.match(variableConflictPatch, /security definer/i, "el patch de conflicto conserva SECURITY DEFINER");
+assert.match(variableConflictPatch, /set search_path = public, pg_temp/i, "el patch de conflicto preserva search_path");
+assert.match(variableConflictPatch, /v_response_payload := p_payload - 'cycle_day_id'/i, "cycle_day_id sigue fuera del payload canonico");
+assert.match(
+  variableConflictPatch,
+  /where day\.id = v_cycle_day_id\s+and day\.user_id = v_user_id\s+and day\.deleted_at is null/i,
+  "el patch de conflicto mantiene validacion de ownership",
+);
+assert.match(
+  variableConflictPatch,
+  /on conflict \(user_id, local_date, cycle_day_id\)\s+where cycle_day_id is not null\s+do nothing/i,
+  "el patch de conflicto conserva ON CONFLICT scoped parcial",
+);
+assert.match(
+  variableConflictPatch,
+  /on conflict \(user_id, local_date\)\s+where cycle_day_id is null\s+do nothing/i,
+  "el patch de conflicto conserva ON CONFLICT legacy parcial",
+);
+assert.match(
+  variableConflictPatch,
+  /from public\.training_daily_readiness as readiness\s+where readiness\.user_id = v_user_id\s+and readiness\.local_date = v_local_date\s+and readiness\.cycle_day_id = v_cycle_day_id/i,
+  "el patch de conflicto conserva lectura posterior scoped",
+);
+assert.match(
+  variableConflictPatch,
+  /from public\.training_daily_readiness as readiness\s+where readiness\.user_id = v_user_id\s+and readiness\.local_date = v_local_date\s+and readiness\.cycle_day_id is null/i,
+  "el patch de conflicto conserva lectura posterior legacy",
+);
+assert.match(
+  variableConflictPatch,
+  /returns table \([\s\S]*local_date date[\s\S]*\)[\s\S]*#variable_conflict use_column[\s\S]*on conflict \(user_id, local_date/i,
+  "el caso reproducido RETURNS TABLE local_date + ON CONFLICT local_date queda cubierto por la directiva",
+);
+assert.doesNotMatch(variableConflictPatch, /drop function/i, "el patch de conflicto no elimina la RPC");
+assert.doesNotMatch(variableConflictPatch, /save_daily_training_readiness\(\s*p_payload jsonb\s*,/i, "el patch de conflicto no agrega parametros");
+assert.doesNotMatch(variableConflictPatch, /security invoker/i, "el patch de conflicto no cambia a SECURITY INVOKER");
+assert.doesNotMatch(variableConflictPatch, /do update/i, "el patch de conflicto mantiene readiness inmutable");
+assert.doesNotMatch(variableConflictPatch, /delete from|drop table/i, "el patch de conflicto no borra datos");
 
 assert.equal(
   getCalendarDateInTimeZone(new Date("2026-06-16T02:30:00.000Z"), "America/Santiago"),
