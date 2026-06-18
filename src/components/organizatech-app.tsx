@@ -97,6 +97,7 @@ import {
   saveDailyTrainingReadiness,
   TrainingDailyReadinessRepositoryError,
   type TrainingDailyReadinessRecord,
+  type TrainingDailyReadinessScope,
 } from "@/lib/training/training-daily-readiness-repository";
 import {
   addCycleScopedTrainingDaysAndExercises,
@@ -152,7 +153,7 @@ const WORKOUT_DRAFT_KEY_PREFIX = "organizatech:workout-draft";
 const ACTIVE_FLOW_KEY_PREFIX = "organizatech:active-flow";
 const PASSWORD_RECOVERY_FLOW_KEY = "organizatech:password-recovery-flow";
 const ROUTINE_DRAFT_VERSION = 1;
-const WORKOUT_DRAFT_VERSION = 1;
+const WORKOUT_DRAFT_VERSION = 2;
 const ACTIVE_FLOW_VERSION = 1;
 const ROUTINE_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -296,11 +297,28 @@ interface WorkoutDraft {
   dataMode: DataMode;
   userKey: string;
   activeRoutineDay: string;
+  trainingContext: WorkoutTrainingContext;
   activeExerciseIndex: number;
   hasStartedTraining: boolean;
   readiness: TrainingReadiness | null;
   exerciseDrafts: Record<string, ExerciseDraft>;
 }
+
+type WorkoutTrainingContext =
+  | {
+    mode: "legacy";
+    cycleId: null;
+    cycleDayId: null;
+    plannedDay: TrainingDayCode;
+    plannedDate: string | null;
+  }
+  | {
+    mode: "cycle-scoped";
+    cycleId: string;
+    cycleDayId: string;
+    plannedDay: TrainingDayCode;
+    plannedDate: string;
+  };
 
 interface TrainingPlan {
   cycleType: TrainingCycleId;
@@ -652,12 +670,20 @@ export function OrganizatechApp({
     if (!isWorkoutDraftActive) return;
 
     function persistWorkoutDraft() {
+      let trainingContext: WorkoutTrainingContext;
+      try {
+        trainingContext = getCurrentWorkoutTrainingContext();
+      } catch {
+        return;
+      }
+
       saveWorkoutDraft({
         version: WORKOUT_DRAFT_VERSION,
         updatedAt: Date.now(),
         dataMode,
         userKey: getDraftUserKey(dataMode, supabaseUser?.id),
         activeRoutineDay,
+        trainingContext,
         activeExerciseIndex,
         hasStartedTraining,
         readiness,
@@ -744,6 +770,55 @@ export function OrganizatechApp({
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
     : cycleHistory.length + 1;
   const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
+
+  function getCurrentWorkoutTrainingContext(): WorkoutTrainingContext {
+    const plannedDay = getTrainingDayCode(visibleDay);
+
+    if (isTrainingCyclesRepositoryActive && persistedActiveCycle && isCycleScopedTrainingCycle(persistedActiveCycle)) {
+      if (!cycleScopedPlan) {
+        throw new TrainingDailyReadinessRepositoryError(
+          "invalid_context",
+          "No pudimos cargar el plan del ciclo para iniciar el entrenamiento.",
+        );
+      }
+
+      const cycleDay = findCycleScopedDayForTrainingDay(cycleScopedPlan, persistedActiveCycle.id, plannedDay);
+      if (!cycleDay) {
+        throw new TrainingDailyReadinessRepositoryError(
+          "invalid_context",
+          "No pudimos identificar el dia del ciclo para iniciar el entrenamiento.",
+        );
+      }
+
+      if (!persistedActiveCycle.plannedStartDate || !persistedActiveCycle.plannedEndDate) {
+        throw new TrainingDailyReadinessRepositoryError(
+          "invalid_context",
+          "El ciclo activo no tiene rango planificado para iniciar el entrenamiento.",
+        );
+      }
+
+      return {
+        mode: "cycle-scoped",
+        cycleId: persistedActiveCycle.id,
+        cycleDayId: cycleDay.id,
+        plannedDay,
+        plannedDate: getCycleScopedPlannedDate({
+          cyclePlannedStartDate: persistedActiveCycle.plannedStartDate,
+          cyclePlannedEndDate: persistedActiveCycle.plannedEndDate,
+          weekIndex: cycleDay.weekIndex,
+          dayCode: cycleDay.dayCode,
+        }),
+      };
+    }
+
+    return {
+      mode: "legacy",
+      cycleId: null,
+      cycleDayId: null,
+      plannedDay,
+      plannedDate: getCurrentSantiagoWeekDates()[visibleDay] ?? todayKey,
+    };
+  }
 
   function applySessionState(authState: SupabaseSessionState) {
     setIsSupabaseConfiguredState(authState.isConfigured);
@@ -1937,6 +2012,16 @@ export function OrganizatechApp({
     setDailyReadinessError("");
     setRoutineNotice("");
 
+    let trainingContext: WorkoutTrainingContext;
+    try {
+      trainingContext = getCurrentWorkoutTrainingContext();
+    } catch (error) {
+      const message = translateDailyReadinessError(error);
+      setDailyReadinessError(message);
+      setRoutineNotice(message);
+      return;
+    }
+
     if (dataMode !== "supabase" || !hasSupabaseSession) {
       setHasStartedTraining(true);
       return;
@@ -1944,7 +2029,7 @@ export function OrganizatechApp({
 
     setCheckingDailyReadiness(true);
     try {
-      const record = await getDailyTrainingReadiness();
+      const record = await getDailyTrainingReadiness(getDailyReadinessScopeFromWorkoutContext(trainingContext));
       setDailyReadinessRecord(record);
       setReadiness(record?.payload ?? null);
       setHasStartedTraining(true);
@@ -1969,6 +2054,14 @@ export function OrganizatechApp({
     if (savingDailyReadiness) return;
     setDailyReadinessError("");
 
+    let trainingContext: WorkoutTrainingContext;
+    try {
+      trainingContext = getCurrentWorkoutTrainingContext();
+    } catch (error) {
+      setDailyReadinessError(translateDailyReadinessError(error));
+      return;
+    }
+
     if (dataMode !== "supabase" || !hasSupabaseSession) {
       setReadiness(value);
       return;
@@ -1976,7 +2069,7 @@ export function OrganizatechApp({
 
     setSavingDailyReadiness(true);
     try {
-      const record = await saveDailyTrainingReadiness(value);
+      const record = await saveDailyTrainingReadiness(value, getDailyReadinessScopeFromWorkoutContext(trainingContext));
       setDailyReadinessRecord(record);
       setReadiness(record.payload);
     } catch (error) {
@@ -5332,6 +5425,7 @@ function loadWorkoutDraft(mode: DataMode, userId?: string) {
       activeRoutineDay: typeof parsed.activeRoutineDay === "string" && setupDays.includes(parsed.activeRoutineDay)
         ? parsed.activeRoutineDay
         : "Lunes",
+      trainingContext: normalizeWorkoutTrainingContext(parsed.trainingContext),
       activeExerciseIndex: Math.max(0, Number(parsed.activeExerciseIndex) || 0),
       hasStartedTraining: Boolean(parsed.hasStartedTraining),
       readiness: normalizeTrainingReadiness(parsed.readiness),
@@ -5346,6 +5440,54 @@ function loadWorkoutDraft(mode: DataMode, userId?: string) {
 function clearWorkoutDraft(mode: DataMode, userId?: string) {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(getWorkoutDraftKey(mode, userId));
+}
+
+function normalizeWorkoutTrainingContext(value: unknown): WorkoutTrainingContext {
+  if (!value || typeof value !== "object") {
+    return {
+      mode: "legacy",
+      cycleId: null,
+      cycleDayId: null,
+      plannedDay: "monday",
+      plannedDate: null,
+    };
+  }
+
+  const parsed = value as Partial<WorkoutTrainingContext>;
+  const plannedDay = isTrainingDayCode(parsed.plannedDay) ? parsed.plannedDay : "monday";
+  if (
+    parsed.mode === "cycle-scoped" &&
+    typeof parsed.cycleId === "string" &&
+    parsed.cycleId.trim().length > 0 &&
+    typeof parsed.cycleDayId === "string" &&
+    parsed.cycleDayId.trim().length > 0 &&
+    typeof parsed.plannedDate === "string" &&
+    parsed.plannedDate.trim().length > 0
+  ) {
+    return {
+      mode: "cycle-scoped",
+      cycleId: parsed.cycleId,
+      cycleDayId: parsed.cycleDayId,
+      plannedDay,
+      plannedDate: parsed.plannedDate,
+    };
+  }
+
+  return {
+    mode: "legacy",
+    cycleId: null,
+    cycleDayId: null,
+    plannedDay,
+    plannedDate: typeof parsed.plannedDate === "string" ? parsed.plannedDate : null,
+  };
+}
+
+function getDailyReadinessScopeFromWorkoutContext(context: WorkoutTrainingContext): TrainingDailyReadinessScope {
+  if (context.mode === "cycle-scoped") {
+    return { mode: "cycle-scoped", cycleDayId: context.cycleDayId };
+  }
+
+  return { mode: "legacy" };
 }
 
 function createTrainingCycleSnapshot(index: number, plan: TrainingPlan, exercises: ExerciseTemplate[], entries: ExerciseEntry[]): TrainingCycleSnapshot {
@@ -5979,6 +6121,18 @@ function getTrainingDayCode(day: string): TrainingDayCode {
     Domingo: "sunday",
   };
   return mapping[day] ?? "monday";
+}
+
+function isTrainingDayCode(value: unknown): value is TrainingDayCode {
+  return typeof value === "string" && [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+  ].includes(value);
 }
 
 function getSetupDayFromTrainingDayCode(dayCode: TrainingDayCode) {
