@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/lib/progress/progress.test.ts && tsx src/lib/training/cycle-scoped-planned-date.test.ts && tsx src/lib/training/training-cycle-protection.test.ts && tsx src/lib/training/training-cycle-number.test.ts && tsx src/lib/training/training-exercise-selection.test.ts && tsx src/lib/training/training-day-order.test.ts && tsx src/lib/training/cycle-scoped-plan-edit.test.ts && tsx src/lib/training/training-daily-readiness-repository.test.ts && tsx src/lib/training/training-exercise-lineage.test.ts",
+    "test": "tsx src/lib/progress/progress.test.ts && tsx src/lib/training/cycle-scoped-planned-date.test.ts && tsx src/lib/training/training-cycle-protection.test.ts && tsx src/lib/training/training-cycle-number.test.ts && tsx src/lib/training/training-exercise-selection.test.ts && tsx src/lib/training/training-day-order.test.ts && tsx src/lib/training/cycle-scoped-plan-edit.test.ts && tsx src/lib/training/training-daily-readiness-repository.test.ts && tsx src/lib/training/training-exercise-lineage.test.ts && tsx src/lib/training/exercise-last-performance-repository.test.ts",
     "extract:excel": "python scripts/extract_excel.py"
   },
   "dependencies": {
