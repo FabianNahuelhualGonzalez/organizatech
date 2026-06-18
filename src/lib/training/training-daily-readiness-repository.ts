@@ -8,10 +8,6 @@ export interface TrainingDailyReadinessPayload {
   skipped: boolean;
 }
 
-export type TrainingDailyReadinessScope =
-  | { mode: "legacy" }
-  | { mode: "cycle-scoped"; cycleDayId: string };
-
 export interface TrainingDailyReadinessRecord {
   id: string;
   localDate: string;
@@ -24,7 +20,6 @@ export type TrainingDailyReadinessErrorCode =
   | "session_required"
   | "session_expired"
   | "invalid_payload"
-  | "invalid_context"
   | "permission_denied"
   | "unexpected";
 
@@ -42,7 +37,6 @@ export class TrainingDailyReadinessRepositoryError extends Error {
 interface TrainingDailyReadinessRow {
   id: string;
   local_date: string;
-  cycle_day_id?: string | null;
   payload: unknown;
   created_at: string;
   updated_at: string;
@@ -79,23 +73,16 @@ export function getDailyTrainingReadinessLocalDate(reference = new Date()) {
 }
 
 export async function getDailyTrainingReadiness(
-  scope: TrainingDailyReadinessScope,
   reference = new Date(),
 ): Promise<TrainingDailyReadinessRecord | null> {
-  const normalizedScope = normalizeDailyReadinessScope(scope);
   const localDate = getDailyTrainingReadinessLocalDate(reference);
   const { supabase } = await getAuthenticatedDailyReadinessRepository();
 
-  let query = supabase
+  const { data, error } = await supabase
     .from("training_daily_readiness")
-    .select("id,local_date,cycle_day_id,payload,created_at,updated_at")
-    .eq("local_date", localDate);
-
-  query = normalizedScope.mode === "cycle-scoped"
-    ? query.eq("cycle_day_id", normalizedScope.cycleDayId)
-    : query.is("cycle_day_id", null);
-
-  const { data, error } = await query.maybeSingle();
+    .select("id,local_date,payload,created_at,updated_at")
+    .eq("local_date", localDate)
+    .maybeSingle();
 
   if (error) throw mapDailyReadinessRepositoryError(error);
   if (!data) return null;
@@ -105,17 +92,12 @@ export async function getDailyTrainingReadiness(
 
 export async function saveDailyTrainingReadiness(
   payload: TrainingDailyReadinessPayload,
-  scope: TrainingDailyReadinessScope,
 ): Promise<TrainingDailyReadinessRecord> {
-  const normalizedScope = normalizeDailyReadinessScope(scope);
   const normalizedPayload = normalizeDailyReadinessPayload(payload);
   const { supabase } = await getAuthenticatedDailyReadinessRepository();
-  const rpcPayload = normalizedScope.mode === "cycle-scoped"
-    ? { ...normalizedPayload, cycle_day_id: normalizedScope.cycleDayId }
-    : { ...normalizedPayload, cycle_day_id: null };
 
   const { data, error } = await supabase.rpc("save_daily_training_readiness", {
-    p_payload: rpcPayload,
+    p_payload: normalizedPayload,
   });
 
   if (error) throw mapDailyReadinessRepositoryError(error);
@@ -153,32 +135,6 @@ export function normalizeDailyReadinessPayload(
 
 export function shouldShowDailyReadinessForm(record: TrainingDailyReadinessRecord | null) {
   return record === null;
-}
-
-export function normalizeDailyReadinessScope(scope: TrainingDailyReadinessScope): TrainingDailyReadinessScope {
-  if (!scope || typeof scope !== "object" || !("mode" in scope)) {
-    throw new TrainingDailyReadinessRepositoryError(
-      "invalid_context",
-      "No pudimos identificar el entrenamiento para el formulario.",
-    );
-  }
-
-  if (scope.mode === "legacy") return { mode: "legacy" };
-
-  if (scope.mode === "cycle-scoped") {
-    if (typeof scope.cycleDayId === "string" && scope.cycleDayId.trim().length > 0) {
-      return { mode: "cycle-scoped", cycleDayId: scope.cycleDayId.trim() };
-    }
-    throw new TrainingDailyReadinessRepositoryError(
-      "invalid_context",
-      "No pudimos identificar el dia del ciclo para el formulario.",
-    );
-  }
-
-  throw new TrainingDailyReadinessRepositoryError(
-    "invalid_context",
-    "No pudimos identificar el entrenamiento para el formulario.",
-  );
 }
 
 function getCalendarDateFormatter(timeZone: string) {
@@ -254,9 +210,6 @@ function mapDailyReadinessRepositoryError(error: unknown) {
   }
   if (message.toLowerCase().includes("payload") || message.toLowerCase().includes("motivacion")) {
     return new TrainingDailyReadinessRepositoryError("invalid_payload", "Formulario de motivacion invalido.", error);
-  }
-  if (message.toLowerCase().includes("dia del ciclo") || message.toLowerCase().includes("entrenamiento")) {
-    return new TrainingDailyReadinessRepositoryError("invalid_context", "No pudimos identificar el entrenamiento para el formulario.", error);
   }
   return new TrainingDailyReadinessRepositoryError("unexpected", "No pudimos guardar el formulario diario.", error);
 }
