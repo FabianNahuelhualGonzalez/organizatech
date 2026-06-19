@@ -99,6 +99,25 @@ import {
   type TrainingDailyReadinessRecord,
 } from "@/lib/training/training-daily-readiness-repository";
 import {
+  getLatestExercisePerformanceByLineage,
+  type LatestExercisePerformance,
+} from "@/lib/training/exercise-last-performance-repository";
+import {
+  createStableWorkoutStartedAt,
+  createLatestExercisePerformanceRequest,
+  getLatestExercisePerformanceIdleState,
+  getLatestExercisePerformanceLoadingState,
+  loadLatestExercisePerformanceForRequest,
+} from "@/lib/training/exercise-last-performance-loader";
+import {
+  clearWorkoutDraft as clearStoredWorkoutDraft,
+  getDraftUserKey,
+  getWorkoutDraftKey as getStoredWorkoutDraftKey,
+  saveWorkoutDraft as saveStoredWorkoutDraft,
+  loadWorkoutDraft as loadStoredWorkoutDraft,
+  type WorkoutDraftStorageRecord,
+} from "@/lib/training/workout-draft-storage";
+import {
   addCycleScopedTrainingDaysAndExercises,
   createTrainingCycleWithPlan,
   createTrainingSessionWithCycleEntries,
@@ -148,7 +167,6 @@ const setupDays: string[] = [...TRAINING_DAY_LABELS];
 const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
 const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
 const ROUTINE_DRAFT_KEY_PREFIX = "organizatech:routine-draft";
-const WORKOUT_DRAFT_KEY_PREFIX = "organizatech:workout-draft";
 const ACTIVE_FLOW_KEY_PREFIX = "organizatech:active-flow";
 const PASSWORD_RECOVERY_FLOW_KEY = "organizatech:password-recovery-flow";
 const ROUTINE_DRAFT_VERSION = 1;
@@ -290,17 +308,7 @@ interface ActiveFlowState {
   flow: ActiveFlow;
 }
 
-interface WorkoutDraft {
-  version: number;
-  updatedAt: number;
-  dataMode: DataMode;
-  userKey: string;
-  activeRoutineDay: string;
-  activeExerciseIndex: number;
-  hasStartedTraining: boolean;
-  readiness: TrainingReadiness | null;
-  exerciseDrafts: Record<string, ExerciseDraft>;
-}
+type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>>;
 
 interface TrainingPlan {
   cycleType: TrainingCycleId;
@@ -405,6 +413,11 @@ export function OrganizatechApp({
   const [savingDailyReadiness, setSavingDailyReadiness] = useState(false);
   const [dailyReadinessError, setDailyReadinessError] = useState("");
   const [hasStartedTraining, setHasStartedTraining] = useState(false);
+  const [activeWorkoutStartedAt, setActiveWorkoutStartedAt] = useState<string | null>(null);
+  const [latestExercisePerformance, setLatestExercisePerformance] = useState<LatestExercisePerformance | null>(null);
+  const [latestExercisePerformanceLoading, setLatestExercisePerformanceLoading] = useState(false);
+  const [latestExercisePerformanceError, setLatestExercisePerformanceError] = useState("");
+  const latestExercisePerformanceRequestKeyRef = useRef<string | null>(null);
   const [routineEditorReturnScreen, setRoutineEditorReturnScreen] = useState<Screen | null>(null);
   const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>(() => loadCycleHistory());
   const [persistedActiveCycle, setPersistedActiveCycle] = useState<PersistedTrainingCycle | null>(null);
@@ -649,7 +662,8 @@ export function OrganizatechApp({
 
   useEffect(() => {
     const isWorkoutDraftActive = screen === "entrenamiento" && hasStartedTraining;
-    if (!isWorkoutDraftActive) return;
+    if (!isWorkoutDraftActive || !activeWorkoutStartedAt) return;
+    const stableWorkoutStartedAt = activeWorkoutStartedAt;
 
     function persistWorkoutDraft() {
       saveWorkoutDraft({
@@ -659,6 +673,7 @@ export function OrganizatechApp({
         userKey: getDraftUserKey(dataMode, supabaseUser?.id),
         activeRoutineDay,
         activeExerciseIndex,
+        activeWorkoutStartedAt: stableWorkoutStartedAt,
         hasStartedTraining,
         readiness,
         exerciseDrafts,
@@ -673,13 +688,24 @@ export function OrganizatechApp({
       window.removeEventListener("pagehide", persistWorkoutDraft);
       document.removeEventListener("visibilitychange", persistWorkoutDraft);
     };
-  }, [activeExerciseIndex, activeRoutineDay, dataMode, exerciseDrafts, hasStartedTraining, readiness, screen, supabaseUser?.id]);
+  }, [activeExerciseIndex, activeRoutineDay, activeWorkoutStartedAt, dataMode, exerciseDrafts, hasStartedTraining, readiness, screen, supabaseUser?.id]);
 
   useEffect(() => {
     if (screen === "entrenamiento" && !hasStartedTraining) {
       clearWorkoutDraft(dataMode, supabaseUser?.id);
     }
   }, [dataMode, hasStartedTraining, screen, supabaseUser?.id]);
+
+  useEffect(() => {
+    const isActiveWorkout = screen === "entrenamiento" && hasStartedTraining;
+    if (isActiveWorkout && !activeWorkoutStartedAt) {
+      setActiveWorkoutStartedAt(createStableWorkoutStartedAt());
+      return;
+    }
+    if (!isActiveWorkout && activeWorkoutStartedAt) {
+      setActiveWorkoutStartedAt(null);
+    }
+  }, [activeWorkoutStartedAt, hasStartedTraining, screen]);
 
   const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
   const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
@@ -727,6 +753,11 @@ export function OrganizatechApp({
       : dashboardCarouselDays[0] ?? calendarDashboardDay;
   const dayExercises = displayExercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay);
   const dashboardExercises = displayExercises.filter((exercise) => (exercise.day ?? dashboardDay) === dashboardDay);
+  const activeWorkoutExercise = screen === "entrenamiento" && hasStartedTraining && readiness
+    ? dayExercises[activeExerciseIndex] ?? dayExercises[0] ?? null
+    : null;
+  const activeWorkoutExerciseLineageId = activeWorkoutExercise?.exerciseLineageId ?? null;
+  const activeWorkoutExerciseId = activeWorkoutExercise?.id ?? null;
   const visibleDayCoverage = isCycleScopedActiveCycle
     ? getCycleScopedDayCoverage(dayExercises, displayEntries)
     : null;
@@ -744,6 +775,54 @@ export function OrganizatechApp({
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
     : cycleHistory.length + 1;
   const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
+
+  useEffect(() => {
+    if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
+      latestExercisePerformanceRequestKeyRef.current = null;
+      const idle = getLatestExercisePerformanceIdleState();
+      setLatestExercisePerformance(idle.performance);
+      setLatestExercisePerformanceLoading(idle.loading);
+      setLatestExercisePerformanceError(idle.error);
+      return;
+    }
+
+    const request = createLatestExercisePerformanceRequest({
+      exerciseLineageId: activeWorkoutExerciseLineageId,
+      currentSessionId: null,
+      beforeTimestamp: activeWorkoutStartedAt,
+    });
+
+    latestExercisePerformanceRequestKeyRef.current = request?.key ?? null;
+
+    if (!request) {
+      const idle = getLatestExercisePerformanceIdleState();
+      setLatestExercisePerformance(idle.performance);
+      setLatestExercisePerformanceLoading(idle.loading);
+      setLatestExercisePerformanceError(idle.error);
+      return;
+    }
+
+    const loading = getLatestExercisePerformanceLoadingState();
+    setLatestExercisePerformance(loading.performance);
+    setLatestExercisePerformanceLoading(loading.loading);
+    setLatestExercisePerformanceError(loading.error);
+
+    let isMounted = true;
+    void loadLatestExercisePerformanceForRequest({
+      request,
+      fetcher: getLatestExercisePerformanceByLineage,
+      getCurrentRequestKey: () => latestExercisePerformanceRequestKeyRef.current,
+    }).then((result) => {
+      if (!isMounted || result.stale) return;
+      setLatestExercisePerformance(result.performance);
+      setLatestExercisePerformanceLoading(result.loading);
+      setLatestExercisePerformanceError(result.error);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt]);
 
   function applySessionState(authState: SupabaseSessionState) {
     setIsSupabaseConfiguredState(authState.isConfigured);
@@ -838,6 +917,7 @@ export function OrganizatechApp({
 
     setActiveRoutineDay(draft.activeRoutineDay);
     setActiveExerciseIndex(draft.activeExerciseIndex);
+    setActiveWorkoutStartedAt(draft.activeWorkoutStartedAt);
     setHasStartedTraining(draft.hasStartedTraining);
     setReadiness(draft.readiness);
     setExerciseDrafts(draft.exerciseDrafts);
@@ -1928,6 +2008,10 @@ export function OrganizatechApp({
     }));
   }
 
+  function markWorkoutStartedAt() {
+    setActiveWorkoutStartedAt((current) => current ?? createStableWorkoutStartedAt());
+  }
+
   async function startTrainingWithDailyReadiness() {
     if (checkingDailyReadiness || savingDailyReadiness) return;
 
@@ -1938,6 +2022,7 @@ export function OrganizatechApp({
     setRoutineNotice("");
 
     if (dataMode !== "supabase" || !hasSupabaseSession) {
+      markWorkoutStartedAt();
       setHasStartedTraining(true);
       return;
     }
@@ -1947,6 +2032,7 @@ export function OrganizatechApp({
       const record = await getDailyTrainingReadiness();
       setDailyReadinessRecord(record);
       setReadiness(record?.payload ?? null);
+      markWorkoutStartedAt();
       setHasStartedTraining(true);
     } catch (error) {
       const message = translateDailyReadinessError(error);
@@ -5153,16 +5239,12 @@ function saveCycleHistory(history: TrainingCycleSnapshot[]) {
   window.localStorage.setItem(LOCAL_CYCLE_HISTORY_KEY, JSON.stringify(history));
 }
 
-function getDraftUserKey(mode: DataMode, userId?: string) {
-  return mode === "supabase" ? `supabase:${userId ?? "anonymous"}` : "demo:local";
-}
-
 function getRoutineDraftKey(mode: DataMode, userId?: string) {
   return `${ROUTINE_DRAFT_KEY_PREFIX}:${getDraftUserKey(mode, userId)}`;
 }
 
 function getWorkoutDraftKey(mode: DataMode, userId?: string) {
-  return `${WORKOUT_DRAFT_KEY_PREFIX}:${getDraftUserKey(mode, userId)}`;
+  return getStoredWorkoutDraftKey(mode, userId);
 }
 
 function getActiveFlowKey(mode: DataMode, userId?: string) {
@@ -5304,48 +5386,23 @@ function clearRoutineDraft(mode: DataMode, userId?: string) {
 }
 
 function saveWorkoutDraft(draft: WorkoutDraft) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(`${WORKOUT_DRAFT_KEY_PREFIX}:${draft.userKey}`, JSON.stringify(draft));
+  saveStoredWorkoutDraft(draft);
 }
 
 function loadWorkoutDraft(mode: DataMode, userId?: string) {
-  if (typeof window === "undefined") return null;
-
-  try {
-    const raw = window.localStorage.getItem(getWorkoutDraftKey(mode, userId));
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw) as Partial<WorkoutDraft>;
-    const userKey = getDraftUserKey(mode, userId);
-    const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
-    const isExpired = updatedAt === 0 || Date.now() - updatedAt > WORKOUT_DRAFT_MAX_AGE_MS;
-    if (parsed.version !== WORKOUT_DRAFT_VERSION || parsed.userKey !== userKey || parsed.dataMode !== mode || isExpired) {
-      clearWorkoutDraft(mode, userId);
-      return null;
-    }
-
-    return {
-      version: WORKOUT_DRAFT_VERSION,
-      updatedAt,
-      dataMode: mode,
-      userKey,
-      activeRoutineDay: typeof parsed.activeRoutineDay === "string" && setupDays.includes(parsed.activeRoutineDay)
-        ? parsed.activeRoutineDay
-        : "Lunes",
-      activeExerciseIndex: Math.max(0, Number(parsed.activeExerciseIndex) || 0),
-      hasStartedTraining: Boolean(parsed.hasStartedTraining),
-      readiness: normalizeTrainingReadiness(parsed.readiness),
-      exerciseDrafts: normalizeExerciseDrafts(parsed.exerciseDrafts),
-    } satisfies WorkoutDraft;
-  } catch {
-    clearWorkoutDraft(mode, userId);
-    return null;
-  }
+  return loadStoredWorkoutDraft({
+    mode,
+    userId,
+    version: WORKOUT_DRAFT_VERSION,
+    maxAgeMs: WORKOUT_DRAFT_MAX_AGE_MS,
+    setupDays,
+    normalizeReadiness: normalizeTrainingReadiness,
+    normalizeExerciseDrafts,
+  });
 }
 
 function clearWorkoutDraft(mode: DataMode, userId?: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(getWorkoutDraftKey(mode, userId));
+  clearStoredWorkoutDraft(mode, userId);
 }
 
 function createTrainingCycleSnapshot(index: number, plan: TrainingPlan, exercises: ExerciseTemplate[], entries: ExerciseEntry[]): TrainingCycleSnapshot {
