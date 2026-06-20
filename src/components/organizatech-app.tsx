@@ -110,6 +110,11 @@ import {
   loadLatestExercisePerformanceForRequest,
 } from "@/lib/training/exercise-last-performance-loader";
 import {
+  buildExerciseLastPerformancePresentation,
+  type ExerciseLastPerformancePresentation,
+} from "@/lib/training/exercise-last-performance-presentation";
+import { buildExerciseCurrentResultPresentation } from "@/lib/training/exercise-current-result-presentation";
+import {
   clearWorkoutDraft as clearStoredWorkoutDraft,
   getDraftUserKey,
   getWorkoutDraftKey as getStoredWorkoutDraftKey,
@@ -2603,6 +2608,9 @@ export function OrganizatechApp({
           setActiveIndex={setActiveExerciseIndex}
           drafts={exerciseDrafts}
           registeredExerciseIds={registeredCycleScopedExerciseIds}
+          latestExercisePerformance={latestExercisePerformance}
+          latestExercisePerformanceLoading={latestExercisePerformanceLoading}
+          latestExercisePerformanceError={latestExercisePerformanceError}
           updateDraft={updateExerciseDraft}
           registerExercise={registerCurrentExercise}
           saveCompletedTraining={saveCompletedTraining}
@@ -4152,6 +4160,9 @@ function GuidedTrainingScreen({
   setActiveIndex,
   drafts,
   registeredExerciseIds,
+  latestExercisePerformance,
+  latestExercisePerformanceLoading,
+  latestExercisePerformanceError,
   updateDraft,
   registerExercise,
   saveCompletedTraining,
@@ -4169,6 +4180,9 @@ function GuidedTrainingScreen({
   setActiveIndex: (index: number) => void;
   drafts: Record<string, ExerciseDraft>;
   registeredExerciseIds: ReadonlySet<string>;
+  latestExercisePerformance: LatestExercisePerformance | null;
+  latestExercisePerformanceLoading: boolean;
+  latestExercisePerformanceError: string;
   updateDraft: (exercise: ExerciseTemplate, patch: Partial<ExerciseDraft>) => void;
   registerExercise: () => void;
   saveCompletedTraining: () => void;
@@ -4204,8 +4218,20 @@ function GuidedTrainingScreen({
         rir: draft.rir,
       })
     : null;
+  const performancePresentation = activeExercise
+    ? buildExerciseLastPerformancePresentation({
+        planned: {
+          targetSets: activeExercise.targetSets,
+          targetReps: activeExercise.targetReps,
+          baseWeight: activeExercise.baseWeight,
+        },
+        latest: latestExercisePerformance,
+        loading: latestExercisePerformanceLoading,
+        error: latestExercisePerformanceError,
+      })
+    : null;
 
-  if (!activeExercise || !draft || !preview) {
+  if (!activeExercise || !draft || !preview || !performancePresentation) {
     return (
       <section className="screen">
         <div className="card wide">
@@ -4288,13 +4314,7 @@ function GuidedTrainingScreen({
           <h3>{activeExercise.name}</h3>
         </div>
         <div className="series-exercise-card">
-          <div className="series-exercise-top">
-            <div>
-              <span>Objetivo de tu rutina</span>
-              <strong>{formatKg(activeExercise.baseWeight)} · {activeExercise.targetReps} reps</strong>
-            </div>
-            <span>{activeExercise.targetSets} series</span>
-          </div>
+          <ExerciseLastPerformancePanel presentation={performancePresentation} exerciseId={activeExercise.id} />
           <label className="series-weight-field">
             <span>Peso usado</span>
             <input
@@ -4345,28 +4365,85 @@ function GuidedTrainingScreen({
   );
 }
 
+function ExerciseLastPerformancePanel({
+  presentation,
+  exerciseId,
+}: {
+  presentation: ExerciseLastPerformancePresentation;
+  exerciseId: string;
+}) {
+  return (
+    <div className="exercise-reference-card" key={exerciseId}>
+      <div className="exercise-reference-header">
+        <span>Referencia de hoy</span>
+      </div>
+
+      <div className="exercise-reference-block objective">
+        <p className="exercise-reference-label">Objetivo</p>
+        <strong className="exercise-reference-value">{presentation.objectiveText}</strong>
+      </div>
+
+      <div className={`exercise-reference-block detail ${presentation.status}`}>
+        {presentation.seriesRows.length > 0 ? (
+          <details className="exercise-series-details" key={`series-${exerciseId}`}>
+            <summary>
+              <span>{presentation.seriesDetailTitle}</span>
+              <ChevronDown size={16} aria-hidden="true" />
+            </summary>
+            <div className="exercise-series-detail-list">
+              {presentation.seriesRows.map((row) => (
+                <div className="exercise-series-detail-row" key={`${row.label}-${row.value}`}>
+                  <span>{row.label}</span>
+                  <strong>{row.value}</strong>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : (
+          <>
+            <p className="exercise-reference-label">{presentation.lastHeaderText}</p>
+            {presentation.status === "loading" ? (
+              <div className="exercise-performance-skeleton" aria-label="Cargando historial del ejercicio" />
+            ) : (
+              <strong className="exercise-reference-value muted">{presentation.lastSummaryText}</strong>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="exercise-reference-block goal">
+        <p className="exercise-reference-label">Meta de hoy</p>
+        <strong className="exercise-reference-value">{presentation.todayGoalText}</strong>
+      </div>
+    </div>
+  );
+}
+
 function SeriesResult({ entry }: { entry: ExerciseMetrics }) {
-  const tone = getObjectiveTone(entry.objectiveStatus);
-  const statusLabel = getObjectiveStatusLabel(entry.objectiveStatus);
+  const result = buildExerciseCurrentResultPresentation({
+    totalReps: entry.totalReps,
+    targetTotalReps: entry.targetTotalReps,
+    completedSets: entry.completedSets,
+    targetSets: entry.targetSets,
+    actualWeight: entry.weight,
+    targetWeight: entry.previousWeight,
+  });
 
   return (
-    <div className={`series-result ${tone}`}>
-      <p className="series-result-label">Resultado del ejercicio</p>
-      <div className={`series-result-status ${tone}`}>{statusLabel}</div>
-      <div className="series-result-header">
-        <span>kg actual</span>
-        <strong>{formatKg(entry.weight)}</strong>
+    <div className={`series-result session-summary ${result.tone}`}>
+      <p className="series-result-label">Resumen de tu sesión</p>
+      <div className="session-summary-hero">
+        <strong>{result.headline}</strong>
+        <span>{result.message}</span>
       </div>
-      <div className="series-result-deltas">
-        <DeltaValue value={entry.repsDifference} suffix="reps" />
-        <DeltaValue value={entry.kgDifference} suffix="kg" />
-        <DeltaValue value={entry.setsDifference} suffix="series" />
-      </div>
-      <div className="series-result-badges">
-        <StatusBadge status={entry.objectiveStatus} />
-        <ChangeBadge value={entry.kgDifference} positive="Subimos kg" negative="Bajamos kg" neutral="Mismo kg" />
-        <ChangeBadge value={entry.repsDifference} positive="Subimos reps" negative="Bajamos reps" neutral="Mismas reps" />
-        <ChangeBadge value={entry.setsDifference} positive="Mas series" negative="Menos series" neutral="Mismas series" />
+      <div className="session-summary-grid">
+        {result.items.map((item) => (
+          <div className={`session-summary-item ${item.tone}`} key={item.label}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+            <em>{item.detail}</em>
+          </div>
+        ))}
       </div>
     </div>
   );
