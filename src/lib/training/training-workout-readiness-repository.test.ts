@@ -212,8 +212,9 @@ async function run() {
   assert.doesNotMatch(repositorySource, /save_daily_training_readiness/, "repositorio v2 no referencia la RPC legacy");
   assert.doesNotMatch(repositorySource, /p_user_id|p_local_date/, "repositorio v2 no envia user_id ni local_date como parametros RPC");
   assert.doesNotMatch(repositorySource, /as unknown as/, "repositorio v2 no usa casts dobles para mapear filas RPC");
-  assert.match(appSource, /saveTrainingWorkoutReadiness/, "organizatech-app integra solo save readiness v2");
-  assert.doesNotMatch(appSource, /linkTrainingWorkoutReadinessSession/, "organizatech-app no integra link readiness v2");
+  assert.match(appSource, /saveTrainingWorkoutReadiness/, "organizatech-app integra save readiness v2");
+  assert.match(appSource, /linkTrainingWorkoutReadinessSession/, "organizatech-app integra link readiness v2 desde el repositorio");
+  assert.doesNotMatch(appSource, /save_training_workout_readiness_v2|link_training_workout_readiness_session_v2/, "organizatech-app no usa nombres RPC v2 directos");
   assert.equal(testPathOccurrences.length, 1, "package.json incluye el test nuevo exactamente una vez");
 
   console.log("training-workout-readiness repository tests passed");

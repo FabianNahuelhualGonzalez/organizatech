@@ -445,10 +445,13 @@ async function run() {
     const legacyReadinessSource = readFileSync("src/lib/training/training-daily-readiness-repository.ts", "utf8");
     const packageJson = readFileSync("package.json", "utf8");
     assert.match(appSource, /saveTrainingWorkoutReadiness/, "organizatech-app importa save readiness v2");
-    assert.doesNotMatch(appSource, /linkTrainingWorkoutReadinessSession|link_training_workout_readiness_session_v2/, "organizatech-app no importa ni llama link readiness v2");
-    assert.doesNotMatch(appSource, /save_training_workout_readiness_v2/, "organizatech-app no contiene nombre RPC v2 directo");
+    assert.match(appSource, /linkTrainingWorkoutReadinessSession/, "organizatech-app integra link readiness v2 solo desde repositorio");
+    assert.match(appSource, /async function confirmTrainingWorkoutReadinessLink\(pendingLink: PendingWorkoutReadinessLink\)[\s\S]*linkTrainingWorkoutReadinessSession\(\{[\s\S]*workoutAttemptId: pendingLink\.workoutAttemptId,[\s\S]*trainingSessionId: pendingLink\.trainingSessionId/, "confirm link usa exclusivamente IDs del pending");
+    assert.doesNotMatch(appSource, /save_training_workout_readiness_v2|link_training_workout_readiness_session_v2/, "organizatech-app no contiene nombres RPC v2 directos");
     assert.match(appSource, /workoutStartInFlightRef = useRef\(false\)/, "organizatech-app declara lock sincronico de inicio");
     assert.match(appSource, /dailyReadinessSaveInFlightRef = useRef\(false\)/, "organizatech-app declara lock sincronico del save readiness");
+    assert.match(appSource, /workoutCompletionInFlightRef = useRef\(false\)/, "organizatech-app declara lock sincronico de completion");
+    assert.match(appSource, /pendingReadinessLinkRef = useRef<PendingWorkoutReadinessLink \| null>\(null\)/, "organizatech-app declara ref sincronico del pending link");
     assert.match(appSource, /if \(!tryAcquireWorkoutStartLock\(workoutStartInFlightRef\)\) return;[\s\S]*prepareWorkoutStartSnapshot/, "el lock se adquiere antes de preparar snapshot o generar UUID");
     assert.match(appSource, /finally \{\s*releaseWorkoutStartLock\(workoutStartInFlightRef\);\s*\}/, "el lock se libera en finally");
     const persistReadinessStart = appSource.indexOf("async function persistDailyReadiness(value: TrainingReadiness)");
@@ -464,8 +467,8 @@ async function run() {
     assert.match(appSource, /activeWorkoutAttemptIdRef = useRef<string \| null>\(null\)/, "organizatech-app declara ref sincronico del attempt");
     assert.match(appSource, /activeWorkoutReadinessContextRef = useRef<ActiveWorkoutReadinessContext \| null>\(null\)/, "organizatech-app declara contexto inmutable de readiness v2");
     assert.match(appSource, /activeWorkoutAttemptIdRef\.current = attemptId;[\s\S]*setActiveWorkoutAttemptId\(attemptId\)/, "organizatech-app sincroniza ref al generar o reutilizar attempt");
-    assert.match(appSource, /activeWorkoutAttemptIdRef\.current = draft\.workoutAttemptId;[\s\S]*activeWorkoutReadinessContextRef\.current = createActiveWorkoutReadinessContext/, "organizatech-app sincroniza ref y contexto en recovery");
-    assert.match(appSource, /activeWorkoutAttemptIdRef\.current = null;[\s\S]*activeWorkoutReadinessContextRef\.current = null;[\s\S]*setActiveWorkoutAttemptId\(null\)/, "organizatech-app limpia ref/contexto en limpieza definitiva");
+    assert.match(appSource, /activeWorkoutAttemptIdRef\.current = draft\.workoutAttemptId;[\s\S]*setPendingWorkoutReadinessLink\(draft\.pendingReadinessLink\);[\s\S]*activeWorkoutReadinessContextRef\.current = createActiveWorkoutReadinessContext/, "organizatech-app sincroniza ref, pending y contexto en recovery");
+    assert.match(appSource, /activeWorkoutAttemptIdRef\.current = null;[\s\S]*activeWorkoutReadinessContextRef\.current = null;[\s\S]*setActiveWorkoutAttemptId\(null\);[\s\S]*setPendingWorkoutReadinessLink\(null\)/, "organizatech-app limpia ref/contexto/pending en limpieza definitiva");
     assert.match(appSource, /hasRecoverableWorkoutStart/, "organizatech-app distingue inicio recuperable");
     assert.match(appSource, /if \(trainingWorkoutReadinessV2Enabled && startSnapshot\.attemptId\) \{[\s\S]*setHasRecoverableWorkoutStart\(true\)/, "la rama recuperable conserva attempt y startedAt");
     const recoverableBranch = appSource.match(/if \(trainingWorkoutReadinessV2Enabled && startSnapshot\.attemptId\) \{[\s\S]*?return;\s*\}/)?.[0] ?? "";
@@ -488,8 +491,33 @@ async function run() {
     assert.match(appSource, /await cancelTrainingCycle[\s\S]*clearWorkoutDraft\(dataMode, supabaseUser\?\.id\)/, "deleteCurrentTrainingCycle limpia solo despues del cancel exitoso");
     assert.match(appSource, /workoutAttemptId: attemptId/, "organizatech-app guarda el attempt recien resuelto en el draft inicial");
     assert.match(appSource, /pendingReadinessLink: nextPendingReadinessLink/, "organizatech-app guarda el pending link en el draft inicial");
+    assert.match(appSource, /pendingReadinessLink: pendingReadinessLinkRef\.current/, "autosave usa pending ref como fuente primaria");
     assert.match(appSource, /setActiveWorkoutAttemptId\(draft\.workoutAttemptId\)/, "organizatech-app recupera workoutAttemptId del draft");
-    assert.match(appSource, /setPendingReadinessLink\(draft\.pendingReadinessLink\)/, "organizatech-app recupera pendingReadinessLink del draft");
+    assert.match(appSource, /setPendingWorkoutReadinessLink\(draft\.pendingReadinessLink\)/, "organizatech-app recupera pendingReadinessLink en state y ref");
+    const completionStart = appSource.indexOf("async function saveCompletedTraining()");
+    const completionEnd = appSource.indexOf("  function clearAuthForms", completionStart);
+    const completionBlock = completionStart >= 0 && completionEnd > completionStart ? appSource.slice(completionStart, completionEnd) : "";
+    assert.match(completionBlock, /if \(!tryAcquireWorkoutStartLock\(workoutCompletionInFlightRef\)\) return;/, "completion adquiere lock antes de operar");
+    const completionLockIndex = completionBlock.indexOf("tryAcquireWorkoutStartLock(workoutCompletionInFlightRef)");
+    for (const operation of ["pendingReadinessLinkRef.current", "createTrainingSessionWithCycleEntries", "saveTrainingSessionWithEntries", "confirmTrainingWorkoutReadinessLink"]) {
+      const operationIndex = completionBlock.indexOf(operation);
+      assert.ok(completionLockIndex >= 0 && operationIndex > completionLockIndex, `${operation} ocurre despues del lock sincronico de completion`);
+    }
+    assert.ok(completionBlock.indexOf("const recoveredPendingLink = pendingReadinessLinkRef.current") < completionBlock.indexOf("buildCurrentWorkoutSavePlan"), "retry pending se revisa antes de validar o guardar nueva sesion");
+    const newSessionLinkStart = completionBlock.indexOf("persistWorkoutDraftWithPendingLink");
+    const newSessionLinkEnd = completionBlock.indexOf("setExerciseDrafts", newSessionLinkStart);
+    const newSessionLinkBranch = newSessionLinkStart >= 0 && newSessionLinkEnd > newSessionLinkStart ? completionBlock.slice(newSessionLinkStart, newSessionLinkEnd) : "";
+    assert.ok(newSessionLinkBranch.indexOf("persistWorkoutDraftWithPendingLink") < newSessionLinkBranch.indexOf("await confirmTrainingWorkoutReadinessLink(nextPendingLink)"), "pending se persiste antes del link");
+    assert.ok(newSessionLinkBranch.indexOf("await confirmTrainingWorkoutReadinessLink(nextPendingLink)") >= 0, "rama de sesion nueva confirma link antes de continuar a cleanup");
+    const retryPendingStart = completionBlock.indexOf("if (recoveredPendingLink)");
+    const retryPendingEnd = completionBlock.indexOf("let readinessMode", retryPendingStart);
+    const retryPendingBranch = retryPendingStart >= 0 && retryPendingEnd > retryPendingStart ? completionBlock.slice(retryPendingStart, retryPendingEnd) : "";
+    assert.match(retryPendingBranch, /confirmTrainingWorkoutReadinessLink\(recoveredPendingLink\)/, "retry usa los IDs del pending recuperado");
+    assert.doesNotMatch(retryPendingBranch, /createTrainingSessionWithCycleEntries|saveTrainingSessionWithEntries/, "retry con pending no guarda otra sesion");
+    const legacyCompletionBranch = completionBlock.match(/const savedSession = await saveTrainingSessionWithEntries[\s\S]*?finally \{\s*setIsBusy\(false\);\s*\}/)?.[0] ?? "";
+    assert.doesNotMatch(legacyCompletionBranch, /createWorkoutReadinessPendingLink|linkTrainingWorkoutReadinessSession|pendingReadinessLinkRef/, "rama legacy no crea pending ni llama link");
+    const useEffectBlocks = appSource.match(/useEffect\(\(\) => \{[\s\S]*?\n  \}, \[.*?\]\);/g) ?? [];
+    assert.equal(useEffectBlocks.some((block) => block.includes("linkTrainingWorkoutReadinessSession")), false, "no existe link automatico en useEffect");
     assert.match(pageSource, /ENABLE_TRAINING_WORKOUT_READINESS_V2/, "page.tsx lee el feature flag v2");
     assert.match(pageSource, /VERCEL_ENV !== "production"/, "page.tsx bloquea readiness v2 en Production");
     assert.doesNotMatch(storageSource, /save_training_workout_readiness_v2|link_training_workout_readiness_session_v2|crypto\.randomUUID|getSupabaseBrowserClient/, "storage no llama RPCs, Supabase ni genera UUIDs");
@@ -498,6 +526,7 @@ async function run() {
     assert.equal((packageJson.match(/src\/lib\/training\/workout-draft-storage\.test\.ts/g) ?? []).length, 1);
     assert.equal((packageJson.match(/src\/lib\/training\/training-workout-attempt-lifecycle\.test\.ts/g) ?? []).length, 1);
     assert.equal((packageJson.match(/src\/lib\/training\/training-workout-readiness-flow\.test\.ts/g) ?? []).length, 1);
+    assert.equal((packageJson.match(/src\/lib\/training\/training-workout-readiness-link-flow\.test\.ts/g) ?? []).length, 1);
   }
 
   {
