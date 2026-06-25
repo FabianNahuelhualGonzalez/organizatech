@@ -16,8 +16,12 @@ const ambiguityPatch = readFileSync(
 );
 const repositorySource = readFileSync("src/lib/training/training-daily-readiness-repository.ts", "utf8");
 
+function normalizeLineEndings(value: string): string {
+  return value.replace(/\r\n?/g, "\n");
+}
+
 assert.equal(
-  createHash("sha256").update(baseMigration).digest("hex").toUpperCase(),
+  createHash("sha256").update(normalizeLineEndings(baseMigration)).digest("hex").toUpperCase(),
   "A06186A518F35C423D583C537A2839C0A545A66F62DA40C2C0D5D6768E413839",
   "la migracion original de readiness diaria no debe cambiar",
 );
