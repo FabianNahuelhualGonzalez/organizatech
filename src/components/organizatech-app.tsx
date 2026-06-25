@@ -99,6 +99,11 @@ import {
   type TrainingDailyReadinessRecord,
 } from "@/lib/training/training-daily-readiness-repository";
 import {
+  saveTrainingWorkoutReadiness,
+  TrainingWorkoutReadinessRepositoryError,
+  type TrainingWorkoutReadinessPayload,
+} from "@/lib/training/training-workout-readiness-repository";
+import {
   getLatestExercisePerformanceByLineage,
   type LatestExercisePerformance,
 } from "@/lib/training/exercise-last-performance-repository";
@@ -127,8 +132,22 @@ import {
   getWorkoutDraftKey as getStoredWorkoutDraftKey,
   saveWorkoutDraft as saveStoredWorkoutDraft,
   loadWorkoutDraft as loadStoredWorkoutDraft,
+  type PendingWorkoutReadinessLink,
   type WorkoutDraftStorageRecord,
 } from "@/lib/training/workout-draft-storage";
+import {
+  createWorkoutAttemptId,
+  releaseWorkoutStartLock,
+  resolveWorkoutAttemptId,
+  tryAcquireWorkoutStartLock,
+} from "@/lib/training/training-workout-attempt-lifecycle";
+import {
+  resolveTrainingWorkoutReadinessMode,
+  TrainingWorkoutReadinessFlowError,
+  isNonEmptyString,
+  toTrainingWorkoutReadinessPayload,
+  type TrainingWorkoutReadinessMode,
+} from "@/lib/training/training-workout-readiness-flow";
 import {
   addCycleScopedTrainingDaysAndExercises,
   createTrainingCycleWithPlan,
@@ -320,7 +339,19 @@ interface ActiveFlowState {
   flow: ActiveFlow;
 }
 
-type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>>;
+type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>> & {
+  cycleId?: string | null;
+  cycleDayId?: string | null;
+  plannedDay?: string | null;
+  plannedDate?: string | null;
+};
+
+type ActiveWorkoutReadinessContext = {
+  workoutAttemptId: string;
+  cycleId: string;
+  cycleDayId: string;
+  workoutStartedAt: string;
+};
 
 interface TrainingPlan {
   cycleType: TrainingCycleId;
@@ -368,11 +399,13 @@ interface TrainingCycleSnapshot {
 interface OrganizatechAppProps {
   trainingCyclesRepositoryEnabled?: boolean;
   trainingCyclesSnapshotSource?: "ui-main-production" | "ui-main-qa";
+  trainingWorkoutReadinessV2Enabled?: boolean;
 }
 
 export function OrganizatechApp({
   trainingCyclesRepositoryEnabled = false,
   trainingCyclesSnapshotSource = "ui-main-qa",
+  trainingWorkoutReadinessV2Enabled = false,
 }: OrganizatechAppProps) {
   const [screen, setScreen] = useState<Screen>(() => getInitialAuthScreen());
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
@@ -427,6 +460,13 @@ export function OrganizatechApp({
   const [dailyReadinessError, setDailyReadinessError] = useState("");
   const [hasStartedTraining, setHasStartedTraining] = useState(false);
   const [activeWorkoutStartedAt, setActiveWorkoutStartedAt] = useState<string | null>(null);
+  const [activeWorkoutAttemptId, setActiveWorkoutAttemptId] = useState<string | null>(null);
+  const activeWorkoutAttemptIdRef = useRef<string | null>(null);
+  const workoutStartInFlightRef = useRef(false);
+  const dailyReadinessSaveInFlightRef = useRef(false);
+  const [pendingReadinessLink, setPendingReadinessLink] = useState<PendingWorkoutReadinessLink | null>(null);
+  const [hasRecoverableWorkoutStart, setHasRecoverableWorkoutStart] = useState(false);
+  const activeWorkoutReadinessContextRef = useRef<ActiveWorkoutReadinessContext | null>(null);
   const [latestExercisePerformance, setLatestExercisePerformance] = useState<LatestExercisePerformance | null>(null);
   const [latestExercisePerformanceLoading, setLatestExercisePerformanceLoading] = useState(false);
   const [latestExercisePerformanceError, setLatestExercisePerformanceError] = useState("");
@@ -690,6 +730,8 @@ export function OrganizatechApp({
         hasStartedTraining,
         readiness,
         exerciseDrafts,
+        workoutAttemptId: activeWorkoutAttemptIdRef.current ?? activeWorkoutAttemptId,
+        pendingReadinessLink,
       });
     }
 
@@ -701,13 +743,13 @@ export function OrganizatechApp({
       window.removeEventListener("pagehide", persistWorkoutDraft);
       document.removeEventListener("visibilitychange", persistWorkoutDraft);
     };
-  }, [activeExerciseIndex, activeRoutineDay, activeWorkoutStartedAt, dataMode, exerciseDrafts, hasStartedTraining, readiness, screen, supabaseUser?.id]);
+  }, [activeExerciseIndex, activeRoutineDay, activeWorkoutAttemptId, activeWorkoutStartedAt, dataMode, exerciseDrafts, hasStartedTraining, pendingReadinessLink, readiness, screen, supabaseUser?.id]);
 
   useEffect(() => {
-    if (screen === "entrenamiento" && !hasStartedTraining) {
+    if (screen === "entrenamiento" && !hasStartedTraining && !hasRecoverableWorkoutStart) {
       clearWorkoutDraft(dataMode, supabaseUser?.id);
     }
-  }, [dataMode, hasStartedTraining, screen, supabaseUser?.id]);
+  }, [dataMode, hasRecoverableWorkoutStart, hasStartedTraining, screen, supabaseUser?.id]);
 
   useEffect(() => {
     const isActiveWorkout = screen === "entrenamiento" && hasStartedTraining;
@@ -715,10 +757,11 @@ export function OrganizatechApp({
       setActiveWorkoutStartedAt(createStableWorkoutStartedAt());
       return;
     }
-    if (!isActiveWorkout && activeWorkoutStartedAt) {
+    if (!isActiveWorkout && !hasRecoverableWorkoutStart && (activeWorkoutStartedAt || activeWorkoutAttemptId || pendingReadinessLink)) {
       setActiveWorkoutStartedAt(null);
+      resetWorkoutAttemptState();
     }
-  }, [activeWorkoutStartedAt, hasStartedTraining, screen]);
+  }, [activeWorkoutAttemptId, activeWorkoutStartedAt, hasRecoverableWorkoutStart, hasStartedTraining, pendingReadinessLink, screen]);
 
   const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
   const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
@@ -845,6 +888,8 @@ export function OrganizatechApp({
     clearActiveFlow(dataMode, supabaseUser?.id);
     clearRoutineDraft(dataMode, supabaseUser?.id);
     clearWorkoutDraft(dataMode, supabaseUser?.id);
+    resetWorkoutAttemptState();
+    setActiveWorkoutStartedAt(null);
     setSupabaseSession(null);
     setSupabaseUser(null);
     setDataMode("demo");
@@ -927,6 +972,15 @@ export function OrganizatechApp({
     setActiveRoutineDay(draft.activeRoutineDay);
     setActiveExerciseIndex(draft.activeExerciseIndex);
     setActiveWorkoutStartedAt(draft.activeWorkoutStartedAt);
+    activeWorkoutAttemptIdRef.current = draft.workoutAttemptId;
+    setActiveWorkoutAttemptId(draft.workoutAttemptId);
+    setPendingReadinessLink(draft.pendingReadinessLink);
+    activeWorkoutReadinessContextRef.current = createActiveWorkoutReadinessContext({
+      workoutAttemptId: draft.workoutAttemptId,
+      cycleId: readOptionalStringProperty(draft, "cycleId"),
+      cycleDayId: readOptionalStringProperty(draft, "cycleDayId"),
+      workoutStartedAt: draft.activeWorkoutStartedAt,
+    });
     setHasStartedTraining(draft.hasStartedTraining);
     setReadiness(draft.readiness);
     setExerciseDrafts(draft.exerciseDrafts);
@@ -1868,6 +1922,8 @@ export function OrganizatechApp({
         clearActiveFlow(dataMode, supabaseUser?.id);
         clearRoutineDraft(dataMode, supabaseUser?.id);
         clearWorkoutDraft(dataMode, supabaseUser?.id);
+        resetWorkoutAttemptState();
+        setActiveWorkoutStartedAt(null);
         setPersistedActiveCycle(null);
         clearCycleScopedPlanState();
         setSetupByDay(freshSetup);
@@ -1955,6 +2011,9 @@ export function OrganizatechApp({
 
         const nextPlan = createDefaultTrainingPlan();
         clearRoutineDraft(dataMode, supabaseUser?.id);
+        clearWorkoutDraft(dataMode, supabaseUser?.id);
+        resetWorkoutAttemptState();
+        setActiveWorkoutStartedAt(null);
         clearCycleScopedPlanState();
         setTrainingPlan(nextPlan);
         saveTrainingPlan(nextPlan);
@@ -1976,6 +2035,9 @@ export function OrganizatechApp({
 
       await deactivateActiveCycle(dataMode);
       clearRoutineDraft(dataMode, supabaseUser?.id);
+      clearWorkoutDraft(dataMode, supabaseUser?.id);
+      resetWorkoutAttemptState();
+      setActiveWorkoutStartedAt(null);
       await refreshData(dataMode);
 
       const nextPlan = createDefaultTrainingPlan();
@@ -2017,38 +2079,206 @@ export function OrganizatechApp({
     }));
   }
 
+
+  function createActiveWorkoutReadinessContext(input: {
+    workoutAttemptId: string | null;
+    cycleId: string | null;
+    cycleDayId: string | null;
+    workoutStartedAt: string | null;
+  }): ActiveWorkoutReadinessContext | null {
+    if (!isNonEmptyString(input.workoutAttemptId) ||
+      !isNonEmptyString(input.cycleId) ||
+      !isNonEmptyString(input.cycleDayId) ||
+      !isNonEmptyString(input.workoutStartedAt)) {
+      return null;
+    }
+    return {
+      workoutAttemptId: input.workoutAttemptId,
+      cycleId: input.cycleId,
+      cycleDayId: input.cycleDayId,
+      workoutStartedAt: input.workoutStartedAt,
+    };
+  }
+
+  function resolveCurrentReadinessMode() {
+    return resolveTrainingWorkoutReadinessMode({
+      enabled: trainingWorkoutReadinessV2Enabled,
+      cycleScoped: isCycleScopedActiveCycle,
+      workoutAttemptId: activeWorkoutReadinessContextRef.current?.workoutAttemptId ?? null,
+      cycleId: activeWorkoutReadinessContextRef.current?.cycleId ?? null,
+      cycleDayId: activeWorkoutReadinessContextRef.current?.cycleDayId ?? null,
+      workoutStartedAt: activeWorkoutReadinessContextRef.current?.workoutStartedAt ?? null,
+    });
+  }
+
+  function persistCurrentWorkoutDraftSnapshot(nextReadiness: TrainingReadiness | null) {
+    if (!activeWorkoutStartedAt) return;
+    saveWorkoutDraft({
+      version: WORKOUT_DRAFT_VERSION,
+      updatedAt: Date.now(),
+      dataMode,
+      userKey: getDraftUserKey(dataMode, supabaseUser?.id),
+      activeRoutineDay,
+      activeExerciseIndex,
+      activeWorkoutStartedAt,
+      hasStartedTraining,
+      readiness: nextReadiness,
+      exerciseDrafts,
+      workoutAttemptId: activeWorkoutAttemptIdRef.current ?? activeWorkoutAttemptId,
+      pendingReadinessLink,
+      cycleId: activeWorkoutReadinessContextRef.current?.cycleId ?? null,
+      cycleDayId: activeWorkoutReadinessContextRef.current?.cycleDayId ?? null,
+      plannedDay: getTrainingDayCode(visibleDay),
+      plannedDate: null,
+    });
+  }
+  function resetWorkoutAttemptState() {
+    activeWorkoutAttemptIdRef.current = null;
+    activeWorkoutReadinessContextRef.current = null;
+    setActiveWorkoutAttemptId(null);
+    setPendingReadinessLink(null);
+    setHasRecoverableWorkoutStart(false);
+  }
+
   function markWorkoutStartedAt() {
     setActiveWorkoutStartedAt((current) => current ?? createStableWorkoutStartedAt());
   }
 
-  async function startTrainingWithDailyReadiness() {
-    if (checkingDailyReadiness || savingDailyReadiness) return;
+  function prepareWorkoutStartSnapshot(nextActiveExerciseIndex: number) {
+    const startedAt = activeWorkoutStartedAt ?? createStableWorkoutStartedAt();
+    const plannedDay = getTrainingDayCode(visibleDay);
+    const cycleId = isCycleScopedActiveCycle ? persistedActiveCycle?.id ?? null : null;
+    const cycleDayId = isCycleScopedActiveCycle && persistedActiveCycle && cycleScopedPlan
+      ? findCycleScopedDayForTrainingDay(cycleScopedPlan, persistedActiveCycle.id, plannedDay)?.id ?? null
+      : null;
+    const plannedDate = isCycleScopedActiveCycle && persistedActiveCycle && cycleScopedPlan
+      ? (() => {
+          const cycleDay = findCycleScopedDayForTrainingDay(cycleScopedPlan, persistedActiveCycle.id, plannedDay);
+          if (!cycleDay || !isNonEmptyString(persistedActiveCycle.plannedStartDate) || !isNonEmptyString(persistedActiveCycle.plannedEndDate)) return null;
+          return getCycleScopedPlannedDate({
+            cyclePlannedStartDate: persistedActiveCycle.plannedStartDate,
+            cyclePlannedEndDate: persistedActiveCycle.plannedEndDate,
+            weekIndex: cycleDay.weekIndex,
+            dayCode: plannedDay,
+          });
+        })()
+      : null;
 
-    const firstPendingIndex = dayExercises.findIndex((exercise) =>
-      !isExerciseRegisteredInCurrentWorkout(exercise, exerciseDrafts));
-    setActiveExerciseIndex(firstPendingIndex >= 0 ? firstPendingIndex : 0);
-    setDailyReadinessError("");
-    setRoutineNotice("");
-
-    if (dataMode !== "supabase" || !hasSupabaseSession) {
-      markWorkoutStartedAt();
-      setHasStartedTraining(true);
-      return;
+    if (trainingWorkoutReadinessV2Enabled && isCycleScopedActiveCycle && (!cycleId || !cycleDayId)) {
+      throw new Error("No pudimos preparar la identidad del entrenamiento. Recarga el ciclo activo e intenta nuevamente.");
     }
 
-    setCheckingDailyReadiness(true);
+    const attemptId = resolveWorkoutAttemptId({
+      enabled: trainingWorkoutReadinessV2Enabled && isCycleScopedActiveCycle,
+      cycleId,
+      cycleDayId,
+      existingWorkoutAttemptId: activeWorkoutAttemptIdRef.current ?? activeWorkoutAttemptId,
+    }, createWorkoutAttemptId);
+    const nextPendingReadinessLink = attemptId && attemptId === (activeWorkoutAttemptIdRef.current ?? activeWorkoutAttemptId) ? pendingReadinessLink : null;
+
+    setActiveWorkoutStartedAt(startedAt);
+    activeWorkoutAttemptIdRef.current = attemptId;
+    setActiveWorkoutAttemptId(attemptId);
+    setPendingReadinessLink(nextPendingReadinessLink);
+    activeWorkoutReadinessContextRef.current = createActiveWorkoutReadinessContext({
+      workoutAttemptId: attemptId,
+      cycleId,
+      cycleDayId,
+      workoutStartedAt: startedAt,
+    });
+    setHasRecoverableWorkoutStart(false);
+    setActiveExerciseIndex(nextActiveExerciseIndex);
+    setHasStartedTraining(true);
+
+    saveWorkoutDraft({
+      version: WORKOUT_DRAFT_VERSION,
+      updatedAt: Date.now(),
+      dataMode,
+      userKey: getDraftUserKey(dataMode, supabaseUser?.id),
+      activeRoutineDay,
+      activeExerciseIndex: nextActiveExerciseIndex,
+      activeWorkoutStartedAt: startedAt,
+      hasStartedTraining: true,
+      readiness,
+      exerciseDrafts,
+      workoutAttemptId: attemptId,
+      pendingReadinessLink: nextPendingReadinessLink,
+      cycleId,
+      cycleDayId,
+      plannedDay,
+      plannedDate,
+    });
+
+    return { startedAt, attemptId, cycleId, cycleDayId, plannedDay, plannedDate, pendingReadinessLink: nextPendingReadinessLink };
+  }
+
+  async function startTrainingWithDailyReadiness() {
+    if (!tryAcquireWorkoutStartLock(workoutStartInFlightRef)) return;
+
     try {
-      const record = await getDailyTrainingReadiness();
-      setDailyReadinessRecord(record);
-      setReadiness(record?.payload ?? null);
-      markWorkoutStartedAt();
-      setHasStartedTraining(true);
-    } catch (error) {
-      const message = translateDailyReadinessError(error);
-      setDailyReadinessError(message);
-      setRoutineNotice(message);
+      if (checkingDailyReadiness || savingDailyReadiness) return;
+
+      const firstPendingIndex = dayExercises.findIndex((exercise) =>
+        !isExerciseRegisteredInCurrentWorkout(exercise, exerciseDrafts));
+      const nextActiveExerciseIndex = firstPendingIndex >= 0 ? firstPendingIndex : 0;
+      setDailyReadinessError("");
+      setRoutineNotice("");
+
+      let startSnapshot: ReturnType<typeof prepareWorkoutStartSnapshot>;
+      try {
+        startSnapshot = prepareWorkoutStartSnapshot(nextActiveExerciseIndex);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "No pudimos preparar el entrenamiento.";
+        setDailyReadinessError(message);
+        setRoutineNotice(message);
+        return;
+      }
+
+      let readinessMode: TrainingWorkoutReadinessMode;
+      try {
+        readinessMode = resolveCurrentReadinessMode();
+      } catch (error) {
+        const message = error instanceof TrainingWorkoutReadinessFlowError ? error.message : "No pudimos preparar el formulario de entrenamiento.";
+        setDailyReadinessError(message);
+        setRoutineNotice(message);
+        return;
+      }
+
+      if (readinessMode === "attempt_v2") {
+        return;
+      }
+
+      if (dataMode !== "supabase" || !hasSupabaseSession) {
+        return;
+      }
+
+      setCheckingDailyReadiness(true);
+      try {
+        const record = await getDailyTrainingReadiness();
+        setDailyReadinessRecord(record);
+        setReadiness(record?.payload ?? null);
+        setHasRecoverableWorkoutStart(false);
+      } catch (error) {
+        const message = translateDailyReadinessError(error);
+        if (trainingWorkoutReadinessV2Enabled && startSnapshot.attemptId) {
+          setHasStartedTraining(false);
+          setHasRecoverableWorkoutStart(true);
+          setDailyReadinessError(message);
+          setRoutineNotice(message);
+          return;
+        }
+
+        clearWorkoutDraft(dataMode, supabaseUser?.id);
+        setHasStartedTraining(false);
+        setActiveWorkoutStartedAt(null);
+        resetWorkoutAttemptState();
+        setDailyReadinessError(message);
+        setRoutineNotice(message);
+      } finally {
+        setCheckingDailyReadiness(false);
+      }
     } finally {
-      setCheckingDailyReadiness(false);
+      releaseWorkoutStartLock(workoutStartInFlightRef);
     }
   }
 
@@ -2061,23 +2291,79 @@ export function OrganizatechApp({
   }
 
   async function persistDailyReadiness(value: TrainingReadiness) {
-    if (savingDailyReadiness) return;
-    setDailyReadinessError("");
+    if (!tryAcquireWorkoutStartLock(dailyReadinessSaveInFlightRef)) return;
 
-    if (dataMode !== "supabase" || !hasSupabaseSession) {
-      setReadiness(value);
-      return;
-    }
-
-    setSavingDailyReadiness(true);
     try {
-      const record = await saveDailyTrainingReadiness(value);
-      setDailyReadinessRecord(record);
-      setReadiness(record.payload);
-    } catch (error) {
-      setDailyReadinessError(translateDailyReadinessError(error));
+      if (savingDailyReadiness) return;
+      setDailyReadinessError("");
+
+      let readinessMode: TrainingWorkoutReadinessMode;
+      try {
+        readinessMode = resolveCurrentReadinessMode();
+      } catch (error) {
+        const message = error instanceof TrainingWorkoutReadinessFlowError ? error.message : "No pudimos preparar el formulario de entrenamiento.";
+        setDailyReadinessError(message);
+        return;
+      }
+
+      if (readinessMode === "legacy") {
+        if (dataMode !== "supabase" || !hasSupabaseSession) {
+          setReadiness(value);
+          return;
+        }
+
+        setSavingDailyReadiness(true);
+        try {
+          const record = await saveDailyTrainingReadiness(value);
+          setDailyReadinessRecord(record);
+          setReadiness(record.payload);
+        } catch (error) {
+          setDailyReadinessError(translateDailyReadinessError(error));
+        } finally {
+          setSavingDailyReadiness(false);
+        }
+        return;
+      }
+
+      const context = activeWorkoutReadinessContextRef.current;
+      if (!context) {
+        setDailyReadinessError("No pudimos recuperar la identidad del entrenamiento. Recarga e intenta nuevamente.");
+        return;
+      }
+
+      let payload: TrainingWorkoutReadinessPayload;
+      try {
+        payload = toTrainingWorkoutReadinessPayload(value);
+      } catch (error) {
+        setDailyReadinessError(error instanceof Error ? error.message : "Completa tu formulario diario antes de continuar.");
+        return;
+      }
+
+      setSavingDailyReadiness(true);
+      try {
+        const record = await saveTrainingWorkoutReadiness({
+          workoutAttemptId: context.workoutAttemptId,
+          cycleId: context.cycleId,
+          cycleDayId: context.cycleDayId,
+          workoutStartedAt: context.workoutStartedAt,
+          payload,
+        });
+        if (record.contextMismatch) {
+          setDailyReadinessError("Este intento ya tiene un formulario guardado con informacion diferente. Recarga el entrenamiento para recuperar sus datos.");
+          return;
+        }
+        setDailyReadinessRecord(null);
+        setReadiness(record.payload);
+        setHasRecoverableWorkoutStart(false);
+        setPendingReadinessLink(null);
+        persistCurrentWorkoutDraftSnapshot(record.payload);
+      } catch (error) {
+        setDailyReadinessError(translateTrainingWorkoutReadinessError(error));
+      } finally {
+        setSavingDailyReadiness(false);
+      }
     } finally {
-      setSavingDailyReadiness(false);
+      releaseWorkoutStartLock(dailyReadinessSaveInFlightRef);
     }
   }
 
@@ -2203,6 +2489,8 @@ export function OrganizatechApp({
         setStatusMessage("Entrenamiento guardado.");
         try {
           clearWorkoutDraft(dataMode, supabaseUser?.id);
+          resetWorkoutAttemptState();
+          setActiveWorkoutStartedAt(null);
         } catch {
           // El entrenamiento ya fue persistido; un fallo local de limpieza no debe habilitar duplicados.
         }
@@ -2266,6 +2554,8 @@ export function OrganizatechApp({
         });
         setStatusMessage("Entrenamiento guardado.");
         clearWorkoutDraft(dataMode, supabaseUser?.id);
+        resetWorkoutAttemptState();
+        setActiveWorkoutStartedAt(null);
         setReadiness(null);
         setHasStartedTraining(false);
         setScreen("dashboard");
@@ -5841,6 +6131,21 @@ function translateTrainingCycleRepositoryError(error: unknown) {
   return translatePersistenceError(error);
 }
 
+
+
+function readOptionalStringProperty(value: unknown, key: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = (value as Record<string, unknown>)[key];
+  return typeof item === "string" && item.trim().length > 0 ? item : null;
+}
+function translateTrainingWorkoutReadinessError(error: unknown) {
+  if (error instanceof TrainingWorkoutReadinessRepositoryError) {
+    if (error.code === "session_required") return "Inicia sesion para confirmar tu formulario de entrenamiento.";
+    return error.message;
+  }
+  if (error instanceof Error) return error.message;
+  return "No pudimos confirmar tu formulario de entrenamiento. Intentalo nuevamente.";
+}
 function translateDailyReadinessError(error: unknown) {
   if (error instanceof TrainingDailyReadinessRepositoryError) {
     if (error.code === "session_required") return "Debes iniciar sesion para registrar tu formulario diario.";
@@ -6388,5 +6693,3 @@ const tooltipStyle = {
   borderRadius: 8,
   color: "#FFFFFF",
 };
-
-

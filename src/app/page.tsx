@@ -16,11 +16,15 @@ const trainingCyclesSnapshotSource = productionTrainingCyclesRepositoryEnabled
   ? "ui-main-production"
   : "ui-main-qa";
 
+const trainingWorkoutReadinessV2Enabled =
+  process.env.ENABLE_TRAINING_WORKOUT_READINESS_V2 === "true" &&
+  process.env.VERCEL_ENV !== "production";
 export default function Home() {
   return (
     <OrganizatechApp
       trainingCyclesRepositoryEnabled={trainingCyclesRepositoryEnabled}
       trainingCyclesSnapshotSource={trainingCyclesSnapshotSource}
+      trainingWorkoutReadinessV2Enabled={trainingWorkoutReadinessV2Enabled}
     />
   );
 }
