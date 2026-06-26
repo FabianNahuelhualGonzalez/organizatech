@@ -344,18 +344,15 @@ interface ActiveFlowState {
   flow: ActiveFlow;
 }
 
-type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>> & {
-  cycleId?: string | null;
-  cycleDayId?: string | null;
-  plannedDay?: string | null;
-  plannedDate?: string | null;
-};
+type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>>;
 
 type ActiveWorkoutReadinessContext = {
   workoutAttemptId: string;
   cycleId: string;
   cycleDayId: string;
   workoutStartedAt: string;
+  plannedDay: string | null;
+  plannedDate: string | null;
 };
 
 interface TrainingPlan {
@@ -739,6 +736,10 @@ export function OrganizatechApp({
         exerciseDrafts,
         workoutAttemptId: activeWorkoutAttemptIdRef.current ?? activeWorkoutAttemptId,
         pendingReadinessLink: pendingReadinessLinkRef.current,
+        cycleId: activeWorkoutReadinessContextRef.current?.cycleId ?? null,
+        cycleDayId: activeWorkoutReadinessContextRef.current?.cycleDayId ?? null,
+        plannedDay: activeWorkoutReadinessContextRef.current?.plannedDay ?? null,
+        plannedDate: activeWorkoutReadinessContextRef.current?.plannedDate ?? null,
       });
     }
 
@@ -984,9 +985,11 @@ export function OrganizatechApp({
     setPendingWorkoutReadinessLink(draft.pendingReadinessLink);
     activeWorkoutReadinessContextRef.current = createActiveWorkoutReadinessContext({
       workoutAttemptId: draft.workoutAttemptId,
-      cycleId: readOptionalStringProperty(draft, "cycleId"),
-      cycleDayId: readOptionalStringProperty(draft, "cycleDayId"),
+      cycleId: draft.cycleId,
+      cycleDayId: draft.cycleDayId,
       workoutStartedAt: draft.activeWorkoutStartedAt,
+      plannedDay: draft.plannedDay,
+      plannedDate: draft.plannedDate,
     });
     setHasStartedTraining(draft.hasStartedTraining);
     setReadiness(draft.readiness);
@@ -2092,6 +2095,8 @@ export function OrganizatechApp({
     cycleId: string | null;
     cycleDayId: string | null;
     workoutStartedAt: string | null;
+    plannedDay?: string | null;
+    plannedDate?: string | null;
   }): ActiveWorkoutReadinessContext | null {
     if (!isNonEmptyString(input.workoutAttemptId) ||
       !isNonEmptyString(input.cycleId) ||
@@ -2104,6 +2109,8 @@ export function OrganizatechApp({
       cycleId: input.cycleId,
       cycleDayId: input.cycleDayId,
       workoutStartedAt: input.workoutStartedAt,
+      plannedDay: input.plannedDay ?? null,
+      plannedDate: input.plannedDate ?? null,
     };
   }
 
@@ -2135,8 +2142,8 @@ export function OrganizatechApp({
       pendingReadinessLink: pendingReadinessLinkRef.current,
       cycleId: activeWorkoutReadinessContextRef.current?.cycleId ?? null,
       cycleDayId: activeWorkoutReadinessContextRef.current?.cycleDayId ?? null,
-      plannedDay: getTrainingDayCode(visibleDay),
-      plannedDate: null,
+      plannedDay: activeWorkoutReadinessContextRef.current?.plannedDay ?? null,
+      plannedDate: activeWorkoutReadinessContextRef.current?.plannedDate ?? null,
     });
   }
   function setPendingWorkoutReadinessLink(link: PendingWorkoutReadinessLink | null) {
@@ -2198,6 +2205,8 @@ export function OrganizatechApp({
       cycleId,
       cycleDayId,
       workoutStartedAt: startedAt,
+      plannedDay,
+      plannedDate,
     });
     setHasRecoverableWorkoutStart(false);
     setActiveExerciseIndex(nextActiveExerciseIndex);
@@ -6289,11 +6298,6 @@ function translateTrainingCycleRepositoryError(error: unknown) {
 
 
 
-function readOptionalStringProperty(value: unknown, key: string) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const item = (value as Record<string, unknown>)[key];
-  return typeof item === "string" && item.trim().length > 0 ? item : null;
-}
 function translateTrainingWorkoutReadinessError(error: unknown) {
   if (error instanceof TrainingWorkoutReadinessRepositoryError) {
     if (error.code === "session_required") return "Inicia sesion para confirmar tu formulario de entrenamiento.";

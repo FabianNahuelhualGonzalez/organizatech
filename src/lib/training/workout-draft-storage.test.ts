@@ -409,6 +409,58 @@ async function run() {
   }
 
   {
+    const { storage } = createStorage();
+    const initialDraft = {
+      ...createDraft(),
+      workoutAttemptId: "attempt-v2-1",
+      pendingReadinessLink: { workoutAttemptId: "attempt-v2-1", trainingSessionId: "session-v2-1" },
+      cycleId: "cycle-2",
+      cycleDayId: "cycle-day-lunes",
+      plannedDay: "monday",
+      plannedDate: "2026-06-22",
+    };
+    saveWorkoutDraft(initialDraft, storage);
+    const autosaveDraft = {
+      ...initialDraft,
+      activeExerciseIndex: 1,
+      exerciseDrafts: {
+        "exercise-1": {
+          ...initialDraft.exerciseDrafts["exercise-1"],
+          weight: "101.5",
+          reps: [8, 8, 7],
+        },
+      },
+    };
+    saveWorkoutDraft(autosaveDraft, storage);
+    const loaded = load(storage);
+
+    assert.equal(loaded?.workoutAttemptId, "attempt-v2-1");
+    assert.deepEqual(loaded?.pendingReadinessLink, { workoutAttemptId: "attempt-v2-1", trainingSessionId: "session-v2-1" });
+    assert.equal(loaded?.cycleId, "cycle-2");
+    assert.equal(loaded?.cycleDayId, "cycle-day-lunes");
+    assert.equal(loaded?.plannedDay, "monday");
+    assert.equal(loaded?.plannedDate, "2026-06-22");
+    assert.equal(loaded?.activeExerciseIndex, 1);
+    assert.equal(loaded?.exerciseDrafts["exercise-1"]?.weight, "101.5");
+    assert.deepEqual(loaded?.exerciseDrafts["exercise-1"]?.reps, [8, 8, 7]);
+  }
+
+  for (const [field, value] of [
+    ["cycleId", 42],
+    ["cycleDayId", { id: "cycle-day-lunes" }],
+    ["plannedDay", ""],
+    ["plannedDate", []],
+  ] as const) {
+    const { storage, values } = createStorage();
+    values.set(getWorkoutDraftKey("supabase", "user-1"), JSON.stringify({
+      ...createDraft(),
+      workoutAttemptId: "attempt-v2-1",
+      [field]: value,
+    }));
+    assert.equal(load(storage), null, `draft invalido por ${field}`);
+  }
+
+  {
     const { storage, values, removes } = createStorage();
     const expired = { ...createDraft(), updatedAt: NOW - MAX_AGE_MS - 1, workoutAttemptId: "attempt-1" };
     values.set(getWorkoutDraftKey("supabase", "user-1"), JSON.stringify(expired));
@@ -488,6 +540,14 @@ async function run() {
     assert.doesNotMatch(saveCatchBranch, /clearWorkoutDraft|resetWorkoutAttemptState|setActiveWorkoutStartedAt\(null\)/, "error temporal de save v2 conserva attempt");
     assert.match(appSource, /persistCurrentWorkoutDraftSnapshot\(record\.payload\)/, "success v2 persiste readiness confirmada en draft");
     assert.match(appSource, /workoutAttemptId: activeWorkoutAttemptIdRef\.current \?\? activeWorkoutAttemptId/, "draft snapshot usa el attempt ref mas fresco");
+    const autosaveStart = appSource.indexOf("function persistWorkoutDraft()");
+    const autosaveEnd = appSource.indexOf("persistWorkoutDraft();", autosaveStart);
+    const autosaveBlock = autosaveStart >= 0 && autosaveEnd > autosaveStart ? appSource.slice(autosaveStart, autosaveEnd) : "";
+    assert.match(autosaveBlock, /cycleId: activeWorkoutReadinessContextRef\.current\?\.cycleId \?\? null/, "autosave preserva cycleId del contexto v2");
+    assert.match(autosaveBlock, /cycleDayId: activeWorkoutReadinessContextRef\.current\?\.cycleDayId \?\? null/, "autosave preserva cycleDayId del contexto v2");
+    assert.match(autosaveBlock, /plannedDay: activeWorkoutReadinessContextRef\.current\?\.plannedDay \?\? null/, "autosave preserva plannedDay del contexto v2");
+    assert.match(autosaveBlock, /plannedDate: activeWorkoutReadinessContextRef\.current\?\.plannedDate \?\? null/, "autosave preserva plannedDate del contexto v2");
+    assert.doesNotMatch(autosaveBlock, /plannedDay: getTrainingDayCode\(visibleDay\)|plannedDate: null/, "autosave no reconstruye contexto v2 desde estado visual");
     assert.match(appSource, /await cancelTrainingCycle[\s\S]*clearWorkoutDraft\(dataMode, supabaseUser\?\.id\)/, "deleteCurrentTrainingCycle limpia solo despues del cancel exitoso");
     assert.match(appSource, /workoutAttemptId: attemptId/, "organizatech-app guarda el attempt recien resuelto en el draft inicial");
     assert.match(appSource, /pendingReadinessLink: nextPendingReadinessLink/, "organizatech-app guarda el pending link en el draft inicial");

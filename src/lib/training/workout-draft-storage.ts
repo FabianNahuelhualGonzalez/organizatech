@@ -21,6 +21,10 @@ export interface WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts> {
   exerciseDrafts: TExerciseDrafts;
   workoutAttemptId?: string | null;
   pendingReadinessLink?: PendingWorkoutReadinessLink | null;
+  cycleId?: string | null;
+  cycleDayId?: string | null;
+  plannedDay?: string | null;
+  plannedDate?: string | null;
 }
 
 export type LoadedWorkoutDraftStorageRecord<
@@ -28,10 +32,14 @@ export type LoadedWorkoutDraftStorageRecord<
   TExerciseDrafts,
 > = Omit<
   WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts>,
-  "workoutAttemptId" | "pendingReadinessLink"
+  "workoutAttemptId" | "pendingReadinessLink" | "cycleId" | "cycleDayId" | "plannedDay" | "plannedDate"
 > & {
   workoutAttemptId: string | null;
   pendingReadinessLink: PendingWorkoutReadinessLink | null;
+  cycleId: string | null;
+  cycleDayId: string | null;
+  plannedDay: string | null;
+  plannedDate: string | null;
 };
 
 export interface WorkoutDraftStorageLike {
@@ -103,6 +111,11 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
 
     const pendingReadinessLink = normalizePendingReadinessLink(parsed, workoutAttemptId);
     if (pendingReadinessLink === false) return null;
+    const cycleId = normalizeOptionalString(parsed.cycleId);
+    const cycleDayId = normalizeOptionalString(parsed.cycleDayId);
+    const plannedDay = normalizeOptionalString(parsed.plannedDay);
+    const plannedDate = normalizeOptionalString(parsed.plannedDate);
+    if (cycleId === false || cycleDayId === false || plannedDay === false || plannedDate === false) return null;
 
     const startedAt = resolveStableWorkoutStartedAt(parsed.activeWorkoutStartedAt, options.createStartedAt);
     const draft = {
@@ -121,6 +134,10 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
       exerciseDrafts: options.normalizeExerciseDrafts(parsed.exerciseDrafts),
       workoutAttemptId,
       pendingReadinessLink,
+      cycleId,
+      cycleDayId,
+      plannedDay,
+      plannedDate,
     } satisfies LoadedWorkoutDraftStorageRecord<TReadiness, TExerciseDrafts>;
 
     if (startedAt.wasGenerated) {
@@ -145,6 +162,13 @@ export function clearWorkoutDraft(
   } catch {
     return false;
   }
+}
+
+
+function normalizeOptionalString(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim().length > 0) return value;
+  return false;
 }
 
 function normalizeWorkoutAttemptId(parsed: Partial<WorkoutDraftStorageRecord<unknown, unknown>>) {
