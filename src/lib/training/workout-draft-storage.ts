@@ -3,6 +3,11 @@ import { resolveStableWorkoutStartedAt } from "@/lib/training/exercise-last-perf
 
 export const WORKOUT_DRAFT_KEY_PREFIX = "organizatech:workout-draft";
 
+export interface PendingWorkoutReadinessLink {
+  workoutAttemptId: string;
+  trainingSessionId: string;
+}
+
 export interface WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts> {
   version: number;
   updatedAt: number;
@@ -14,7 +19,28 @@ export interface WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts> {
   hasStartedTraining: boolean;
   readiness: TReadiness;
   exerciseDrafts: TExerciseDrafts;
+  workoutAttemptId?: string | null;
+  pendingReadinessLink?: PendingWorkoutReadinessLink | null;
+  cycleId?: string | null;
+  cycleDayId?: string | null;
+  plannedDay?: string | null;
+  plannedDate?: string | null;
 }
+
+export type LoadedWorkoutDraftStorageRecord<
+  TReadiness,
+  TExerciseDrafts,
+> = Omit<
+  WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts>,
+  "workoutAttemptId" | "pendingReadinessLink" | "cycleId" | "cycleDayId" | "plannedDay" | "plannedDate"
+> & {
+  workoutAttemptId: string | null;
+  pendingReadinessLink: PendingWorkoutReadinessLink | null;
+  cycleId: string | null;
+  cycleDayId: string | null;
+  plannedDay: string | null;
+  plannedDate: string | null;
+};
 
 export interface WorkoutDraftStorageLike {
   getItem(key: string): string | null;
@@ -58,7 +84,7 @@ export function saveWorkoutDraft<TReadiness, TExerciseDrafts>(
 
 export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
   options: LoadWorkoutDraftOptions<TReadiness, TExerciseDrafts>,
-): WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts> | null {
+): LoadedWorkoutDraftStorageRecord<TReadiness, TExerciseDrafts> | null {
   const storage = options.storage ?? getWorkoutDraftStorage();
   if (!storage) return null;
 
@@ -80,6 +106,17 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
       return null;
     }
 
+    const workoutAttemptId = normalizeWorkoutAttemptId(parsed);
+    if (workoutAttemptId === false) return null;
+
+    const pendingReadinessLink = normalizePendingReadinessLink(parsed, workoutAttemptId);
+    if (pendingReadinessLink === false) return null;
+    const cycleId = normalizeOptionalString(parsed.cycleId);
+    const cycleDayId = normalizeOptionalString(parsed.cycleDayId);
+    const plannedDay = normalizeOptionalString(parsed.plannedDay);
+    const plannedDate = normalizeOptionalString(parsed.plannedDate);
+    if (cycleId === false || cycleDayId === false || plannedDay === false || plannedDate === false) return null;
+
     const startedAt = resolveStableWorkoutStartedAt(parsed.activeWorkoutStartedAt, options.createStartedAt);
     const draft = {
       ...parsed,
@@ -95,7 +132,13 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
       hasStartedTraining: Boolean(parsed.hasStartedTraining),
       readiness: options.normalizeReadiness(parsed.readiness),
       exerciseDrafts: options.normalizeExerciseDrafts(parsed.exerciseDrafts),
-    } satisfies WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts>;
+      workoutAttemptId,
+      pendingReadinessLink,
+      cycleId,
+      cycleDayId,
+      plannedDay,
+      plannedDate,
+    } satisfies LoadedWorkoutDraftStorageRecord<TReadiness, TExerciseDrafts>;
 
     if (startedAt.wasGenerated) {
       saveWorkoutDraft(draft, storage);
@@ -119,6 +162,43 @@ export function clearWorkoutDraft(
   } catch {
     return false;
   }
+}
+
+
+function normalizeOptionalString(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim().length > 0) return value;
+  return false;
+}
+
+function normalizeWorkoutAttemptId(parsed: Partial<WorkoutDraftStorageRecord<unknown, unknown>>) {
+  if (!("workoutAttemptId" in parsed) || parsed.workoutAttemptId === null || parsed.workoutAttemptId === undefined) {
+    return null;
+  }
+  if (typeof parsed.workoutAttemptId === "string" && parsed.workoutAttemptId.trim().length > 0) {
+    return parsed.workoutAttemptId;
+  }
+  return false;
+}
+
+function normalizePendingReadinessLink(
+  parsed: Partial<WorkoutDraftStorageRecord<unknown, unknown>>,
+  workoutAttemptId: string | null,
+): PendingWorkoutReadinessLink | null | false {
+  if (!("pendingReadinessLink" in parsed) || parsed.pendingReadinessLink === null || parsed.pendingReadinessLink === undefined) {
+    return null;
+  }
+
+  const link = parsed.pendingReadinessLink;
+  if (!isPlainObject(link) || !workoutAttemptId) return false;
+  if (typeof link.workoutAttemptId !== "string" || link.workoutAttemptId.trim().length === 0) return false;
+  if (typeof link.trainingSessionId !== "string" || link.trainingSessionId.trim().length === 0) return false;
+  if (link.workoutAttemptId !== workoutAttemptId) return false;
+
+  return {
+    workoutAttemptId: link.workoutAttemptId,
+    trainingSessionId: link.trainingSessionId,
+  };
 }
 
 function getWorkoutDraftStorage(): WorkoutDraftStorageLike | null {
