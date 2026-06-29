@@ -207,9 +207,11 @@ function formatHistoricalWeightSummary(weights: number[]) {
 function formatSeriesRows(series: LatestExercisePerformanceSeries[]): ExerciseLastPerformanceSeriesRow[] {
   return series.map((item, index) => {
     const parts: string[] = [];
+    const weight = readNumber(item.weight);
     const reps = readNumber(item.reps);
     const rir = item.rir?.trim();
 
+    if (weight !== null) parts.push(formatWeight(weight));
     if (reps !== null) parts.push(`${formatNumber(reps)} ${reps === 1 ? "repetición" : "repeticiones"}`);
     if (rir) parts.push(`RIR ${rir}`);
 
@@ -225,28 +227,22 @@ function formatProgressGoal(
   historical: HistoricalSummary,
   fallbackGoal: string,
 ) {
-  const plannedTotalReps = planned.targetSets !== null && planned.targetReps.min !== null && planned.targetReps.max !== null
-    ? planned.targetSets * planned.targetReps.max
-    : null;
-
   if (historical.totalReps === null) {
     return "Tu primera referencia se guardará al finalizar";
   }
 
-  if (plannedTotalReps === null) {
+  if (historical.reps.length > 0) {
+    return "Iguala o supera por 1 repetici\u00f3n vs la semana pasada";
+  }
+
+  if (planned.targetSets === null || planned.targetReps.min === null || planned.targetReps.max === null) {
     return fallbackGoal === "Completa el objetivo definido para este ejercicio"
       ? "Intenta superar tu última referencia con buena técnica"
       : fallbackGoal;
   }
 
-  const repsDiff = plannedTotalReps - historical.totalReps;
-  if (repsDiff > 0) {
-    return `Sacar las mismas repeticiones o ${formatNumber(repsDiff)} más vs la semana pasada`;
-  }
-
-  return "Igualar o superar tu última referencia";
+  return fallbackGoal;
 }
-
 function formatTodayVsLast(planned: NormalizedPlannedExercise, historical: HistoricalSummary) {
   const parts: string[] = [];
   const tones: Array<"positive" | "negative" | "neutral"> = [];
