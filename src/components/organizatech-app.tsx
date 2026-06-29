@@ -143,6 +143,11 @@ import {
   tryAcquireWorkoutStartLock,
 } from "@/lib/training/training-workout-attempt-lifecycle";
 import {
+  canResumeActiveWorkoutFromMemory,
+  resolveActiveWorkoutReentryDecision,
+  shouldRetainActiveWorkoutAttemptState,
+} from "@/lib/training/active-workout-reentry";
+import {
   resolveTrainingWorkoutReadinessMode,
   TrainingWorkoutReadinessFlowError,
   isNonEmptyString,
@@ -767,11 +772,12 @@ export function OrganizatechApp({
 
   useEffect(() => {
     const isActiveWorkout = screen === "entrenamiento" && hasStartedTraining;
+    const isPausedWorkoutOnDashboard = shouldRetainActiveWorkoutAttemptState({ screen, hasStartedTraining });
     if (isActiveWorkout && !activeWorkoutStartedAt) {
       setActiveWorkoutStartedAt(createStableWorkoutStartedAt());
       return;
     }
-    if (!isActiveWorkout && !hasRecoverableWorkoutStart && (activeWorkoutStartedAt || activeWorkoutAttemptId || pendingReadinessLink)) {
+    if (!isActiveWorkout && !isPausedWorkoutOnDashboard && !hasRecoverableWorkoutStart && (activeWorkoutStartedAt || activeWorkoutAttemptId || pendingReadinessLink)) {
       setActiveWorkoutStartedAt(null);
       resetWorkoutAttemptState();
     }
@@ -994,7 +1000,10 @@ export function OrganizatechApp({
   }
 
   function restoreWorkoutDraftForSession(mode: DataMode, userId?: string) {
-    const draft = loadWorkoutDraft(mode, userId);
+    return restoreWorkoutDraftRecord(loadWorkoutDraft(mode, userId));
+  }
+
+  function restoreWorkoutDraftRecord(draft: NonNullable<ReturnType<typeof loadWorkoutDraft>> | null) {
     if (!draft) return false;
 
     setActiveRoutineDay(draft.activeRoutineDay);
@@ -1020,6 +1029,33 @@ export function OrganizatechApp({
     setStatusMessage("Recuperamos tu entrenamiento pendiente.");
     setScreen("entrenamiento");
     return true;
+  }
+
+  function restoreActiveWorkoutForNavigation() {
+    const draft = loadWorkoutDraft(dataMode, supabaseUser?.id);
+    const memoryState = {
+      attemptV2: trainingWorkoutReadinessV2Enabled && isCycleScopedActiveCycle,
+      hasStartedTraining,
+      readiness,
+      activeWorkoutStartedAt,
+      workoutAttemptId: activeWorkoutAttemptIdRef.current ?? activeWorkoutAttemptId,
+      cycleId: activeWorkoutReadinessContextRef.current?.cycleId ?? null,
+      cycleDayId: activeWorkoutReadinessContextRef.current?.cycleDayId ?? null,
+    };
+    const decision = resolveActiveWorkoutReentryDecision(memoryState, Boolean(draft));
+
+    if (decision === "resume-memory" && canResumeActiveWorkoutFromMemory(memoryState)) {
+      setScreenHistory([]);
+      setIsMenuOpen(false);
+      setScreen("entrenamiento");
+      return true;
+    }
+
+    if (decision === "restore-draft") {
+      return restoreWorkoutDraftRecord(draft);
+    }
+
+    return false;
   }
 
   async function refreshData(mode = dataMode) {
@@ -1432,6 +1468,7 @@ export function OrganizatechApp({
       setSetupDay(getVisibleTrainingDay(exercises, activeRoutineDay));
       setIsEditingRoutinePlan(!hasRoutinePlan);
     } else if (nextScreen === "entrenamiento") {
+      if (restoreActiveWorkoutForNavigation()) return;
       setHasStartedTraining(false);
       setReadiness(null);
     } else {
@@ -1447,8 +1484,6 @@ export function OrganizatechApp({
   function goBack() {
     if (screen === "entrenamiento") {
       if (readiness) {
-        setReadiness(null);
-        setHasStartedTraining(false);
         setScreen("dashboard");
         setScreenHistory([]);
         return;
@@ -1904,6 +1939,8 @@ export function OrganizatechApp({
   }
 
   function openRoutineDay(day: string, keepTrainingStarted = false) {
+    if (!keepTrainingStarted && restoreActiveWorkoutForNavigation()) return;
+
     setActiveRoutineDay(day);
     setActiveExerciseIndex(0);
     setRoutineNotice("");
