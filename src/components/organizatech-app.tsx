@@ -59,7 +59,7 @@ import {
 } from "@/lib/progress/calculations";
 import { buildExerciseComparisonSummary, getExerciseHistory } from "@/lib/progress/exercise-history";
 import { formatDecimalEs, formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
-import { getWeeklyProgressDayIndex, weeklyProgressLabels } from "@/lib/progress/week-day";
+import { buildWeeklyProgressChart } from "@/lib/progress/weekly-progress-chart";
 import type {
   ExerciseComparisonSummary,
   ExerciseEntry,
@@ -3614,7 +3614,7 @@ function DashboardScreen({
           </strong>
           <span>vs semana anterior</span>
         </div>
-        <WeeklyProgressSvg value={summary.volumePercentage} />
+        <WeeklyProgressSvg value={summary.volumePercentage} weekDays={routineDays} />
       </div>
       <div className={`card wide dashboard-training-card ${activeDayData.status}`}>
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
@@ -3697,16 +3697,18 @@ function IndexDots({ activeIndex, count }: { activeIndex: number; count: number 
     </div>
   );
 }
-function WeeklyProgressSvg({ value }: { value: number }) {
-  const [activeIndex, setActiveIndex] = useState(getCurrentTrainingDayIndex);
-  const clampedValue = Math.max(-4, Math.min(4, value));
-  const values = [-0.8, -0.5, 0.2, 1.2, 0.5, 0.8, clampedValue];
-  const labels = weeklyProgressLabels;
-  const points = values.map((item, index) => {
-    const x = 18 + index * 69;
-    const y = 84 - ((item + 4) / 8) * 66;
-    return { x, y, value: item, label: labels[index] };
-  });
+function WeeklyProgressSvg({ value, weekDays }: { value: number; weekDays: string[] }) {
+  const chart = useMemo(() => buildWeeklyProgressChart({
+    weekDays,
+    currentDay: getCalendarTrainingDay(),
+    value,
+  }), [value, weekDays]);
+  const [activeIndex, setActiveIndex] = useState(chart.activeIndex);
+  const labels = chart.labels;
+  const points = chart.points;
+  useEffect(() => {
+    setActiveIndex(chart.activeIndex);
+  }, [chart.activeIndex, labels.length]);
   const activePoint = points[activeIndex] ?? points.at(-1)!;
   const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   const areaPath = `${path} L ${points.at(-1)!.x} 112 L ${points[0].x} 112 Z`;
@@ -6607,10 +6609,6 @@ function getTrainingDayFromDate(value: string) {
     timeZone: "America/Santiago",
   }).format(date);
   return setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(weekday.toLowerCase())) ?? "";
-}
-
-function getCurrentTrainingDayIndex() {
-  return getWeeklyProgressDayIndex(getSantiagoDateKey(new Date()));
 }
 
 function parseDateKeyAsLocalNoon(value: string) {

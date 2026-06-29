@@ -22,20 +22,21 @@ const basePerformance: LatestExercisePerformance = {
 };
 
 const planned = { targetSets: 3, targetReps: 10, baseWeight: 100 };
+const historicalGoalText = "Iguala o supera por 1 repetición vs la semana pasada";
 
 {
   const view = buildExerciseLastPerformancePresentation({ planned, latest: basePerformance });
   assert.equal(view.objectiveText, "3 × 10 · 100 kg");
-  assert.equal(view.todayGoalText, "Sacar las mismas repeticiones o 1 más vs la semana pasada");
+  assert.equal(view.todayGoalText, historicalGoalText);
   assert.equal(view.lastHeaderText, "DETALLE DE SERIES · 12 JUN");
   assert.equal(view.seriesDetailTitle, "Ver detalle de series · 12 JUN");
   assert.equal(view.lastSummaryText, "95 kg · 10 / 10 / 9 reps");
   assert.equal(view.comparisonText, "+5 kg · +1 rep");
   assert.equal(view.comparisonTone, "positive");
   assert.deepEqual(view.seriesRows, [
-    { label: "Serie 1", value: "10 repeticiones · RIR 2" },
-    { label: "Serie 2", value: "10 repeticiones" },
-    { label: "Serie 3", value: "9 repeticiones · RIR 0" },
+    { label: "Serie 1", value: "95 kg · 10 repeticiones · RIR 2" },
+    { label: "Serie 2", value: "95 kg · 10 repeticiones" },
+    { label: "Serie 3", value: "95 kg · 9 repeticiones · RIR 0" },
   ]);
 }
 
@@ -45,7 +46,7 @@ const planned = { targetSets: 3, targetReps: 10, baseWeight: 100 };
     latest: basePerformance,
   });
   assert.equal(view.objectiveText, "3 × 10");
-  assert.equal(view.todayGoalText, "Sacar las mismas repeticiones o 1 más vs la semana pasada");
+  assert.equal(view.todayGoalText, historicalGoalText);
   assert.equal(view.comparisonText, "+1 rep");
 }
 
@@ -55,7 +56,7 @@ const planned = { targetSets: 3, targetReps: 10, baseWeight: 100 };
     latest: basePerformance,
   });
   assert.equal(view.objectiveText, "3 × 8-10 · 100 kg");
-  assert.equal(view.todayGoalText, "Sacar las mismas repeticiones o 1 más vs la semana pasada");
+  assert.equal(view.todayGoalText, historicalGoalText);
 }
 
 assert.equal(formatLocalTrainingDate("2026-06-12"), "12 JUN");
@@ -74,8 +75,13 @@ assert.equal(formatLocalTrainingDate("2026-06-12T23:30:00.000Z"), "12 JUN");
     },
   });
   assert.equal(view.lastSummaryText, "80-95 kg · 8 / 8 / 8 reps");
-  assert.equal(view.todayGoalText, "Sacar las mismas repeticiones o 6 más vs la semana pasada");
+  assert.equal(view.todayGoalText, historicalGoalText);
   assert.equal(view.comparisonText, "+5 kg · +6 reps");
+  assert.deepEqual(view.seriesRows, [
+    { label: "Serie 1", value: "80 kg · 8 repeticiones" },
+    { label: "Serie 2", value: "90 kg · 8 repeticiones" },
+    { label: "Serie 3", value: "95 kg · 8 repeticiones" },
+  ]);
 }
 
 {
@@ -90,9 +96,10 @@ assert.equal(formatLocalTrainingDate("2026-06-12T23:30:00.000Z"), "12 JUN");
     },
   });
   assert.equal(view.lastSummaryText, "10 / 10 reps");
-  assert.equal(view.todayGoalText, "Sacar las mismas repeticiones o 10 más vs la semana pasada");
+  assert.equal(view.todayGoalText, historicalGoalText);
   assert.equal(view.comparisonText, "+10 reps");
   assert(!view.lastSummaryText.includes("200 kg"));
+  assert(!JSON.stringify(view.seriesRows).includes("200 kg"));
 }
 
 {
@@ -107,7 +114,7 @@ assert.equal(formatLocalTrainingDate("2026-06-12T23:30:00.000Z"), "12 JUN");
       ],
     },
   });
-  assert.equal(view.todayGoalText, "Igualar o superar tu última referencia");
+  assert.equal(view.todayGoalText, historicalGoalText);
   assert.equal(view.comparisonText, "-5 kg · -3 reps");
   assert.equal(view.comparisonTone, "negative");
 }
@@ -121,7 +128,7 @@ assert.equal(formatLocalTrainingDate("2026-06-12T23:30:00.000Z"), "12 JUN");
       createSeries({ order: 3, reps: 10, weight: 100 }),
     ],
   } });
-  assert.equal(view.todayGoalText, "Igualar o superar tu última referencia");
+  assert.equal(view.todayGoalText, historicalGoalText);
   assert.equal(view.comparisonText, "Mismo peso · Mismas reps");
   assert.equal(view.comparisonTone, "neutral");
 }
@@ -194,7 +201,7 @@ assert.equal(formatLocalTrainingDate("2026-06-12T23:30:00.000Z"), "12 JUN");
     },
   });
   assert.equal(multiEntry.lastSummaryText, "50 kg · 10 / 10 / 9 / 8 reps");
-  assert.equal(multiEntry.seriesRows[0]?.value, "10 repeticiones");
+  assert.equal(multiEntry.seriesRows[0]?.value, "50 kg · 10 repeticiones");
   assert.equal(multiEntry.seriesRows.length, 4);
 }
 
