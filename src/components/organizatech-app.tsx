@@ -165,7 +165,13 @@ import {
   type CycleScopedTrainingSessionEntryInput,
   type CycleScopedTrainingPlan,
 } from "@/lib/training/cycle-scoped-training-repository";
-import { getCycleScopedPlannedDate } from "@/lib/training/cycle-scoped-planned-date";
+import {
+  getCalendarWeekStartDateKey,
+  getCycleCalendarPlannedDate,
+  getCycleCalendarWeekNumber,
+  getSessionEffectiveCalendarWeekStart,
+  getSessionEffectiveCycleWeekNumber,
+} from "@/lib/training/cycle-calendar-week";
 import {
   analyzeCycleScopedDayEdit,
   createCycleScopedDayNotes,
@@ -799,12 +805,26 @@ export function OrganizatechApp({
       : isCycleScopedPlanLoading
       ? "Cargando el plan operativo del ciclo activo."
       : "El ciclo activo no tiene rutina, dia y ejercicio cycle-scoped cargados. No se mostraran datos legacy.");
-  const metrics = useMemo(() => calculateWeeklyComparison(displayEntries), [displayEntries]);
   const todayKey = getSantiagoDateKey(new Date());
-  const currentWeek = getLegacyWeekNumberForTrainingDate(displayTrainingSessions, displayEntries, todayKey);
+  const currentWeek = isCycleScopedActiveCycle && persistedActiveCycle?.plannedStartDate
+    ? getCycleCalendarWeekNumber(persistedActiveCycle.plannedStartDate, todayKey)
+    : getLegacyWeekNumberForTrainingDate(displayTrainingSessions, displayEntries, todayKey);
+  const calendarNormalizedTrainingSessions = useMemo(
+    () => isCycleScopedActiveCycle && persistedActiveCycle?.plannedStartDate
+      ? normalizeCycleScopedSessionsByCalendarWeek(displayTrainingSessions, persistedActiveCycle.plannedStartDate)
+      : displayTrainingSessions,
+    [displayTrainingSessions, isCycleScopedActiveCycle, persistedActiveCycle?.plannedStartDate],
+  );
+  const calendarNormalizedEntries = useMemo(
+    () => isCycleScopedActiveCycle && persistedActiveCycle?.plannedStartDate
+      ? normalizeCycleScopedEntriesByCalendarWeek(displayEntries, persistedActiveCycle.plannedStartDate)
+      : displayEntries,
+    [displayEntries, isCycleScopedActiveCycle, persistedActiveCycle?.plannedStartDate],
+  );
+  const metrics = useMemo(() => calculateWeeklyComparison(calendarNormalizedEntries), [calendarNormalizedEntries]);
   const hasTrainingEntries = isCycleScopedActiveCycle
-    ? displayEntries.length > 0 || displayTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0)
-    : displayTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
+    ? calendarNormalizedEntries.length > 0 || calendarNormalizedTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0)
+    : calendarNormalizedTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
   const hasRoutinePlan = displayExercises.length > 0;
   const routineDays = getActiveRoutineDays(displayExercises, displayTrainingPlan);
   const dashboardCarouselDays = hasRoutinePlan ? routineDays : setupDays;
@@ -2173,12 +2193,11 @@ export function OrganizatechApp({
     const plannedDate = isCycleScopedActiveCycle && persistedActiveCycle && cycleScopedPlan
       ? (() => {
           const cycleDay = findCycleScopedDayForTrainingDay(cycleScopedPlan, persistedActiveCycle.id, plannedDay);
-          if (!cycleDay || !isNonEmptyString(persistedActiveCycle.plannedStartDate) || !isNonEmptyString(persistedActiveCycle.plannedEndDate)) return null;
-          return getCycleScopedPlannedDate({
-            cyclePlannedStartDate: persistedActiveCycle.plannedStartDate,
-            cyclePlannedEndDate: persistedActiveCycle.plannedEndDate,
-            weekIndex: cycleDay.weekIndex,
-            dayCode: plannedDay,
+          if (!cycleDay || !isNonEmptyString(persistedActiveCycle.plannedStartDate)) return null;
+          return getCycleCalendarPlannedDate({
+            plannedStartDate: persistedActiveCycle.plannedStartDate,
+            weekNumber: currentWeek,
+            plannedDay,
           });
         })()
       : null;
@@ -2541,18 +2560,19 @@ export function OrganizatechApp({
           return;
         }
 
-        if (!persistedActiveCycle.plannedStartDate || !persistedActiveCycle.plannedEndDate) {
+        if (!persistedActiveCycle.plannedStartDate) {
           setRoutineNotice("El ciclo activo no tiene un rango planificado valido. No se guardaran datos legacy.");
           return;
         }
 
         let plannedDate: string;
+        let effectiveWeekNumber: number;
         try {
-          plannedDate = getCycleScopedPlannedDate({
-            cyclePlannedStartDate: persistedActiveCycle.plannedStartDate,
-            cyclePlannedEndDate: persistedActiveCycle.plannedEndDate,
-            weekIndex: cycleDay.weekIndex,
-            dayCode: cycleDay.dayCode,
+          effectiveWeekNumber = getCycleCalendarWeekNumber(persistedActiveCycle.plannedStartDate, trainedDate);
+          plannedDate = getCycleCalendarPlannedDate({
+            plannedStartDate: persistedActiveCycle.plannedStartDate,
+            weekNumber: effectiveWeekNumber,
+            plannedDay: cycleDay.dayCode,
           });
         } catch {
           setRoutineNotice("No se pudo resolver la fecha planificada dentro del rango del ciclo. No se guardaran datos legacy.");
@@ -2604,7 +2624,7 @@ export function OrganizatechApp({
             plannedDay,
             plannedDate,
             trainedDate,
-            weekNumber: cycleDay.weekIndex,
+            weekNumber: effectiveWeekNumber,
             status: "completed",
             notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${formatReadinessNote(readiness)}`,
             entries: entriesInput,
@@ -2986,8 +3006,8 @@ export function OrganizatechApp({
             currentMetrics={dashboardCurrentMetrics}
             insights={insights}
             currentWeek={currentWeek}
-            entries={displayEntries}
-            sessions={displayTrainingSessions}
+            entries={calendarNormalizedEntries}
+            sessions={calendarNormalizedTrainingSessions}
             startRegistration={() => navigateTo("registro-entrenamiento")}
             goToRoutine={() => openRoutineDay(dashboardDay)}
             viewSummary={(selectedDay) => {
@@ -3443,7 +3463,9 @@ function DashboardScreen({
     () => sessions.filter((session) => (
       session.status === "completed" &&
       !session.deletedAt &&
-      (usesCycleScopedSessions || session.calendarWeekStart === currentWeekStart)
+      (usesCycleScopedSessions
+        ? getSessionEffectiveCalendarWeekStart(session) === currentWeekStart
+        : session.calendarWeekStart === currentWeekStart)
     )),
     [sessions, currentWeekStart, usesCycleScopedSessions],
   );
@@ -3465,10 +3487,10 @@ function DashboardScreen({
     const plannedDay = getTrainingDayCode(item);
     const session = findDashboardSessionForDay(activeSessions, itemExercises, expectedDate, plannedDay, usesCycleScopedSessions);
     const sessionEntries = session ? findDashboardEntries(session.entries, itemExercises, expectedDate, usesCycleScopedSessions) : [];
-    const allMatchingEntries = findDashboardEntries(entries, itemExercises, expectedDate, usesCycleScopedSessions);
+    const allMatchingEntries = usesCycleScopedSessions ? [] : findDashboardEntries(entries, itemExercises, expectedDate, false);
     const fallbackEntries = sessionEntries.length > 0 ? [] : allMatchingEntries;
     const itemEntries = usesCycleScopedSessions
-      ? allMatchingEntries
+      ? sessionEntries
       : sessionEntries.length > 0
         ? sessionEntries
         : fallbackEntries;
@@ -6462,6 +6484,30 @@ function calculateRegisteredDashboardSummary(metrics: ExerciseMetrics[]) {
   );
 }
 
+function normalizeCycleScopedSessionsByCalendarWeek(sessions: TrainingSession[], plannedStartDate: string) {
+  return sessions.map((session) => {
+    const effectiveWeekNumber = getSessionEffectiveCycleWeekNumber(plannedStartDate, session) ?? session.weekNumber;
+    const effectiveCalendarWeekStart = getSessionEffectiveCalendarWeekStart(session) ?? session.calendarWeekStart;
+    const normalizedEntries = session.entries.map((entry) => ({
+      ...entry,
+      week: getSessionEffectiveCycleWeekNumber(plannedStartDate, { trainedDate: entry.date }) ?? effectiveWeekNumber,
+    }));
+    return {
+      ...session,
+      weekNumber: effectiveWeekNumber,
+      calendarWeekStart: effectiveCalendarWeekStart,
+      entries: normalizedEntries,
+    };
+  });
+}
+
+function normalizeCycleScopedEntriesByCalendarWeek(entries: ExerciseEntry[], plannedStartDate: string) {
+  return entries.map((entry) => ({
+    ...entry,
+    week: getSessionEffectiveCycleWeekNumber(plannedStartDate, { trainedDate: entry.date }) ?? entry.week,
+  }));
+}
+
 function findDashboardSessionForDay(
   sessions: TrainingSession[],
   dayExercises: ExerciseTemplate[],
@@ -6490,8 +6536,9 @@ function findDashboardEntries(
 ) {
   if (!expectedDate || dayExercises.length === 0) return [];
   const dayExerciseIds = new Set(dayExercises.map((exercise) => getDashboardExerciseIdentity(exercise, usesCycleScopedSessions)));
+  const shouldMatchEntryDate = !usesCycleScopedSessions;
   return entries.filter((entry) => (
-    (usesCycleScopedSessions || normalizeEntryDateKey(entry.date) === expectedDate) &&
+    (!shouldMatchEntryDate || normalizeEntryDateKey(entry.date) === expectedDate) &&
     dayExerciseIds.has(getDashboardEntryExerciseIdentity(entry, usesCycleScopedSessions))
   ));
 }
