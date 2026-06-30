@@ -4,6 +4,7 @@ import { roundDecimal } from "@/lib/progress/weight-format";
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const santiagoTimeZone = "America/Santiago";
 const weekDayLabels = ["L", "M", "X", "J", "V", "S", "D"] as const;
+const plannedDayOrder = ["Lunes", "Martes", "Miercoles", "Miércoles", "Jueves", "Viernes", "Sabado", "Sábado", "Domingo"];
 
 export type WeeklyEquivalentProgressTone = "positive" | "danger" | "neutral";
 export type WeeklyEquivalentProgressStatus = "ready" | "no_previous" | "neutral";
@@ -17,23 +18,33 @@ export interface EquivalentWeeklyDateRanges {
   todayLabel: string;
 }
 
-export interface WeeklyEquivalentProgressPoint {
+export interface WeeklyDualProgressPoint {
+  day: string;
   label: string;
-  value: number;
-  comparable: boolean;
+  currentDate: string;
+  previousDate: string;
+  currentVolume: number | null;
+  previousVolume: number;
+  currentPercentage: number | null;
+  previousPercentage: number | null;
+  isFuture: boolean;
 }
 
 export interface WeeklyEquivalentProgressResult {
   ranges: EquivalentWeeklyDateRanges;
+  plannedDays: string[];
+  previousFinalVolume: number;
   currentEquivalentValue: number;
   previousEquivalentValue: number;
   percentage: number | null;
+  previousComparablePercentage: number | null;
   primaryLabel: string;
-  comparisonLabel: "vs mismo punto de la semana anterior";
+  previousLabel: string;
+  comparisonLabel: "Vs semana anterior";
   detailLabel: string;
   tone: WeeklyEquivalentProgressTone;
   status: WeeklyEquivalentProgressStatus;
-  points: WeeklyEquivalentProgressPoint[];
+  points: WeeklyDualProgressPoint[];
 }
 
 export function getEquivalentWeeklyDateRanges(referenceDate: Date | string = new Date()): EquivalentWeeklyDateRanges {
@@ -59,32 +70,61 @@ export function calculateEquivalentWeeklyProgress(input: {
   sessions?: TrainingSession[];
   referenceDate?: Date | string;
   activeCycleId?: string | null;
+  plannedDays?: string[];
 }): WeeklyEquivalentProgressResult {
   const ranges = getEquivalentWeeklyDateRanges(input.referenceDate);
+  const plannedDays = resolvePlannedWeekDays(input.plannedDays ?? []);
   const entries = filterComparableEntries({
     entries: input.entries,
     sessions: input.sessions ?? [],
     activeCycleId: input.activeCycleId,
   });
-  const currentEntries = entries.filter((entry) => isDateInRange(normalizeEntryDateKey(entry.date), ranges.currentWeekStart, ranges.currentComparisonEnd));
-  const previousEntries = entries.filter((entry) => isDateInRange(normalizeEntryDateKey(entry.date), ranges.previousWeekStart, ranges.previousComparisonEnd));
-  const currentEquivalentValue = calculateEntriesVolume(currentEntries);
-  const previousEquivalentValue = calculateEntriesVolume(previousEntries);
-  const percentage = calculateEquivalentPercentage(currentEquivalentValue, previousEquivalentValue);
-  const status = resolveProgressStatus(currentEquivalentValue, previousEquivalentValue, percentage);
+  const points = buildDualWeeklyProgressSeries({ entries, ranges, plannedDays });
+  const previousFinalVolume = points.at(-1)?.previousVolume ?? 0;
+  const normalizedPoints = normalizeWeeklySeriesAgainstPreviousFinal(points, previousFinalVolume);
+  const comparableIndex = getComparablePlannedDayIndex(normalizedPoints);
+  const comparablePoint = comparableIndex >= 0 ? normalizedPoints[comparableIndex] : null;
+  const currentEquivalentValue = comparablePoint?.currentVolume ?? 0;
+  const previousEquivalentValue = comparablePoint?.previousVolume ?? 0;
+  const percentage = comparablePoint?.currentPercentage ?? null;
+  const previousComparablePercentage = comparablePoint?.previousPercentage ?? null;
+  const status = resolveProgressStatus(currentEquivalentValue, previousFinalVolume, percentage);
 
   return {
     ranges,
+    plannedDays,
+    previousFinalVolume,
     currentEquivalentValue,
     previousEquivalentValue,
     percentage,
-    primaryLabel: percentage === null ? "—" : `${formatSignedNumber(Math.round(percentage))}%`,
-    comparisonLabel: "vs mismo punto de la semana anterior",
+    previousComparablePercentage,
+    primaryLabel: formatProgressPercentage(percentage),
+    previousLabel: formatProgressPercentage(previousComparablePercentage),
+    comparisonLabel: "Vs semana anterior",
     detailLabel: buildDetailLabel(status),
     tone: resolveProgressTone(percentage, status),
     status,
-    points: buildEquivalentProgressPoints(entries, ranges),
+    points: normalizedPoints,
   };
+}
+
+export function resolvePlannedWeekDays(days: string[]) {
+  const normalized = new Map<string, string>();
+  days.forEach((day) => {
+    const canonical = canonicalizePlannedDay(day);
+    if (canonical) normalized.set(removeAccents(canonical).toLowerCase(), canonical);
+  });
+
+  const ordered = [...normalized.values()].sort((a, b) => getDayOffset(a) - getDayOffset(b));
+  return ordered.length > 0 ? ordered : ["Lunes"];
+}
+
+export function formatProgressPercentage(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "—";
+  const rounded = roundDecimal(value);
+  if (Object.is(rounded, -0) || rounded === 0) return "0%";
+  const fixed = rounded.toFixed(2).replace(/\.?0+$/, "");
+  return `${rounded > 0 ? "+" : ""}${fixed.replace(".", ",")}%`;
 }
 
 function filterComparableEntries(input: {
@@ -107,22 +147,57 @@ function filterComparableEntries(input: {
   return [...uniqueEntries.values()];
 }
 
-function buildEquivalentProgressPoints(entries: ExerciseEntry[], ranges: EquivalentWeeklyDateRanges) {
-  return Array.from({ length: ranges.elapsedDayCount }, (_, index) => {
-    const currentEnd = addDays(ranges.currentWeekStart, index);
-    const previousEnd = addDays(ranges.previousWeekStart, index);
-    const currentValue = calculateEntriesVolume(entries.filter((entry) =>
-      isDateInRange(normalizeEntryDateKey(entry.date), ranges.currentWeekStart, currentEnd)));
-    const previousValue = calculateEntriesVolume(entries.filter((entry) =>
-      isDateInRange(normalizeEntryDateKey(entry.date), ranges.previousWeekStart, previousEnd)));
-    const value = calculateEquivalentPercentage(currentValue, previousValue);
+function buildDualWeeklyProgressSeries(input: {
+  entries: ExerciseEntry[];
+  ranges: EquivalentWeeklyDateRanges;
+  plannedDays: string[];
+}) {
+  let currentCumulative = 0;
+  let previousCumulative = 0;
+
+  return input.plannedDays.map((day) => {
+    const offset = getDayOffset(day);
+    const currentDate = addDays(input.ranges.currentWeekStart, offset);
+    const previousDate = addDays(input.ranges.previousWeekStart, offset);
+    const isFuture = currentDate > input.ranges.currentComparisonEnd;
+
+    previousCumulative += calculateEntriesVolume(input.entries.filter((entry) => normalizeEntryDateKey(entry.date) === previousDate));
+    if (!isFuture) {
+      currentCumulative += calculateEntriesVolume(input.entries.filter((entry) => normalizeEntryDateKey(entry.date) === currentDate));
+    }
 
     return {
-      label: weekDayLabels[index] ?? "",
-      value: value ?? 0,
-      comparable: value !== null,
-    };
+      day,
+      label: getShortDayLabel(day),
+      currentDate,
+      previousDate,
+      currentVolume: isFuture ? null : roundDecimal(currentCumulative),
+      previousVolume: roundDecimal(previousCumulative),
+      currentPercentage: null,
+      previousPercentage: null,
+      isFuture,
+    } satisfies WeeklyDualProgressPoint;
   });
+}
+
+function normalizeWeeklySeriesAgainstPreviousFinal(points: WeeklyDualProgressPoint[], previousFinalVolume: number) {
+  return points.map((point) => ({
+    ...point,
+    currentPercentage: point.currentVolume === null ? null : calculateAgainstPreviousFinal(point.currentVolume, previousFinalVolume),
+    previousPercentage: calculateAgainstPreviousFinal(point.previousVolume, previousFinalVolume),
+  }));
+}
+
+function calculateAgainstPreviousFinal(cumulativeVolume: number, previousFinalVolume: number) {
+  if (previousFinalVolume <= 0) return null;
+  return roundDecimal(((cumulativeVolume / previousFinalVolume) - 1) * 100);
+}
+
+function getComparablePlannedDayIndex(points: WeeklyDualProgressPoint[]) {
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    if (!points[index].isFuture) return index;
+  }
+  return -1;
 }
 
 function calculateEntriesVolume(entries: ExerciseEntry[]) {
@@ -132,13 +207,8 @@ function calculateEntriesVolume(entries: ExerciseEntry[]) {
   }, 0));
 }
 
-function calculateEquivalentPercentage(currentValue: number, previousValue: number) {
-  if (previousValue <= 0) return null;
-  return roundDecimal(((currentValue - previousValue) / previousValue) * 100);
-}
-
-function resolveProgressStatus(currentValue: number, previousValue: number, percentage: number | null): WeeklyEquivalentProgressStatus {
-  if (previousValue <= 0 && currentValue <= 0) return "neutral";
+function resolveProgressStatus(currentValue: number, previousFinalVolume: number, percentage: number | null): WeeklyEquivalentProgressStatus {
+  if (previousFinalVolume <= 0 && currentValue <= 0) return "neutral";
   if (percentage === null) return "no_previous";
   return "ready";
 }
@@ -149,17 +219,13 @@ function resolveProgressTone(percentage: number | null, status: WeeklyEquivalent
 }
 
 function buildDetailLabel(status: WeeklyEquivalentProgressStatus) {
-  if (status === "ready") return "Semana en curso";
+  if (status === "ready") return "Semana actual";
   if (status === "neutral") return "Sin registros equivalentes";
   return "Sin comparación anterior";
 }
 
-function formatSignedNumber(value: number) {
-  return value > 0 ? `+${value}` : String(value);
-}
-
-function isDateInRange(value: string, start: string, end: string) {
-  return value >= start && value <= end;
+function isDateKey(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function addDays(dateKey: string, days: number) {
@@ -196,4 +262,36 @@ function getMondayBasedWeekdayOffset(epochDay: number) {
 
 function formatEpochDayAsDateKey(epochDay: number) {
   return new Date(epochDay * MILLISECONDS_PER_DAY).toISOString().slice(0, 10);
+}
+
+function canonicalizePlannedDay(day: string) {
+  const trimmed = day.trim();
+  if (isDateKey(trimmed)) return getDayNameFromOffset(getMondayBasedWeekdayOffset(parseDateKeyToEpochDay(trimmed)));
+  const normalized = removeAccents(trimmed).toLowerCase();
+  const found = plannedDayOrder.find((item) => removeAccents(item).toLowerCase() === normalized);
+  return found ? getDayNameFromOffset(getDayOffset(found)) : null;
+}
+
+function getDayOffset(day: string) {
+  const normalized = removeAccents(day).toLowerCase();
+  if (normalized === "lunes") return 0;
+  if (normalized === "martes") return 1;
+  if (normalized === "miercoles") return 2;
+  if (normalized === "jueves") return 3;
+  if (normalized === "viernes") return 4;
+  if (normalized === "sabado") return 5;
+  if (normalized === "domingo") return 6;
+  return 0;
+}
+
+function getDayNameFromOffset(offset: number) {
+  return ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"][offset] ?? "Lunes";
+}
+
+function getShortDayLabel(day: string) {
+  return weekDayLabels[getDayOffset(day)] ?? day.slice(0, 1).toUpperCase();
+}
+
+function removeAccents(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }

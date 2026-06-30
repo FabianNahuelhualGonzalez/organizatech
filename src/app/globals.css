@@ -2628,15 +2628,33 @@ h3 {
   grid-area: summary;
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: 10px;
   align-content: center;
 }
 
-.weekly-progress-summary strong {
+.weekly-progress-value-block {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.weekly-progress-value-block p {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(11px, 3vw, 13px);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.weekly-progress-value-block strong {
   max-width: 100%;
   overflow-wrap: anywhere;
-  font-size: clamp(34px, 8vw, 48px);
-  line-height: 0.95;
+  font-size: clamp(22px, 5.4vw, 31px);
+  line-height: 1;
+}
+
+.weekly-progress-value-block.previous strong {
+  color: #dce7ff;
 }
 
 .weekly-progress-summary span {
@@ -2713,6 +2731,16 @@ h3 {
 .weekly-line {
   fill: none;
   stroke-linecap: round;
+  stroke-width: 3.6;
+}
+
+.weekly-line.previous {
+  stroke: rgba(220, 231, 255, 0.46);
+  stroke-dasharray: 7 7;
+  stroke-width: 2.6;
+}
+
+.weekly-line.current {
   stroke-width: 4;
 }
 
@@ -2720,10 +2748,16 @@ h3 {
   fill: rgba(60, 122, 255, 0.24);
 }
 
-.weekly-point {
+.weekly-point.current {
   fill: #dce7ff;
   stroke: var(--primary);
   stroke-width: 4;
+}
+
+.weekly-point.previous {
+  fill: rgba(220, 231, 255, 0.82);
+  stroke: rgba(7, 16, 26, 0.94);
+  stroke-width: 2;
 }
 
 .weekly-axis-values {
@@ -2747,6 +2781,40 @@ h3 {
   font-size: clamp(12px, 3.5vw, 15px);
   font-weight: 800;
   text-align: center;
+}
+
+.weekly-progress-legend {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: clamp(10px, 2.8vw, 12px);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.weekly-progress-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.weekly-progress-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.weekly-progress-legend i.current {
+  background: var(--primary);
+  box-shadow: 0 0 10px rgba(60, 122, 255, 0.8);
+}
+
+.weekly-progress-legend i.previous {
+  border: 1px solid rgba(220, 231, 255, 0.76);
+  background: rgba(220, 231, 255, 0.3);
 }
 
 .progress-track {
@@ -3379,7 +3447,7 @@ h3 {
 }
 
 .weekly-progress-summary {
-  gap: 6px;
+  gap: 8px;
 }
 
 .weekly-progress-summary .small-label {
@@ -3387,8 +3455,8 @@ h3 {
   line-height: 1.28;
 }
 
-.weekly-progress-summary strong {
-  font-size: clamp(2rem, 7.5vw, 2.75rem);
+.weekly-progress-value-block strong {
+  font-size: clamp(1.38rem, 5.4vw, 1.9rem);
 }
 
 .weekly-progress-summary span {
@@ -3428,8 +3496,8 @@ h3 {
   position: absolute;
   z-index: 2;
   display: grid;
-  min-width: 44px;
-  max-width: 58px;
+  min-width: 86px;
+  max-width: 98px;
   gap: 1px;
   transform: translate(-50%, -84%);
   border: 1px solid rgba(60, 122, 255, 0.45);
@@ -3450,6 +3518,7 @@ h3 {
   color: var(--blue-soft);
   font-size: 10px;
   font-weight: 900;
+  white-space: nowrap;
 }
 
 .weekly-point-hit {

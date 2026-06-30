@@ -1,7 +1,6 @@
 const fallbackTrainingDays = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"];
 const fallbackValues = [-0.8, -0.5, 0.2, 1.2, 0.5, 0.8, -0.2];
 const chartTopY = 18;
-const chartZeroY = 65;
 const chartBottomY = 112;
 
 export interface WeeklyProgressChartPoint {
@@ -12,10 +11,21 @@ export interface WeeklyProgressChartPoint {
   comparable: boolean;
 }
 
+export interface WeeklyDualProgressChartPoint {
+  x: number;
+  y: number | null;
+  value: number | null;
+  label: string;
+  comparable: boolean;
+  volume?: number | null;
+}
+
 export interface WeeklyProgressChart {
   labels: string[];
   values: number[];
   points: WeeklyProgressChartPoint[];
+  currentPoints: WeeklyDualProgressChartPoint[];
+  previousPoints: WeeklyDualProgressChartPoint[];
   activeIndex: number;
   axisLabels: string[];
 }
@@ -26,7 +36,11 @@ export function buildWeeklyProgressChart(input: {
   currentDay?: string;
 } | {
   series: ReadonlyArray<{ label: string; value: number; comparable?: boolean }>;
+} | {
+  currentSeries: ReadonlyArray<{ label: string; value: number | null; comparable?: boolean; volume?: number | null }>;
+  previousSeries: ReadonlyArray<{ label: string; value: number | null; comparable?: boolean; volume?: number | null }>;
 }) {
+  if ("currentSeries" in input) return buildWeeklyProgressChartFromDualSeries(input.currentSeries, input.previousSeries);
   if ("series" in input) return buildWeeklyProgressChartFromSeries(input.series);
 
   const days = normalizeWeekDays(input.weekDays);
@@ -44,6 +58,8 @@ export function buildWeeklyProgressChart(input: {
     labels,
     values,
     points,
+    currentPoints: points,
+    previousPoints: [],
     activeIndex,
     axisLabels: buildAxisLabels(4),
   } satisfies WeeklyProgressChart;
@@ -70,9 +86,56 @@ function buildWeeklyProgressChartFromSeries(series: ReadonlyArray<{ label: strin
     labels,
     values,
     points,
+    currentPoints: points,
+    previousPoints: [],
     activeIndex: points.length - 1,
     axisLabels: buildAxisLabels(axisLimit),
   } satisfies WeeklyProgressChart;
+}
+
+function buildWeeklyProgressChartFromDualSeries(
+  currentSeries: ReadonlyArray<{ label: string; value: number | null; comparable?: boolean; volume?: number | null }>,
+  previousSeries: ReadonlyArray<{ label: string; value: number | null; comparable?: boolean; volume?: number | null }>,
+) {
+  const labels = previousSeries.length > 0 ? previousSeries.map((point) => point.label) : currentSeries.map((point) => point.label);
+  const allValues = [...currentSeries, ...previousSeries].map((point) => point.value).filter((value): value is number => Number.isFinite(value));
+  const axisLimit = getAxisLimit(allValues);
+  const count = Math.max(labels.length, currentSeries.length, previousSeries.length, 1);
+  const currentPoints = currentSeries.map((point, index) => toDualPoint(point, index, count, axisLimit));
+  const previousPoints = previousSeries.map((point, index) => toDualPoint(point, index, count, axisLimit));
+  const activeIndex = Math.max(0, currentPoints.findLastIndex((point) => point.value !== null));
+
+  return {
+    labels,
+    values: allValues,
+    points: currentPoints.filter((point): point is WeeklyProgressChartPoint => point.value !== null && point.y !== null).map((point) => ({
+      x: point.x,
+      y: point.y,
+      value: point.value,
+      label: point.label,
+      comparable: point.comparable,
+    })),
+    currentPoints,
+    previousPoints,
+    activeIndex,
+    axisLabels: buildAxisLabels(axisLimit),
+  } satisfies WeeklyProgressChart;
+}
+
+function toDualPoint(
+  point: { label: string; value: number | null; comparable?: boolean; volume?: number | null },
+  index: number,
+  count: number,
+  axisLimit: number,
+): WeeklyDualProgressChartPoint {
+  return {
+    x: getPointX(index, count),
+    y: point.value === null ? null : getPointY(point.value, axisLimit),
+    value: point.value,
+    label: point.label,
+    comparable: point.comparable ?? point.value !== null,
+    volume: point.volume ?? null,
+  };
 }
 
 function getAxisLimit(values: number[]) {
@@ -82,7 +145,11 @@ function getAxisLimit(values: number[]) {
 
 function buildAxisLabels(limit: number) {
   const middle = limit / 2;
-  return [`+${limit}%`, `+${middle}%`, "0%", `-${middle}%`, `-${limit}%`];
+  return [`+${formatAxisNumber(limit)}%`, `+${formatAxisNumber(middle)}%`, "0%", `-${formatAxisNumber(middle)}%`, `-${formatAxisNumber(limit)}%`];
+}
+
+function formatAxisNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(1))).replace(".", ",");
 }
 
 function normalizeWeekDays(weekDays: readonly string[]) {

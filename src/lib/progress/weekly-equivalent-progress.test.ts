@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import type { ExerciseEntry, TrainingSession } from "@/lib/progress/types";
 import {
   calculateEquivalentWeeklyProgress,
+  formatProgressPercentage,
   getEquivalentWeeklyDateRanges,
+  resolvePlannedWeekDays,
 } from "@/lib/progress/weekly-equivalent-progress";
 
 assert.deepEqual(getEquivalentWeeklyDateRanges("2026-06-29"), {
@@ -66,64 +68,105 @@ assert.deepEqual(getEquivalentWeeklyDateRanges("2027-01-01"), {
   todayLabel: "V",
 });
 
+assert.deepEqual(
+  resolvePlannedWeekDays(["Viernes", "Lunes", "Miercoles", "Lunes"]),
+  ["Lunes", "Miércoles", "Viernes"],
+  "deduplica y ordena los dias planificados",
+);
+
+assert.deepEqual(
+  resolvePlannedWeekDays(["2026-07-04", "Martes", "Jueves"]),
+  ["Martes", "Jueves", "Sábado"],
+  "acepta fechas y rutinas no consecutivas",
+);
+
+assert.deepEqual(resolvePlannedWeekDays([]), ["Lunes"], "mantiene fallback seguro para planes vacios");
+
 {
   const result = calculateEquivalentWeeklyProgress({
-    referenceDate: "2026-06-30",
+    referenceDate: "2026-07-01",
+    plannedDays: ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"],
     entries: [
-      entry("current-lunes", "2026-06-29", 10),
-      entry("current-martes", "2026-06-30", 10),
-      entry("previous-lunes", "2026-06-22", 10),
-      entry("previous-martes", "2026-06-23", 30),
-      entry("previous-future", "2026-06-24", 999),
+      volumeEntry("previous-l", "2026-06-22", 150),
+      volumeEntry("previous-m", "2026-06-23", 140),
+      volumeEntry("previous-x", "2026-06-24", 125),
+      volumeEntry("previous-j", "2026-06-25", 75),
+      volumeEntry("previous-v", "2026-06-26", 10),
+      volumeEntry("current-l", "2026-06-29", 175),
+      volumeEntry("current-m", "2026-06-30", 123.75),
     ],
   });
 
-  assert.equal(result.currentEquivalentValue, 200);
-  assert.equal(result.previousEquivalentValue, 400);
-  assert.equal(result.percentage, -50, "porcentaje negativo usa periodos equivalentes lunes-martes");
-  assert.equal(result.primaryLabel, "-50%");
+  assert.deepEqual(result.plannedDays, ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]);
+  assert.equal(result.previousFinalVolume, 500, "la semana anterior completa fija el baseline");
+  assert.equal(result.points.length, 5, "el eje muestra todos los dias planificados");
+  assert.deepEqual(result.points.map((point) => point.label), ["L", "M", "X", "J", "V"]);
+  assert.deepEqual(result.points.map((point) => point.previousPercentage), [-70, -42, -17, -2, 0]);
+  assert.deepEqual(result.points.map((point) => point.currentPercentage), [-65, -40.25, -40.25, null, null]);
+  assert.equal(result.points[2].currentVolume, 298.75, "dia transcurrido sin sesion conserva acumulado plano");
+  assert.equal(result.points[3].currentVolume, null, "dia futuro queda sin dato inventado");
+  assert.equal(result.points[4].currentPercentage, null, "la serie actual no se extiende al futuro");
+  assert.equal(result.currentEquivalentValue, 298.75);
+  assert.equal(result.previousEquivalentValue, 415);
+  assert.equal(result.percentage, -40.25);
+  assert.equal(result.previousComparablePercentage, -17);
+  assert.equal(result.primaryLabel, "-40,25%");
+  assert.equal(result.previousLabel, "-17%");
+  assert.equal(result.comparisonLabel, "Vs semana anterior");
+  assert.equal(result.detailLabel, "Semana actual");
   assert.equal(result.tone, "danger");
-  assert.equal(result.comparisonLabel, "vs mismo punto de la semana anterior");
-  assert.equal(result.points.length, 2, "no incluye dias futuros");
 }
 
 {
   const result = calculateEquivalentWeeklyProgress({
-    referenceDate: "2026-06-30",
+    referenceDate: "2026-07-03",
+    plannedDays: ["Lunes", "Miercoles", "Viernes"],
     entries: [
-      entry("current", "2026-06-29", 14.945),
-      entry("previous", "2026-06-22", 25),
+      volumeEntry("previous-l", "2026-06-22", 100),
+      volumeEntry("previous-x", "2026-06-24", 200),
+      volumeEntry("previous-v", "2026-06-26", 200),
+      volumeEntry("current-l", "2026-06-29", 250),
+      volumeEntry("current-x", "2026-07-01", 250),
+      volumeEntry("current-v", "2026-07-03", 200),
     ],
   });
 
-  assert.equal(result.percentage, -40.22, "mantiene decimales internos");
-  assert.equal(result.primaryLabel, "-40%", "presenta el porcentaje principal redondeado");
-}
-
-{
-  const result = calculateEquivalentWeeklyProgress({
-    referenceDate: "2026-06-30",
-    entries: [
-      entry("current", "2026-06-29", 15),
-      entry("previous", "2026-06-22", 10),
-    ],
-  });
-
-  assert.equal(result.percentage, 50, "porcentaje positivo correcto");
-  assert.equal(result.primaryLabel, "+50%");
+  assert.deepEqual(result.plannedDays, ["Lunes", "Miércoles", "Viernes"]);
+  assert.equal(result.points.at(-1)?.previousPercentage, 0, "la semana anterior termina en 0%");
+  assert.equal(result.percentage, 40, "la semana actual puede superar el baseline final");
+  assert.equal(result.primaryLabel, "+40%");
   assert.equal(result.tone, "positive");
 }
 
 {
   const result = calculateEquivalentWeeklyProgress({
-    referenceDate: "2026-06-30",
+    referenceDate: "2026-07-01",
+    plannedDays: ["Martes", "Jueves", "Sabado"],
     entries: [
-      entry("current", "2026-06-29", 10),
-      entry("previous", "2026-06-22", 10),
+      volumeEntry("previous-m", "2026-06-23", 100),
+      volumeEntry("previous-j", "2026-06-25", 200),
+      volumeEntry("previous-s", "2026-06-27", 200),
+      volumeEntry("current-m", "2026-06-30", 50),
     ],
   });
 
-  assert.equal(result.percentage, 0, "porcentaje cero correcto");
+  assert.deepEqual(result.points.map((point) => point.label), ["M", "J", "S"]);
+  assert.deepEqual(result.points.map((point) => point.currentPercentage), [-90, null, null]);
+  assert.equal(result.percentage, -90, "usa el ultimo dia planificado transcurrido, aunque haya gaps");
+}
+
+{
+  const result = calculateEquivalentWeeklyProgress({
+    referenceDate: "2026-06-30",
+    plannedDays: ["Lunes"],
+    entries: [
+      volumeEntry("current", "2026-06-29", 10),
+      volumeEntry("previous", "2026-06-22", 10),
+    ],
+  });
+
+  assert.equal(result.points.length, 1);
+  assert.equal(result.percentage, 0);
   assert.equal(result.primaryLabel, "0%");
   assert.equal(result.tone, "neutral");
 }
@@ -131,19 +174,21 @@ assert.deepEqual(getEquivalentWeeklyDateRanges("2027-01-01"), {
 {
   const result = calculateEquivalentWeeklyProgress({
     referenceDate: "2026-06-30",
-    entries: [entry("current", "2026-06-29", 10)],
+    plannedDays: ["Lunes"],
+    entries: [volumeEntry("current", "2026-06-29", 10)],
   });
 
-  assert.equal(result.previousEquivalentValue, 0);
+  assert.equal(result.previousFinalVolume, 0);
   assert.equal(result.percentage, null, "semana anterior en 0 no produce infinito");
   assert.equal(result.primaryLabel, "—");
   assert.equal(result.detailLabel, "Sin comparación anterior");
-  assert.equal(Number.isFinite(result.percentage ?? 0), true);
+  assert.equal(result.status, "no_previous");
 }
 
 {
   const result = calculateEquivalentWeeklyProgress({
     referenceDate: "2026-06-30",
+    plannedDays: ["Lunes"],
     entries: [],
   });
 
@@ -151,22 +196,24 @@ assert.deepEqual(getEquivalentWeeklyDateRanges("2027-01-01"), {
   assert.equal(result.previousEquivalentValue, 0);
   assert.equal(result.percentage, null, "ambos periodos en 0 no produce NaN");
   assert.equal(result.detailLabel, "Sin registros equivalentes");
+  assert.equal(result.status, "neutral");
   assert.equal(result.tone, "neutral");
 }
 
 {
   const result = calculateEquivalentWeeklyProgress({
     referenceDate: "2026-06-30",
+    plannedDays: ["Lunes"],
     sessions: [
       session("deleted", "completed", "2026-06-22", "2026-06-22", "2026-06-22T10:00:00Z"),
       session("skipped", "skipped", "2026-06-22", "2026-06-22", "2026-06-22T10:00:00Z"),
       session("valid", "completed", "2026-06-22", "2026-06-22", "2026-06-22T10:00:00Z"),
     ],
     entries: [
-      entry("current", "2026-06-29", 20),
-      entry("deleted-entry", "2026-06-22", 999, { sessionId: "deleted" }),
-      entry("skipped-entry", "2026-06-22", 999, { sessionId: "skipped" }),
-      entry("valid-entry", "2026-06-22", 10, { sessionId: "valid" }),
+      volumeEntry("current", "2026-06-29", 200),
+      volumeEntry("deleted-entry", "2026-06-22", 999, { sessionId: "deleted" }),
+      volumeEntry("skipped-entry", "2026-06-22", 999, { sessionId: "skipped" }),
+      volumeEntry("valid-entry", "2026-06-22", 100, { sessionId: "valid" }),
     ],
   });
 
@@ -178,11 +225,12 @@ assert.deepEqual(getEquivalentWeeklyDateRanges("2027-01-01"), {
   const result = calculateEquivalentWeeklyProgress({
     referenceDate: "2026-06-30",
     activeCycleId: "cycle-a",
+    plannedDays: ["Lunes"],
     entries: [
-      entry("current-a", "2026-06-29", 20, { cycleId: "cycle-a" }),
-      entry("previous-a", "2026-06-22", 10, { cycleId: "cycle-a" }),
-      entry("current-b", "2026-06-29", 999, { cycleId: "cycle-b" }),
-      entry("previous-b", "2026-06-22", 999, { cycleId: "cycle-b" }),
+      volumeEntry("current-a", "2026-06-29", 200, { cycleId: "cycle-a" }),
+      volumeEntry("previous-a", "2026-06-22", 100, { cycleId: "cycle-a" }),
+      volumeEntry("current-b", "2026-06-29", 999, { cycleId: "cycle-b" }),
+      volumeEntry("previous-b", "2026-06-22", 999, { cycleId: "cycle-b" }),
     ],
   });
 
@@ -194,13 +242,14 @@ assert.deepEqual(getEquivalentWeeklyDateRanges("2027-01-01"), {
 {
   const result = calculateEquivalentWeeklyProgress({
     referenceDate: "2026-06-30",
+    plannedDays: ["Lunes"],
     entries: [
-      entry("current", "2026-06-29", 10),
-      entry("outside-current", "2026-07-01", 999),
-      entry("previous", "2026-06-22", 10),
-      entry("outside-previous", "2026-06-24", 999),
-      entry("duplicate", "2026-06-29", 10),
-      entry("duplicate", "2026-06-29", 10),
+      volumeEntry("current", "2026-06-29", 100),
+      volumeEntry("outside-current", "2026-07-01", 999),
+      volumeEntry("previous", "2026-06-22", 100),
+      volumeEntry("outside-previous", "2026-06-24", 999),
+      volumeEntry("duplicate", "2026-06-29", 100),
+      volumeEntry("duplicate", "2026-06-29", 100),
     ],
   });
 
@@ -209,12 +258,46 @@ assert.deepEqual(getEquivalentWeeklyDateRanges("2027-01-01"), {
   assert.equal(result.percentage, 100);
 }
 
+{
+  const firstWeek = calculateEquivalentWeeklyProgress({
+    referenceDate: "2026-07-03",
+    plannedDays: ["Lunes", "Viernes"],
+    entries: [
+      volumeEntry("previous-l", "2026-06-22", 100),
+      volumeEntry("previous-v", "2026-06-26", 100),
+      volumeEntry("current-l", "2026-06-29", 200),
+      volumeEntry("current-v", "2026-07-03", 300),
+    ],
+  });
+  const nextWeek = calculateEquivalentWeeklyProgress({
+    referenceDate: "2026-07-06",
+    plannedDays: ["Lunes", "Viernes"],
+    entries: [
+      volumeEntry("previous-l", "2026-06-22", 100),
+      volumeEntry("previous-v", "2026-06-26", 100),
+      volumeEntry("current-l", "2026-06-29", 200),
+      volumeEntry("current-v", "2026-07-03", 300),
+      volumeEntry("next-l", "2026-07-06", 250),
+    ],
+  });
+
+  assert.equal(firstWeek.previousFinalVolume, 200);
+  assert.equal(nextWeek.previousFinalVolume, 500, "al cambiar de semana la semana cerrada pasa a referencia");
+  assert.equal(nextWeek.points[0].previousVolume, 200);
+}
+
+assert.equal(formatProgressPercentage(-40.25), "-40,25%");
+assert.equal(formatProgressPercentage(125.5), "+125,5%");
+assert.equal(formatProgressPercentage(-0), "0%");
+assert.equal(formatProgressPercentage(Number.NaN), "—");
+assert.equal(formatProgressPercentage(Number.POSITIVE_INFINITY), "—");
+
 console.log("weekly-equivalent-progress tests passed");
 
-function entry(
+function volumeEntry(
   id: string,
   date: string,
-  weight: number,
+  volume: number,
   overrides: Partial<ExerciseEntry> = {},
 ): ExerciseEntry {
   return {
@@ -226,8 +309,8 @@ function entry(
     date,
     targetSets: 1,
     targetReps: 10,
-    weight,
-    previousWeight: weight,
+    weight: volume / 10,
+    previousWeight: volume / 10,
     reps: [10],
     ...overrides,
   };

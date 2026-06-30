@@ -51,4 +51,45 @@ import { buildWeeklyProgressChart } from "@/lib/progress/weekly-progress-chart";
   assert.deepEqual(chart.labels, ["L", "M", "X", "J", "V", "S", "D"]);
 }
 
+{
+  const chart = buildWeeklyProgressChart({
+    currentSeries: [
+      { label: "L", value: -65, comparable: true },
+      { label: "M", value: -40.25, comparable: true },
+      { label: "X", value: -40.25, comparable: true },
+      { label: "J", value: null, comparable: false },
+      { label: "V", value: null, comparable: false },
+    ],
+    previousSeries: [
+      { label: "L", value: -70, comparable: true },
+      { label: "M", value: -42, comparable: true },
+      { label: "X", value: -17, comparable: true },
+      { label: "J", value: -2, comparable: true },
+      { label: "V", value: 0, comparable: true },
+    ],
+  });
+
+  assert.deepEqual(chart.labels, ["L", "M", "X", "J", "V"]);
+  assert.equal(chart.currentPoints.length, 5);
+  assert.equal(chart.previousPoints.length, 5);
+  assert.equal(chart.activeIndex, 2, "destaca el ultimo punto real de la semana actual");
+  assert.equal(chart.currentPoints[3].y, null, "los dias futuros no tienen punto real");
+  assert.equal(chart.previousPoints[4].value, 0, "la semana anterior permanece completa");
+  assert.equal(chart.points.length, 3, "la linea actual no se extiende hacia valores futuros null");
+  assert.deepEqual(chart.axisLabels, ["+70%", "+35%", "0%", "-35%", "-70%"]);
+}
+
+{
+  const chart = buildWeeklyProgressChart({
+    currentSeries: [{ label: "L", value: null, comparable: false }],
+    previousSeries: [{ label: "L", value: 0, comparable: true }],
+  });
+
+  assert.deepEqual(chart.labels, ["L"]);
+  assert.equal(chart.activeIndex, 0);
+  assert.equal(chart.currentPoints[0].x, 240);
+  assert.equal(chart.currentPoints[0].y, null);
+  assert.equal(chart.previousPoints[0].y !== null, true, "un solo punto anterior sigue siendo visible");
+}
+
 console.log("weekly-progress-chart tests passed");
