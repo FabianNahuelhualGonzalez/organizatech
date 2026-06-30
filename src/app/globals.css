@@ -2285,6 +2285,102 @@ h3 {
   min-width: 0;
 }
 
+.dashboard-training-card-content {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.dashboard-day-pill {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(203, 213, 225, 0.2);
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: white;
+  background: rgba(255, 255, 255, 0.035);
+  font-size: clamp(15px, 4vw, 20px);
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.dashboard-routine-name {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: clamp(14px, 3.8vw, 18px);
+  line-height: 1.3;
+}
+
+.dashboard-routine-name span {
+  color: var(--green);
+  font-weight: 950;
+}
+
+.dashboard-routine-name strong {
+  min-width: 0;
+  color: white;
+  font-weight: 850;
+}
+
+.dashboard-exercise-table {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dashboard-exercise-table-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(44px, 0.18fr) minmax(44px, 0.18fr) minmax(54px, 0.2fr);
+  gap: clamp(6px, 2vw, 12px);
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.12);
+  color: var(--muted);
+}
+
+.dashboard-exercise-table-row:last-child {
+  border-bottom: 0;
+}
+
+.dashboard-exercise-table-row.heading {
+  padding-top: 0;
+  color: white;
+  font-size: clamp(11px, 3vw, 13px);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.dashboard-exercise-table-row strong,
+.dashboard-exercise-table-row span {
+  min-width: 0;
+}
+
+.dashboard-exercise-table-row strong {
+  overflow: hidden;
+  color: white;
+  font-size: clamp(14px, 3.8vw, 17px);
+  font-weight: 850;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-exercise-table-row span {
+  color: var(--muted);
+  font-size: clamp(13px, 3.4vw, 16px);
+  font-weight: 800;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .dashboard-status-badge,
 .registered-status {
   display: inline-flex;
@@ -2307,8 +2403,8 @@ h3 {
 
 .dashboard-status-badge.pending,
 .dashboard-status-badge.partial {
-  color: var(--yellow);
-  background: rgba(255, 191, 77, 0.1);
+  color: var(--blue);
+  background: rgba(60, 122, 255, 0.1);
 }
 
 .dashboard-training-card .exercise-row {

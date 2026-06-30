@@ -195,6 +195,10 @@ import {
   sortTrainingDaysByWeekOrder,
   TRAINING_DAY_LABELS,
 } from "@/lib/training/training-day-order";
+import {
+  buildTrainingCarouselCardModel,
+  type TrainingCarouselCardModel,
+} from "@/lib/training/training-carousel-card-presentation";
 
 type Screen =
   | "login"
@@ -3447,6 +3451,17 @@ function PasswordField({
   );
 }
 
+interface DashboardTrainingCardData {
+  day: string;
+  status: "completed" | "partial" | "pending";
+  registeredCount: number;
+  plannedCount: number;
+  isToday: boolean;
+  exercises: ExerciseTemplate[];
+  metrics: ExerciseMetrics[];
+  pendingExercises: ExerciseTemplate[];
+}
+
 function DashboardScreen({
   exercises,
   hasTrainingEntries,
@@ -3607,26 +3622,12 @@ function DashboardScreen({
           <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
             {carouselDays.map((item) => {
               const itemData = getDashboardDayData(item);
-              const itemSummary = calculateTargetSummary(itemData.exercises);
+              const itemModel = buildDashboardTrainingCardModel(itemData, "Ir a rutina de entrenamiento");
 
               return (
                 <article className="dashboard-training-slide" key={item}>
-                  <p className="eyebrow">{itemData.exercises[0]?.routine ?? item}</p>
-                  <h3>{itemData.title}</h3>
                   {itemData.hasRoutine ? (
-                    <>
-                      <RoutineMetricGrid targetSummary={itemSummary} exerciseLabel="Ejercicios total" />
-                      <div className="exercise-preview-section">
-                        <h3>Ejercicios a realizar · {item}</h3>
-                        <div className="exercise-preview-carousel">
-                          {itemData.exercises.map((exercise) => (
-                            <article className="exercise-preview-slide" key={exercise.id}>
-                              <ProgrammedExerciseCard exercise={exercise} />
-                            </article>
-                          ))}
-                        </div>
-                      </div>
-                    </>
+                    <DashboardTrainingCardContent model={itemModel} />
                   ) : (
                     <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
                   )}
@@ -3657,42 +3658,15 @@ function DashboardScreen({
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
           {carouselDays.map((item) => {
             const itemData = getDashboardDayData(item);
-            const registeredSummary = calculateRegisteredDashboardSummary(itemData.metrics);
+            const itemModel = buildDashboardTrainingCardModel(
+              itemData,
+              itemData.isCompleted ? "Ver resumen" : "Ir a rutina",
+            );
 
             return (
               <article className="dashboard-training-slide" key={item}>
-                <div className="dashboard-training-heading">
-                  <h3>{itemData.title}</h3>
-                  {itemData.hasRoutine ? (
-                    <span className={`dashboard-status-badge ${itemData.status}`}>
-                      {itemData.status === "completed"
-                        ? `Completado · ${itemData.registeredCount} de ${itemData.plannedCount}${itemData.isToday ? " · Hoy" : ""}`
-                        : itemData.status === "partial"
-                          ? `Parcial · ${itemData.registeredCount} de ${itemData.plannedCount}${itemData.isToday ? " · Hoy" : ""}`
-                          : `Pendiente · ${itemData.registeredCount} de ${itemData.plannedCount}${itemData.isToday ? " · Hoy" : ""}`}
-                    </span>
-                  ) : null}
-                </div>
                 {itemData.hasRoutine ? (
-                  <div className="exercise-list">
-                    {itemData.metrics.length > 0 ? (
-                      <div className="registered-summary-card">
-                        <span>Entrenamiento registrado</span>
-                        <strong>{registeredSummary.exerciseCount} ejercicios · {formatKg(registeredSummary.totalWeight)} · {registeredSummary.totalReps} reps</strong>
-                      </div>
-                    ) : null}
-                    {itemData.metrics.slice(0, 3).map((entry) => (
-                      <RegisteredExerciseCard key={entry.id} entry={entry} />
-                    ))}
-                    {itemData.pendingExercises.slice(0, Math.max(0, 3 - itemData.metrics.length)).map((exercise) => (
-                      <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
-                    ))}
-                    {itemData.metrics.length + itemData.pendingExercises.length > 3 ? (
-                      <p className="dashboard-more-exercises">
-                        +{itemData.metrics.length + itemData.pendingExercises.length - 3} ejercicios más
-                      </p>
-                    ) : null}
-                  </div>
+                  <DashboardTrainingCardContent model={itemModel} />
                 ) : (
                   <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
                 )}
@@ -3716,6 +3690,63 @@ function DashboardScreen({
     </section>
   );
 }
+
+function buildDashboardTrainingCardModel(
+  itemData: DashboardTrainingCardData,
+  actionLabel: string,
+) {
+  const plannedRows = itemData.metrics.length > 0 ? itemData.pendingExercises : itemData.exercises;
+  return buildTrainingCarouselCardModel({
+    day: itemData.day,
+    routineName: itemData.exercises[0]?.routine ?? null,
+    status: itemData.status,
+    isToday: itemData.isToday,
+    registeredCount: itemData.registeredCount,
+    plannedCount: itemData.plannedCount,
+    registeredExercises: itemData.metrics,
+    plannedExercises: plannedRows,
+    actionLabel,
+    maxVisibleExercises: 4,
+    formatWeight: formatKg,
+  });
+}
+
+function DashboardTrainingCardContent({ model }: { model: TrainingCarouselCardModel }) {
+  return (
+    <div className="dashboard-training-card-content">
+      <div className="dashboard-training-heading">
+        <span className="dashboard-day-pill">{model.day}</span>
+        <span className={`dashboard-status-badge ${model.status}`}>
+          {model.statusLabel}
+        </span>
+      </div>
+      <div className="dashboard-routine-name">
+        <span>Entrenamiento:</span>
+        <strong>{model.routineName}</strong>
+      </div>
+      <div className="dashboard-exercise-table" role="table" aria-label={`Resumen de entrenamiento ${model.day}`}>
+        <div className="dashboard-exercise-table-row heading" role="row">
+          <span role="columnheader">Ejercicio</span>
+          <span role="columnheader">Series</span>
+          <span role="columnheader">Reps</span>
+          <span role="columnheader">kg</span>
+        </div>
+        {model.rows.map((row) => (
+          <div className="dashboard-exercise-table-row" role="row" key={`${row.source}-${row.id}`}>
+            <strong role="cell" title={row.name}>{row.name}</strong>
+            <span role="cell">{row.sets}</span>
+            <span role="cell">{row.reps}</span>
+            <span role="cell">{row.kg}</span>
+          </div>
+        ))}
+      </div>
+      {model.additionalExerciseCount > 0 ? (
+        <p className="dashboard-more-exercises">+ {model.additionalExerciseCount} ejercicios más</p>
+      ) : null}
+    </div>
+  );
+}
+
 function DashboardDayDots({ day, weekDays }: { day: string; weekDays: string[] }) {
   const activeIndex = Math.max(0, weekDays.indexOf(day));
   return <IndexDots activeIndex={activeIndex} count={weekDays.length} />;
