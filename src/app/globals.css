@@ -79,6 +79,33 @@ a {
   text-align: center;
 }
 
+.topbar-training-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 9px;
+  row-gap: 2px;
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(11px, 3.2vw, 14px);
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.topbar-training-meta span {
+  display: inline-flex;
+  white-space: nowrap;
+}
+
+.topbar-training-meta span + span::before {
+  content: "|";
+  margin-right: 9px;
+  color: rgba(220, 231, 255, 0.48);
+  font-weight: 650;
+}
+
 .topbar.hidden {
   opacity: 0;
   pointer-events: none;

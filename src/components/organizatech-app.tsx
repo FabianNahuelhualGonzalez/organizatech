@@ -197,6 +197,7 @@ import {
 } from "@/lib/training/training-day-order";
 import {
   buildTrainingCarouselCardModel,
+  buildTrainingTopbarMeta,
   resolveActiveCarouselIndex,
   resolveTrainingCarouselAction,
   type TrainingCarouselCardModel,
@@ -867,6 +868,18 @@ export function OrganizatechApp({
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
     : cycleHistory.length + 1;
   const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
+  const trainingTopbarMeta = buildTrainingTopbarMeta({
+    cycleLabel: getCycleTypeTitle(displayTrainingPlan),
+    weekNumber: currentWeek,
+    completedDays: calculateWeeklyCompletedTrainingDays({
+      plannedDays: dashboardCarouselDays,
+      exercises: displayExercises,
+      entries: calendarNormalizedEntries,
+      sessions: calendarNormalizedTrainingSessions,
+      usesCycleScopedSessions: isCycleScopedActiveCycle,
+    }),
+    plannedDays: hasRoutinePlan ? dashboardCarouselDays.length : 0,
+  });
 
   useEffect(() => {
     if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
@@ -2964,7 +2977,15 @@ export function OrganizatechApp({
         </button>
         <div>
           <h1>Organizatech</h1>
-          <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}</p>
+          {trainingTopbarMeta ? (
+            <p className="topbar-training-meta" aria-label={`${trainingTopbarMeta.cycleLabel}, ${trainingTopbarMeta.weekLabel}, ${trainingTopbarMeta.progressLabel}`}>
+              <span>{trainingTopbarMeta.cycleLabel}</span>
+              <span>{trainingTopbarMeta.weekLabel}</span>
+              <span>{trainingTopbarMeta.progressLabel}</span>
+            </p>
+          ) : (
+            <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}</p>
+          )}
         </div>
         <button className="icon-button" aria-label="Ver alertas del panel principal" onClick={() => setScreen("dashboard")}>
           <Bell size={18} />
@@ -6148,6 +6169,11 @@ function getCycleTitle(plan: TrainingPlan) {
   return `${cycle?.title ?? "Ciclo"} · ${getCycleObjectiveValue(plan)}`;
 }
 
+function getCycleTypeTitle(plan: TrainingPlan) {
+  const cycle = trainingCycles.find((item) => item.id === plan.cycleType);
+  return cycle?.title ?? "Ciclo";
+}
+
 function getCycleDurationLabel(plan: TrainingPlan) {
   const unit = plan.cycleType === "macro" ? "meses" : plan.cycleType === "session" ? "dia" : "semanas";
   return `${getCycleDurationValue(plan)} ${unit}`;
@@ -6549,6 +6575,51 @@ function calculateRegisteredDashboardSummary(metrics: ExerciseMetrics[]) {
     }),
     { totalWeight: 0, totalReps: 0, exerciseCount: 0 },
   );
+}
+
+function calculateWeeklyCompletedTrainingDays({
+  plannedDays,
+  exercises,
+  entries,
+  sessions,
+  usesCycleScopedSessions,
+}: {
+  plannedDays: string[];
+  exercises: ExerciseTemplate[];
+  entries: ExerciseEntry[];
+  sessions: TrainingSession[];
+  usesCycleScopedSessions: boolean;
+}) {
+  const currentWeekDates = getCurrentSantiagoWeekDates();
+  const currentWeekStart = currentWeekDates.Lunes;
+  const activeSessions = sessions.filter((session) => (
+    session.status === "completed" &&
+    !session.deletedAt &&
+    (usesCycleScopedSessions
+      ? getSessionEffectiveCalendarWeekStart(session) === currentWeekStart
+      : session.calendarWeekStart === currentWeekStart)
+  ));
+
+  return plannedDays.reduce((completedCount, day) => {
+    const dayExercises = exercises.filter((exercise) => (exercise.day ?? day) === day);
+    const expectedDate = currentWeekDates[day] ?? "";
+    const plannedDay = getTrainingDayCode(day);
+    const session = findDashboardSessionForDay(activeSessions, dayExercises, expectedDate, plannedDay, usesCycleScopedSessions);
+    const sessionEntries = session ? findDashboardEntries(session.entries, dayExercises, expectedDate, usesCycleScopedSessions) : [];
+    const allMatchingEntries = usesCycleScopedSessions ? [] : findDashboardEntries(entries, dayExercises, expectedDate, false);
+    const fallbackEntries = sessionEntries.length > 0 ? [] : allMatchingEntries;
+    const itemEntries = usesCycleScopedSessions
+      ? sessionEntries
+      : sessionEntries.length > 0
+        ? sessionEntries
+        : fallbackEntries;
+    const coverage = usesCycleScopedSessions
+      ? getCycleScopedDayCoverage(dayExercises, itemEntries)
+      : null;
+    const status = coverage?.status ?? (Boolean(session) || fallbackEntries.length > 0 ? "completed" : "pending");
+
+    return status === "completed" ? completedCount + 1 : completedCount;
+  }, 0);
 }
 
 function normalizeCycleScopedSessionsByCalendarWeek(sessions: TrainingSession[], plannedStartDate: string) {

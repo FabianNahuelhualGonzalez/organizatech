@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 import {
   buildTrainingCarouselCardModel,
+  buildTrainingTopbarMeta,
   resolveActiveCarouselIndex,
   resolveTrainingCarouselAction,
 } from "@/lib/training/training-carousel-card-presentation";
@@ -18,6 +19,47 @@ function createPlannedExercises(count: number) {
 }
 
 async function run() {
+  assert.deepEqual(buildTrainingTopbarMeta({
+    cycleLabel: "Macrociclo",
+    weekNumber: 3,
+    completedDays: 1,
+    plannedDays: 7,
+  }), {
+    cycleLabel: "Macrociclo",
+    weekLabel: "Semana 3",
+    progressLabel: "1 de 7 días",
+  });
+  assert.equal(buildTrainingTopbarMeta({
+    cycleLabel: "Microciclo",
+    weekNumber: 1,
+    completedDays: 1,
+    plannedDays: 1,
+  })?.progressLabel, "1 de 1 día");
+  assert.equal(buildTrainingTopbarMeta({
+    cycleLabel: "Mesociclo",
+    weekNumber: 2,
+    completedDays: 9,
+    plannedDays: 4,
+  })?.progressLabel, "4 de 4 días");
+  assert.equal(buildTrainingTopbarMeta({
+    cycleLabel: "",
+    weekNumber: 2,
+    completedDays: 1,
+    plannedDays: 4,
+  }), null);
+  assert.equal(buildTrainingTopbarMeta({
+    cycleLabel: "Macrociclo",
+    weekNumber: undefined,
+    completedDays: 1,
+    plannedDays: 4,
+  }), null);
+  assert.equal(buildTrainingTopbarMeta({
+    cycleLabel: "Macrociclo",
+    weekNumber: 2,
+    completedDays: 0,
+    plannedDays: 0,
+  }), null);
+
   assert.deepEqual(resolveTrainingCarouselAction("completed"), { label: "Ver resumen", action: "summary" });
   assert.deepEqual(resolveTrainingCarouselAction("pending"), { label: "Ir a rutina", action: "routine" });
   assert.deepEqual(resolveTrainingCarouselAction("partial"), { label: "Continuar rutina", action: "routine" });
@@ -190,9 +232,18 @@ async function run() {
     const contentStart = appSource.indexOf("function DashboardTrainingCardContent");
     const contentEnd = appSource.indexOf("function DashboardDayDots", contentStart);
     const cardContentSource = contentStart >= 0 && contentEnd > contentStart ? appSource.slice(contentStart, contentEnd) : "";
+    const topbarStart = appSource.indexOf("<header className={`topbar");
+    const topbarEnd = appSource.indexOf("</header>", topbarStart);
+    const topbarSource = topbarStart >= 0 && topbarEnd > topbarStart ? appSource.slice(topbarStart, topbarEnd) : "";
     const dashboardStart = appSource.indexOf("function DashboardScreen");
     const dashboardEnd = appSource.indexOf("function buildDashboardTrainingCardModel", dashboardStart);
     const dashboardSource = dashboardStart >= 0 && dashboardEnd > dashboardStart ? appSource.slice(dashboardStart, dashboardEnd) : "";
+    assert.match(topbarSource, /topbar-training-meta[\s\S]*trainingTopbarMeta\.cycleLabel[\s\S]*trainingTopbarMeta\.weekLabel[\s\S]*trainingTopbarMeta\.progressLabel/, "topbar muestra ciclo, semana y progreso en bloques");
+    assert.match(appSource, /plannedDays: hasRoutinePlan \? dashboardCarouselDays\.length : 0/, "topbar no muestra 0 de 0 cuando no hay plan");
+    assert.match(appSource, /function calculateWeeklyCompletedTrainingDays[\s\S]*status === "completed" \? completedCount \+ 1 : completedCount/, "progreso semanal cuenta solo dias completados");
+    assert.match(cssSource, /\.topbar-training-meta[\s\S]*justify-content: center/, "segunda linea del topbar queda centrada");
+    assert.match(cssSource, /\.topbar-training-meta span \+ span::before[\s\S]*content: "\\|"/, "topbar usa separadores verticales visuales");
+    assert.match(cssSource, /\.topbar-training-meta span[\s\S]*white-space: nowrap/, "bloques del topbar evitan cortes internos incomodos");
     assert.match(cssSource, /\.dashboard-training-carousel[\s\S]*overflow-x: auto/, "carrusel conserva overflow horizontal");
     assert.match(cssSource, /\.dashboard-training-carousel[\s\S]*scroll-snap-type: x mandatory/, "carrusel conserva scroll-snap");
     assert.match(cssSource, /\.dashboard-training-slide[\s\S]*scroll-snap-align: start/, "slides conservan snap align");

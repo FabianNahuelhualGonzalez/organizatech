@@ -65,6 +65,19 @@ export interface ResolveActiveCarouselIndexInput {
   slides: TrainingCarouselSlideGeometry[];
 }
 
+export interface BuildTrainingTopbarMetaInput {
+  cycleLabel: string | null | undefined;
+  weekNumber: number | null | undefined;
+  completedDays: number | null | undefined;
+  plannedDays: number | null | undefined;
+}
+
+export interface TrainingTopbarMeta {
+  cycleLabel: string;
+  weekLabel: string;
+  progressLabel: string;
+}
+
 export function buildTrainingCarouselCardModel(input: BuildTrainingCarouselCardModelInput): TrainingCarouselCardModel {
   const maxVisibleExercises = Math.max(1, input.maxVisibleExercises ?? 4);
   const allRows = [
@@ -121,6 +134,27 @@ export function resolveActiveCarouselIndex(input: ResolveActiveCarouselIndexInpu
   });
 
   return Math.max(0, Math.min(input.slides.length - 1, nearestIndex));
+}
+
+export function buildTrainingTopbarMeta(input: BuildTrainingTopbarMetaInput): TrainingTopbarMeta | null {
+  const cycleLabel = input.cycleLabel?.trim();
+  const weekNumber = Number(input.weekNumber);
+  const completedDays = Number(input.completedDays);
+  const plannedDays = Number(input.plannedDays);
+
+  if (!cycleLabel || !Number.isFinite(weekNumber) || weekNumber < 1) return null;
+  if (!Number.isFinite(completedDays) || completedDays < 0) return null;
+  if (!Number.isFinite(plannedDays) || plannedDays < 1) return null;
+
+  const normalizedCompletedDays = Math.min(Math.trunc(completedDays), Math.trunc(plannedDays));
+  const normalizedPlannedDays = Math.trunc(plannedDays);
+  const dayUnit = normalizedPlannedDays === 1 ? "día" : "días";
+
+  return {
+    cycleLabel,
+    weekLabel: `Semana ${Math.trunc(weekNumber)}`,
+    progressLabel: `${normalizedCompletedDays} de ${normalizedPlannedDays} ${dayUnit}`,
+  };
 }
 
 function buildStatusLabel(status: TrainingCarouselStatus, registeredCount: number, plannedCount: number, isToday: boolean) {
