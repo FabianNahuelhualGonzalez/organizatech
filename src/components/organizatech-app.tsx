@@ -195,6 +195,13 @@ import {
   sortTrainingDaysByWeekOrder,
   TRAINING_DAY_LABELS,
 } from "@/lib/training/training-day-order";
+import {
+  buildTrainingCarouselCardModel,
+  buildTrainingTopbarMeta,
+  resolveActiveCarouselIndex,
+  resolveTrainingCarouselAction,
+  type TrainingCarouselCardModel,
+} from "@/lib/training/training-carousel-card-presentation";
 
 type Screen =
   | "login"
@@ -861,6 +868,18 @@ export function OrganizatechApp({
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
     : cycleHistory.length + 1;
   const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
+  const trainingTopbarMeta = buildTrainingTopbarMeta({
+    cycleLabel: getCycleTypeTitle(displayTrainingPlan),
+    weekNumber: currentWeek,
+    completedDays: calculateWeeklyCompletedTrainingDays({
+      plannedDays: dashboardCarouselDays,
+      exercises: displayExercises,
+      entries: calendarNormalizedEntries,
+      sessions: calendarNormalizedTrainingSessions,
+      usesCycleScopedSessions: isCycleScopedActiveCycle,
+    }),
+    plannedDays: hasRoutinePlan ? dashboardCarouselDays.length : 0,
+  });
 
   useEffect(() => {
     if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
@@ -2958,7 +2977,15 @@ export function OrganizatechApp({
         </button>
         <div>
           <h1>Organizatech</h1>
-          <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}</p>
+          {trainingTopbarMeta ? (
+            <p className="topbar-training-meta" aria-label={`${trainingTopbarMeta.cycleLabel}, ${trainingTopbarMeta.weekLabel}, ${trainingTopbarMeta.progressLabel}`}>
+              <span>{trainingTopbarMeta.cycleLabel}</span>
+              <span>{trainingTopbarMeta.weekLabel}</span>
+              <span>{trainingTopbarMeta.progressLabel}</span>
+            </p>
+          ) : (
+            <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}</p>
+          )}
         </div>
         <button className="icon-button" aria-label="Ver alertas del panel principal" onClick={() => setScreen("dashboard")}>
           <Bell size={18} />
@@ -3447,6 +3474,17 @@ function PasswordField({
   );
 }
 
+interface DashboardTrainingCardData {
+  day: string;
+  status: "completed" | "partial" | "pending";
+  registeredCount: number;
+  plannedCount: number;
+  isToday: boolean;
+  exercises: ExerciseTemplate[];
+  metrics: ExerciseMetrics[];
+  pendingExercises: ExerciseTemplate[];
+}
+
 function DashboardScreen({
   exercises,
   hasTrainingEntries,
@@ -3513,8 +3551,9 @@ function DashboardScreen({
     const index = carouselDays.indexOf(day);
     const container = carouselRef.current;
     const slide = index >= 0 ? container?.children.item(index) as HTMLElement | null : null;
-    if (container && slide) {
-      container.scrollTo({ left: slide.offsetLeft - container.offsetLeft, behavior: "smooth" });
+    const firstSlide = container?.children.item(0) as HTMLElement | null;
+    if (container && slide && firstSlide) {
+      container.scrollTo({ left: slide.offsetLeft - firstSlide.offsetLeft, behavior: "smooth" });
     }
   }, [day, carouselDays]);
 
@@ -3561,21 +3600,18 @@ function DashboardScreen({
   }
 
   const activeDayData = getDashboardDayData(activeCarouselDay);
+  const activeDayAction = resolveTrainingCarouselAction(activeDayData.status);
 
   function handleTrainingCarouselScroll(event: UIEvent<HTMLDivElement>) {
     const container = event.currentTarget;
     const children = Array.from(container.children) as HTMLElement[];
-    const center = container.scrollLeft + container.clientWidth / 2;
-    let nearestIndex = 0;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-
-    children.forEach((child, index) => {
-      const childCenter = child.offsetLeft + child.offsetWidth / 2;
-      const distance = Math.abs(childCenter - center);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestIndex = index;
-      }
+    const nearestIndex = resolveActiveCarouselIndex({
+      scrollLeft: container.scrollLeft,
+      viewportWidth: container.clientWidth,
+      slides: children.map((child) => ({
+        offsetLeft: child.offsetLeft,
+        offsetWidth: child.offsetWidth,
+      })),
     });
 
     const nextDay = carouselDays[nearestIndex] ?? activeCarouselDay;
@@ -3607,26 +3643,12 @@ function DashboardScreen({
           <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
             {carouselDays.map((item) => {
               const itemData = getDashboardDayData(item);
-              const itemSummary = calculateTargetSummary(itemData.exercises);
+              const itemModel = buildDashboardTrainingCardModel(itemData);
 
               return (
                 <article className="dashboard-training-slide" key={item}>
-                  <p className="eyebrow">{itemData.exercises[0]?.routine ?? item}</p>
-                  <h3>{itemData.title}</h3>
                   {itemData.hasRoutine ? (
-                    <>
-                      <RoutineMetricGrid targetSummary={itemSummary} exerciseLabel="Ejercicios total" />
-                      <div className="exercise-preview-section">
-                        <h3>Ejercicios a realizar · {item}</h3>
-                        <div className="exercise-preview-carousel">
-                          {itemData.exercises.map((exercise) => (
-                            <article className="exercise-preview-slide" key={exercise.id}>
-                              <ProgrammedExerciseCard exercise={exercise} />
-                            </article>
-                          ))}
-                        </div>
-                      </div>
-                    </>
+                    <DashboardTrainingCardContent model={itemModel} />
                   ) : (
                     <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
                   )}
@@ -3657,42 +3679,12 @@ function DashboardScreen({
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
           {carouselDays.map((item) => {
             const itemData = getDashboardDayData(item);
-            const registeredSummary = calculateRegisteredDashboardSummary(itemData.metrics);
+            const itemModel = buildDashboardTrainingCardModel(itemData);
 
             return (
               <article className="dashboard-training-slide" key={item}>
-                <div className="dashboard-training-heading">
-                  <h3>{itemData.title}</h3>
-                  {itemData.hasRoutine ? (
-                    <span className={`dashboard-status-badge ${itemData.status}`}>
-                      {itemData.status === "completed"
-                        ? `Completado · ${itemData.registeredCount} de ${itemData.plannedCount}${itemData.isToday ? " · Hoy" : ""}`
-                        : itemData.status === "partial"
-                          ? `Parcial · ${itemData.registeredCount} de ${itemData.plannedCount}${itemData.isToday ? " · Hoy" : ""}`
-                          : `Pendiente · ${itemData.registeredCount} de ${itemData.plannedCount}${itemData.isToday ? " · Hoy" : ""}`}
-                    </span>
-                  ) : null}
-                </div>
                 {itemData.hasRoutine ? (
-                  <div className="exercise-list">
-                    {itemData.metrics.length > 0 ? (
-                      <div className="registered-summary-card">
-                        <span>Entrenamiento registrado</span>
-                        <strong>{registeredSummary.exerciseCount} ejercicios · {formatKg(registeredSummary.totalWeight)} · {registeredSummary.totalReps} reps</strong>
-                      </div>
-                    ) : null}
-                    {itemData.metrics.slice(0, 3).map((entry) => (
-                      <RegisteredExerciseCard key={entry.id} entry={entry} />
-                    ))}
-                    {itemData.pendingExercises.slice(0, Math.max(0, 3 - itemData.metrics.length)).map((exercise) => (
-                      <ProgrammedExerciseCard exercise={exercise} key={exercise.id} />
-                    ))}
-                    {itemData.metrics.length + itemData.pendingExercises.length > 3 ? (
-                      <p className="dashboard-more-exercises">
-                        +{itemData.metrics.length + itemData.pendingExercises.length - 3} ejercicios más
-                      </p>
-                    ) : null}
-                  </div>
+                  <DashboardTrainingCardContent model={itemModel} />
                 ) : (
                   <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
                 )}
@@ -3703,9 +3695,9 @@ function DashboardScreen({
         {activeDayData.hasRoutine ? (
           <button
             className={`button secondary dashboard-routine-button ${activeDayData.status}`}
-            onClick={() => activeDayData.isCompleted ? viewSummary(activeDayData.day) : goToRoutine()}
+            onClick={() => activeDayAction.action === "summary" ? viewSummary(activeDayData.day) : goToRoutine()}
           >
-            {activeDayData.isCompleted ? "Ver resumen" : "Ir a rutina"}
+            {activeDayAction.label}
           </button>
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
@@ -3716,6 +3708,63 @@ function DashboardScreen({
     </section>
   );
 }
+
+function buildDashboardTrainingCardModel(
+  itemData: DashboardTrainingCardData,
+) {
+  const action = resolveTrainingCarouselAction(itemData.status);
+  const plannedRows = itemData.metrics.length > 0 ? itemData.pendingExercises : itemData.exercises;
+  return buildTrainingCarouselCardModel({
+    day: itemData.day,
+    routineName: itemData.exercises[0]?.routine ?? null,
+    status: itemData.status,
+    isToday: itemData.isToday,
+    registeredCount: itemData.registeredCount,
+    plannedCount: itemData.plannedCount,
+    registeredExercises: itemData.metrics,
+    plannedExercises: plannedRows,
+    actionLabel: action.label,
+    maxVisibleExercises: 4,
+    formatWeight: formatKg,
+  });
+}
+
+function DashboardTrainingCardContent({ model }: { model: TrainingCarouselCardModel }) {
+  return (
+    <div className="dashboard-training-card-content">
+      <div className="dashboard-training-heading">
+        <span className="dashboard-day-pill">{model.day}</span>
+        <span className={`dashboard-status-badge ${model.status}`}>
+          {model.statusLabel}
+        </span>
+      </div>
+      <div className={`dashboard-routine-name ${model.status}`}>
+        <span>Entrenamiento:</span>
+        <strong>{model.routineName}</strong>
+      </div>
+      <div className="dashboard-exercise-table" role="table" aria-label={`Resumen de entrenamiento ${model.day}`}>
+        <div className="dashboard-exercise-table-row heading" role="row">
+          <span role="columnheader">Ejercicio</span>
+          <span role="columnheader">Series</span>
+          <span role="columnheader">Reps</span>
+          <span role="columnheader">kg</span>
+        </div>
+        {model.rows.map((row) => (
+          <div className="dashboard-exercise-table-row" role="row" key={`${row.source}-${row.id}`}>
+            <strong role="cell" title={row.name}>{row.name}</strong>
+            <span role="cell">{row.sets}</span>
+            <span role="cell">{row.reps}</span>
+            <span role="cell">{row.kg}</span>
+          </div>
+        ))}
+      </div>
+      {model.additionalExerciseCount > 0 ? (
+        <p className="dashboard-more-exercises">+ {model.additionalExerciseCount} ejercicios más</p>
+      ) : null}
+    </div>
+  );
+}
+
 function DashboardDayDots({ day, weekDays }: { day: string; weekDays: string[] }) {
   const activeIndex = Math.max(0, weekDays.indexOf(day));
   return <IndexDots activeIndex={activeIndex} count={weekDays.length} />;
@@ -6120,6 +6169,11 @@ function getCycleTitle(plan: TrainingPlan) {
   return `${cycle?.title ?? "Ciclo"} · ${getCycleObjectiveValue(plan)}`;
 }
 
+function getCycleTypeTitle(plan: TrainingPlan) {
+  const cycle = trainingCycles.find((item) => item.id === plan.cycleType);
+  return cycle?.title ?? "Ciclo";
+}
+
 function getCycleDurationLabel(plan: TrainingPlan) {
   const unit = plan.cycleType === "macro" ? "meses" : plan.cycleType === "session" ? "dia" : "semanas";
   return `${getCycleDurationValue(plan)} ${unit}`;
@@ -6521,6 +6575,51 @@ function calculateRegisteredDashboardSummary(metrics: ExerciseMetrics[]) {
     }),
     { totalWeight: 0, totalReps: 0, exerciseCount: 0 },
   );
+}
+
+function calculateWeeklyCompletedTrainingDays({
+  plannedDays,
+  exercises,
+  entries,
+  sessions,
+  usesCycleScopedSessions,
+}: {
+  plannedDays: string[];
+  exercises: ExerciseTemplate[];
+  entries: ExerciseEntry[];
+  sessions: TrainingSession[];
+  usesCycleScopedSessions: boolean;
+}) {
+  const currentWeekDates = getCurrentSantiagoWeekDates();
+  const currentWeekStart = currentWeekDates.Lunes;
+  const activeSessions = sessions.filter((session) => (
+    session.status === "completed" &&
+    !session.deletedAt &&
+    (usesCycleScopedSessions
+      ? getSessionEffectiveCalendarWeekStart(session) === currentWeekStart
+      : session.calendarWeekStart === currentWeekStart)
+  ));
+
+  return plannedDays.reduce((completedCount, day) => {
+    const dayExercises = exercises.filter((exercise) => (exercise.day ?? day) === day);
+    const expectedDate = currentWeekDates[day] ?? "";
+    const plannedDay = getTrainingDayCode(day);
+    const session = findDashboardSessionForDay(activeSessions, dayExercises, expectedDate, plannedDay, usesCycleScopedSessions);
+    const sessionEntries = session ? findDashboardEntries(session.entries, dayExercises, expectedDate, usesCycleScopedSessions) : [];
+    const allMatchingEntries = usesCycleScopedSessions ? [] : findDashboardEntries(entries, dayExercises, expectedDate, false);
+    const fallbackEntries = sessionEntries.length > 0 ? [] : allMatchingEntries;
+    const itemEntries = usesCycleScopedSessions
+      ? sessionEntries
+      : sessionEntries.length > 0
+        ? sessionEntries
+        : fallbackEntries;
+    const coverage = usesCycleScopedSessions
+      ? getCycleScopedDayCoverage(dayExercises, itemEntries)
+      : null;
+    const status = coverage?.status ?? (Boolean(session) || fallbackEntries.length > 0 ? "completed" : "pending");
+
+    return status === "completed" ? completedCount + 1 : completedCount;
+  }, 0);
 }
 
 function normalizeCycleScopedSessionsByCalendarWeek(sessions: TrainingSession[], plannedStartDate: string) {
