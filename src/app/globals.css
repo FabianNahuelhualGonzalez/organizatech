@@ -89,8 +89,8 @@ a {
   row-gap: 2px;
   margin: 0;
   color: var(--muted);
-  font-size: clamp(11px, 3.2vw, 14px);
-  font-weight: 750;
+  font-size: clamp(10px, 3vw, 13px);
+  font-weight: 500;
   line-height: 1.25;
 }
 
@@ -103,7 +103,7 @@ a {
   content: "|";
   margin-right: 9px;
   color: rgba(220, 231, 255, 0.48);
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .topbar.hidden {
