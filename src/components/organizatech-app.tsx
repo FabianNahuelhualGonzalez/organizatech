@@ -3690,7 +3690,7 @@ function DashboardScreen({
                 <span className={`weekly-progress-difference ${weeklyEquivalentProgress.tone}`}>
                   Diferencia de volumen: <strong>{weeklyEquivalentProgress.primaryLabel}</strong>
                 </span>
-                <small>{buildWeeklyProgressTrendLabel(weeklyEquivalentProgress)}</small>
+                <small className={`weekly-progress-trend-pill ${weeklyEquivalentProgress.tone}`}>{buildWeeklyProgressTrendLabel(weeklyEquivalentProgress)}</small>
               </div>
             ) : (
               <strong className={weeklyEquivalentProgress.tone}>{weeklyEquivalentProgress.primaryLabel}</strong>

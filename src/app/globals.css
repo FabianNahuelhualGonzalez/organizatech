@@ -2640,9 +2640,9 @@ h3 {
 
 .weekly-progress-value-block p {
   margin: 0;
-  color: var(--muted);
-  font-size: clamp(11px, 3vw, 13px);
-  font-weight: 800;
+  color: #fff;
+  font-size: clamp(12px, 3.1vw, 14px);
+  font-weight: 900;
   line-height: 1.25;
 }
 
@@ -2659,16 +2659,15 @@ h3 {
 
 .weekly-progress-comparison-list {
   display: grid;
-  gap: 3px;
+  gap: 5px;
   min-width: 0;
 }
 
-.weekly-progress-comparison-list span,
-.weekly-progress-comparison-list small {
+.weekly-progress-comparison-list span {
   color: var(--muted);
-  font-size: clamp(10px, 2.85vw, 12px);
+  font-size: clamp(10px, 2.8vw, 12px);
   font-weight: 800;
-  line-height: 1.22;
+  line-height: 1.2;
 }
 
 .weekly-progress-comparison-list strong {
@@ -2690,8 +2689,39 @@ h3 {
 }
 
 .weekly-progress-comparison-list small {
-  color: rgba(220, 231, 255, 0.76);
   font-size: clamp(9px, 2.55vw, 11px);
+}
+
+.weekly-progress-trend-pill {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--yellow);
+  background: rgba(255, 191, 77, 0.12);
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.weekly-progress-trend-pill.danger {
+  color: #fff;
+  border-color: rgba(255, 93, 105, 0.94);
+  background: rgba(255, 93, 105, 0.32);
+}
+
+.weekly-progress-trend-pill.positive {
+  color: #fff;
+  border-color: rgba(116, 223, 113, 0.94);
+  background: rgba(116, 223, 113, 0.28);
+}
+
+.weekly-progress-trend-pill.neutral {
+  color: var(--yellow);
+  border-color: rgba(255, 191, 77, 0.94);
+  background: rgba(255, 191, 77, 0.14);
 }
 
 .weekly-progress-volume-pair {
