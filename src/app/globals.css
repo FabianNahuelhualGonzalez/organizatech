@@ -2645,6 +2645,32 @@ h3 {
   line-height: 1.35;
 }
 
+.weekly-progress-empty-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.weekly-progress-empty-copy span,
+.weekly-progress-empty-copy small {
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.weekly-progress-empty-copy span {
+  color: #dce7ff;
+  font-size: clamp(11px, 3.1vw, 14px);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.weekly-progress-empty-copy small {
+  color: var(--muted);
+  font-size: clamp(9px, 2.55vw, 11px);
+  line-height: 1.25;
+}
+
 .weekly-progress-visual {
   position: relative;
   min-width: 0;
@@ -3357,6 +3383,18 @@ h3 {
 
 .weekly-progress-summary small {
   font-size: clamp(0.66rem, 2.55vw, 0.76rem);
+}
+
+.weekly-progress-empty-copy {
+  gap: 1px;
+}
+
+.weekly-progress-empty-copy span {
+  font-size: clamp(0.66rem, 2.75vw, 0.82rem);
+}
+
+.weekly-progress-empty-copy small {
+  font-size: clamp(0.58rem, 2.35vw, 0.68rem);
 }
 
 .weekly-progress-visual {

@@ -3684,8 +3684,14 @@ function DashboardScreen({
           <strong className={weeklyEquivalentProgress.tone}>
             {weeklyEquivalentProgress.primaryLabel}
           </strong>
-          <span>{weeklyEquivalentProgress.comparisonLabel}</span>
-          <small>{weeklyEquivalentProgress.detailLabel}</small>
+          {weeklyEquivalentProgress.status === "ready" ? (
+            <span>{weeklyEquivalentProgress.comparisonLabel}</span>
+          ) : (
+            <div className="weekly-progress-empty-copy">
+              <span>{weeklyEquivalentProgress.detailLabel}</span>
+              <small>Mismo punto de la semana anterior</small>
+            </div>
+          )}
         </div>
         <WeeklyProgressSvg progress={weeklyEquivalentProgress} />
       </div>
