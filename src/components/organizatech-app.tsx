@@ -197,6 +197,7 @@ import {
 } from "@/lib/training/training-day-order";
 import {
   buildTrainingCarouselCardModel,
+  resolveActiveCarouselIndex,
   resolveTrainingCarouselAction,
   type TrainingCarouselCardModel,
 } from "@/lib/training/training-carousel-card-presentation";
@@ -3529,8 +3530,9 @@ function DashboardScreen({
     const index = carouselDays.indexOf(day);
     const container = carouselRef.current;
     const slide = index >= 0 ? container?.children.item(index) as HTMLElement | null : null;
-    if (container && slide) {
-      container.scrollTo({ left: slide.offsetLeft - container.offsetLeft, behavior: "smooth" });
+    const firstSlide = container?.children.item(0) as HTMLElement | null;
+    if (container && slide && firstSlide) {
+      container.scrollTo({ left: slide.offsetLeft - firstSlide.offsetLeft, behavior: "smooth" });
     }
   }, [day, carouselDays]);
 
@@ -3582,17 +3584,13 @@ function DashboardScreen({
   function handleTrainingCarouselScroll(event: UIEvent<HTMLDivElement>) {
     const container = event.currentTarget;
     const children = Array.from(container.children) as HTMLElement[];
-    const center = container.scrollLeft + container.clientWidth / 2;
-    let nearestIndex = 0;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-
-    children.forEach((child, index) => {
-      const childCenter = child.offsetLeft + child.offsetWidth / 2;
-      const distance = Math.abs(childCenter - center);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestIndex = index;
-      }
+    const nearestIndex = resolveActiveCarouselIndex({
+      scrollLeft: container.scrollLeft,
+      viewportWidth: container.clientWidth,
+      slides: children.map((child) => ({
+        offsetLeft: child.offsetLeft,
+        offsetWidth: child.offsetWidth,
+      })),
     });
 
     const nextDay = carouselDays[nearestIndex] ?? activeCarouselDay;

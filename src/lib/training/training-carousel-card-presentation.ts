@@ -54,6 +54,17 @@ export interface TrainingCarouselAction {
   action: "summary" | "routine";
 }
 
+export interface TrainingCarouselSlideGeometry {
+  offsetLeft: number;
+  offsetWidth: number;
+}
+
+export interface ResolveActiveCarouselIndexInput {
+  scrollLeft: number;
+  viewportWidth: number;
+  slides: TrainingCarouselSlideGeometry[];
+}
+
 export function buildTrainingCarouselCardModel(input: BuildTrainingCarouselCardModelInput): TrainingCarouselCardModel {
   const maxVisibleExercises = Math.max(1, input.maxVisibleExercises ?? 4);
   const allRows = [
@@ -90,6 +101,26 @@ export function resolveTrainingCarouselAction(status: TrainingCarouselStatus): T
   if (status === "completed") return { label: "Ver resumen", action: "summary" };
   if (status === "partial") return { label: "Continuar rutina", action: "routine" };
   return { label: "Ir a rutina", action: "routine" };
+}
+
+export function resolveActiveCarouselIndex(input: ResolveActiveCarouselIndexInput): number {
+  if (input.slides.length === 0) return 0;
+
+  const trackStart = input.slides[0]?.offsetLeft ?? 0;
+  const viewportCenter = trackStart + input.scrollLeft + input.viewportWidth / 2;
+  let nearestIndex = 0;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  input.slides.forEach((slide, index) => {
+    const slideCenter = slide.offsetLeft + slide.offsetWidth / 2;
+    const distance = Math.abs(slideCenter - viewportCenter);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = index;
+    }
+  });
+
+  return Math.max(0, Math.min(input.slides.length - 1, nearestIndex));
 }
 
 function buildStatusLabel(status: TrainingCarouselStatus, registeredCount: number, plannedCount: number, isToday: boolean) {

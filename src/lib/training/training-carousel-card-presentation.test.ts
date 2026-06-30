@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 import {
   buildTrainingCarouselCardModel,
+  resolveActiveCarouselIndex,
   resolveTrainingCarouselAction,
 } from "@/lib/training/training-carousel-card-presentation";
 
@@ -34,6 +35,70 @@ async function run() {
     const slideStatuses = ["pending", "completed"] as const;
     assert.equal(resolveTrainingCarouselAction(slideStatuses[0]).action, "routine");
     assert.equal(resolveTrainingCarouselAction(slideStatuses[1]).action, "summary");
+  }
+
+  {
+    const slides = [
+      { offsetLeft: 0, offsetWidth: 320 },
+      { offsetLeft: 320, offsetWidth: 320 },
+    ];
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 0, viewportWidth: 320, slides }), 0);
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 320, viewportWidth: 320, slides }), 1);
+  }
+
+  {
+    const slides = [
+      { offsetLeft: 0, offsetWidth: 300 },
+      { offsetLeft: 316, offsetWidth: 300 },
+      { offsetLeft: 632, offsetWidth: 300 },
+    ];
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 316, viewportWidth: 300, slides }), 1);
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 632, viewportWidth: 300, slides }), 2);
+  }
+
+  {
+    const slides = [
+      { offsetLeft: 48, offsetWidth: 360 },
+      { offsetLeft: 424, offsetWidth: 360 },
+    ];
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 0, viewportWidth: 360, slides }), 0);
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 376, viewportWidth: 360, slides }), 1);
+  }
+
+  {
+    const desktopSlides = [
+      { offsetLeft: 12, offsetWidth: 840 },
+      { offsetLeft: 852, offsetWidth: 840 },
+    ];
+    const mobileSlides = [
+      { offsetLeft: 6, offsetWidth: 342 },
+      { offsetLeft: 348, offsetWidth: 342 },
+    ];
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 840, viewportWidth: 840, slides: desktopSlides }), 1);
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 342, viewportWidth: 342, slides: mobileSlides }), 1);
+  }
+
+  {
+    const slides = [
+      { offsetLeft: 0, offsetWidth: 300 },
+      { offsetLeft: 300, offsetWidth: 300 },
+    ];
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 150, viewportWidth: 300, slides }), 0);
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: -80, viewportWidth: 300, slides }), 0);
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 900, viewportWidth: 300, slides }), 1);
+    assert.equal(resolveActiveCarouselIndex({ scrollLeft: 0, viewportWidth: 300, slides: [] }), 0);
+  }
+
+  {
+    const weekDays = ["Lunes", "Martes"];
+    const slides = [
+      { offsetLeft: 32, offsetWidth: 500 },
+      { offsetLeft: 532, offsetWidth: 500 },
+    ];
+    const martesIndex = resolveActiveCarouselIndex({ scrollLeft: 500, viewportWidth: 500, slides });
+    const lunesIndex = resolveActiveCarouselIndex({ scrollLeft: 0, viewportWidth: 500, slides });
+    assert.equal(weekDays[martesIndex], "Martes");
+    assert.equal(weekDays[lunesIndex], "Lunes");
   }
 
   {
@@ -132,6 +197,7 @@ async function run() {
     assert.match(cssSource, /\.dashboard-training-carousel[\s\S]*scroll-snap-type: x mandatory/, "carrusel conserva scroll-snap");
     assert.match(cssSource, /\.dashboard-training-slide[\s\S]*scroll-snap-align: start/, "slides conservan snap align");
     assert.match(dashboardSource, /const activeDayAction = resolveTrainingCarouselAction\(activeDayData\.status\)/, "boton activo deriva label y accion desde el status activo");
+    assert.match(dashboardSource, /resolveActiveCarouselIndex\(\{[\s\S]*scrollLeft: container\.scrollLeft,[\s\S]*viewportWidth: container\.clientWidth,[\s\S]*offsetLeft: child\.offsetLeft,[\s\S]*offsetWidth: child\.offsetWidth/, "handler usa el resolvedor robusto de slide activo");
     assert.match(dashboardSource, /activeDayAction\.action === "summary" \? viewSummary\(activeDayData\.day\) : goToRoutine\(\)/, "accion del boton usa la misma decision que el label");
     assert.match(dashboardSource, /\{activeDayAction\.label\}/, "label del boton usa la decision activa");
     assert.doesNotMatch(dashboardSource, /activeDayData\.isCompleted \? "Ver resumen" : "Ir a rutina"|activeDayData\.isCompleted \? viewSummary/, "boton no depende de isCompleted stale");
