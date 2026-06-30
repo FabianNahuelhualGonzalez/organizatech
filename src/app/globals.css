@@ -2679,16 +2679,20 @@ h3 {
 
 .weekly-progress-visual {
   grid-area: chart;
-  position: relative;
   width: 100%;
+  min-width: 0;
+}
+
+.weekly-chart-stage {
+  position: relative;
   min-width: 0;
   padding-right: clamp(38px, 8vw, 46px);
 }
 
-.weekly-progress-visual svg {
+.weekly-chart-stage svg {
   display: block;
   width: 100%;
-  min-height: 112px;
+  min-height: 158px;
   overflow: visible;
 }
 
@@ -3408,11 +3412,16 @@ h3 {
 }
 
 .weekly-progress-visual {
+  display: grid;
+  gap: 2px;
+}
+
+.weekly-chart-stage {
   padding-right: clamp(38px, 8vw, 46px);
 }
 
-.weekly-progress-visual svg {
-  min-height: clamp(92px, 25vw, 118px);
+.weekly-chart-stage svg {
+  min-height: clamp(150px, 28vw, 168px);
 }
 
 .weekly-tooltip {
@@ -3422,7 +3431,7 @@ h3 {
   min-width: 44px;
   max-width: 58px;
   gap: 1px;
-  transform: translate(-50%, -112%);
+  transform: translate(-50%, -84%);
   border: 1px solid rgba(60, 122, 255, 0.45);
   border-radius: 8px;
   color: white;
@@ -3856,12 +3865,12 @@ h3 {
     gap: 8px;
   }
 
-  .weekly-progress-visual {
+  .weekly-chart-stage {
     padding-right: 38px;
   }
 
-  .weekly-progress-visual svg {
-    min-height: 88px;
+  .weekly-chart-stage svg {
+    min-height: 132px;
   }
 
   .motivation-summary-card .compact-insight-row {
