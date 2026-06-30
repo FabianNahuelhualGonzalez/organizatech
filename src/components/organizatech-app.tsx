@@ -3898,14 +3898,18 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
               tabIndex={0}
               aria-label={`${progress.points[index]?.day ?? point.label}: semana actual ${formatKgNullable(point.value)}, semana anterior ${formatKgNullable(previousPoints[index]?.value ?? null)}`}
               onClick={() => {
+                setIsTooltipVisible((current) => index !== activeIndex || !current);
                 setActiveIndex(index);
-                setIsTooltipVisible(true);
               }}
               onMouseEnter={() => setActiveIndex(index)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setIsTooltipVisible((current) => index !== activeIndex || !current);
                   setActiveIndex(index);
-                  setIsTooltipVisible(true);
+                }
+                if (event.key === "Escape") {
+                  setIsTooltipVisible(false);
                 }
               }}
             >
