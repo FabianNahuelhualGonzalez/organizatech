@@ -2676,6 +2676,11 @@ h3 {
   line-height: inherit;
 }
 
+.weekly-progress-value-block .weekly-progress-comparison-list strong {
+  font-size: inherit;
+  line-height: inherit;
+}
+
 .weekly-progress-difference.positive strong {
   color: var(--green);
 }
@@ -3543,6 +3548,10 @@ h3 {
 
 .weekly-progress-value-block strong {
   font-size: clamp(1.38rem, 5.4vw, 1.9rem);
+}
+
+.weekly-progress-value-block .weekly-progress-comparison-list strong {
+  font-size: inherit;
 }
 
 .weekly-progress-summary span {
