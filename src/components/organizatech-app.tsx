@@ -60,6 +60,10 @@ import {
 import { buildExerciseComparisonSummary, getExerciseHistory } from "@/lib/progress/exercise-history";
 import { formatDecimalEs, formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import { buildWeeklyProgressChart } from "@/lib/progress/weekly-progress-chart";
+import {
+  calculateEquivalentWeeklyProgress,
+  type WeeklyEquivalentProgressResult,
+} from "@/lib/progress/weekly-equivalent-progress";
 import type {
   ExerciseComparisonSummary,
   ExerciseEntry,
@@ -862,6 +866,12 @@ export function OrganizatechApp({
   const dashboardExerciseIds = new Set(dashboardExercises.map((exercise) => exercise.id));
   const dashboardCurrentMetrics = currentMetrics.filter((entry) => dashboardExerciseIds.has(entry.exerciseId));
   const summary = calculateWeeklySummary(metrics, currentWeek);
+  const weeklyEquivalentProgress = useMemo(() => calculateEquivalentWeeklyProgress({
+    entries: calendarNormalizedEntries,
+    sessions: calendarNormalizedTrainingSessions,
+    referenceDate: new Date(),
+    activeCycleId: isCycleScopedActiveCycle ? persistedActiveCycle?.id ?? null : null,
+  }), [calendarNormalizedEntries, calendarNormalizedTrainingSessions, isCycleScopedActiveCycle, persistedActiveCycle?.id]);
   const insights = generateSmartInsights(summary, currentMetrics);
   const visibleCycleHistoryCount = isTrainingCyclesRepositoryActive ? persistedCycleHistory.length : cycleHistory.length;
   const visibleCycleNumber = isTrainingCyclesRepositoryActive
@@ -3067,6 +3077,7 @@ export function OrganizatechApp({
             routine={dashboardRoutine}
             dayExercises={dashboardExercises}
             summary={summary}
+            weeklyEquivalentProgress={weeklyEquivalentProgress}
             currentMetrics={dashboardCurrentMetrics}
             insights={insights}
             currentWeek={currentWeek}
@@ -3496,6 +3507,7 @@ function DashboardScreen({
   routine,
   dayExercises,
   summary,
+  weeklyEquivalentProgress,
   currentMetrics,
   insights,
   currentWeek,
@@ -3516,6 +3528,7 @@ function DashboardScreen({
   routine: string;
   dayExercises: ExerciseTemplate[];
   summary: ReturnType<typeof calculateWeeklySummary>;
+  weeklyEquivalentProgress: WeeklyEquivalentProgressResult;
   currentMetrics: ExerciseMetrics[];
   insights: ReturnType<typeof generateSmartInsights>;
   currentWeek: number;
@@ -3667,13 +3680,20 @@ function DashboardScreen({
       <MetricGrid summary={summary} />
       <div className="card wide dashboard-progress-card">
         <div className="weekly-progress-summary">
-          <p className="small-label">Vista progreso semanal</p>
-          <strong className={summary.volumePercentage >= 0 ? "positive" : "danger"}>
-            {formatSigned(summary.volumePercentage)}%
+          <p className="small-label">Progreso semanal</p>
+          <strong className={weeklyEquivalentProgress.tone}>
+            {weeklyEquivalentProgress.primaryLabel}
           </strong>
-          <span>vs semana anterior</span>
+          {weeklyEquivalentProgress.status === "ready" ? (
+            <span>{weeklyEquivalentProgress.comparisonLabel}</span>
+          ) : (
+            <div className="weekly-progress-empty-copy">
+              <span>{weeklyEquivalentProgress.detailLabel}</span>
+              <small>Mismo punto de la semana anterior</small>
+            </div>
+          )}
         </div>
-        <WeeklyProgressSvg value={summary.volumePercentage} weekDays={routineDays} />
+        <WeeklyProgressSvg progress={weeklyEquivalentProgress} />
       </div>
       <div className={`card wide dashboard-training-card ${activeDayData.status}`}>
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
@@ -3783,12 +3803,10 @@ function IndexDots({ activeIndex, count }: { activeIndex: number; count: number 
     </div>
   );
 }
-function WeeklyProgressSvg({ value, weekDays }: { value: number; weekDays: string[] }) {
+function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressResult }) {
   const chart = useMemo(() => buildWeeklyProgressChart({
-    weekDays,
-    currentDay: getCalendarTrainingDay(),
-    value,
-  }), [value, weekDays]);
+    series: progress.points,
+  }), [progress.points]);
   const [activeIndex, setActiveIndex] = useState(chart.activeIndex);
   const labels = chart.labels;
   const points = chart.points;
@@ -3800,17 +3818,13 @@ function WeeklyProgressSvg({ value, weekDays }: { value: number; weekDays: strin
   const areaPath = `${path} L ${points.at(-1)!.x} 112 L ${points[0].x} 112 Z`;
 
   return (
-    <div className="weekly-progress-visual" aria-label={`Progreso semanal ${formatSigned(value)}%`}>
+    <div className="weekly-progress-visual" aria-label={`Progreso semanal ${progress.primaryLabel}`}>
       <div className="weekly-tooltip" style={{ left: `${(activePoint.x / 480) * 100}%`, top: activePoint.y }}>
         <strong>{activePoint.label}</strong>
-        <span>{formatSigned(activePoint.value)}%</span>
+        <span>{activePoint.comparable ? `${formatSigned(activePoint.value)}%` : "—"}</span>
       </div>
       <div className="weekly-axis-values" aria-hidden="true">
-        <span>+4%</span>
-        <span>+2%</span>
-        <span>0%</span>
-        <span>-2%</span>
-        <span>-4%</span>
+        {chart.axisLabels.map((label) => <span key={label}>{label}</span>)}
       </div>
       <svg viewBox="0 0 480 128" role="img">
         <defs>
@@ -3828,15 +3842,15 @@ function WeeklyProgressSvg({ value, weekDays }: { value: number; weekDays: strin
         </defs>
         {[16, 32, 48, 64, 80].map((y) => <line className="weekly-grid-line" key={y} x1="8" x2="456" y1={y} y2={y} />)}
         <line className="weekly-zero-line" x1="8" x2="456" y1="64" y2="64" />
-        <path className="weekly-area" d={areaPath} />
-        <path className="weekly-line" d={path} stroke="url(#weeklyLine)" filter="url(#weeklyGlow)" />
+        {points.length > 1 ? <path className="weekly-area" d={areaPath} /> : null}
+        {points.length > 1 ? <path className="weekly-line" d={path} stroke="url(#weeklyLine)" filter="url(#weeklyGlow)" /> : null}
         {points.map((point, index) => (
           <g
-            key={point.label}
+            key={`${point.label}-${index}`}
             className="weekly-point-hit"
             role="button"
             tabIndex={0}
-            aria-label={`${point.label}: ${formatSigned(point.value)}%`}
+            aria-label={`${point.label}: ${point.comparable ? `${formatSigned(point.value)}%` : "Sin comparación anterior"}`}
             onClick={() => setActiveIndex(index)}
             onMouseEnter={() => setActiveIndex(index)}
             onKeyDown={(event) => {
@@ -3849,7 +3863,7 @@ function WeeklyProgressSvg({ value, weekDays }: { value: number; weekDays: strin
         ))}
       </svg>
       <div className="weekly-day-labels" aria-hidden="true">
-        {labels.map((item) => <span key={item}>{item}</span>)}
+        {labels.map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}
       </div>
     </div>
   );
