@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { buildTrainingCarouselCardModel } from "@/lib/training/training-carousel-card-presentation";
+import {
+  buildTrainingCarouselCardModel,
+  resolveTrainingCarouselAction,
+} from "@/lib/training/training-carousel-card-presentation";
 
 function createPlannedExercises(count: number) {
   return Array.from({ length: count }, (_, index) => ({
@@ -14,6 +17,25 @@ function createPlannedExercises(count: number) {
 }
 
 async function run() {
+  assert.deepEqual(resolveTrainingCarouselAction("completed"), { label: "Ver resumen", action: "summary" });
+  assert.deepEqual(resolveTrainingCarouselAction("pending"), { label: "Ir a rutina", action: "routine" });
+  assert.deepEqual(resolveTrainingCarouselAction("partial"), { label: "Continuar rutina", action: "routine" });
+  assert.equal(resolveTrainingCarouselAction("completed").label, "Ver resumen");
+  assert.equal(resolveTrainingCarouselAction("pending").label, "Ir a rutina");
+  assert.equal(resolveTrainingCarouselAction("partial").label, "Continuar rutina");
+
+  {
+    const slideStatuses = ["completed", "pending"] as const;
+    assert.equal(resolveTrainingCarouselAction(slideStatuses[0]).label, "Ver resumen");
+    assert.equal(resolveTrainingCarouselAction(slideStatuses[1]).label, "Ir a rutina");
+  }
+
+  {
+    const slideStatuses = ["pending", "completed"] as const;
+    assert.equal(resolveTrainingCarouselAction(slideStatuses[0]).action, "routine");
+    assert.equal(resolveTrainingCarouselAction(slideStatuses[1]).action, "summary");
+  }
+
   {
     const model = buildTrainingCarouselCardModel({
       day: "Lunes",
@@ -103,9 +125,16 @@ async function run() {
     const contentStart = appSource.indexOf("function DashboardTrainingCardContent");
     const contentEnd = appSource.indexOf("function DashboardDayDots", contentStart);
     const cardContentSource = contentStart >= 0 && contentEnd > contentStart ? appSource.slice(contentStart, contentEnd) : "";
+    const dashboardStart = appSource.indexOf("function DashboardScreen");
+    const dashboardEnd = appSource.indexOf("function buildDashboardTrainingCardModel", dashboardStart);
+    const dashboardSource = dashboardStart >= 0 && dashboardEnd > dashboardStart ? appSource.slice(dashboardStart, dashboardEnd) : "";
     assert.match(cssSource, /\.dashboard-training-carousel[\s\S]*overflow-x: auto/, "carrusel conserva overflow horizontal");
     assert.match(cssSource, /\.dashboard-training-carousel[\s\S]*scroll-snap-type: x mandatory/, "carrusel conserva scroll-snap");
     assert.match(cssSource, /\.dashboard-training-slide[\s\S]*scroll-snap-align: start/, "slides conservan snap align");
+    assert.match(dashboardSource, /const activeDayAction = resolveTrainingCarouselAction\(activeDayData\.status\)/, "boton activo deriva label y accion desde el status activo");
+    assert.match(dashboardSource, /activeDayAction\.action === "summary" \? viewSummary\(activeDayData\.day\) : goToRoutine\(\)/, "accion del boton usa la misma decision que el label");
+    assert.match(dashboardSource, /\{activeDayAction\.label\}/, "label del boton usa la decision activa");
+    assert.doesNotMatch(dashboardSource, /activeDayData\.isCompleted \? "Ver resumen" : "Ir a rutina"|activeDayData\.isCompleted \? viewSummary/, "boton no depende de isCompleted stale");
     assert.doesNotMatch(helperSource, /Supabase|saveTrainingSession|saveTrainingWorkoutReadiness|getSupabaseBrowserClient/, "helper visual no llama Supabase ni guardado");
     assert.doesNotMatch(cardContentSource, /Supabase|saveTrainingSession|saveTrainingWorkoutReadiness|getSupabaseBrowserClient|createWorkoutAttemptId/, "contenido visual no llama Supabase, guardado ni attempts");
   }

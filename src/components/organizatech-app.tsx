@@ -197,6 +197,7 @@ import {
 } from "@/lib/training/training-day-order";
 import {
   buildTrainingCarouselCardModel,
+  resolveTrainingCarouselAction,
   type TrainingCarouselCardModel,
 } from "@/lib/training/training-carousel-card-presentation";
 
@@ -3576,6 +3577,7 @@ function DashboardScreen({
   }
 
   const activeDayData = getDashboardDayData(activeCarouselDay);
+  const activeDayAction = resolveTrainingCarouselAction(activeDayData.status);
 
   function handleTrainingCarouselScroll(event: UIEvent<HTMLDivElement>) {
     const container = event.currentTarget;
@@ -3622,7 +3624,7 @@ function DashboardScreen({
           <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
             {carouselDays.map((item) => {
               const itemData = getDashboardDayData(item);
-              const itemModel = buildDashboardTrainingCardModel(itemData, "Ir a rutina de entrenamiento");
+              const itemModel = buildDashboardTrainingCardModel(itemData);
 
               return (
                 <article className="dashboard-training-slide" key={item}>
@@ -3658,10 +3660,7 @@ function DashboardScreen({
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
           {carouselDays.map((item) => {
             const itemData = getDashboardDayData(item);
-            const itemModel = buildDashboardTrainingCardModel(
-              itemData,
-              itemData.isCompleted ? "Ver resumen" : "Ir a rutina",
-            );
+            const itemModel = buildDashboardTrainingCardModel(itemData);
 
             return (
               <article className="dashboard-training-slide" key={item}>
@@ -3677,9 +3676,9 @@ function DashboardScreen({
         {activeDayData.hasRoutine ? (
           <button
             className={`button secondary dashboard-routine-button ${activeDayData.status}`}
-            onClick={() => activeDayData.isCompleted ? viewSummary(activeDayData.day) : goToRoutine()}
+            onClick={() => activeDayAction.action === "summary" ? viewSummary(activeDayData.day) : goToRoutine()}
           >
-            {activeDayData.isCompleted ? "Ver resumen" : "Ir a rutina"}
+            {activeDayAction.label}
           </button>
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
@@ -3693,8 +3692,8 @@ function DashboardScreen({
 
 function buildDashboardTrainingCardModel(
   itemData: DashboardTrainingCardData,
-  actionLabel: string,
 ) {
+  const action = resolveTrainingCarouselAction(itemData.status);
   const plannedRows = itemData.metrics.length > 0 ? itemData.pendingExercises : itemData.exercises;
   return buildTrainingCarouselCardModel({
     day: itemData.day,
@@ -3705,7 +3704,7 @@ function buildDashboardTrainingCardModel(
     plannedCount: itemData.plannedCount,
     registeredExercises: itemData.metrics,
     plannedExercises: plannedRows,
-    actionLabel,
+    actionLabel: action.label,
     maxVisibleExercises: 4,
     formatWeight: formatKg,
   });

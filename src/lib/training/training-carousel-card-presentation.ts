@@ -49,6 +49,11 @@ export interface TrainingCarouselCardModel {
   additionalExerciseCount: number;
 }
 
+export interface TrainingCarouselAction {
+  label: "Ver resumen" | "Ir a rutina" | "Continuar rutina";
+  action: "summary" | "routine";
+}
+
 export function buildTrainingCarouselCardModel(input: BuildTrainingCarouselCardModelInput): TrainingCarouselCardModel {
   const maxVisibleExercises = Math.max(1, input.maxVisibleExercises ?? 4);
   const allRows = [
@@ -79,6 +84,12 @@ export function buildTrainingCarouselCardModel(input: BuildTrainingCarouselCardM
     rows: allRows.slice(0, maxVisibleExercises),
     additionalExerciseCount: Math.max(0, allRows.length - maxVisibleExercises),
   };
+}
+
+export function resolveTrainingCarouselAction(status: TrainingCarouselStatus): TrainingCarouselAction {
+  if (status === "completed") return { label: "Ver resumen", action: "summary" };
+  if (status === "partial") return { label: "Continuar rutina", action: "routine" };
+  return { label: "Ir a rutina", action: "routine" };
 }
 
 function buildStatusLabel(status: TrainingCarouselStatus, registeredCount: number, plannedCount: number, isToday: boolean) {
