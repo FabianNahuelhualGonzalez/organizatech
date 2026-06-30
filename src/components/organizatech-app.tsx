@@ -3683,22 +3683,25 @@ function DashboardScreen({
         <div className="weekly-progress-summary">
           <div className="weekly-progress-value-block">
             <p className="small-label">Progreso semanal</p>
-            <strong className={weeklyEquivalentProgress.tone}>{weeklyEquivalentProgress.primaryLabel}</strong>
-          </div>
-          {weeklyEquivalentProgress.status === "ready" ? (
-            <div className="weekly-progress-value-block previous">
-              <p>vs mismo punto de la semana anterior</p>
-              <div className="weekly-progress-volume-pair">
-                <span>Actual: {weeklyEquivalentProgress.currentVolumeLabel}</span>
-                <span>Anterior: {weeklyEquivalentProgress.previousVolumeLabel}</span>
+            {weeklyEquivalentProgress.status === "ready" ? (
+              <div className="weekly-progress-comparison-list">
+                <span>Volumen semana anterior: <strong>{weeklyEquivalentProgress.previousVolumeLabel}</strong></span>
+                <span>Volumen actual: <strong>{weeklyEquivalentProgress.currentVolumeLabel}</strong></span>
+                <span className={`weekly-progress-difference ${weeklyEquivalentProgress.tone}`}>
+                  Diferencia de volumen: <strong>{weeklyEquivalentProgress.primaryLabel}</strong>
+                </span>
+                <small>{buildWeeklyProgressTrendLabel(weeklyEquivalentProgress)}</small>
               </div>
-            </div>
-          ) : (
+            ) : (
+              <strong className={weeklyEquivalentProgress.tone}>{weeklyEquivalentProgress.primaryLabel}</strong>
+            )}
+          </div>
+          {weeklyEquivalentProgress.status !== "ready" ? (
             <div className="weekly-progress-empty-copy">
               <span>{weeklyEquivalentProgress.detailLabel}</span>
               <small>Completa esta semana para crear tu primera referencia</small>
             </div>
-          )}
+          ) : null}
         </div>
         <WeeklyProgressSvg progress={weeklyEquivalentProgress} />
       </div>
@@ -3951,6 +3954,12 @@ function buildWeeklyProgressAriaLabel(progress: WeeklyEquivalentProgressResult) 
     return `Progreso semanal: volumen acumulado actual ${progress.primaryLabel}; sin comparación anterior`;
   }
   return "Progreso semanal: sin datos suficientes para comparar";
+}
+
+function buildWeeklyProgressTrendLabel(progress: WeeklyEquivalentProgressResult) {
+  if (progress.differenceValue > 0) return "Vas por encima del ritmo de la semana anterior";
+  if (progress.differenceValue < 0) return "Vas por debajo del ritmo de la semana anterior";
+  return "Mantienes un ritmo similar a la semana anterior";
 }
 
 function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {

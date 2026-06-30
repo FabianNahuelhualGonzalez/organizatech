@@ -111,7 +111,7 @@ assert.deepEqual(resolvePlannedWeekDays([]), ["Lunes"], "mantiene fallback segur
   assert.equal(result.percentage, -40.25);
   assert.equal(result.previousComparablePercentage, -17);
   assert.equal(result.differenceValue, -116.25);
-  assert.equal(result.primaryLabel, "-116,25 kg");
+  assert.equal(result.primaryLabel, "116,25 kg");
   assert.equal(result.previousLabel, "415 kg");
   assert.equal(result.currentVolumeLabel, "298,75 kg");
   assert.equal(result.previousVolumeLabel, "415 kg");
@@ -138,7 +138,7 @@ assert.deepEqual(resolvePlannedWeekDays([]), ["Lunes"], "mantiene fallback segur
   assert.equal(result.points.at(-1)?.previousPercentage, 0, "la semana anterior termina en 0%");
   assert.equal(result.percentage, 40, "la semana actual puede superar el baseline final");
   assert.equal(result.differenceValue, 200);
-  assert.equal(result.primaryLabel, "+200 kg");
+  assert.equal(result.primaryLabel, "200 kg");
   assert.equal(result.tone, "positive");
 }
 
