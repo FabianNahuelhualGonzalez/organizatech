@@ -2639,6 +2639,12 @@ h3 {
   line-height: 1.35;
 }
 
+.weekly-progress-summary small {
+  color: rgba(220, 231, 255, 0.74);
+  font-size: clamp(10px, 2.8vw, 12px);
+  line-height: 1.35;
+}
+
 .weekly-progress-visual {
   position: relative;
   min-width: 0;
@@ -2695,8 +2701,8 @@ h3 {
 }
 
 .weekly-day-labels {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  display: flex;
+  justify-content: space-between;
   padding: 0 34px 0 4px;
   color: #dce7ff;
   font-size: clamp(12px, 3.5vw, 15px);
@@ -3347,6 +3353,10 @@ h3 {
 
 .weekly-progress-summary span {
   font-size: clamp(0.72rem, 2.8vw, 0.88rem);
+}
+
+.weekly-progress-summary small {
+  font-size: clamp(0.66rem, 2.55vw, 0.76rem);
 }
 
 .weekly-progress-visual {

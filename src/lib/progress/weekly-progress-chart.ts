@@ -6,6 +6,7 @@ export interface WeeklyProgressChartPoint {
   y: number;
   value: number;
   label: string;
+  comparable: boolean;
 }
 
 export interface WeeklyProgressChart {
@@ -13,13 +14,18 @@ export interface WeeklyProgressChart {
   values: number[];
   points: WeeklyProgressChartPoint[];
   activeIndex: number;
+  axisLabels: string[];
 }
 
 export function buildWeeklyProgressChart(input: {
   weekDays: readonly string[];
   value: number;
   currentDay?: string;
+} | {
+  series: ReadonlyArray<{ label: string; value: number; comparable?: boolean }>;
 }) {
+  if ("series" in input) return buildWeeklyProgressChartFromSeries(input.series);
+
   const days = normalizeWeekDays(input.weekDays);
   const labels = days.map(getTrainingDayShortLabel);
   const clampedValue = clampWeeklyValue(input.value);
@@ -28,7 +34,7 @@ export function buildWeeklyProgressChart(input: {
   const points = values.map((value, index) => {
     const x = getPointX(index, values.length);
     const y = 84 - ((value + 4) / 8) * 66;
-    return { x, y, value, label: labels[index] };
+    return { x, y, value, label: labels[index], comparable: true };
   });
 
   return {
@@ -36,7 +42,44 @@ export function buildWeeklyProgressChart(input: {
     values,
     points,
     activeIndex,
+    axisLabels: buildAxisLabels(4),
   } satisfies WeeklyProgressChart;
+}
+
+function buildWeeklyProgressChartFromSeries(series: ReadonlyArray<{ label: string; value: number; comparable?: boolean }>) {
+  const fallbackSeries = series.length > 0 ? series : [{ label: "L", value: 0, comparable: false }];
+  const labels = fallbackSeries.map((point) => point.label);
+  const values = fallbackSeries.map((point) => point.value);
+  const axisLimit = getAxisLimit(values);
+  const points = fallbackSeries.map((point, index) => {
+    const x = getPointX(index, fallbackSeries.length);
+    const y = 84 - ((point.value + axisLimit) / (axisLimit * 2)) * 66;
+    return {
+      x,
+      y,
+      value: point.value,
+      label: point.label,
+      comparable: point.comparable ?? true,
+    };
+  });
+
+  return {
+    labels,
+    values,
+    points,
+    activeIndex: points.length - 1,
+    axisLabels: buildAxisLabels(axisLimit),
+  } satisfies WeeklyProgressChart;
+}
+
+function getAxisLimit(values: number[]) {
+  const maxAbs = Math.max(4, ...values.map((value) => Math.abs(value)));
+  return Math.ceil(maxAbs / 10) * 10;
+}
+
+function buildAxisLabels(limit: number) {
+  const middle = limit / 2;
+  return [`+${limit}%`, `+${middle}%`, "0%", `-${middle}%`, `-${limit}%`];
 }
 
 function normalizeWeekDays(weekDays: readonly string[]) {
