@@ -2657,6 +2657,43 @@ h3 {
   color: #dce7ff;
 }
 
+.weekly-progress-comparison-list {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.weekly-progress-comparison-list span,
+.weekly-progress-comparison-list small {
+  color: var(--muted);
+  font-size: clamp(10px, 2.85vw, 12px);
+  font-weight: 800;
+  line-height: 1.22;
+}
+
+.weekly-progress-comparison-list strong {
+  color: #dce7ff;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.weekly-progress-difference.positive strong {
+  color: var(--green);
+}
+
+.weekly-progress-difference.danger strong {
+  color: var(--red);
+}
+
+.weekly-progress-difference.neutral strong {
+  color: #dce7ff;
+}
+
+.weekly-progress-comparison-list small {
+  color: rgba(220, 231, 255, 0.76);
+  font-size: clamp(9px, 2.55vw, 11px);
+}
+
 .weekly-progress-volume-pair {
   display: grid;
   gap: 2px;
@@ -2753,7 +2790,7 @@ h3 {
 }
 
 .weekly-line.previous {
-  stroke: rgba(220, 231, 255, 0.46);
+  stroke: rgba(255, 191, 77, 0.82);
   stroke-dasharray: 7 7;
   stroke-width: 2.6;
 }
@@ -2773,7 +2810,7 @@ h3 {
 }
 
 .weekly-point.previous {
-  fill: rgba(220, 231, 255, 0.82);
+  fill: var(--yellow);
   stroke: rgba(7, 16, 26, 0.94);
   stroke-width: 2;
 }
@@ -2831,8 +2868,9 @@ h3 {
 }
 
 .weekly-progress-legend i.previous {
-  border: 1px solid rgba(220, 231, 255, 0.76);
-  background: rgba(220, 231, 255, 0.3);
+  border: 1px solid rgba(255, 191, 77, 0.86);
+  background: rgba(255, 191, 77, 0.72);
+  box-shadow: 0 0 10px rgba(255, 191, 77, 0.34);
 }
 
 .progress-track {

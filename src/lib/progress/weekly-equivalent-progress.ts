@@ -1,5 +1,5 @@
 import type { ExerciseEntry, TrainingSession } from "@/lib/progress/types";
-import { formatKg, formatSignedKg, roundDecimal } from "@/lib/progress/weight-format";
+import { formatKg, roundDecimal } from "@/lib/progress/weight-format";
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const santiagoTimeZone = "America/Santiago";
@@ -103,7 +103,7 @@ export function calculateEquivalentWeeklyProgress(input: {
     differenceValue,
     percentage,
     previousComparablePercentage,
-    primaryLabel: status === "ready" ? formatSignedKg(differenceValue) : currentEquivalentValue > 0 ? formatKg(currentEquivalentValue) : "—",
+    primaryLabel: status === "ready" ? formatKg(Math.abs(differenceValue)) : currentEquivalentValue > 0 ? formatKg(currentEquivalentValue) : "—",
     previousLabel: status === "ready" ? formatKg(previousEquivalentValue) : "—",
     currentVolumeLabel: formatKg(currentEquivalentValue),
     previousVolumeLabel: status === "ready" ? formatKg(previousEquivalentValue) : "—",
