@@ -3810,58 +3810,63 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
   const [activeIndex, setActiveIndex] = useState(chart.activeIndex);
   const labels = chart.labels;
   const points = chart.points;
+  const chartViewBoxHeight = 144;
   useEffect(() => {
     setActiveIndex(chart.activeIndex);
   }, [chart.activeIndex, labels.length]);
   const activePoint = points[activeIndex] ?? points.at(-1)!;
   const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
-  const areaPath = `${path} L ${points.at(-1)!.x} 112 L ${points[0].x} 112 Z`;
+  const areaPath = `${path} L ${points.at(-1)!.x} 132 L ${points[0].x} 132 Z`;
+  const tooltipLeft = `clamp(24px, ${(activePoint.x / 480) * 100}%, calc(100% - 80px))`;
+  const tooltipTop = `${(activePoint.y / chartViewBoxHeight) * 100}%`;
 
   return (
     <div className="weekly-progress-visual" aria-label={`Progreso semanal ${progress.primaryLabel}`}>
-      <div className="weekly-tooltip" style={{ left: `${(activePoint.x / 480) * 100}%`, top: activePoint.y }}>
-        <strong>{activePoint.label}</strong>
-        <span>{activePoint.comparable ? `${formatSigned(activePoint.value)}%` : "—"}</span>
+      <div className="weekly-chart-stage">
+        <div className="weekly-tooltip" style={{ left: tooltipLeft, top: tooltipTop }}>
+          <strong>{activePoint.label}</strong>
+          <span>{activePoint.comparable ? `${formatSigned(activePoint.value)}%` : "—"}</span>
+        </div>
+        <div className="weekly-axis-values" aria-hidden="true">
+          {chart.axisLabels.map((label) => <span key={label}>{label}</span>)}
+        </div>
+        <svg viewBox={`0 0 480 ${chartViewBoxHeight}`} role="img">
+          <defs>
+            <linearGradient id="weeklyLine" x1="0" x2="1" y1="0" y2="0">
+              <stop offset="0%" stopColor="#63A2FF" />
+              <stop offset="100%" stopColor="#1D5CFF" />
+            </linearGradient>
+            <filter id="weeklyGlow" x="-20%" y="-80%" width="140%" height="260%">
+              <feGaussianBlur stdDeviation="5" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          {[18, 42, 65, 89, 112].map((y) => <line className="weekly-grid-line" key={y} x1="6" x2="474" y1={y} y2={y} />)}
+          <line className="weekly-zero-line" x1="6" x2="474" y1="65" y2="65" />
+          {points.length > 1 ? <path className="weekly-area" d={areaPath} /> : null}
+          {points.length > 1 ? <path className="weekly-line" d={path} stroke="url(#weeklyLine)" filter="url(#weeklyGlow)" /> : null}
+          {points.map((point, index) => (
+            <g
+              key={`${point.label}-${index}`}
+              className="weekly-point-hit"
+              role="button"
+              tabIndex={0}
+              aria-label={`${point.label}: ${point.comparable ? `${formatSigned(point.value)}%` : "Sin comparación anterior"}`}
+              onClick={() => setActiveIndex(index)}
+              onMouseEnter={() => setActiveIndex(index)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") setActiveIndex(index);
+              }}
+            >
+              <circle className={index === activeIndex ? "weekly-point-glow active" : "weekly-point-glow"} cx={point.x} cy={point.y} r={index === activeIndex ? 14 : 8} />
+              <circle className={index === activeIndex ? "weekly-point active" : "weekly-point"} cx={point.x} cy={point.y} r={index === activeIndex ? 5 : 3} />
+            </g>
+          ))}
+        </svg>
       </div>
-      <div className="weekly-axis-values" aria-hidden="true">
-        {chart.axisLabels.map((label) => <span key={label}>{label}</span>)}
-      </div>
-      <svg viewBox="0 0 480 128" role="img">
-        <defs>
-          <linearGradient id="weeklyLine" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#63A2FF" />
-            <stop offset="100%" stopColor="#1D5CFF" />
-          </linearGradient>
-          <filter id="weeklyGlow" x="-20%" y="-80%" width="140%" height="260%">
-            <feGaussianBlur stdDeviation="5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
-        {[16, 32, 48, 64, 80].map((y) => <line className="weekly-grid-line" key={y} x1="8" x2="456" y1={y} y2={y} />)}
-        <line className="weekly-zero-line" x1="8" x2="456" y1="64" y2="64" />
-        {points.length > 1 ? <path className="weekly-area" d={areaPath} /> : null}
-        {points.length > 1 ? <path className="weekly-line" d={path} stroke="url(#weeklyLine)" filter="url(#weeklyGlow)" /> : null}
-        {points.map((point, index) => (
-          <g
-            key={`${point.label}-${index}`}
-            className="weekly-point-hit"
-            role="button"
-            tabIndex={0}
-            aria-label={`${point.label}: ${point.comparable ? `${formatSigned(point.value)}%` : "Sin comparación anterior"}`}
-            onClick={() => setActiveIndex(index)}
-            onMouseEnter={() => setActiveIndex(index)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") setActiveIndex(index);
-            }}
-          >
-            <circle className={index === activeIndex ? "weekly-point-glow active" : "weekly-point-glow"} cx={point.x} cy={point.y} r={index === activeIndex ? 14 : 8} />
-            <circle className={index === activeIndex ? "weekly-point active" : "weekly-point"} cx={point.x} cy={point.y} r={index === activeIndex ? 5 : 3} />
-          </g>
-        ))}
-      </svg>
       <div className="weekly-day-labels" aria-hidden="true">
         {labels.map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}
       </div>

@@ -1,5 +1,8 @@
 const fallbackTrainingDays = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"];
 const fallbackValues = [-0.8, -0.5, 0.2, 1.2, 0.5, 0.8, -0.2];
+const chartTopY = 18;
+const chartZeroY = 65;
+const chartBottomY = 112;
 
 export interface WeeklyProgressChartPoint {
   x: number;
@@ -33,7 +36,7 @@ export function buildWeeklyProgressChart(input: {
   const values = days.map((_, index) => index === activeIndex ? clampedValue : fallbackValues[index % fallbackValues.length]);
   const points = values.map((value, index) => {
     const x = getPointX(index, values.length);
-    const y = 84 - ((value + 4) / 8) * 66;
+    const y = getPointY(value, 4);
     return { x, y, value, label: labels[index], comparable: true };
   });
 
@@ -53,7 +56,7 @@ function buildWeeklyProgressChartFromSeries(series: ReadonlyArray<{ label: strin
   const axisLimit = getAxisLimit(values);
   const points = fallbackSeries.map((point, index) => {
     const x = getPointX(index, fallbackSeries.length);
-    const y = 84 - ((point.value + axisLimit) / (axisLimit * 2)) * 66;
+    const y = getPointY(point.value, axisLimit);
     return {
       x,
       y,
@@ -95,9 +98,14 @@ function getActiveTrainingDayIndex(days: string[], currentDay: string | undefine
 
 function getPointX(index: number, count: number) {
   if (count <= 1) return 240;
-  const start = 18;
-  const end = 456;
+  const start = 12;
+  const end = 468;
   return start + ((end - start) / (count - 1)) * index;
+}
+
+function getPointY(value: number, axisLimit: number) {
+  const ratio = (value + axisLimit) / (axisLimit * 2);
+  return chartBottomY - ratio * (chartBottomY - chartTopY);
 }
 
 function getTrainingDayShortLabel(day: string) {

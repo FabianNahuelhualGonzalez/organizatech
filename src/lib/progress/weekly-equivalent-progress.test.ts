@@ -91,6 +91,19 @@ assert.deepEqual(getEquivalentWeeklyDateRanges("2027-01-01"), {
   const result = calculateEquivalentWeeklyProgress({
     referenceDate: "2026-06-30",
     entries: [
+      entry("current", "2026-06-29", 14.945),
+      entry("previous", "2026-06-22", 25),
+    ],
+  });
+
+  assert.equal(result.percentage, -40.22, "mantiene decimales internos");
+  assert.equal(result.primaryLabel, "-40%", "presenta el porcentaje principal redondeado");
+}
+
+{
+  const result = calculateEquivalentWeeklyProgress({
+    referenceDate: "2026-06-30",
+    entries: [
       entry("current", "2026-06-29", 15),
       entry("previous", "2026-06-22", 10),
     ],

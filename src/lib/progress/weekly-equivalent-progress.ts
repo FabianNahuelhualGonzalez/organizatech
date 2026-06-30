@@ -78,7 +78,7 @@ export function calculateEquivalentWeeklyProgress(input: {
     currentEquivalentValue,
     previousEquivalentValue,
     percentage,
-    primaryLabel: percentage === null ? "—" : `${formatSignedNumber(percentage)}%`,
+    primaryLabel: percentage === null ? "—" : `${formatSignedNumber(Math.round(percentage))}%`,
     comparisonLabel: "vs mismo punto de la semana anterior",
     detailLabel: buildDetailLabel(status),
     tone: resolveProgressTone(percentage, status),
