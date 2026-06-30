@@ -2617,9 +2617,9 @@ h3 {
 
 .dashboard-progress-card {
   display: grid;
-  grid-template-columns: minmax(150px, 0.34fr) minmax(0, 0.66fr);
+  grid-template-columns: minmax(170px, 0.28fr) minmax(0, 0.72fr);
   grid-template-areas: "summary chart";
-  gap: clamp(12px, 4vw, 22px);
+  gap: clamp(8px, 2.4vw, 14px);
   align-items: center;
   overflow: hidden;
 }
@@ -3368,9 +3368,9 @@ h3 {
 }
 
 .dashboard-progress-card {
-  grid-template-columns: minmax(150px, 0.34fr) minmax(0, 0.66fr);
+  grid-template-columns: minmax(170px, 0.28fr) minmax(0, 0.72fr);
   grid-template-areas: "summary chart";
-  gap: clamp(10px, 3.4vw, 18px);
+  gap: clamp(8px, 2.4vw, 14px);
   align-items: center;
 }
 

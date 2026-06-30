@@ -3816,7 +3816,7 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
   const activePoint = points[activeIndex] ?? points.at(-1)!;
   const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   const areaPath = `${path} L ${points.at(-1)!.x} 112 L ${points[0].x} 112 Z`;
-  const tooltipLeft = `clamp(24px, ${(activePoint.x / 480) * 100}%, calc(100% - 52px))`;
+  const tooltipLeft = `clamp(24px, ${(activePoint.x / 480) * 100}%, calc(100% - 80px))`;
 
   return (
     <div className="weekly-progress-visual" aria-label={`Progreso semanal ${progress.primaryLabel}`}>
