@@ -2617,19 +2617,25 @@ h3 {
 
 .dashboard-progress-card {
   display: grid;
-  grid-template-columns: minmax(78px, 0.32fr) minmax(0, 1fr);
+  grid-template-columns: minmax(150px, 0.34fr) minmax(0, 0.66fr);
+  grid-template-areas: "summary chart";
   gap: clamp(12px, 4vw, 22px);
   align-items: center;
   overflow: hidden;
 }
 
 .weekly-progress-summary {
+  grid-area: summary;
   display: grid;
+  min-width: 0;
   gap: 8px;
+  align-content: center;
 }
 
 .weekly-progress-summary strong {
-  font-size: clamp(42px, 14vw, 64px);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: clamp(34px, 8vw, 48px);
   line-height: 0.95;
 }
 
@@ -2672,9 +2678,11 @@ h3 {
 }
 
 .weekly-progress-visual {
+  grid-area: chart;
   position: relative;
+  width: 100%;
   min-width: 0;
-  padding-right: 34px;
+  padding-right: clamp(38px, 8vw, 46px);
 }
 
 .weekly-progress-visual svg {
@@ -2719,6 +2727,7 @@ h3 {
   top: 3px;
   right: 0;
   bottom: 28px;
+  width: clamp(34px, 7vw, 42px);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -2729,7 +2738,7 @@ h3 {
 .weekly-day-labels {
   display: flex;
   justify-content: space-between;
-  padding: 0 34px 0 4px;
+  padding: 0 clamp(38px, 8vw, 46px) 0 4px;
   color: #dce7ff;
   font-size: clamp(12px, 3.5vw, 15px);
   font-weight: 800;
@@ -3359,7 +3368,8 @@ h3 {
 }
 
 .dashboard-progress-card {
-  grid-template-columns: minmax(86px, 0.34fr) minmax(0, 1fr);
+  grid-template-columns: minmax(150px, 0.34fr) minmax(0, 0.66fr);
+  grid-template-areas: "summary chart";
   gap: clamp(10px, 3.4vw, 18px);
   align-items: center;
 }
@@ -3374,7 +3384,7 @@ h3 {
 }
 
 .weekly-progress-summary strong {
-  font-size: clamp(2.25rem, 10.5vw, 3.8rem);
+  font-size: clamp(2rem, 7.5vw, 2.75rem);
 }
 
 .weekly-progress-summary span {
@@ -3398,7 +3408,7 @@ h3 {
 }
 
 .weekly-progress-visual {
-  padding-right: 30px;
+  padding-right: clamp(38px, 8vw, 46px);
 }
 
 .weekly-progress-visual svg {
@@ -3409,7 +3419,8 @@ h3 {
   position: absolute;
   z-index: 2;
   display: grid;
-  min-width: 46px;
+  min-width: 44px;
+  max-width: 58px;
   gap: 1px;
   transform: translate(-50%, -112%);
   border: 1px solid rgba(60, 122, 255, 0.45);
@@ -3630,7 +3641,11 @@ h3 {
   }
 
   .dashboard-progress-card {
-    grid-template-columns: minmax(70px, 0.34fr) minmax(0, 1fr);
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "summary"
+      "chart";
+    align-items: stretch;
   }
 
   .routine-item {
@@ -3834,12 +3849,15 @@ h3 {
   }
 
   .dashboard-progress-card {
-    grid-template-columns: minmax(78px, 0.36fr) minmax(0, 1fr);
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "summary"
+      "chart";
     gap: 8px;
   }
 
   .weekly-progress-visual {
-    padding-right: 26px;
+    padding-right: 38px;
   }
 
   .weekly-progress-visual svg {
