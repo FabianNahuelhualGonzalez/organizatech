@@ -2324,6 +2324,10 @@ h3 {
   font-weight: 950;
 }
 
+.dashboard-routine-name.pending span {
+  color: var(--yellow);
+}
+
 .dashboard-routine-name strong {
   min-width: 0;
   color: white;
@@ -2403,7 +2407,11 @@ h3 {
   background: rgba(116, 223, 113, 0.1);
 }
 
-.dashboard-status-badge.pending,
+.dashboard-status-badge.pending {
+  color: var(--yellow);
+  background: rgba(255, 191, 77, 0.1);
+}
+
 .dashboard-status-badge.partial {
   color: var(--blue);
   background: rgba(60, 122, 255, 0.1);

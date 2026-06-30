@@ -3720,7 +3720,7 @@ function DashboardTrainingCardContent({ model }: { model: TrainingCarouselCardMo
           {model.statusLabel}
         </span>
       </div>
-      <div className="dashboard-routine-name">
+      <div className={`dashboard-routine-name ${model.status}`}>
         <span>Entrenamiento:</span>
         <strong>{model.routineName}</strong>
       </div>
