@@ -39,8 +39,9 @@ export function buildWeeklyProgressChart(input: {
 } | {
   currentSeries: ReadonlyArray<{ label: string; value: number | null; comparable?: boolean; volume?: number | null }>;
   previousSeries: ReadonlyArray<{ label: string; value: number | null; comparable?: boolean; volume?: number | null }>;
+  unit?: "percent" | "kg";
 }) {
-  if ("currentSeries" in input) return buildWeeklyProgressChartFromDualSeries(input.currentSeries, input.previousSeries);
+  if ("currentSeries" in input) return buildWeeklyProgressChartFromDualSeries(input.currentSeries, input.previousSeries, input.unit ?? "percent");
   if ("series" in input) return buildWeeklyProgressChartFromSeries(input.series);
 
   const days = normalizeWeekDays(input.weekDays);
@@ -96,13 +97,14 @@ function buildWeeklyProgressChartFromSeries(series: ReadonlyArray<{ label: strin
 function buildWeeklyProgressChartFromDualSeries(
   currentSeries: ReadonlyArray<{ label: string; value: number | null; comparable?: boolean; volume?: number | null }>,
   previousSeries: ReadonlyArray<{ label: string; value: number | null; comparable?: boolean; volume?: number | null }>,
+  unit: "percent" | "kg",
 ) {
   const labels = previousSeries.length > 0 ? previousSeries.map((point) => point.label) : currentSeries.map((point) => point.label);
   const allValues = [...currentSeries, ...previousSeries].map((point) => point.value).filter((value): value is number => Number.isFinite(value));
-  const axisLimit = getAxisLimit(allValues);
+  const axisLimit = unit === "kg" ? getKgAxisLimit(allValues) : getAxisLimit(allValues);
   const count = Math.max(labels.length, currentSeries.length, previousSeries.length, 1);
-  const currentPoints = currentSeries.map((point, index) => toDualPoint(point, index, count, axisLimit));
-  const previousPoints = previousSeries.map((point, index) => toDualPoint(point, index, count, axisLimit));
+  const currentPoints = currentSeries.map((point, index) => toDualPoint(point, index, count, axisLimit, unit));
+  const previousPoints = previousSeries.map((point, index) => toDualPoint(point, index, count, axisLimit, unit));
   const activeIndex = Math.max(0, currentPoints.findLastIndex((point) => point.value !== null));
 
   return {
@@ -118,7 +120,7 @@ function buildWeeklyProgressChartFromDualSeries(
     currentPoints,
     previousPoints,
     activeIndex,
-    axisLabels: buildAxisLabels(axisLimit),
+    axisLabels: unit === "kg" ? buildKgAxisLabels(axisLimit) : buildAxisLabels(axisLimit),
   } satisfies WeeklyProgressChart;
 }
 
@@ -127,10 +129,11 @@ function toDualPoint(
   index: number,
   count: number,
   axisLimit: number,
+  unit: "percent" | "kg",
 ): WeeklyDualProgressChartPoint {
   return {
     x: getPointX(index, count),
-    y: point.value === null ? null : getPointY(point.value, axisLimit),
+    y: point.value === null ? null : unit === "kg" ? getPointYInRange(point.value, 0, axisLimit) : getPointY(point.value, axisLimit),
     value: point.value,
     label: point.label,
     comparable: point.comparable ?? point.value !== null,
@@ -143,13 +146,39 @@ function getAxisLimit(values: number[]) {
   return Math.ceil(maxAbs / 10) * 10;
 }
 
+function getKgAxisLimit(values: number[]) {
+  const maxValue = Math.max(1, ...values);
+  if (maxValue <= 100) return Math.ceil(maxValue / 10) * 10;
+  if (maxValue <= 1000) return Math.ceil(maxValue / 100) * 100;
+  return Math.ceil(maxValue / 1000) * 1000;
+}
+
 function buildAxisLabels(limit: number) {
   const middle = limit / 2;
   return [`+${formatAxisNumber(limit)}%`, `+${formatAxisNumber(middle)}%`, "0%", `-${formatAxisNumber(middle)}%`, `-${formatAxisNumber(limit)}%`];
 }
 
+function buildKgAxisLabels(limit: number) {
+  return [
+    formatCompactKg(limit),
+    formatCompactKg(limit * 0.75),
+    formatCompactKg(limit * 0.5),
+    formatCompactKg(limit * 0.25),
+    "0",
+  ];
+}
+
 function formatAxisNumber(value: number) {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(1))).replace(".", ",");
+}
+
+function formatCompactKg(value: number) {
+  if (value >= 1000) {
+    const compact = value / 1000;
+    const formatted = Number.isInteger(compact) ? String(compact) : String(Number(compact.toFixed(1))).replace(".", ",");
+    return `${formatted}k`;
+  }
+  return String(Math.round(value));
 }
 
 function normalizeWeekDays(weekDays: readonly string[]) {
@@ -172,6 +201,12 @@ function getPointX(index: number, count: number) {
 
 function getPointY(value: number, axisLimit: number) {
   const ratio = (value + axisLimit) / (axisLimit * 2);
+  return chartBottomY - ratio * (chartBottomY - chartTopY);
+}
+
+function getPointYInRange(value: number, min: number, max: number) {
+  const range = Math.max(1, max - min);
+  const ratio = (value - min) / range;
   return chartBottomY - ratio * (chartBottomY - chartTopY);
 }
 

@@ -110,8 +110,11 @@ assert.deepEqual(resolvePlannedWeekDays([]), ["Lunes"], "mantiene fallback segur
   assert.equal(result.previousEquivalentValue, 415);
   assert.equal(result.percentage, -40.25);
   assert.equal(result.previousComparablePercentage, -17);
-  assert.equal(result.primaryLabel, "-40,25%");
-  assert.equal(result.previousLabel, "-17%");
+  assert.equal(result.differenceValue, -116.25);
+  assert.equal(result.primaryLabel, "-116,25 kg");
+  assert.equal(result.previousLabel, "415 kg");
+  assert.equal(result.currentVolumeLabel, "298,75 kg");
+  assert.equal(result.previousVolumeLabel, "415 kg");
   assert.equal(result.comparisonLabel, "Vs semana anterior");
   assert.equal(result.detailLabel, "Semana actual");
   assert.equal(result.tone, "danger");
@@ -134,7 +137,8 @@ assert.deepEqual(resolvePlannedWeekDays([]), ["Lunes"], "mantiene fallback segur
   assert.deepEqual(result.plannedDays, ["Lunes", "Miércoles", "Viernes"]);
   assert.equal(result.points.at(-1)?.previousPercentage, 0, "la semana anterior termina en 0%");
   assert.equal(result.percentage, 40, "la semana actual puede superar el baseline final");
-  assert.equal(result.primaryLabel, "+40%");
+  assert.equal(result.differenceValue, 200);
+  assert.equal(result.primaryLabel, "+200 kg");
   assert.equal(result.tone, "positive");
 }
 
@@ -167,7 +171,8 @@ assert.deepEqual(resolvePlannedWeekDays([]), ["Lunes"], "mantiene fallback segur
 
   assert.equal(result.points.length, 1);
   assert.equal(result.percentage, 0);
-  assert.equal(result.primaryLabel, "0%");
+  assert.equal(result.differenceValue, 0);
+  assert.equal(result.primaryLabel, "0 kg");
   assert.equal(result.tone, "neutral");
 }
 
@@ -180,7 +185,10 @@ assert.deepEqual(resolvePlannedWeekDays([]), ["Lunes"], "mantiene fallback segur
 
   assert.equal(result.previousFinalVolume, 0);
   assert.equal(result.percentage, null, "semana anterior en 0 no produce infinito");
-  assert.equal(result.primaryLabel, "—");
+  assert.equal(result.primaryLabel, "10 kg");
+  assert.equal(result.previousLabel, "—");
+  assert.equal(result.previousVolumeLabel, "—");
+  assert.equal(result.points[0].previousVolume, null, "sin referencia no inventa 0 kg para la serie anterior");
   assert.equal(result.detailLabel, "Sin comparación anterior");
   assert.equal(result.status, "no_previous");
 }

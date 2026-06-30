@@ -3687,13 +3687,16 @@ function DashboardScreen({
           </div>
           {weeklyEquivalentProgress.status === "ready" ? (
             <div className="weekly-progress-value-block previous">
-              <p>{weeklyEquivalentProgress.comparisonLabel}</p>
-              <strong>{weeklyEquivalentProgress.previousLabel}</strong>
+              <p>vs mismo punto de la semana anterior</p>
+              <div className="weekly-progress-volume-pair">
+                <span>Actual: {weeklyEquivalentProgress.currentVolumeLabel}</span>
+                <span>Anterior: {weeklyEquivalentProgress.previousVolumeLabel}</span>
+              </div>
             </div>
           ) : (
             <div className="weekly-progress-empty-copy">
               <span>{weeklyEquivalentProgress.detailLabel}</span>
-              <small>Semana anterior completa como referencia</small>
+              <small>Completa esta semana para crear tu primera referencia</small>
             </div>
           )}
         </div>
@@ -3808,27 +3811,31 @@ function IndexDots({ activeIndex, count }: { activeIndex: number; count: number 
   );
 }
 function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressResult }) {
+  const hasPreviousReference = progress.status === "ready";
   const chart = useMemo(() => buildWeeklyProgressChart({
     currentSeries: progress.points.map((point) => ({
       label: point.label,
-      value: point.currentPercentage,
-      comparable: point.currentPercentage !== null,
+      value: point.currentVolume,
+      comparable: point.currentVolume !== null,
       volume: point.currentVolume,
     })),
     previousSeries: progress.points.map((point) => ({
       label: point.label,
-      value: point.previousPercentage,
-      comparable: point.previousPercentage !== null,
-      volume: point.previousVolume,
+      value: hasPreviousReference ? point.previousVolume : null,
+      comparable: hasPreviousReference && point.previousVolume !== null,
+      volume: hasPreviousReference ? point.previousVolume : null,
     })),
-  }), [progress.points]);
+    unit: "kg",
+  }), [hasPreviousReference, progress.points]);
   const [activeIndex, setActiveIndex] = useState(chart.activeIndex);
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
   const labels = chart.labels;
   const currentPoints = chart.currentPoints;
   const previousPoints = chart.previousPoints;
   const chartViewBoxHeight = 144;
   useEffect(() => {
     setActiveIndex(chart.activeIndex);
+    setIsTooltipVisible(false);
   }, [chart.activeIndex, labels.length]);
   const activeCurrentPoint = currentPoints[activeIndex] ?? currentPoints.find((point) => point.value !== null) ?? currentPoints[0];
   const activePreviousPoint = previousPoints[activeIndex] ?? previousPoints[0];
@@ -3836,25 +3843,28 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
   const previousPath = buildSvgPath(previousPoints);
   const currentAreaPath = buildAreaPath(currentPoints);
   const tooltipAnchorX = activeCurrentPoint?.x ?? activePreviousPoint?.x ?? 240;
-  const tooltipLeft = `clamp(52px, ${(tooltipAnchorX / 480) * 100}%, calc(100% - 104px))`;
-  const tooltipTop = `${((activeCurrentPoint?.y ?? activePreviousPoint?.y ?? 65) / chartViewBoxHeight) * 100}%`;
+  const tooltipLeft = `clamp(68px, ${(tooltipAnchorX / 480) * 100}%, calc(100% - 136px))`;
+  const tooltipTop = `clamp(18px, ${((activeCurrentPoint?.y ?? activePreviousPoint?.y ?? 65) / chartViewBoxHeight) * 100}%, calc(100% - 62px))`;
   const tooltipDay = progress.points[activeIndex]?.day ?? activeCurrentPoint?.label ?? "";
+  const progressAriaLabel = buildWeeklyProgressAriaLabel(progress);
 
   return (
     <div
       className="weekly-progress-visual"
-      aria-label={`Progreso semanal: semana actual ${progress.primaryLabel}; semana anterior ${progress.previousLabel}`}
+      aria-label={progressAriaLabel}
     >
       <div className="weekly-progress-legend" aria-hidden="true">
         <span><i className="current" /> Semana actual</span>
-        <span><i className="previous" /> Semana anterior</span>
+        {hasPreviousReference ? <span><i className="previous" /> Semana anterior</span> : null}
       </div>
       <div className="weekly-chart-stage">
-        <div className="weekly-tooltip" style={{ left: tooltipLeft, top: tooltipTop }}>
-          <strong>{tooltipDay}</strong>
-          <span>Actual: {formatSignedNullable(activeCurrentPoint?.value ?? null)}</span>
-          <span>Anterior: {formatSignedNullable(activePreviousPoint?.value ?? null)}</span>
-        </div>
+        {isTooltipVisible ? (
+          <div className="weekly-tooltip" style={{ left: tooltipLeft, top: tooltipTop }}>
+            <strong>{tooltipDay}</strong>
+            <span>Semana actual: {formatKgNullable(activeCurrentPoint?.value ?? null)}</span>
+            <span>Semana anterior: {formatKgNullable(hasPreviousReference ? activePreviousPoint?.value ?? null : null)}</span>
+          </div>
+        ) : null}
         <div className="weekly-axis-values" aria-hidden="true">
           {chart.axisLabels.map((label) => <span key={label}>{label}</span>)}
         </div>
@@ -3873,24 +3883,34 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
             </filter>
           </defs>
           {[18, 42, 65, 89, 112].map((y) => <line className="weekly-grid-line" key={y} x1="6" x2="474" y1={y} y2={y} />)}
-          <line className="weekly-zero-line" x1="6" x2="474" y1="65" y2="65" />
+          <line className="weekly-zero-line" x1="6" x2="474" y1="112" y2="112" />
           {currentAreaPath ? <path className="weekly-area" d={currentAreaPath} /> : null}
-          {previousPath ? <path className="weekly-line previous" d={previousPath} /> : null}
+          {hasPreviousReference && previousPath ? <path className="weekly-line previous" d={previousPath} /> : null}
           {currentPath ? <path className="weekly-line current" d={currentPath} stroke="url(#weeklyLine)" filter="url(#weeklyGlow)" /> : null}
-          {previousPoints.map((point, index) => point.y === null ? null : (
+          {hasPreviousReference ? previousPoints.map((point, index) => point.y === null ? null : (
             <circle className="weekly-point previous" key={`previous-${point.label}-${index}`} cx={point.x} cy={point.y} r="3" />
-          ))}
+          )) : null}
           {currentPoints.map((point, index) => point.y === null ? null : (
             <g
               key={`current-${point.label}-${index}`}
               className="weekly-point-hit"
               role="button"
               tabIndex={0}
-              aria-label={`${progress.points[index]?.day ?? point.label}: semana actual ${formatSignedNullable(point.value)}, semana anterior ${formatSignedNullable(previousPoints[index]?.value ?? null)}`}
-              onClick={() => setActiveIndex(index)}
+              aria-label={`${progress.points[index]?.day ?? point.label}: semana actual ${formatKgNullable(point.value)}, semana anterior ${formatKgNullable(previousPoints[index]?.value ?? null)}`}
+              onClick={() => {
+                setIsTooltipVisible((current) => index !== activeIndex || !current);
+                setActiveIndex(index);
+              }}
               onMouseEnter={() => setActiveIndex(index)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") setActiveIndex(index);
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setIsTooltipVisible((current) => index !== activeIndex || !current);
+                  setActiveIndex(index);
+                }
+                if (event.key === "Escape") {
+                  setIsTooltipVisible(false);
+                }
               }}
             >
               <circle className={index === activeIndex ? "weekly-point-glow active" : "weekly-point-glow"} cx={point.x} cy={point.y} r={index === activeIndex ? 14 : 8} />
@@ -3918,8 +3938,19 @@ function buildAreaPath(points: Array<{ x: number; y: number | null }>) {
   return `${path} L ${segments.at(-1)!.x} 132 L ${segments[0].x} 132 Z`;
 }
 
-function formatSignedNullable(value: number | null) {
-  return value === null || !Number.isFinite(value) ? "—" : `${formatSigned(value, 2)}%`;
+function formatKgNullable(value: number | null) {
+  return value === null || !Number.isFinite(value) ? "—" : formatKg(value);
+}
+
+function buildWeeklyProgressAriaLabel(progress: WeeklyEquivalentProgressResult) {
+  if (progress.currentEquivalentValue <= 0) return "Progreso semanal: sin datos suficientes para comparar";
+  if (progress.status === "ready") {
+    return `Progreso semanal: diferencia ${progress.primaryLabel}; semana actual ${progress.currentVolumeLabel}; semana anterior ${progress.previousVolumeLabel}`;
+  }
+  if (progress.status === "no_previous") {
+    return `Progreso semanal: volumen acumulado actual ${progress.primaryLabel}; sin comparación anterior`;
+  }
+  return "Progreso semanal: sin datos suficientes para comparar";
 }
 
 function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {

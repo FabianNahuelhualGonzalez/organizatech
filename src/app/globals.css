@@ -2657,6 +2657,24 @@ h3 {
   color: #dce7ff;
 }
 
+.weekly-progress-volume-pair {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.weekly-progress-volume-pair span {
+  color: #dce7ff;
+  font-size: clamp(11px, 3vw, 13px);
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.weekly-progress-volume-pair span + span {
+  color: var(--muted);
+}
+
 .weekly-progress-summary span {
   color: var(--muted);
   font-size: clamp(12px, 3.4vw, 15px);
@@ -3496,10 +3514,10 @@ h3 {
   position: absolute;
   z-index: 2;
   display: grid;
-  min-width: 86px;
-  max-width: 98px;
+  min-width: 144px;
+  max-width: 164px;
   gap: 1px;
-  transform: translate(-50%, -84%);
+  transform: translate(-50%, 10px);
   border: 1px solid rgba(60, 122, 255, 0.45);
   border-radius: 8px;
   color: white;

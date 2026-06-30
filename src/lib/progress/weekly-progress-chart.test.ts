@@ -81,6 +81,27 @@ import { buildWeeklyProgressChart } from "@/lib/progress/weekly-progress-chart";
 
 {
   const chart = buildWeeklyProgressChart({
+    currentSeries: [
+      { label: "L", value: 298.75, comparable: true },
+      { label: "M", value: null, comparable: false },
+    ],
+    previousSeries: [
+      { label: "L", value: 415, comparable: true },
+      { label: "M", value: 500, comparable: true },
+    ],
+    unit: "kg",
+  });
+
+  assert.deepEqual(chart.labels, ["L", "M"]);
+  assert.equal(chart.activeIndex, 0);
+  assert.equal(chart.currentPoints[1].y, null, "la serie actual en kg tampoco traza futuro");
+  assert.deepEqual(chart.axisLabels, ["500", "375", "250", "125", "0"]);
+  assert.equal(chart.previousPoints[1].y, 18, "el mayor volumen queda arriba del grafico");
+  assert.equal(chart.currentPoints[0].y! > chart.previousPoints[0].y!, true, "menor volumen acumulado queda mas abajo");
+}
+
+{
+  const chart = buildWeeklyProgressChart({
     currentSeries: [{ label: "L", value: null, comparable: false }],
     previousSeries: [{ label: "L", value: 0, comparable: true }],
   });

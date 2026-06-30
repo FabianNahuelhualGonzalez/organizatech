@@ -1,5 +1,5 @@
 import type { ExerciseEntry, TrainingSession } from "@/lib/progress/types";
-import { roundDecimal } from "@/lib/progress/weight-format";
+import { formatKg, formatSignedKg, roundDecimal } from "@/lib/progress/weight-format";
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const santiagoTimeZone = "America/Santiago";
@@ -24,7 +24,7 @@ export interface WeeklyDualProgressPoint {
   currentDate: string;
   previousDate: string;
   currentVolume: number | null;
-  previousVolume: number;
+  previousVolume: number | null;
   currentPercentage: number | null;
   previousPercentage: number | null;
   isFuture: boolean;
@@ -36,10 +36,13 @@ export interface WeeklyEquivalentProgressResult {
   previousFinalVolume: number;
   currentEquivalentValue: number;
   previousEquivalentValue: number;
+  differenceValue: number;
   percentage: number | null;
   previousComparablePercentage: number | null;
   primaryLabel: string;
   previousLabel: string;
+  currentVolumeLabel: string;
+  previousVolumeLabel: string;
   comparisonLabel: "Vs semana anterior";
   detailLabel: string;
   tone: WeeklyEquivalentProgressTone;
@@ -86,6 +89,7 @@ export function calculateEquivalentWeeklyProgress(input: {
   const comparablePoint = comparableIndex >= 0 ? normalizedPoints[comparableIndex] : null;
   const currentEquivalentValue = comparablePoint?.currentVolume ?? 0;
   const previousEquivalentValue = comparablePoint?.previousVolume ?? 0;
+  const differenceValue = roundDecimal(currentEquivalentValue - previousEquivalentValue);
   const percentage = comparablePoint?.currentPercentage ?? null;
   const previousComparablePercentage = comparablePoint?.previousPercentage ?? null;
   const status = resolveProgressStatus(currentEquivalentValue, previousFinalVolume, percentage);
@@ -96,13 +100,16 @@ export function calculateEquivalentWeeklyProgress(input: {
     previousFinalVolume,
     currentEquivalentValue,
     previousEquivalentValue,
+    differenceValue,
     percentage,
     previousComparablePercentage,
-    primaryLabel: formatProgressPercentage(percentage),
-    previousLabel: formatProgressPercentage(previousComparablePercentage),
+    primaryLabel: status === "ready" ? formatSignedKg(differenceValue) : currentEquivalentValue > 0 ? formatKg(currentEquivalentValue) : "—",
+    previousLabel: status === "ready" ? formatKg(previousEquivalentValue) : "—",
+    currentVolumeLabel: formatKg(currentEquivalentValue),
+    previousVolumeLabel: status === "ready" ? formatKg(previousEquivalentValue) : "—",
     comparisonLabel: "Vs semana anterior",
     detailLabel: buildDetailLabel(status),
-    tone: resolveProgressTone(percentage, status),
+    tone: resolveProgressTone(differenceValue, status),
     status,
     points: normalizedPoints,
   };
@@ -184,7 +191,8 @@ function normalizeWeeklySeriesAgainstPreviousFinal(points: WeeklyDualProgressPoi
   return points.map((point) => ({
     ...point,
     currentPercentage: point.currentVolume === null ? null : calculateAgainstPreviousFinal(point.currentVolume, previousFinalVolume),
-    previousPercentage: calculateAgainstPreviousFinal(point.previousVolume, previousFinalVolume),
+    previousVolume: previousFinalVolume <= 0 ? null : point.previousVolume,
+    previousPercentage: point.previousVolume === null ? null : calculateAgainstPreviousFinal(point.previousVolume, previousFinalVolume),
   }));
 }
 
@@ -213,9 +221,9 @@ function resolveProgressStatus(currentValue: number, previousFinalVolume: number
   return "ready";
 }
 
-function resolveProgressTone(percentage: number | null, status: WeeklyEquivalentProgressStatus): WeeklyEquivalentProgressTone {
-  if (status !== "ready" || percentage === null || percentage === 0) return "neutral";
-  return percentage > 0 ? "positive" : "danger";
+function resolveProgressTone(differenceValue: number, status: WeeklyEquivalentProgressStatus): WeeklyEquivalentProgressTone {
+  if (status !== "ready" || differenceValue === 0) return "neutral";
+  return differenceValue > 0 ? "positive" : "danger";
 }
 
 function buildDetailLabel(status: WeeklyEquivalentProgressStatus) {
