@@ -3687,8 +3687,11 @@ function DashboardScreen({
           </div>
           {weeklyEquivalentProgress.status === "ready" ? (
             <div className="weekly-progress-value-block previous">
-              <p>{weeklyEquivalentProgress.comparisonLabel}</p>
-              <strong>{weeklyEquivalentProgress.previousLabel}</strong>
+              <p>vs mismo punto de la semana anterior</p>
+              <div className="weekly-progress-volume-pair">
+                <span>Actual: {weeklyEquivalentProgress.currentVolumeLabel}</span>
+                <span>Anterior: {weeklyEquivalentProgress.previousVolumeLabel}</span>
+              </div>
             </div>
           ) : (
             <div className="weekly-progress-empty-copy">
@@ -3811,16 +3814,17 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
   const chart = useMemo(() => buildWeeklyProgressChart({
     currentSeries: progress.points.map((point) => ({
       label: point.label,
-      value: point.currentPercentage,
-      comparable: point.currentPercentage !== null,
+      value: point.currentVolume,
+      comparable: point.currentVolume !== null,
       volume: point.currentVolume,
     })),
     previousSeries: progress.points.map((point) => ({
       label: point.label,
-      value: point.previousPercentage,
-      comparable: point.previousPercentage !== null,
+      value: point.previousVolume,
+      comparable: point.previousVolume !== null,
       volume: point.previousVolume,
     })),
+    unit: "kg",
   }), [progress.points]);
   const [activeIndex, setActiveIndex] = useState(chart.activeIndex);
   const labels = chart.labels;
@@ -3836,14 +3840,14 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
   const previousPath = buildSvgPath(previousPoints);
   const currentAreaPath = buildAreaPath(currentPoints);
   const tooltipAnchorX = activeCurrentPoint?.x ?? activePreviousPoint?.x ?? 240;
-  const tooltipLeft = `clamp(52px, ${(tooltipAnchorX / 480) * 100}%, calc(100% - 104px))`;
+  const tooltipLeft = `clamp(68px, ${(tooltipAnchorX / 480) * 100}%, calc(100% - 136px))`;
   const tooltipTop = `${((activeCurrentPoint?.y ?? activePreviousPoint?.y ?? 65) / chartViewBoxHeight) * 100}%`;
   const tooltipDay = progress.points[activeIndex]?.day ?? activeCurrentPoint?.label ?? "";
 
   return (
     <div
       className="weekly-progress-visual"
-      aria-label={`Progreso semanal: semana actual ${progress.primaryLabel}; semana anterior ${progress.previousLabel}`}
+      aria-label={`Progreso semanal: diferencia ${progress.primaryLabel}; actual ${progress.currentVolumeLabel}; anterior ${progress.previousVolumeLabel}`}
     >
       <div className="weekly-progress-legend" aria-hidden="true">
         <span><i className="current" /> Semana actual</span>
@@ -3852,8 +3856,8 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
       <div className="weekly-chart-stage">
         <div className="weekly-tooltip" style={{ left: tooltipLeft, top: tooltipTop }}>
           <strong>{tooltipDay}</strong>
-          <span>Actual: {formatSignedNullable(activeCurrentPoint?.value ?? null)}</span>
-          <span>Anterior: {formatSignedNullable(activePreviousPoint?.value ?? null)}</span>
+          <span>Actual: {formatKgNullable(activeCurrentPoint?.value ?? null)}</span>
+          <span>Anterior: {formatKgNullable(activePreviousPoint?.value ?? null)}</span>
         </div>
         <div className="weekly-axis-values" aria-hidden="true">
           {chart.axisLabels.map((label) => <span key={label}>{label}</span>)}
@@ -3873,7 +3877,7 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
             </filter>
           </defs>
           {[18, 42, 65, 89, 112].map((y) => <line className="weekly-grid-line" key={y} x1="6" x2="474" y1={y} y2={y} />)}
-          <line className="weekly-zero-line" x1="6" x2="474" y1="65" y2="65" />
+          <line className="weekly-zero-line" x1="6" x2="474" y1="112" y2="112" />
           {currentAreaPath ? <path className="weekly-area" d={currentAreaPath} /> : null}
           {previousPath ? <path className="weekly-line previous" d={previousPath} /> : null}
           {currentPath ? <path className="weekly-line current" d={currentPath} stroke="url(#weeklyLine)" filter="url(#weeklyGlow)" /> : null}
@@ -3886,7 +3890,7 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
               className="weekly-point-hit"
               role="button"
               tabIndex={0}
-              aria-label={`${progress.points[index]?.day ?? point.label}: semana actual ${formatSignedNullable(point.value)}, semana anterior ${formatSignedNullable(previousPoints[index]?.value ?? null)}`}
+              aria-label={`${progress.points[index]?.day ?? point.label}: semana actual ${formatKgNullable(point.value)}, semana anterior ${formatKgNullable(previousPoints[index]?.value ?? null)}`}
               onClick={() => setActiveIndex(index)}
               onMouseEnter={() => setActiveIndex(index)}
               onKeyDown={(event) => {
@@ -3918,8 +3922,8 @@ function buildAreaPath(points: Array<{ x: number; y: number | null }>) {
   return `${path} L ${segments.at(-1)!.x} 132 L ${segments[0].x} 132 Z`;
 }
 
-function formatSignedNullable(value: number | null) {
-  return value === null || !Number.isFinite(value) ? "—" : `${formatSigned(value, 2)}%`;
+function formatKgNullable(value: number | null) {
+  return value === null || !Number.isFinite(value) ? "—" : formatKg(value);
 }
 
 function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {
