@@ -185,7 +185,10 @@ assert.deepEqual(resolvePlannedWeekDays([]), ["Lunes"], "mantiene fallback segur
 
   assert.equal(result.previousFinalVolume, 0);
   assert.equal(result.percentage, null, "semana anterior en 0 no produce infinito");
-  assert.equal(result.primaryLabel, "—");
+  assert.equal(result.primaryLabel, "10 kg");
+  assert.equal(result.previousLabel, "—");
+  assert.equal(result.previousVolumeLabel, "—");
+  assert.equal(result.points[0].previousVolume, null, "sin referencia no inventa 0 kg para la serie anterior");
   assert.equal(result.detailLabel, "Sin comparación anterior");
   assert.equal(result.status, "no_previous");
 }

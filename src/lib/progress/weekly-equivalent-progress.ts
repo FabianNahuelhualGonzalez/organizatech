@@ -24,7 +24,7 @@ export interface WeeklyDualProgressPoint {
   currentDate: string;
   previousDate: string;
   currentVolume: number | null;
-  previousVolume: number;
+  previousVolume: number | null;
   currentPercentage: number | null;
   previousPercentage: number | null;
   isFuture: boolean;
@@ -103,10 +103,10 @@ export function calculateEquivalentWeeklyProgress(input: {
     differenceValue,
     percentage,
     previousComparablePercentage,
-    primaryLabel: status === "ready" ? formatSignedKg(differenceValue) : "—",
-    previousLabel: formatKg(previousEquivalentValue),
+    primaryLabel: status === "ready" ? formatSignedKg(differenceValue) : currentEquivalentValue > 0 ? formatKg(currentEquivalentValue) : "—",
+    previousLabel: status === "ready" ? formatKg(previousEquivalentValue) : "—",
     currentVolumeLabel: formatKg(currentEquivalentValue),
-    previousVolumeLabel: formatKg(previousEquivalentValue),
+    previousVolumeLabel: status === "ready" ? formatKg(previousEquivalentValue) : "—",
     comparisonLabel: "Vs semana anterior",
     detailLabel: buildDetailLabel(status),
     tone: resolveProgressTone(differenceValue, status),
@@ -191,7 +191,8 @@ function normalizeWeeklySeriesAgainstPreviousFinal(points: WeeklyDualProgressPoi
   return points.map((point) => ({
     ...point,
     currentPercentage: point.currentVolume === null ? null : calculateAgainstPreviousFinal(point.currentVolume, previousFinalVolume),
-    previousPercentage: calculateAgainstPreviousFinal(point.previousVolume, previousFinalVolume),
+    previousVolume: previousFinalVolume <= 0 ? null : point.previousVolume,
+    previousPercentage: point.previousVolume === null ? null : calculateAgainstPreviousFinal(point.previousVolume, previousFinalVolume),
   }));
 }
 

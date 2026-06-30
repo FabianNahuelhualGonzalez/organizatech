@@ -3514,10 +3514,10 @@ h3 {
   position: absolute;
   z-index: 2;
   display: grid;
-  min-width: 118px;
-  max-width: 132px;
+  min-width: 144px;
+  max-width: 164px;
   gap: 1px;
-  transform: translate(-50%, -84%);
+  transform: translate(-50%, 10px);
   border: 1px solid rgba(60, 122, 255, 0.45);
   border-radius: 8px;
   color: white;
