@@ -3942,12 +3942,14 @@ function TrainingCompletionSummaryScreen({
   summary: TrainingCompletionSummary;
   onDashboard: () => void;
 }) {
+  const previousDateLabel = summary.exercises.find((exercise) => exercise.comparisonStatus === "ready" && exercise.previousDateLabel)?.previousDateLabel ?? "";
+  const currentDateLabel = summary.exercises[0]?.currentDateLabel ?? "";
+
   return (
     <section className="training-completion-screen">
       <div className="training-completion-title">
         <h2>Resumen de tu entrenamiento</h2>
         <p>Estos fueron tus resultados</p>
-        <small>Toma una captura y comparte tu progreso</small>
       </div>
 
       <article className="training-completion-card">
@@ -3966,8 +3968,8 @@ function TrainingCompletionSummaryScreen({
           <div role="rowgroup">
             <div className="training-completion-row heading" role="row">
               <span role="columnheader">Ejercicio y Series</span>
-              <span role="columnheader">Anterior</span>
-              <span role="columnheader">Actual</span>
+              <span role="columnheader">Anterior{previousDateLabel && <small>{previousDateLabel}</small>}</span>
+              <span role="columnheader">Actual{currentDateLabel && <small>{currentDateLabel}</small>}</span>
               <span role="columnheader">Resultado</span>
             </div>
           </div>
@@ -3981,7 +3983,6 @@ function TrainingCompletionSummaryScreen({
                 <div role="cell">
                   {exercise.comparisonStatus === "ready" ? (
                     <>
-                      <small>{exercise.previousDateLabel}</small>
                       <span>{exercise.previousTotalReps ?? "—"} reps</span>
                       <span>{exercise.previousWeightLabel}</span>
                     </>
@@ -3990,7 +3991,6 @@ function TrainingCompletionSummaryScreen({
                   )}
                 </div>
                 <div role="cell">
-                  <small>{exercise.currentDateLabel}</small>
                   <span>{exercise.currentTotalReps} reps</span>
                   <span>{exercise.currentWeightLabel}</span>
                 </div>
