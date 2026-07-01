@@ -206,6 +206,11 @@ import {
   resolveTrainingCarouselAction,
   type TrainingCarouselCardModel,
 } from "@/lib/training/training-carousel-card-presentation";
+import {
+  buildTrainingCompletionSummary,
+  type TrainingCompletionHistoricalInput,
+  type TrainingCompletionSummary,
+} from "@/lib/training/training-completion-summary";
 
 type Screen =
   | "login"
@@ -215,6 +220,7 @@ type Screen =
   | "recovery-expired"
   | "dashboard"
   | "entrenamiento"
+  | "training-summary"
   | "registro-entrenamiento"
   | "comparacion"
   | "historial-ciclos"
@@ -497,6 +503,7 @@ export function OrganizatechApp({
   const [latestExercisePerformanceLoading, setLatestExercisePerformanceLoading] = useState(false);
   const [latestExercisePerformanceError, setLatestExercisePerformanceError] = useState("");
   const latestExercisePerformanceRequestKeyRef = useRef<string | null>(null);
+  const [trainingCompletionSummary, setTrainingCompletionSummary] = useState<TrainingCompletionSummary | null>(null);
   const [routineEditorReturnScreen, setRoutineEditorReturnScreen] = useState<Screen | null>(null);
   const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>(() => loadCycleHistory());
   const [persistedActiveCycle, setPersistedActiveCycle] = useState<PersistedTrainingCycle | null>(null);
@@ -793,6 +800,12 @@ export function OrganizatechApp({
       resetWorkoutAttemptState();
     }
   }, [activeWorkoutAttemptId, activeWorkoutStartedAt, hasRecoverableWorkoutStart, hasStartedTraining, pendingReadinessLink, screen]);
+
+  useEffect(() => {
+    if (screen === "training-summary" && !trainingCompletionSummary) {
+      setScreen("dashboard");
+    }
+  }, [screen, trainingCompletionSummary]);
 
   const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
   const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
@@ -1491,6 +1504,10 @@ export function OrganizatechApp({
     if (nextScreen === screen) {
       setIsMenuOpen(false);
       return;
+    }
+
+    if (nextScreen === "dashboard") {
+      setTrainingCompletionSummary(null);
     }
 
     if (nextScreen === "registro-entrenamiento") {
@@ -2555,6 +2572,71 @@ export function OrganizatechApp({
     setScreen("dashboard");
   }
 
+  async function buildCompletedTrainingSummarySnapshot(input: {
+    sessionId: string;
+    validExercises: ExerciseTemplate[];
+    capturedExerciseDrafts: Record<string, ExerciseDraft>;
+    workoutStartedAt: string | null;
+    savedAt: string;
+    trainedDate: string;
+  }) {
+    const historicalEntries = await Promise.allSettled(input.validExercises.map(async (exercise) => {
+      if (!exercise.exerciseLineageId) {
+        return [exercise.id, { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput] as const;
+      }
+
+      const latest = await getLatestExercisePerformanceByLineage({
+        exerciseLineageId: exercise.exerciseLineageId,
+        currentSessionId: input.sessionId,
+      });
+
+      return [
+        exercise.id,
+        latest
+          ? { status: "ready", latest } satisfies TrainingCompletionHistoricalInput
+          : { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput,
+      ] as const;
+    }));
+
+    const historicalByExerciseId: Record<string, TrainingCompletionHistoricalInput> = {};
+    historicalEntries.forEach((result, index) => {
+      const exercise = input.validExercises[index];
+      if (!exercise) return;
+      if (result.status === "fulfilled") {
+        historicalByExerciseId[result.value[0]] = result.value[1];
+      } else {
+        historicalByExerciseId[exercise.id] = { status: "unavailable", latest: null };
+      }
+    });
+
+    return buildTrainingCompletionSummary({
+      sessionId: input.sessionId,
+      dayLabel: visibleDay,
+      statusLabel: `Completado · ${input.validExercises.length} de ${input.validExercises.length}`,
+      workoutName: visibleRoutine,
+      cycleLabel: trainingTopbarMeta?.cycleLabel ?? getCycleTypeTitle(displayTrainingPlan),
+      weekLabel: trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`,
+      progressLabel: trainingTopbarMeta?.progressLabel ?? `${routineDays.length} de ${routineDays.length} dias`,
+      workoutStartedAt: input.workoutStartedAt,
+      savedAt: input.savedAt,
+      currentDate: input.trainedDate,
+      exercises: input.validExercises.map((exercise) => {
+        const draft = normalizeExerciseDraft(exercise, input.capturedExerciseDrafts[exercise.id]);
+        return {
+          exerciseId: exercise.id,
+          exerciseLineageId: exercise.exerciseLineageId ?? null,
+          exerciseName: exercise.name,
+          targetSets: exercise.targetSets,
+          draft: {
+            weight: draft.weight,
+            reps: draft.reps,
+          },
+        };
+      }),
+      historicalByExerciseId,
+    });
+  }
+
   async function saveCompletedTraining() {
     if (!tryAcquireWorkoutStartLock(workoutCompletionInFlightRef)) return;
     let saveLockAcquired = false;
@@ -2742,6 +2824,16 @@ export function OrganizatechApp({
           }
         }
 
+        const summarySnapshot = await buildCompletedTrainingSummarySnapshot({
+          sessionId: savedTrainingSessionId,
+          validExercises,
+          capturedExerciseDrafts,
+          workoutStartedAt: capturedStartedAt,
+          savedAt: new Date().toISOString(),
+          trainedDate,
+        });
+        setTrainingCompletionSummary(summarySnapshot);
+
         setExerciseDrafts((current) => {
           const next = { ...current };
           for (const exercise of validExercises) delete next[exercise.id];
@@ -2750,6 +2842,7 @@ export function OrganizatechApp({
         setStatusMessage("Entrenamiento guardado.");
         try {
           finishCompletedWorkout();
+          setScreen("training-summary");
         } catch {
           // El entrenamiento ya fue persistido; un fallo local de limpieza no debe habilitar duplicados.
         }
@@ -2774,6 +2867,8 @@ export function OrganizatechApp({
         const trainedDate = todayKey;
         const plannedDay = getTrainingDayCode(visibleDay);
         const trainingWeek = getLegacyWeekNumberForTrainingDate(trainingSessions, entries, trainedDate);
+        const capturedExerciseDrafts = exerciseDrafts;
+        const capturedStartedAt = activeWorkoutStartedAt;
         const savedSession = await saveTrainingSessionWithEntries({
           routine: visibleRoutine,
           plannedDay,
@@ -2801,6 +2896,15 @@ export function OrganizatechApp({
         }),
         }, dataMode);
 
+        const summarySnapshot = await buildCompletedTrainingSummarySnapshot({
+          sessionId: savedSession.id,
+          validExercises,
+          capturedExerciseDrafts,
+          workoutStartedAt: capturedStartedAt,
+          savedAt: new Date().toISOString(),
+          trainedDate,
+        });
+        setTrainingCompletionSummary(summarySnapshot);
         setTrainingSessions((current) => [...current, savedSession]);
         setEntries((current) => [...current, ...savedSession.entries]);
         setExerciseDrafts((current) => {
@@ -2810,6 +2914,7 @@ export function OrganizatechApp({
         });
         setStatusMessage("Entrenamiento guardado.");
         finishCompletedWorkout();
+        setScreen("training-summary");
       } catch (error) {
         const message = handlePersistenceError(error);
         setRoutineNotice(message === "Ya existe un entrenamiento registrado para esta rutina y fecha."
@@ -2998,7 +3103,14 @@ export function OrganizatechApp({
             <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}</p>
           )}
         </div>
-        <button className="icon-button" aria-label="Ver alertas del panel principal" onClick={() => setScreen("dashboard")}>
+        <button
+          className="icon-button"
+          aria-label="Ver alertas del panel principal"
+          onClick={() => {
+            setTrainingCompletionSummary(null);
+            setScreen("dashboard");
+          }}
+        >
           <Bell size={18} />
         </button>
       </header>
@@ -3054,7 +3166,7 @@ export function OrganizatechApp({
         </>
       )}
 
-      {screen !== "dashboard" && (
+      {screen !== "dashboard" && screen !== "training-summary" && (
         <div className="section-back-row">
           <button className="button secondary section-back-button" type="button" onClick={goBack}>
             <ChevronLeft size={17} />
@@ -3093,6 +3205,15 @@ export function OrganizatechApp({
             switchDay={setDashboardDayOverride}
           />
         )
+      )}
+      {screen === "training-summary" && trainingCompletionSummary && (
+        <TrainingCompletionSummaryScreen
+          summary={trainingCompletionSummary}
+          onDashboard={() => {
+            setTrainingCompletionSummary(null);
+            setScreen("dashboard");
+          }}
+        />
       )}
       {screen === "registro-entrenamiento" && isCycleScopedPlanBlocked && !isEditingRoutinePlan && (
         <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
@@ -3813,6 +3934,84 @@ function IndexDots({ activeIndex, count }: { activeIndex: number; count: number 
     </div>
   );
 }
+
+function TrainingCompletionSummaryScreen({
+  summary,
+  onDashboard,
+}: {
+  summary: TrainingCompletionSummary;
+  onDashboard: () => void;
+}) {
+  const previousDateLabel = summary.exercises.find((exercise) => exercise.comparisonStatus === "ready" && exercise.previousDateLabel)?.previousDateLabel ?? "";
+  const currentDateLabel = summary.exercises[0]?.currentDateLabel ?? "";
+
+  return (
+    <section className="training-completion-screen">
+      <div className="training-completion-title">
+        <h2>Resumen de tu entrenamiento</h2>
+        <p>Estos fueron tus resultados</p>
+      </div>
+
+      <article className="training-completion-card">
+        <header className="training-completion-card-header">
+          <span className="training-completion-day">{summary.dayLabel}</span>
+          <span className="training-completion-status">{summary.statusLabel}</span>
+        </header>
+
+        <div className="training-completion-meta">
+          <h3><span>Entrenamiento:</span> {summary.workoutName}</h3>
+          <p><strong>Fase:</strong> {summary.cycleLabel} | {summary.weekLabel} | {summary.progressLabel}</p>
+          <p><strong>Duración:</strong> {summary.durationLabel}</p>
+        </div>
+
+        <div className="training-completion-table" role="table" aria-label="Comparación de ejercicios del entrenamiento completado">
+          <div role="rowgroup">
+            <div className="training-completion-row heading" role="row">
+              <span role="columnheader">Ejercicio y Series</span>
+              <span role="columnheader">Anterior{previousDateLabel && <small>{previousDateLabel}</small>}</span>
+              <span role="columnheader">Actual{currentDateLabel && <small>{currentDateLabel}</small>}</span>
+              <span role="columnheader">Resultado</span>
+            </div>
+          </div>
+          <div role="rowgroup">
+            {summary.exercises.map((exercise) => (
+              <div className="training-completion-row" role="row" key={exercise.exerciseId}>
+                <div role="cell" className="exercise-cell">
+                  <strong>{exercise.exerciseName}</strong>
+                  <span>{exercise.currentSeriesCount} {exercise.currentSeriesCount === 1 ? "serie" : "series"}</span>
+                </div>
+                <div role="cell">
+                  {exercise.comparisonStatus === "ready" ? (
+                    <>
+                      <span>{exercise.previousTotalReps ?? "—"} reps</span>
+                      <span>{exercise.previousWeightLabel}</span>
+                    </>
+                  ) : (
+                    <span className="muted-result">{exercise.comparisonStatus === "first_reference" ? "—" : "No disponible"}</span>
+                  )}
+                </div>
+                <div role="cell">
+                  <span>{exercise.currentTotalReps} reps</span>
+                  <span>{exercise.currentWeightLabel}</span>
+                </div>
+                <div role="cell" className="result-cell">
+                  {exercise.resultLines.map((line, index) => (
+                    <span className={line.tone} key={`${exercise.exerciseId}-${line.label}-${index}`}>{line.label}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <button className="button training-completion-button" type="button" onClick={onDashboard}>
+          Ir al panel principal
+        </button>
+      </article>
+    </section>
+  );
+}
+
 function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressResult }) {
   const hasPreviousReference = progress.status === "ready";
   const chart = useMemo(() => buildWeeklyProgressChart({
@@ -6946,6 +7145,7 @@ function isAppScreen(value: unknown): value is Screen {
     value === "recovery-expired" ||
     value === "dashboard" ||
     value === "entrenamiento" ||
+    value === "training-summary" ||
     value === "registro-entrenamiento" ||
     value === "comparacion" ||
     value === "historial-ciclos" ||
@@ -7130,6 +7330,7 @@ function screenLabel(screen: Screen) {
     "recovery-expired": "Enlace expirado",
     dashboard: "Panel principal",
     entrenamiento: "Entrenamiento",
+    "training-summary": "Resumen de entrenamiento",
     "registro-entrenamiento": "Registro de entrenamiento",
     "historial-ciclos": "Historial ciclo de entrenamiento",
     comparacion: "Comparación semanal",
