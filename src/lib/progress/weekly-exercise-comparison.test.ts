@@ -212,6 +212,27 @@ import { buildWeeklyExerciseComparisonModel } from "@/lib/progress/weekly-exerci
 
 {
   const model = buildWeeklyExerciseComparisonModel({
+    plannedExercises: [exercise({ id: "press", lineage: "lineage-press", name: "Press", day: "Lunes", routine: "Pecho" })],
+    entries: [
+      entry({ id: "press-w1", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 1, date: "2026-06-01", weight: 90, reps: [8, 8, 8] }),
+      entry({ id: "press-w2", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 2, date: "2026-06-08", weight: 92.5, reps: [9, 8, 8] }),
+      entry({ id: "press-w3", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 3, date: "2026-06-15", weight: 95, reps: [9, 9, 8] }),
+      entry({ id: "press-w4", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 4, date: "2026-06-22", weight: 97.5, reps: [10, 9, 9] }),
+      entry({ id: "press-w5", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 5, date: "2026-06-29", weight: 100, reps: [10, 10, 9] }),
+    ],
+    selectedDay: "Lunes",
+    selectedExerciseId: "press",
+    currentWeek: 5,
+  });
+
+  assert.deepEqual(model.availableWeeks, [1, 2, 3, 4, 5], "selector expone todas las semanas reales disponibles");
+  assert.deepEqual(model.kgChartSeries.map((point) => point.label), ["S1", "S2", "S3", "S4", "S5"], "grafico de kg no recorta a tres semanas");
+  assert.deepEqual(model.repsChartSeries.map((point) => point.label), ["S1", "S2", "S3", "S4", "S5"], "grafico de reps no recorta a tres semanas");
+  assert.equal(model.effectiveWeek, 5);
+}
+
+{
+  const model = buildWeeklyExerciseComparisonModel({
     plannedExercises: [exercise({ id: "hack", lineage: "lineage-hack", name: "Hack", day: "Miercoles", routine: "Piernas", targetSets: 5, targetReps: 5, baseWeight: 100 })],
     entries: [
       entry({ id: "hack-w1", exerciseId: "hack", lineage: "lineage-hack", name: "Hack", routine: "Piernas", week: 1, date: "2026-06-15", weight: 100, reps: [5, 5, 5, 5, 5] }),

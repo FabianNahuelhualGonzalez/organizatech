@@ -1122,6 +1122,11 @@ h3 {
   line-height: 1.28;
 }
 
+.select-day-section p {
+  font-size: clamp(10px, 2.75vw, 12px);
+  line-height: 1.24;
+}
+
 .select-day-section {
   grid-template-columns: minmax(0, 1fr) minmax(104px, 0.42fr);
   align-items: start;
@@ -1154,7 +1159,9 @@ h3 {
 
 .weekly-routine-name {
   color: var(--muted) !important;
-  font-size: clamp(18px, 5.4vw, 26px) !important;
+  font-size: clamp(16px, 4.8vw, 22px) !important;
+  line-height: 1.12 !important;
+  overflow-wrap: anywhere;
 }
 
 .weekly-plan-table {
@@ -1165,8 +1172,8 @@ h3 {
 
 .weekly-plan-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.58fr) minmax(48px, 0.5fr) minmax(48px, 0.5fr) minmax(54px, 0.52fr);
-  gap: clamp(8px, 3vw, 16px);
+  grid-template-columns: minmax(0, 1.5fr) minmax(50px, 0.52fr) minmax(50px, 0.52fr) minmax(54px, 0.5fr);
+  gap: clamp(10px, 3.4vw, 18px);
   align-items: center;
   min-width: 0;
   border: 0;
@@ -1180,7 +1187,7 @@ h3 {
 
 .weekly-plan-row.heading {
   color: var(--muted);
-  font-size: clamp(13px, 4vw, 20px);
+  font-size: clamp(11px, 3.3vw, 16px);
 }
 
 .weekly-plan-row:not(.heading) {
@@ -1260,9 +1267,22 @@ h3 {
 }
 
 .weekly-results-grid {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: 22px;
+}
+
+.weekly-results-grid::before {
+  content: "";
+  position: absolute;
+  top: 52px;
+  bottom: 8px;
+  left: 50%;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.78);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .weekly-series-column {
@@ -1303,6 +1323,10 @@ h3 {
   overflow-wrap: anywhere;
   color: #fff;
   text-align: right;
+}
+
+.weekly-results-note {
+  max-width: 38ch;
 }
 
 .weekly-results-note,
@@ -1360,6 +1384,10 @@ h3 {
   font-size: clamp(24px, 8vw, 42px);
   font-weight: 500;
   line-height: 1.05;
+}
+
+.weekly-metric-summary.reps-summary strong {
+  font-size: clamp(20px, 6.8vw, 34px);
 }
 
 .weekly-metric-summary span,
