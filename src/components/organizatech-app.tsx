@@ -61,6 +61,12 @@ import { buildExerciseComparisonSummary, getExerciseHistory } from "@/lib/progre
 import { formatDecimalEs, formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import { buildWeeklyProgressChart } from "@/lib/progress/weekly-progress-chart";
 import {
+  buildWeeklyExerciseComparisonModel,
+  type WeeklyExerciseComparisonModel,
+  type WeeklyExerciseComparisonSeriesPoint,
+  type WeeklyExerciseMetricSummary,
+} from "@/lib/progress/weekly-exercise-comparison";
+import {
   calculateEquivalentWeeklyProgress,
   type WeeklyEquivalentProgressResult,
 } from "@/lib/progress/weekly-equivalent-progress";
@@ -5336,182 +5342,281 @@ function ComparisonScreenV2({
   selectedDay: string;
   setSelectedDay: (day: string) => void;
 }) {
-  const [activeView, setActiveView] = useState<"plan" | "week">("plan");
-  const [activeWeek, setActiveWeek] = useState(currentWeek);
   const [selectedExerciseId, setSelectedExerciseId] = useState("");
-  const [isExercisePickerOpen, setIsExercisePickerOpen] = useState(false);
-  const activeDay = routineDays.includes(selectedDay) ? selectedDay : routineDays[0];
-  const dayExerciseCandidates = exercises.filter((exercise) => (exercise.day ?? "Lunes") === activeDay);
-  const dayExercises = getExercisesForTrainingDay(exercises, activeDay);
-  const dayExerciseIds = new Set(dayExerciseCandidates.map((exercise) => exercise.id));
-  const dayMetrics = dedupeMetricsByWeekAndExercise(metrics.filter((entry) => dayExerciseIds.has(entry.exerciseId)));
-  const weekNumbers = getWeekNumbers(dayMetrics);
-  const selectedWeek = activeView === "week" ? getSafeSelectedWeek(weekNumbers, activeWeek, currentWeek) : 0;
-  const currentMetrics = dayMetrics.filter((entry) => entry.week === selectedWeek);
-  const targetSummary = calculateTargetSummary(dayExercises);
-  const routineName = dayExercises[0]?.routine ?? activeDay;
-  const comparisonContext = getWeeklyComparisonContext(dayMetrics, selectedWeek, activeDay);
-  const title = activeView === "plan"
-    ? `Rutina registrada ${activeDay}`
-    : comparisonContext.title;
-  const visibleMetrics = activeView === "plan" ? [] : currentMetrics;
-  const listTitle = activeView === "plan"
-    ? `Listado de rutina registrada día ${activeDay} | ${routineName}`
-    : `Ejercicios comparados | Semana ${selectedWeek}`;
-  const allComparableExercises = dayExercises.filter((exercise) => exercise.name.trim().length > 0);
-  const selectedExercise = allComparableExercises.find((exercise) => exercise.id === selectedExerciseId) ?? allComparableExercises[0];
-  const selectedHistory = selectedExercise
-    ? getExerciseHistory(dayMetrics, selectedExercise.name)
-    : [];
-  const historySummary = buildExerciseComparisonSummary(selectedHistory, selectedExercise?.name);
-  const chartData = historySummary?.history.map((entry) => ({
-    label: entry.weekLabel?.replace("Semana ", "S") ?? formatDate(entry.date),
-    peso: entry.weight,
-  })) ?? [];
+  const activeDay = routineDays.includes(selectedDay) ? selectedDay : routineDays[0] ?? selectedDay;
+  const comparisonModel = useMemo(() => buildWeeklyExerciseComparisonModel({
+    plannedExercises: exercises,
+    entries: metrics,
+    selectedDay: activeDay,
+    selectedExerciseId,
+    currentWeek,
+  }), [activeDay, currentWeek, exercises, metrics, selectedExerciseId]);
 
   useEffect(() => {
-    if (!selectedExerciseId || !allComparableExercises.some((exercise) => exercise.id === selectedExerciseId)) {
-      setSelectedExerciseId(allComparableExercises[0]?.id ?? "");
-      setIsExercisePickerOpen(false);
+    if (comparisonModel.selectedExerciseId && comparisonModel.selectedExerciseId !== selectedExerciseId) {
+      setSelectedExerciseId(comparisonModel.selectedExerciseId);
     }
-  }, [allComparableExercises, selectedExerciseId]);
-
-  useEffect(() => {
-    if (activeView === "week" && weekNumbers.length > 0 && !weekNumbers.includes(activeWeek)) {
-      setActiveWeek(weekNumbers[0]);
-    }
-  }, [activeView, activeWeek, weekNumbers]);
+  }, [comparisonModel.selectedExerciseId, selectedExerciseId]);
 
   return (
-    <section className="screen">
-      <div className="card wide">
-        <div className="section-heading">
+    <section className="screen weekly-comparison-screen">
+      <div className="weekly-comparison-shell">
+        <div className="weekly-comparison-section select-day-section">
           <div>
-            <h3>Selecciona rutina o dia</h3>
-            <p className="eyebrow">Cambia entre tus dias registrados para revisar el progreso.</p>
+            <h3>Selecciona el día</h3>
+            <p>Cambia entre tus días registrados para revisar tu progreso.</p>
           </div>
-        </div>
-        <div className="routine-day-pills">
-          {routineDays.map((day) => (
-            <button
-              key={day}
-              className={`routine-day-pill configured ${day === activeDay ? "active" : ""}`}
-              type="button"
-              onClick={() => {
-                setSelectedDay(day);
-                setActiveView("plan");
-                setIsExercisePickerOpen(false);
+          <label className="weekly-comparison-select" aria-label="Seleccionar día de entrenamiento">
+            <select
+              value={activeDay}
+              onChange={(event) => {
+                setSelectedDay(event.target.value);
+                setSelectedExerciseId("");
               }}
             >
-              {day}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="card wide comparison-hero">
-        <p className="eyebrow">Comparacion semanal</p>
-        <h3>{title}</h3>
-        <p className="eyebrow">{activeDay} | {routineName}</p>
-        <div className="comparison-chip-row">
-          <button className={`compare-chip ${activeView === "plan" ? "active" : ""}`} type="button" onClick={() => setActiveView("plan")}>Rutina registrada</button>
-          <span className="compare-chip">vs</span>
-          {weekNumbers.map((week) => (
-            <button
-              key={week}
-              className={`compare-chip ${activeView === "week" && activeWeek === week ? "active" : ""}`}
-              type="button"
-              onClick={() => {
-                setActiveWeek(week);
-                setActiveView("week");
-              }}
-            >
-              Semana {week}
-            </button>
-          ))}
-        </div>
-        {activeView === "week" ? <p className="eyebrow comparison-reference-note">{comparisonContext.detail}</p> : null}
-        {activeView === "plan" ? (
-          <RoutineMetricGrid targetSummary={targetSummary} exerciseLabel="Ejercicios" />
-        ) : (
-          <MetricGrid summary={calculateWeeklySummary(dayMetrics, selectedWeek)} />
-        )}
-      </div>
-
-      <div className="card wide">
-        <h3>{listTitle}</h3>
-        <div className="exercise-list">
-          {activeView !== "plan" && visibleMetrics.length > 0
-            ? visibleMetrics.map((entry) => <ExerciseRow key={entry.id} entry={entry} showVolume />)
-            : dayExercises.map((exercise) => (
-              <ProgrammedExerciseCard exercise={exercise} key={exercise.id} showStatus={false} />
-            ))}
-        </div>
-      </div>
-
-      <div className="card wide exercise-week-card">
-        <div className="section-heading">
-          <div>
-            <h3>Comparar ejercicio por semana</h3>
-            <p className="eyebrow">Selecciona un ejercicio para ver cómo cambia semana a semana.</p>
-          </div>
-        </div>
-
-        <div className="custom-select">
-          <button className="custom-select-trigger" type="button" onClick={() => setIsExercisePickerOpen((value) => !value)}>
-            <span>{selectedExercise?.name ?? "Selecciona ejercicio"}</span>
-            <ChevronDown size={17} />
-          </button>
-          {isExercisePickerOpen ? (
-            <div className="custom-select-menu">
-              {allComparableExercises.map((exercise) => (
-                <button
-                  key={exercise.id}
-                  className={`custom-select-option ${exercise.id === selectedExercise?.id ? "active" : ""}`}
-                  type="button"
-                  onClick={() => {
-                    setSelectedExerciseId(exercise.id);
-                    setIsExercisePickerOpen(false);
-                  }}
-                >
-                  {exercise.name}
-                </button>
+              {routineDays.map((day) => (
+                <option key={day} value={day}>{day}</option>
               ))}
-            </div>
-          ) : null}
+            </select>
+          </label>
         </div>
 
-        {historySummary ? (
-          <>
-            <ExerciseHistorySummaryCard summary={historySummary} />
-            <ExerciseBestMarkCard summary={historySummary} />
+        <section className="weekly-comparison-section">
+          <h3>Rutina registrada {comparisonModel.selectedDay}</h3>
+          <p className="weekly-routine-name">{comparisonModel.plannedRoutine ?? "Sin rutina registrada"}</p>
+        </section>
 
-            <div className="exercise-history-chart">
-              <h3>Evolución histórica del peso</h3>
-              <p className="eyebrow">El gráfico muestra cómo cambia la carga registrada para este ejercicio en el tiempo.</p>
-              <div className="chart-wrap">
-                <ResponsiveContainer>
-                  <ReLineChart data={chartData}>
-                    <CartesianGrid stroke="rgba(255,255,255,.08)" />
-                    <XAxis dataKey="label" stroke="#9CA8B8" />
-                    <YAxis stroke="#9CA8B8" />
-                    <Tooltip contentStyle={tooltipStyle} />
-                    <Line type="monotone" dataKey="peso" stroke="#3C7AFF" strokeWidth={3} dot={{ r: 4 }} />
-                  </ReLineChart>
-                </ResponsiveContainer>
+        <section className="weekly-comparison-section">
+          <h3>Rutina de entrenamiento registrada</h3>
+          <p>Selecciona dentro de la tabla el ejercicio para obtener más detalles.</p>
+          <div className="weekly-plan-table" role="table" aria-label="Rutina planificada del día">
+            <div role="rowgroup">
+              <div className="weekly-plan-row heading" role="row">
+                <span role="columnheader">Ejercicios</span>
+                <span role="columnheader">Series</span>
+                <span role="columnheader">Reps</span>
+                <span role="columnheader">KG</span>
               </div>
             </div>
-            <ExerciseHistoryList summary={historySummary} />
-          </>
-        ) : (
-          <div className="exercise-focus-card">
-            <h3>Sin historial para este ejercicio</h3>
-            <p>Aún no tienes historial para este ejercicio. Regístralo en un entrenamiento para ver su evolución.</p>
+            <div role="rowgroup">
+              {comparisonModel.plannedExercises.length > 0 ? comparisonModel.plannedExercises.map((exercise) => (
+                <div
+                  className={`weekly-plan-row ${exercise.isSelected ? "active" : ""}`}
+                  role="row"
+                  key={exercise.exerciseId}
+                  onClick={() => setSelectedExerciseId(exercise.exerciseId)}
+                >
+                  <span role="cell">
+                    <button
+                      className="weekly-plan-row-button"
+                      type="button"
+                      aria-pressed={exercise.isSelected}
+                      onClick={() => setSelectedExerciseId(exercise.exerciseId)}
+                    >
+                      {exercise.name}
+                    </button>
+                  </span>
+                  <span role="cell">{exercise.targetSets}</span>
+                  <span role="cell">{exercise.targetReps}</span>
+                  <span role="cell">{formatDecimalEs(exercise.baseWeight)}</span>
+                </div>
+              )) : (
+                <div className="weekly-comparison-empty">No hay ejercicios configurados para este día.</div>
+              )}
+            </div>
           </div>
-        )}
+        </section>
+
+        <section className="weekly-comparison-section">
+          <h3>Tus resultados</h3>
+          <WeeklyResultsPanel model={comparisonModel} />
+        </section>
+
+        <WeeklyMetricProgressCard
+          title="Compara los KG de tus ejercicios"
+          helper="Selecciona un ejercicio para saber cómo vas evolucionando semana a semana."
+          model={comparisonModel}
+          metric="kg"
+        />
+
+        <WeeklyMetricProgressCard
+          title="Compara las repeticiones de tus ejercicios"
+          helper="Selecciona un ejercicio para saber cómo vas evolucionando semana a semana."
+          model={comparisonModel}
+          metric="reps"
+        />
       </div>
     </section>
   );
+}
+
+function WeeklyResultsPanel({ model }: { model: WeeklyExerciseComparisonModel }) {
+  const baseline = model.resultComparison.baseline;
+  const effective = model.resultComparison.effective;
+
+  if (!model.selectedExercise) {
+    return <div className="weekly-comparison-empty">Selecciona un día con ejercicios para revisar resultados.</div>;
+  }
+
+  if (!baseline) {
+    return (
+      <div className="weekly-results-card">
+        <p className="weekly-results-kicker">Este es tu ejercicio registrado</p>
+        <strong>{model.selectedExercise.name} <span>{model.selectedExercise.targetSets} x {model.selectedExercise.targetReps} · {formatKg(model.selectedExercise.baseWeight)}</span></strong>
+        <div className="weekly-comparison-empty">Aún no existe Semana 1 registrada para este ejercicio. Cuando registres tu primera semana, podremos comparar tu evolución.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="weekly-results-card">
+      <p className="weekly-results-kicker">Este es tu ejercicio registrado</p>
+      <strong>{model.selectedExercise.name} <span>{model.selectedExercise.targetSets} x {model.selectedExercise.targetReps} · {formatKg(model.selectedExercise.baseWeight)}</span></strong>
+      {model.emptyState === "insufficient_chart_data" ? (
+        <div className="weekly-comparison-empty">Aún necesitamos otra semana registrada para comparar tu evolución.</div>
+      ) : (
+        <div className="weekly-results-grid">
+          <WeeklySeriesColumn title="Semana 1" record={baseline} />
+          <WeeklySeriesColumn title={`Semana ${effective?.week ?? "—"}`} record={effective} />
+        </div>
+      )}
+      <p className="weekly-results-note">Mostraremos tu semana 1 vs la actual para que veas tu evolución semana a semana.</p>
+    </div>
+  );
+}
+
+function WeeklySeriesColumn({ title, record }: { title: string; record: WeeklyExerciseComparisonModel["resultComparison"]["baseline"] }) {
+  if (!record) {
+    return (
+      <div className="weekly-series-column">
+        <span>{title}</span>
+        <div className="weekly-comparison-empty compact">Sin registro real.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="weekly-series-column">
+      <span>{title}</span>
+      <small>{formatDate(record.date)}</small>
+      {record.reps.map((reps, index) => (
+        <div className="weekly-series-pill" key={`${record.entryId}-${index}`}>
+          <span>Serie {index + 1}</span>
+          <strong>{formatKg(record.weight)} · {reps} repeticiones</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WeeklyMetricProgressCard({
+  title,
+  helper,
+  model,
+  metric,
+}: {
+  title: string;
+  helper: string;
+  model: WeeklyExerciseComparisonModel;
+  metric: "kg" | "reps";
+}) {
+  const summary = metric === "kg" ? model.kgSummary : model.repsSummary;
+  const series = metric === "kg" ? model.kgChartSeries : model.repsChartSeries;
+  const chartData = series.map((point) => ({ label: point.label, value: point.value, date: point.date }));
+  const hasEnoughChartData = series.length > 1;
+  const unit = metric === "kg" ? "kg" : "reps";
+
+  return (
+    <section className="weekly-comparison-section weekly-metric-card">
+      <h3>{title}</h3>
+      <p>{helper}</p>
+      <div className="weekly-selected-exercise">{model.selectedExercise?.name ?? "Sin ejercicio seleccionado"}</div>
+
+      {hasEnoughChartData ? (
+        <div className="weekly-chart-box">
+          <ResponsiveContainer width="100%" height={210}>
+            <ReLineChart data={chartData} margin={{ top: 18, right: 18, bottom: 8, left: 0 }}>
+              <CartesianGrid stroke="rgba(220,231,255,.12)" />
+              <XAxis dataKey="label" stroke="#9CA8B8" />
+              <YAxis stroke="#9CA8B8" width={38} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(value) => [`${value} ${unit}`, metric === "kg" ? "Peso" : "Reps"]} labelFormatter={(label) => `${label}`} />
+              <Line type="monotone" dataKey="value" stroke="#3C7AFF" strokeWidth={3} dot={{ r: 5, strokeWidth: 2 }} activeDot={{ r: 7 }} />
+            </ReLineChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <div className="weekly-comparison-empty">Aún no hay datos suficientes para graficar este ejercicio.</div>
+      )}
+
+      <p className="weekly-chart-copy">
+        {metric === "kg"
+          ? "El gráfico muestra cómo cambia la carga registrada para este ejercicio durante el ciclo de entrenamiento."
+          : "El gráfico muestra cómo cambian las repeticiones registradas para este ejercicio durante el ciclo de entrenamiento."}
+      </p>
+
+      <WeeklyMetricSummaryView summary={summary} model={model} metric={metric} />
+    </section>
+  );
+}
+
+function WeeklyMetricSummaryView({
+  summary,
+  model,
+  metric,
+}: {
+  summary: WeeklyExerciseMetricSummary;
+  model: WeeklyExerciseComparisonModel;
+  metric: "kg" | "reps";
+}) {
+  const baseline = model.resultComparison.baseline;
+  const effective = model.resultComparison.effective;
+  const differenceLabel = formatMetricDifference(summary.difference, metric);
+  const toneClass = summary.tone === "positive" ? "positive" : summary.tone === "negative" ? "danger" : "neutral";
+
+  if (summary.status === "unavailable" || !baseline || !effective) {
+    return <div className="weekly-comparison-empty">Sin historial suficiente para este ejercicio.</div>;
+  }
+
+  return (
+    <div className="weekly-metric-summary">
+      <div>
+        <h4>Cómo iniciaste</h4>
+        <strong>{metric === "kg" ? formatKg(baseline.weight) : baseline.repsLabel}</strong>
+        <span>Fecha inicio</span>
+        <small>{formatDate(baseline.date)}</small>
+      </div>
+      <div className="weekly-metric-divider" aria-hidden="true" />
+      <div>
+        <h4>Actualmente</h4>
+        <strong>{metric === "kg" ? formatKg(effective.weight) : effective.repsLabel}</strong>
+        <span>Fecha actual</span>
+        <small>{formatDate(effective.date)}</small>
+      </div>
+      <p className={`weekly-metric-difference ${toneClass}`}>{differenceLabel}</p>
+      {metric === "kg" && summary.difference === 0 ? (
+        <p className="weekly-metric-insight">Aún no hay diferencias en peso. Apenas registres una variación, la mostraremos aquí.</p>
+      ) : (
+        <p className="weekly-metric-insight">{buildMetricInsight(summary.difference, metric)}</p>
+      )}
+    </div>
+  );
+}
+
+function formatMetricDifference(value: number | null, metric: "kg" | "reps") {
+  if (value === null) return "—";
+  const suffix = metric === "kg" ? "kg" : "repes";
+  return `${formatSigned(value, metric === "kg" ? 2 : 0)} ${suffix}`;
+}
+
+function buildMetricInsight(value: number | null, metric: "kg" | "reps") {
+  if (value === null) return "Aún no hay información suficiente para comparar este ejercicio.";
+  const absolute = Math.abs(value);
+  const label = metric === "kg" ? `${formatDecimalEs(absolute)}kg` : `${formatDecimalEs(absolute)} repes`;
+  if (value > 0) return `Aumentaste +${label} desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio.`;
+  if (value < 0) return `Bajaste -${label} desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio.`;
+  return metric === "kg"
+    ? "Mantienes el mismo peso desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio."
+    : "Mantienes las mismas repeticiones desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio.";
 }
 
 function ExerciseHistorySummaryCard({ summary }: { summary: ExerciseComparisonSummary }) {
