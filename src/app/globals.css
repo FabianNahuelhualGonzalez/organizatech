@@ -1327,6 +1327,8 @@ h3 {
 
 .weekly-results-note {
   max-width: 38ch;
+  justify-self: center;
+  text-align: center;
 }
 
 .weekly-results-note,

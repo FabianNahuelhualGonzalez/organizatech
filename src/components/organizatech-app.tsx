@@ -5517,7 +5517,7 @@ function WeeklyResultsPanel({ model }: { model: WeeklyExerciseComparisonModel })
           <WeeklySeriesColumn title={`Semana ${effective?.week ?? "—"}`} record={effective} />
         </div>
       )}
-      <p className="weekly-results-note">Base vs semana elegida.<br />Así ves tu evolución.</p>
+      <p className="weekly-results-note">Primer registro vs semana elegida</p>
     </div>
   );
 }
@@ -5538,7 +5538,7 @@ function WeeklySeriesColumn({ title, record }: { title: string; record: WeeklyEx
       <small>{formatDate(record.date)}</small>
       {record.reps.map((reps, index) => (
         <div className="weekly-series-pill" key={`${record.entryId}-${index}`}>
-          <span>Serie {index + 1}</span>
+          <span>S{index + 1}:</span>
           <strong>{formatKg(record.weight)} · {reps} reps</strong>
         </div>
       ))}
