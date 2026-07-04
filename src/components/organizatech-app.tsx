@@ -5343,20 +5343,28 @@ function ComparisonScreenV2({
   setSelectedDay: (day: string) => void;
 }) {
   const [selectedExerciseId, setSelectedExerciseId] = useState("");
+  const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
   const activeDay = routineDays.includes(selectedDay) ? selectedDay : routineDays[0] ?? selectedDay;
   const comparisonModel = useMemo(() => buildWeeklyExerciseComparisonModel({
     plannedExercises: exercises,
     entries: metrics,
     selectedDay: activeDay,
     selectedExerciseId,
+    selectedWeek,
     currentWeek,
-  }), [activeDay, currentWeek, exercises, metrics, selectedExerciseId]);
+  }), [activeDay, currentWeek, exercises, metrics, selectedExerciseId, selectedWeek]);
 
   useEffect(() => {
     if (comparisonModel.selectedExerciseId && comparisonModel.selectedExerciseId !== selectedExerciseId) {
       setSelectedExerciseId(comparisonModel.selectedExerciseId);
     }
   }, [comparisonModel.selectedExerciseId, selectedExerciseId]);
+
+  useEffect(() => {
+    if (comparisonModel.selectedWeek !== selectedWeek) {
+      setSelectedWeek(comparisonModel.selectedWeek);
+    }
+  }, [comparisonModel.selectedWeek, selectedWeek]);
 
   return (
     <section className="screen weekly-comparison-screen">
@@ -5372,6 +5380,7 @@ function ComparisonScreenV2({
               onChange={(event) => {
                 setSelectedDay(event.target.value);
                 setSelectedExerciseId("");
+                setSelectedWeek(null);
               }}
             >
               {routineDays.map((day) => (
@@ -5404,14 +5413,20 @@ function ComparisonScreenV2({
                   className={`weekly-plan-row ${exercise.isSelected ? "active" : ""}`}
                   role="row"
                   key={exercise.exerciseId}
-                  onClick={() => setSelectedExerciseId(exercise.exerciseId)}
+                  onClick={() => {
+                    setSelectedExerciseId(exercise.exerciseId);
+                    setSelectedWeek(null);
+                  }}
                 >
                   <span role="cell">
                     <button
                       className="weekly-plan-row-button"
                       type="button"
                       aria-pressed={exercise.isSelected}
-                      onClick={() => setSelectedExerciseId(exercise.exerciseId)}
+                      onClick={() => {
+                        setSelectedExerciseId(exercise.exerciseId);
+                        setSelectedWeek(null);
+                      }}
                     >
                       {exercise.name}
                     </button>
@@ -5428,7 +5443,21 @@ function ComparisonScreenV2({
         </section>
 
         <section className="weekly-comparison-section">
-          <h3>Tus resultados</h3>
+          <div className="weekly-results-heading">
+            <h3>Tus resultados</h3>
+            {comparisonModel.availableWeeks.length > 0 ? (
+              <label className="weekly-comparison-select week-select" aria-label="Seleccionar semana para comparar">
+                <select
+                  value={comparisonModel.selectedWeek ?? ""}
+                  onChange={(event) => setSelectedWeek(Number(event.target.value))}
+                >
+                  {comparisonModel.availableWeeks.map((week) => (
+                    <option key={week} value={week}>Semana {week}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
           <WeeklyResultsPanel model={comparisonModel} />
         </section>
 
@@ -5463,24 +5492,32 @@ function WeeklyResultsPanel({ model }: { model: WeeklyExerciseComparisonModel })
       <div className="weekly-results-card">
         <p className="weekly-results-kicker">Este es tu ejercicio registrado</p>
         <strong>{model.selectedExercise.name} <span>{model.selectedExercise.targetSets} x {model.selectedExercise.targetReps} · {formatKg(model.selectedExercise.baseWeight)}</span></strong>
-        <div className="weekly-comparison-empty">Aún no existe Semana 1 registrada para este ejercicio. Cuando registres tu primera semana, podremos comparar tu evolución.</div>
+        <div className="weekly-comparison-empty">Aún no hay registros reales para este ejercicio. Cuando completes una semana, podremos mostrar tu evolución.</div>
       </div>
     );
   }
+
+  const isFirstReferenceOnly = model.emptyState === "insufficient_chart_data";
+  const firstReferenceCopy = model.availableWeeks.length <= 1
+    ? "Esta es tu primera referencia registrada. Cuando completes otra semana, podremos comparar tu evolución."
+    : "Esta es tu primera semana registrada para este ejercicio. Selecciona una semana posterior para comparar tu evolución.";
 
   return (
     <div className="weekly-results-card">
       <p className="weekly-results-kicker">Este es tu ejercicio registrado</p>
       <strong>{model.selectedExercise.name} <span>{model.selectedExercise.targetSets} x {model.selectedExercise.targetReps} · {formatKg(model.selectedExercise.baseWeight)}</span></strong>
-      {model.emptyState === "insufficient_chart_data" ? (
-        <div className="weekly-comparison-empty">Aún necesitamos otra semana registrada para comparar tu evolución.</div>
+      {model.isUsingFallbackBaseline ? (
+        <p className="weekly-results-note">Usaremos tu primera semana registrada como punto de partida.</p>
+      ) : null}
+      {isFirstReferenceOnly ? (
+        <div className="weekly-comparison-empty">{firstReferenceCopy}</div>
       ) : (
         <div className="weekly-results-grid">
-          <WeeklySeriesColumn title="Semana 1" record={baseline} />
+          <WeeklySeriesColumn title={`Semana ${baseline.week}`} record={baseline} />
           <WeeklySeriesColumn title={`Semana ${effective?.week ?? "—"}`} record={effective} />
         </div>
       )}
-      <p className="weekly-results-note">Mostraremos tu semana 1 vs la actual para que veas tu evolución semana a semana.</p>
+      <p className="weekly-results-note">Mostraremos tu semana base vs la actual para que veas tu evolución semana a semana.</p>
     </div>
   );
 }
@@ -5575,6 +5612,16 @@ function WeeklyMetricSummaryView({
 
   if (summary.status === "unavailable" || !baseline || !effective) {
     return <div className="weekly-comparison-empty">Sin historial suficiente para este ejercicio.</div>;
+  }
+
+  if (model.emptyState === "insufficient_chart_data") {
+    return (
+      <div className="weekly-comparison-empty">
+        {model.availableWeeks.length <= 1
+          ? "Esta es tu primera referencia registrada para este ejercicio. Cuando registres otra semana, podremos mostrar tu evolución."
+          : "Esta es tu primera semana registrada para este ejercicio. Selecciona una semana posterior para ver la evolución."}
+      </div>
+    );
   }
 
   return (

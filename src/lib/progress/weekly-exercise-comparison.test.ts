@@ -66,19 +66,67 @@ import { buildWeeklyExerciseComparisonModel } from "@/lib/progress/weekly-exerci
   const model = buildWeeklyExerciseComparisonModel({
     plannedExercises: [exercise({ id: "press", lineage: "lineage-press", name: "Press", day: "Lunes", routine: "Pecho" })],
     entries: [
-      entry({ id: "press-w2", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 2, date: "2026-07-01", weight: 100, reps: [10, 10] }),
+      entry({ id: "press-w3", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 3, date: "2026-07-01", weight: 100, reps: [10, 10, 10] }),
+      entry({ id: "press-w4", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 4, date: "2026-07-08", weight: 100, reps: [12, 12, 12] }),
+      entry({ id: "press-w5", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 5, date: "2026-07-15", weight: 105, reps: [12, 12, 12] }),
     ],
     selectedDay: "Lunes",
     selectedExerciseId: "press",
-    currentWeek: 2,
+    currentWeek: 6,
   });
 
-  assert.equal(model.hasBaseline, false, "Semana 1 solo es baseline si existe registro real");
-  assert.equal(model.baselineWeek, null);
-  assert.equal(model.emptyState, "no_baseline_week", "sin Semana 1 devuelve estado claro sin ceros");
-  assert.deepEqual(model.kgChartSeries.map((point) => point.value), [100]);
-  assert.equal(model.kgSummary.startValue, null);
-  assert.equal(model.repsSummary.difference, null);
+  assert.equal(model.hasBaseline, true, "sin Semana 1 usa primera semana real disponible");
+  assert.equal(model.baselineWeek, 3);
+  assert.equal(model.baselineSource, "first_available");
+  assert.equal(model.isUsingFallbackBaseline, true);
+  assert.equal(model.effectiveWeek, 5);
+  assert.equal(model.selectedWeek, 5);
+  assert.equal(model.emptyState, "none");
+  assert.deepEqual(model.availableWeeks, [3, 4, 5], "availableWeeks no incluye Semana 1 si no existe");
+  assert.deepEqual(model.kgChartSeries.map((point) => point.label), ["S3", "S4", "S5"]);
+  assert.deepEqual(model.repsChartSeries.map((point) => point.value), [30, 36, 36]);
+  assert.equal(model.kgSummary.difference, 5);
+  assert.equal(model.repsSummary.difference, 6);
+}
+
+{
+  const model = buildWeeklyExerciseComparisonModel({
+    plannedExercises: [exercise({ id: "press", lineage: "lineage-press", name: "Press", day: "Lunes", routine: "Pecho" })],
+    entries: [
+      entry({ id: "press-w3", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 3, date: "2026-07-01", weight: 100, reps: [10, 10, 10] }),
+      entry({ id: "press-w4", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 4, date: "2026-07-08", weight: 100, reps: [12, 12, 12] }),
+      entry({ id: "press-w5", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 5, date: "2026-07-15", weight: 105, reps: [12, 12, 12] }),
+    ],
+    selectedDay: "Lunes",
+    selectedExerciseId: "press",
+    selectedWeek: 4,
+    currentWeek: 6,
+  });
+
+  assert.equal(model.baselineWeek, 3, "selector derecho mantiene baseline primera disponible");
+  assert.equal(model.effectiveWeek, 4, "selector derecho puede usar Semana 4");
+  assert.equal(model.selectedWeek, 4);
+  assert.equal(model.kgSummary.difference, 0);
+  assert.equal(model.repsSummary.difference, 6);
+}
+
+{
+  const model = buildWeeklyExerciseComparisonModel({
+    plannedExercises: [exercise({ id: "press", lineage: "lineage-press", name: "Press", day: "Lunes", routine: "Pecho" })],
+    entries: [
+      entry({ id: "press-w3", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 3, date: "2026-07-01", weight: 100, reps: [10, 10, 10] }),
+      entry({ id: "press-w4", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 4, date: "2026-07-08", weight: 100, reps: [12, 12, 12] }),
+    ],
+    selectedDay: "Lunes",
+    selectedExerciseId: "press",
+    selectedWeek: 3,
+    currentWeek: 4,
+  });
+
+  assert.equal(model.baselineWeek, 3);
+  assert.equal(model.effectiveWeek, 3);
+  assert.equal(model.emptyState, "insufficient_chart_data", "seleccionar la semana base no muestra comparacion duplicada");
+  assert.deepEqual(model.availableWeeks, [3, 4]);
 }
 
 {
@@ -103,6 +151,25 @@ import { buildWeeklyExerciseComparisonModel } from "@/lib/progress/weekly-exerci
   assert.equal(model.kgSummary.tone, "neutral");
   assert.equal(model.repsSummary.difference, 0);
   assert.equal(model.repsSummary.tone, "neutral");
+}
+
+{
+  const model = buildWeeklyExerciseComparisonModel({
+    plannedExercises: [exercise({ id: "press", lineage: "lineage-press", name: "Press", day: "Lunes", routine: "Pecho" })],
+    entries: [
+      entry({ id: "press-w3", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 3, date: "2026-07-01", weight: 100, reps: [10, 10, 10] }),
+    ],
+    selectedDay: "Lunes",
+    selectedExerciseId: "press",
+    currentWeek: 5,
+  });
+
+  assert.equal(model.baselineWeek, 3);
+  assert.equal(model.baselineSource, "first_available");
+  assert.equal(model.effectiveWeek, 3);
+  assert.equal(model.emptyState, "insufficient_chart_data", "una sola semana posterior es primera referencia disponible");
+  assert.deepEqual(model.kgChartSeries.map((point) => point.label), ["S3"]);
+  assert.deepEqual(model.repsChartSeries.map((point) => point.value), [30]);
 }
 
 {

@@ -1118,8 +1118,8 @@ h3 {
 .weekly-comparison-section p {
   margin: 0;
   color: var(--muted);
-  font-size: clamp(12px, 3.6vw, 15px);
-  line-height: 1.35;
+  font-size: clamp(11px, 3.15vw, 14px);
+  line-height: 1.28;
 }
 
 .select-day-section {
@@ -1154,7 +1154,7 @@ h3 {
 
 .weekly-routine-name {
   color: var(--muted) !important;
-  font-size: clamp(20px, 6vw, 28px) !important;
+  font-size: clamp(18px, 5.4vw, 26px) !important;
 }
 
 .weekly-plan-table {
@@ -1165,8 +1165,8 @@ h3 {
 
 .weekly-plan-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(42px, 0.48fr) minmax(42px, 0.48fr) minmax(52px, 0.5fr);
-  gap: 8px;
+  grid-template-columns: minmax(0, 1.58fr) minmax(48px, 0.5fr) minmax(48px, 0.5fr) minmax(54px, 0.52fr);
+  gap: clamp(8px, 3vw, 16px);
   align-items: center;
   min-width: 0;
   border: 0;
@@ -1180,12 +1180,12 @@ h3 {
 
 .weekly-plan-row.heading {
   color: var(--muted);
-  font-size: clamp(15px, 4.8vw, 24px);
+  font-size: clamp(13px, 4vw, 20px);
 }
 
 .weekly-plan-row:not(.heading) {
   cursor: pointer;
-  font-size: clamp(12px, 3.6vw, 15px);
+  font-size: clamp(11px, 3.3vw, 14px);
 }
 
 .weekly-plan-row-button {
@@ -1225,6 +1225,22 @@ h3 {
   border: 1px solid rgba(255, 255, 255, 0.82);
   border-radius: 8px;
   padding: clamp(12px, 4vw, 16px);
+}
+
+.weekly-results-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(116px, 0.42fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.weekly-results-heading h3 {
+  min-width: 0;
+}
+
+.weekly-comparison-select.week-select {
+  justify-self: end;
+  width: min(150px, 100%);
 }
 
 .weekly-results-kicker {

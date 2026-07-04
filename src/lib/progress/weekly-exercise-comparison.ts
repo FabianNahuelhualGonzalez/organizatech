@@ -12,6 +12,8 @@ export type WeeklyExerciseComparisonEmptyState =
   | "no_baseline_week"
   | "insufficient_chart_data";
 
+export type WeeklyExerciseComparisonBaselineSource = "week_1" | "first_available";
+
 export interface WeeklyExerciseComparisonPlannedExercise {
   exerciseId: string;
   exerciseLineageId: string | null;
@@ -63,7 +65,10 @@ export interface WeeklyExerciseComparisonModel {
   selectedExercise: WeeklyExerciseComparisonPlannedExercise | null;
   availableWeeks: number[];
   baselineWeek: number | null;
+  baselineSource: WeeklyExerciseComparisonBaselineSource | null;
+  isUsingFallbackBaseline: boolean;
   targetWeek: number;
+  selectedWeek: number | null;
   effectiveWeek: number | null;
   hasBaseline: boolean;
   hasCurrent: boolean;
@@ -81,6 +86,7 @@ export function buildWeeklyExerciseComparisonModel(input: {
   entries: ExerciseEntry[];
   selectedDay: string;
   selectedExerciseId?: string | null;
+  selectedWeek?: number | null;
   currentWeek: number;
 }): WeeklyExerciseComparisonModel {
   const availableDays = getAvailableDays(input.plannedExercises);
@@ -95,6 +101,7 @@ export function buildWeeklyExerciseComparisonModel(input: {
       selectedDay,
       plannedRoutine: null,
       targetWeek,
+      selectedWeek: null,
       emptyState: "no_routine_for_day",
     });
   }
@@ -106,6 +113,7 @@ export function buildWeeklyExerciseComparisonModel(input: {
       selectedDay,
       plannedRoutine,
       targetWeek,
+      selectedWeek: null,
       emptyState: "no_exercises_for_day",
     });
   }
@@ -121,6 +129,7 @@ export function buildWeeklyExerciseComparisonModel(input: {
       selectedDay,
       plannedRoutine,
       targetWeek,
+      selectedWeek: null,
       selectedExerciseId: selectedExercise.id,
       selectedExercise: selectedPlannedExercise,
       plannedExercises,
@@ -134,10 +143,16 @@ export function buildWeeklyExerciseComparisonModel(input: {
     entries: input.entries,
   });
   const availableWeeks = records.map((record) => record.week);
-  const baseline = records.find((record) => record.week === 1) ?? null;
+  const baseline = records.find((record) => record.week === 1) ?? records[0] ?? null;
+  const baselineSource: WeeklyExerciseComparisonBaselineSource | null = baseline
+    ? baseline.week === 1 ? "week_1" : "first_available"
+    : null;
   const current = records.find((record) => record.week === targetWeek) ?? null;
-  const effective = current ?? records.at(-1) ?? null;
-  const emptyState = getEmptyState({ records, baseline, hasReliableIdentity: Boolean(identity) });
+  const safeSelectedWeek = sanitizeWeek(input.selectedWeek ?? NaN);
+  const selected = safeSelectedWeek ? records.find((record) => record.week === safeSelectedWeek) ?? null : null;
+  const effective = selected ?? current ?? records.at(-1) ?? null;
+  const selectedWeek = effective?.week ?? null;
+  const emptyState = getEmptyState({ records, baseline, effective, hasReliableIdentity: Boolean(identity) });
   const kgChartSeries = records.map((record) => ({
     week: record.week,
     label: `S${record.week}`,
@@ -158,8 +173,11 @@ export function buildWeeklyExerciseComparisonModel(input: {
     selectedExerciseId: selectedExercise.id,
     selectedExercise: selectedPlannedExercise,
     availableWeeks,
-    baselineWeek: baseline ? 1 : null,
+    baselineWeek: baseline?.week ?? null,
+    baselineSource,
+    isUsingFallbackBaseline: baselineSource === "first_available",
     targetWeek,
+    selectedWeek,
     effectiveWeek: effective?.week ?? null,
     hasBaseline: Boolean(baseline),
     hasCurrent: Boolean(current),
@@ -191,6 +209,7 @@ function createEmptyModel(input: {
   selectedDay: string;
   plannedRoutine: string | null;
   targetWeek: number;
+  selectedWeek: number | null;
   selectedExerciseId?: string | null;
   selectedExercise?: WeeklyExerciseComparisonPlannedExercise | null;
   plannedExercises?: WeeklyExerciseComparisonPlannedExercise[];
@@ -204,7 +223,10 @@ function createEmptyModel(input: {
     selectedExercise: input.selectedExercise ?? null,
     availableWeeks: [],
     baselineWeek: null,
+    baselineSource: null,
+    isUsingFallbackBaseline: false,
     targetWeek: input.targetWeek,
+    selectedWeek: input.selectedWeek,
     effectiveWeek: null,
     hasBaseline: false,
     hasCurrent: false,
@@ -369,12 +391,13 @@ function createUnavailableSummary(): WeeklyExerciseMetricSummary {
 function getEmptyState(input: {
   records: WeeklyExerciseComparisonRecord[];
   baseline: WeeklyExerciseComparisonRecord | null;
+  effective: WeeklyExerciseComparisonRecord | null;
   hasReliableIdentity: boolean;
 }): WeeklyExerciseComparisonEmptyState {
   if (!input.hasReliableIdentity) return "no_reliable_identity";
   if (input.records.length === 0) return "no_real_records";
   if (!input.baseline) return "no_baseline_week";
-  if (input.records.length < 2) return "insufficient_chart_data";
+  if (input.records.length < 2 || input.effective?.week === input.baseline.week) return "insufficient_chart_data";
   return "none";
 }
 
