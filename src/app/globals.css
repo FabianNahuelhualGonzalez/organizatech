@@ -1292,7 +1292,7 @@ h3 {
 }
 
 .weekly-series-column > span {
-  color: var(--muted);
+  color: #fff;
   text-align: center;
   font-size: 12px;
 }
@@ -1304,25 +1304,27 @@ h3 {
 
 .weekly-series-pill {
   display: grid;
-  grid-template-columns: minmax(54px, 0.52fr) minmax(0, 1fr);
-  gap: 6px;
+  grid-template-columns: minmax(26px, 0.24fr) minmax(0, 1fr);
+  gap: 4px;
   align-items: center;
   min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.86);
   border-radius: 999px;
-  padding: 4px 7px;
+  padding: 4px 6px;
   color: #fff;
-  font-size: clamp(10px, 3vw, 12px);
+  font-size: clamp(9px, 2.65vw, 12px);
 }
 
 .weekly-series-pill span {
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .weekly-series-pill strong {
-  overflow-wrap: anywhere;
+  min-width: 0;
   color: #fff;
   text-align: right;
+  white-space: nowrap;
 }
 
 .weekly-results-note {
