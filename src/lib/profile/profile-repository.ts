@@ -38,9 +38,10 @@ export async function getProfilePersonalData(): Promise<ProfilePersonalData> {
     .from("profiles")
     .select("id,display_name,email,first_name,last_name,birth_date,gender")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
 
   if (error) throw new ProfileRepositoryError("No pudimos cargar tu perfil.", error);
+  if (!data) throw new ProfileRepositoryError("No encontramos tu perfil. Actualiza la sesión e intenta nuevamente.");
   return mapProfileRow(data as ProfileRow);
 }
 

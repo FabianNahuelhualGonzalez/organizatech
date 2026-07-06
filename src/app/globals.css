@@ -332,6 +332,111 @@ h3 {
   text-align: right;
 }
 
+.profile-edit-button {
+  min-height: 32px;
+  border: 1px solid rgba(60, 122, 255, 0.72);
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(60, 122, 255, 0.18);
+  padding: 0 12px;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.profile-edit-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.profile-form {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.profile-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--muted);
+  font-size: clamp(11px, 3.3vw, 13px);
+  font-weight: 800;
+}
+
+.profile-field input,
+.profile-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid rgba(220, 231, 255, 0.16);
+  border-radius: 8px;
+  color: #fff;
+  background: rgba(7, 16, 26, 0.62);
+  padding: 0 12px;
+  outline: none;
+}
+
+.profile-field input:focus,
+.profile-field select:focus {
+  border-color: rgba(60, 122, 255, 0.8);
+  box-shadow: 0 0 0 3px rgba(60, 122, 255, 0.14);
+}
+
+.profile-field input[readonly] {
+  cursor: default;
+  color: var(--muted);
+  background: rgba(220, 231, 255, 0.04);
+}
+
+.profile-field small,
+.profile-form-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.profile-field small {
+  color: var(--red);
+}
+
+.profile-readonly-row {
+  border: 1px solid rgba(220, 231, 255, 0.12);
+  border-radius: 8px;
+  padding: 11px 12px;
+}
+
+.profile-form-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.profile-inline-notice {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(255, 191, 77, 0.44);
+  border-radius: 8px;
+  color: var(--blue-soft);
+  background: rgba(255, 191, 77, 0.08);
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.profile-inline-notice button {
+  border: 0;
+  color: var(--yellow);
+  background: transparent;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .profile-feature-section {
   position: relative;
   overflow: hidden;

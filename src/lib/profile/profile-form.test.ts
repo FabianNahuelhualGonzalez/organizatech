@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 
 import {
   buildDisplayName,
+  buildProfileFormInitialValues,
   buildProfilePersonalDataPayload,
   calculateAgeFromBirthDate,
   createInitialProfileInsertPayload,
   deriveNamePartsFromDisplayName,
+  formatBirthDateLabel,
+  formatProfileAgeLabel,
   isProfileGender,
+  profileGenderLabels,
   resolveEnsureProfileWrite,
 } from "@/lib/profile/profile-form";
 
@@ -32,6 +36,45 @@ const referenceDate = new Date(2026, 6, 6);
 }
 
 {
+  assert.deepEqual(buildProfileFormInitialValues({
+    displayName: "Fabian Elias Nahuelhual",
+    firstName: "Fabian",
+    lastName: "Nahuelhual",
+    birthDate: "1990-07-06",
+    gender: "male",
+  }), {
+    firstName: "Fabian",
+    lastName: "Nahuelhual",
+    birthDate: "1990-07-06",
+    gender: "male",
+  });
+
+  assert.deepEqual(buildProfileFormInitialValues({
+    displayName: "Fabian Elias Nahuelhual",
+    firstName: null,
+    lastName: null,
+    birthDate: null,
+    gender: null,
+  }), {
+    firstName: "Fabian",
+    lastName: "Elias Nahuelhual",
+    birthDate: "",
+    gender: "not_specified",
+  });
+
+  assert.deepEqual(buildProfileFormInitialValues({
+    displayName: "Fabian Elias Nahuelhual",
+    birthDate: "fecha-invalida",
+    gender: "male",
+  }), {
+    firstName: "Fabian",
+    lastName: "Elias Nahuelhual",
+    birthDate: "",
+    gender: "male",
+  });
+}
+
+{
   assert.equal(buildDisplayName("Fabian", "Nahuelhual"), "Fabian Nahuelhual");
   assert.equal(buildDisplayName(" Fabian ", ""), "Fabian");
   assert.equal(buildDisplayName("Fabian", null), "Fabian");
@@ -42,6 +85,12 @@ const referenceDate = new Date(2026, 6, 6);
   assert.equal(calculateAgeFromBirthDate("1990-07-06", referenceDate), 36);
   assert.equal(calculateAgeFromBirthDate("1990-07-07", referenceDate), 35);
   assert.equal(calculateAgeFromBirthDate("fecha", referenceDate), null);
+  assert.equal(formatProfileAgeLabel("1990-07-06", referenceDate), "36 años");
+  assert.equal(formatProfileAgeLabel(null, referenceDate), "No configurada");
+  assert.equal(formatProfileAgeLabel("fecha", referenceDate), "No configurada");
+  assert.equal(formatBirthDateLabel(null), "No configurada");
+  assert.equal(formatBirthDateLabel("1990-07-06"), "06/07/1990");
+  assert.equal(formatBirthDateLabel("fecha"), "No configurada");
 }
 
 {
@@ -68,6 +117,11 @@ const referenceDate = new Date(2026, 6, 6);
   assert.equal(isProfileGender("prefer_not_to_say"), true);
   assert.equal(isProfileGender("not_specified"), true);
   assert.equal(isProfileGender("otro"), false);
+  assert.equal(profileGenderLabels.male, "Hombre");
+  assert.equal(profileGenderLabels.female, "Mujer");
+  assert.equal(profileGenderLabels.non_binary, "No binario");
+  assert.equal(profileGenderLabels.prefer_not_to_say, "Prefiero no decir");
+  assert.equal(profileGenderLabels.not_specified, "No especificado");
 
   assert.equal(buildProfilePersonalDataPayload({ firstName: "Fabian", gender: "otro" }, referenceDate).ok, false);
 }

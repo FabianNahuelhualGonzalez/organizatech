@@ -13,6 +13,21 @@ export interface ProfileNameParts {
   lastName: string;
 }
 
+export interface ProfileFormInitialSource {
+  displayName: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  birthDate?: string | null;
+  gender?: string | null;
+}
+
+export interface ProfileFormValues {
+  firstName: string;
+  lastName: string;
+  birthDate: string;
+  gender: ProfileGender;
+}
+
 export interface ProfilePersonalDataInput {
   firstName: string;
   lastName?: string | null;
@@ -52,6 +67,14 @@ const minProfileAge = 10;
 const maxProfileAge = 100;
 const dateOnlyPattern = /^\d{4}-\d{2}-\d{2}$/;
 
+export const profileGenderLabels: Record<ProfileGender, string> = {
+  male: "Hombre",
+  female: "Mujer",
+  non_binary: "No binario",
+  prefer_not_to_say: "Prefiero no decir",
+  not_specified: "No especificado",
+};
+
 export function deriveNamePartsFromDisplayName(displayName: string | null | undefined): ProfileNameParts {
   const normalized = normalizeSpaces(displayName);
   if (!normalized) return { firstName: "", lastName: "" };
@@ -63,10 +86,36 @@ export function deriveNamePartsFromDisplayName(displayName: string | null | unde
   };
 }
 
+export function buildProfileFormInitialValues(source: ProfileFormInitialSource): ProfileFormValues {
+  const legacyNameParts = deriveNamePartsFromDisplayName(source.displayName);
+  const firstName = normalizeSpaces(source.firstName) || legacyNameParts.firstName;
+  const lastName = normalizeSpaces(source.lastName) || legacyNameParts.lastName;
+  const birthDate = normalizeBirthDate(source.birthDate) ?? "";
+  const gender = normalizeGender(source.gender) ?? "not_specified";
+
+  return {
+    firstName,
+    lastName,
+    birthDate,
+    gender,
+  };
+}
+
 export function buildDisplayName(firstName: string, lastName?: string | null) {
   const normalizedFirstName = normalizeSpaces(firstName);
   const normalizedLastName = normalizeSpaces(lastName);
   return normalizedLastName ? `${normalizedFirstName} ${normalizedLastName}` : normalizedFirstName;
+}
+
+export function formatProfileAgeLabel(birthDate: string | null | undefined, referenceDate = new Date()) {
+  const age = calculateAgeFromBirthDate(birthDate, referenceDate);
+  return age === null ? "No configurada" : `${age} años`;
+}
+
+export function formatBirthDateLabel(value: string | null | undefined) {
+  const parsed = parseDateOnly(value);
+  if (!parsed) return "No configurada";
+  return `${String(parsed.day).padStart(2, "0")}/${String(parsed.month).padStart(2, "0")}/${parsed.year}`;
 }
 
 export function calculateAgeFromBirthDate(birthDate: string | null | undefined, referenceDate = new Date()): number | null {

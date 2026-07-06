@@ -50,6 +50,12 @@ import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
 import { ProfileScreen } from "@/components/profile/ProfileScreen";
 import { buildProfileViewModel } from "@/lib/profile/profile-view-model";
 import {
+  getProfilePersonalData,
+  updateProfilePersonalData,
+  type ProfilePersonalData,
+} from "@/lib/profile/profile-repository";
+import type { ProfileFormValues } from "@/lib/profile/profile-form";
+import {
   calculateExerciseMetrics,
   calculateWeeklyComparison,
   calculateWeeklySummary,
@@ -471,6 +477,9 @@ export function OrganizatechApp({
   const [dataMode, setDataMode] = useState<DataMode>("demo");
   const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
+  const [profilePersonalData, setProfilePersonalData] = useState<ProfilePersonalData | null>(null);
+  const [profilePersonalDataLoading, setProfilePersonalDataLoading] = useState(false);
+  const [profilePersonalDataError, setProfilePersonalDataError] = useState("");
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(() => getPasswordRecoveryRouteState() === "none");
   const [isBusy, setIsBusy] = useState(false);
@@ -904,12 +913,12 @@ export function OrganizatechApp({
     : cycleHistory.length + 1;
   const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
   const profileViewModel = useMemo(() => buildProfileViewModel({
-    displayName: sessionName,
-    email: supabaseUser?.email ?? null,
+    displayName: profilePersonalData?.displayName ?? sessionName,
+    email: profilePersonalData?.email ?? supabaseUser?.email ?? null,
     dataSource,
     avatarUrl: null,
     avatarPath: null,
-  }), [dataSource, sessionName, supabaseUser?.email]);
+  }), [dataSource, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
   const trainingTopbarMeta = buildTrainingTopbarMeta({
     cycleLabel: getCycleTypeTitle(displayTrainingPlan),
     weekNumber: currentWeek,
@@ -971,11 +980,46 @@ export function OrganizatechApp({
     };
   }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt]);
 
+  useEffect(() => {
+    if (screen !== "perfil" || dataSource !== "supabase" || !supabaseUser) {
+      if (dataSource !== "supabase") {
+        setProfilePersonalData(null);
+        setProfilePersonalDataLoading(false);
+        setProfilePersonalDataError("");
+      }
+      return;
+    }
+
+    let isMounted = true;
+    setProfilePersonalDataLoading(true);
+    setProfilePersonalDataError("");
+
+    void getProfilePersonalData()
+      .then((profile) => {
+        if (!isMounted) return;
+        setProfilePersonalData(profile);
+        setSessionName(profile.displayName);
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+        setProfilePersonalDataError(error instanceof Error ? error.message : "No pudimos cargar tu perfil.");
+      })
+      .finally(() => {
+        if (isMounted) setProfilePersonalDataLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [dataSource, screen, supabaseUser]);
+
   function applySessionState(authState: SupabaseSessionState) {
     setIsSupabaseConfiguredState(authState.isConfigured);
     setDataMode(authState.dataMode);
     setSupabaseSession(authState.session);
     setSupabaseUser(authState.user);
+    setProfilePersonalData(null);
+    setProfilePersonalDataError("");
     if (authState.user) setSessionName(getSessionDisplayName(authState.user));
   }
 
@@ -987,6 +1031,9 @@ export function OrganizatechApp({
     setActiveWorkoutStartedAt(null);
     setSupabaseSession(null);
     setSupabaseUser(null);
+    setProfilePersonalData(null);
+    setProfilePersonalDataLoading(false);
+    setProfilePersonalDataError("");
     setDataMode("demo");
     setDataSource("local");
     setExercises([]);
@@ -1144,6 +1191,37 @@ export function OrganizatechApp({
     } finally {
       setIsBusy(false);
     }
+  }
+
+  async function refreshProfilePersonalData() {
+    if (dataSource !== "supabase" || !supabaseUser) {
+      setProfilePersonalData(null);
+      setProfilePersonalDataLoading(false);
+      setProfilePersonalDataError("");
+      return null;
+    }
+
+    setProfilePersonalDataLoading(true);
+    setProfilePersonalDataError("");
+    try {
+      const profile = await getProfilePersonalData();
+      setProfilePersonalData(profile);
+      setSessionName(profile.displayName);
+      return profile;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No pudimos cargar tu perfil.";
+      setProfilePersonalDataError(message);
+      return null;
+    } finally {
+      setProfilePersonalDataLoading(false);
+    }
+  }
+
+  async function handleSaveProfilePersonalData(input: ProfileFormValues) {
+    const profile = await updateProfilePersonalData(input);
+    setProfilePersonalData(profile);
+    setSessionName(profile.displayName);
+    return profile;
   }
 
   async function refreshPersistedTrainingCycles() {
@@ -3343,7 +3421,17 @@ export function OrganizatechApp({
           ? <PersistedCycleHistoryScreen history={persistedCycleHistory} />
           : <CycleHistoryScreen history={cycleHistory} />
       )}
-      {screen === "perfil" && <ProfileScreen profile={profileViewModel} />}
+      {screen === "perfil" && (
+        <ProfileScreen
+          profile={profileViewModel}
+          personalData={profilePersonalData}
+          canEditPersonalData={dataSource === "supabase" && Boolean(supabaseUser)}
+          personalDataLoading={profilePersonalDataLoading}
+          personalDataError={profilePersonalDataError}
+          onReloadPersonalData={refreshProfilePersonalData}
+          onSavePersonalData={handleSaveProfilePersonalData}
+        />
+      )}
       {isNewCycleConfirmOpen && (
         <ConfirmNewCycleModal
           isBusy={isBusy}
