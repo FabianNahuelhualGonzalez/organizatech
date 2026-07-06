@@ -829,6 +829,7 @@ export function OrganizatechApp({
   }, [screen, trainingCompletionSummary]);
 
   const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
+  const canEditProfilePersonalData = Boolean(supabaseUser && getSupabaseBrowserClient());
   const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
   const persistedActiveCyclePlan = isTrainingCyclesRepositoryActive && persistedActiveCycle
     ? createTrainingPlanFromPersistedCycle(persistedActiveCycle, trainingPlan)
@@ -915,10 +916,10 @@ export function OrganizatechApp({
   const profileViewModel = useMemo(() => buildProfileViewModel({
     displayName: profilePersonalData?.displayName ?? sessionName,
     email: profilePersonalData?.email ?? supabaseUser?.email ?? null,
-    dataSource,
+    dataSource: canEditProfilePersonalData ? "supabase" : dataSource,
     avatarUrl: null,
     avatarPath: null,
-  }), [dataSource, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
+  }), [canEditProfilePersonalData, dataSource, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
   const trainingTopbarMeta = buildTrainingTopbarMeta({
     cycleLabel: getCycleTypeTitle(displayTrainingPlan),
     weekNumber: currentWeek,
@@ -981,8 +982,8 @@ export function OrganizatechApp({
   }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt]);
 
   useEffect(() => {
-    if (screen !== "perfil" || dataSource !== "supabase" || !supabaseUser) {
-      if (dataSource !== "supabase") {
+    if (screen !== "perfil" || !canEditProfilePersonalData) {
+      if (!canEditProfilePersonalData) {
         setProfilePersonalData(null);
         setProfilePersonalDataLoading(false);
         setProfilePersonalDataError("");
@@ -1011,7 +1012,7 @@ export function OrganizatechApp({
     return () => {
       isMounted = false;
     };
-  }, [dataSource, screen, supabaseUser]);
+  }, [canEditProfilePersonalData, screen]);
 
   function applySessionState(authState: SupabaseSessionState) {
     setIsSupabaseConfiguredState(authState.isConfigured);
@@ -1194,7 +1195,7 @@ export function OrganizatechApp({
   }
 
   async function refreshProfilePersonalData() {
-    if (dataSource !== "supabase" || !supabaseUser) {
+    if (!canEditProfilePersonalData) {
       setProfilePersonalData(null);
       setProfilePersonalDataLoading(false);
       setProfilePersonalDataError("");
@@ -3425,7 +3426,7 @@ export function OrganizatechApp({
         <ProfileScreen
           profile={profileViewModel}
           personalData={profilePersonalData}
-          canEditPersonalData={dataSource === "supabase" && Boolean(supabaseUser)}
+          canEditPersonalData={canEditProfilePersonalData}
           personalDataLoading={profilePersonalDataLoading}
           personalDataError={profilePersonalDataError}
           onReloadPersonalData={refreshProfilePersonalData}
