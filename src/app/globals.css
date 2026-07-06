@@ -2886,7 +2886,7 @@ h3 {
 
 .profile-menu-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 12px;
   align-items: center;
   border: 1px solid rgba(220, 231, 255, 0.12);
@@ -2908,21 +2908,6 @@ h3 {
   font-size: 14px;
   font-weight: 900;
   line-height: 1.2;
-}
-
-.profile-menu-copy span,
-.profile-menu-copy small {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.profile-menu-copy small {
-  color: var(--green);
-  font-weight: 800;
 }
 
 .profile-shortcut {

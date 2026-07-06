@@ -238,7 +238,7 @@ type Screen =
   | "historial-ciclos"
   | "perfil";
 
-const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "registro-entrenamiento", "historial-ciclos", "comparacion"];
+const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
 const setupDays: string[] = [...TRAINING_DAY_LABELS];
 const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
 const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
@@ -3109,6 +3109,8 @@ export function OrganizatechApp({
     : primaryScreens.filter((item) =>
       item === "dashboard" ||
       item === "entrenamiento" ||
+      item === "perfil" ||
+      item === "comparacion" ||
       item === "registro-entrenamiento" ||
       (item === "historial-ciclos" && visibleCycleHistoryCount > 0)
     );
@@ -3166,7 +3168,7 @@ export function OrganizatechApp({
             </div>
             <div className="menu-drawer-body">
               <div className="menu-panel" role="menu" aria-label="Menú principal">
-                <ProfileMenuHeader profile={profileViewModel} onOpenProfile={() => navigateTo("perfil")} />
+                <ProfileMenuHeader profile={profileViewModel} />
                 <div className="menu-grid">
                   {menuScreens.map((item) => (
                     <button
@@ -3180,7 +3182,6 @@ export function OrganizatechApp({
                   ))}
                 </div>
                 <div className="menu-account">
-                  <p className="eyebrow">Cuenta</p>
                   <button className="logout-button" role="menuitem" onClick={handleLogout} disabled={isBusy}>
                     <LogOut size={17} />
                     Cerrar sesión
@@ -7630,12 +7631,12 @@ function screenLabel(screen: Screen) {
     "nueva-password": "Nueva contraseña",
     "recovery-expired": "Enlace expirado",
     dashboard: "Panel principal",
-    entrenamiento: "Entrenamiento",
+    entrenamiento: "Entrenemos",
     "training-summary": "Resumen de entrenamiento",
-    "registro-entrenamiento": "Registro de entrenamiento",
+    "registro-entrenamiento": "Modificar ciclo de entrenamiento",
     "historial-ciclos": "Historial ciclo de entrenamiento",
     comparacion: "Comparación semanal",
-    perfil: "Perfil",
+    perfil: "Mi perfil",
   };
   return labels[screen];
 }

@@ -24,8 +24,7 @@ export function ProfileScreen({ profile }: { profile: ProfileViewModel }) {
         <div className="profile-hero-copy">
           <p className="eyebrow">Perfil</p>
           <h2>{profile.displayName}</h2>
-          <p>{profile.secondaryLabel}</p>
-          <span className="profile-pill">{profile.accountLabel}</span>
+          {profile.email && <p>{profile.email}</p>}
         </div>
       </div>
 
