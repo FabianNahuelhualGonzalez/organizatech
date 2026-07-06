@@ -175,7 +175,13 @@ function detectCoachSignals(input: NormalizedTrainingCoachInput): DetectedSignal
   const performanceHigh = volumeDifference > 0 || Boolean(bestProgress) || safeNumber(workout.repsDifference) > 0;
   const readiness = input.readiness;
 
-  if (input.comparisonStatus === "first_reference") signals.push({ id: "first_reference", priority: 100 });
+  if (input.comparisonStatus === "none") return signals;
+  if (input.comparisonStatus === "first_reference") {
+    signals.push({ id: "first_reference", priority: 100 });
+    if (routineComplete) signals.push({ id: "routine_complete", priority: 40 });
+    return signals;
+  }
+
   if (routineComplete) signals.push({ id: "routine_complete", priority: 40 });
   if (bestProgress) signals.push({ id: "kg_up_reps_up", priority: 95, exercise: bestProgress });
   if (kgUpRepsDown) signals.push({ id: "kg_up_reps_down", priority: 96, exercise: kgUpRepsDown });
@@ -204,6 +210,16 @@ function buildInsight(signal: DetectedSignal, input: NormalizedTrainingCoachInpu
         "Cerraste todos los ejercicios planificados. Esa consistencia suma mucho.",
         "Completaste la rutina. Ahora el foco puede pasar a calidad y progresión.",
       ]),
+      tone: "positive",
+      priority: signal.priority,
+    };
+  }
+
+  if (signal.id === "first_reference") {
+    return {
+      title: "Registro base creado",
+      body: "Este entrenamiento queda como punto de partida para comparar tus próximas semanas.",
+      action: "Repite técnica y consistencia antes de acelerar la progresión.",
       tone: "positive",
       priority: signal.priority,
     };
@@ -433,7 +449,7 @@ function compactFeedback(feedback: TrainingCoachFeedback): TrainingCoachFeedback
 }
 
 function isStrengthSignal(id: SignalId) {
-  return id === "routine_complete" || id === "kg_up_reps_up" || id === "same_kg_reps_up" || id === "volume_up";
+  return id === "first_reference" || id === "routine_complete" || id === "kg_up_reps_up" || id === "same_kg_reps_up" || id === "volume_up";
 }
 
 function isAttentionSignal(id: SignalId) {

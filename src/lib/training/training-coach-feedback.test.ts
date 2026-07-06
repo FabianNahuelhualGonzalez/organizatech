@@ -15,9 +15,28 @@ import {
 
   assert.equal(feedback.headline, "Primer punto de partida");
   assert.match(feedback.summary, /base/i);
+  assert.equal(feedback.strengths[0]?.title, "Registro base creado");
   assert.equal(feedback.confidence, "medium");
   assert.ok(feedback.sourceSignals.includes("first_reference"));
   assertNonEmptyFeedback(feedback);
+}
+
+{
+  const feedback = buildTrainingCoachFeedback(baseInput({
+    comparisonStatus: "first_reference",
+    exercises: [exercise({ name: "prueba 17-06", kgDifference: 10, repsDifference: 12 })],
+    workout: { completedExercises: 2, totalExercises: 2, volumeDifference: 1500, volumePercentage: 25, repsDifference: 12, kgIncreasedExercises: 1 },
+  }));
+
+  assert.equal(feedback.headline, "Primer punto de partida");
+  assert.equal(feedback.strengths[0]?.title, "Registro base creado");
+  assert.notEqual(feedback.strengths[0]?.title, "Progreso fuerte");
+  assert.deepEqual(
+    feedback.sourceSignals.filter((signal) => signal === "kg_up_reps_up" || signal === "volume_up" || signal === "kg_up_reps_down"),
+    [],
+    "first_reference no debe generar señales comparativas aunque lleguen diferencias",
+  );
+  assert.doesNotMatch(JSON.stringify(feedback), /Progreso fuerte|subió carga|subió reps|bajó volumen/i);
 }
 
 {
