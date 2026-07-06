@@ -4,6 +4,7 @@ import type { WeeklyEquivalentProgressResult } from "@/lib/progress/weekly-equiv
 import type { ExerciseEntry, ExerciseMetrics, WeeklySummary } from "@/lib/progress/types";
 import { buildTrainingCoachFeedback } from "@/lib/training/training-coach-feedback";
 import {
+  buildDashboardWeeklyTrend,
   buildTrainingCoachDashboardInput,
   parseReadinessFromNotes,
   resolveDashboardReadiness,
@@ -22,6 +23,7 @@ import {
   assert.equal(input.referenceWeek, 4);
   assert.equal(input.workout?.kgIncreasedExercises, 1);
   assert.equal(input.exercises?.[0]?.name, "Press plano");
+  assert.equal(input.weeklyTrend?.phase, "first_reference");
 }
 
 {
@@ -49,6 +51,7 @@ import {
   assert.equal(input.comparisonStatus, "none");
   assert.equal(input.readiness, null);
   assert.deepEqual(input.exercises, []);
+  assert.equal(input.weeklyTrend?.phase, "no_history");
 }
 
 {
@@ -122,6 +125,84 @@ import {
   assert.ok(feedback.summary.length > 0);
   assert.ok(feedback.nextAdvice.length > 0);
   assert.ok(feedback.sourceSignals.includes("strong_exercise_drop"));
+}
+
+{
+  const trend = buildDashboardWeeklyTrend([
+    entry({ week: 3, id: "w3-a", exerciseName: "Press plano", reps: [10, 10, 10], weight: 100 }),
+    entry({ week: 4, id: "w4-a", exerciseName: "Press plano", reps: [11, 10, 10], weight: 100 }),
+    entry({ week: 5, id: "w5-a", exerciseName: "Press plano", reps: [12, 10, 10], weight: 101, previousWeight: 100 }),
+  ], 5);
+
+  assert.deepEqual(trend.availableWeeks, [3, 4, 5]);
+  assert.deepEqual(trend.missingWeeks, []);
+  assert.equal(trend.weekCount, 3);
+  assert.equal(trend.phase, "early_trend");
+  assert.equal(trend.trendWindow?.firstWeek, 3);
+  assert.equal(trend.trendWindow?.lastWeek, 5);
+}
+
+{
+  const trend = buildDashboardWeeklyTrend([
+    entry({ week: 3, id: "w3-a" }),
+    entry({ week: 5, id: "w5-a" }),
+  ], 5);
+
+  assert.deepEqual(trend.availableWeeks, [3, 5]);
+  assert.deepEqual(trend.missingWeeks, [4]);
+  assert.equal(trend.weekCount, 2);
+  assert.equal(trend.phase, "initial_comparison");
+}
+
+{
+  const trend = buildDashboardWeeklyTrend([
+    entry({ week: 4, id: "w4-a", exerciseName: "Press plano", reps: [10, 10, 10], targetSets: 3, targetReps: 10 }),
+    entry({ week: 4, id: "w4-b", exerciseName: "Sentadilla", reps: [10, 10, 10], targetSets: 3, targetReps: 10 }),
+    entry({ week: 5, id: "w5-a", exerciseName: "Press plano", reps: [10, 8, 0], targetSets: 3, targetReps: 10 }),
+  ], 5);
+
+  assert.equal(trend.currentWeekComplete, false);
+  assert.equal(trend.isCurrentWeekInProgress, true);
+}
+
+{
+  const trend = buildDashboardWeeklyTrend([
+    entry({ week: 3, id: "w3-a" }),
+    entry({ week: 4, id: "w4-a" }),
+  ], 5);
+
+  assert.equal(trend.currentWeekComplete, false);
+  assert.equal(trend.isCurrentWeekInProgress, false);
+  assert.deepEqual(trend.availableWeeks, [3, 4]);
+}
+
+{
+  const trend = buildDashboardWeeklyTrend([
+    entry({ week: 3, id: "valid", exerciseName: "Press plano" }),
+    entry({ week: 4, id: "empty-name", exerciseName: "" }),
+    entry({ week: 5, id: "zero-reps", exerciseName: "Sentadilla", reps: [0, 0, 0] }),
+  ], 5);
+
+  assert.deepEqual(trend.availableWeeks, [3]);
+  assert.equal(trend.weekCount, 1);
+}
+
+{
+  const mapped = buildTrainingCoachDashboardInput({
+    summary: summary({ week: 5 }),
+    currentMetrics: [metric({ exerciseName: "Press plano", week: 5 })],
+    entries: [
+      entry({ week: 3, id: "w3-a", exerciseName: "Press plano", reps: [10, 10, 10], weight: 100 }),
+      entry({ week: 4, id: "w4-a", exerciseName: "Press plano", reps: [11, 10, 10], weight: 100 }),
+      entry({ week: 5, id: "w5-a", exerciseName: "Press plano", reps: [12, 10, 10], weight: 101, previousWeight: 100 }),
+    ],
+    currentWeek: 5,
+    weeklyEquivalentProgress: progress("ready"),
+  });
+
+  const feedback = buildTrainingCoachFeedback(mapped);
+  assert.equal(mapped.weeklyTrend?.phase, "early_trend");
+  assert.ok(feedback.trendSignals?.includes("historical_early_trend"));
 }
 
 console.log("training-coach-dashboard-mapper tests passed");
