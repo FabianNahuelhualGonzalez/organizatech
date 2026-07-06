@@ -3676,10 +3676,22 @@ function DashboardScreen({
     weeklyEquivalentProgress,
   })), [summary, currentMetrics, entries, currentWeek, weeklyEquivalentProgress]);
   const coachVisualStatus = weeklyEquivalentProgress.status === "ready"
-    ? { showScore: true, label: feedbackHeadlineForStatus(coachFeedback), detail: "Factores de rendimiento" }
+    ? { showScore: true, label: feedbackHeadlineForStatus(coachFeedback), detail: "Factores de rendimiento", factorLabel: "Factores de rendimiento" }
     : weeklyEquivalentProgress.status === "no_previous"
-      ? { showScore: false, label: "Base creada", detail: "Punto de partida" }
-      : { showScore: false, label: "Sin historial suficiente", detail: "Registro actual" };
+      ? {
+          showScore: false,
+          badgeLabel: "Base creada",
+          label: "Punto de partida",
+          detail: "Tu primera referencia de progreso",
+          factorLabel: "Factores del registro actual",
+        }
+      : {
+          showScore: false,
+          badgeLabel: "Datos disponibles",
+          label: "Sin historial suficiente",
+          detail: "Registro actual",
+          factorLabel: "Datos disponibles",
+        };
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
@@ -4189,7 +4201,7 @@ function DashboardCoachCard({
 }: {
   feedback: TrainingCoachFeedback;
   analytics: AnalyticsSnapshot;
-  visualStatus: { showScore: boolean; label: string; detail: string };
+  visualStatus: { showScore: boolean; label: string; detail: string; factorLabel: string; badgeLabel?: string };
 }) {
   const blocks: Array<{ id: string; label: string; insight: CoachInsight }> = [];
   const strength = feedback.strengths[0];
@@ -4230,7 +4242,7 @@ function DashboardCoachCard({
           </div>
         ) : (
           <div className={`coach-status-pill ${feedback.tone}`}>
-            <span>{visualStatus.label}</span>
+            <span>{visualStatus.badgeLabel ?? visualStatus.label}</span>
           </div>
         )}
         <div className="coach-status-copy">
@@ -4238,7 +4250,8 @@ function DashboardCoachCard({
           <span>{visualStatus.detail}</span>
         </div>
       </div>
-      <div className="coach-factor-list" aria-label={visualStatus.showScore ? "Factores de rendimiento" : "Factores del registro actual"}>
+      <div className="coach-factor-list" aria-label={visualStatus.factorLabel}>
+        <span className="coach-factor-heading">{visualStatus.factorLabel}</span>
         {factors.map((factor) => (
           <div className="coach-factor-row" key={factor.label}>
             <div>

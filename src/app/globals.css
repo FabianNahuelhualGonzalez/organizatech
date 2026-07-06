@@ -4043,6 +4043,13 @@ h3 {
   background: rgba(5, 16, 30, 0.28);
 }
 
+.coach-factor-heading {
+  color: var(--muted);
+  font-size: clamp(10px, 2.8vw, 12px);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .coach-factor-row {
   display: grid;
   gap: 5px;
