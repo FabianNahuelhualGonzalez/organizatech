@@ -50,7 +50,7 @@ export function buildTrainingCoachDashboardInput(input: TrainingCoachDashboardIn
         id: metric.exerciseId,
         name: metric.exerciseName.trim(),
         kgDifference: finiteOrNull(metric.kgDifference),
-        repsDifference: finiteOrNull(metric.repsDifference),
+        repsDifference: finiteOrNull(resolveComparableRepsDifference(metric, input.entries, input.currentWeek) ?? metric.repsDifference),
         volumeDifference: finiteOrNull(metric.volumeDifference),
         volumePercentage: finiteOrNull(metric.volumePercentage),
       }))
@@ -148,6 +148,28 @@ function isTrendWeekComplete(currentWeek: TrainingCoachWeeklyTrendWeek, weeks: T
   return expectedExercises > 0 &&
     safeNumber(currentWeek.completedExercises) >= expectedExercises &&
     safeNumber(currentWeek.complianceRate) >= 100;
+}
+
+function resolveComparableRepsDifference(metric: ExerciseMetrics, entries: ExerciseEntry[], currentWeek: number) {
+  const currentTotalReps = sumFinite(metric.reps);
+  const previous = findPreviousComparableEntry(metric, entries, currentWeek);
+  if (!previous) return null;
+  const previousTotalReps = sumFinite(previous.reps);
+  if (currentTotalReps === null || previousTotalReps === null) return null;
+  return currentTotalReps - previousTotalReps;
+}
+
+function findPreviousComparableEntry(metric: ExerciseMetrics, entries: ExerciseEntry[], currentWeek: number) {
+  const lineageId = metric.exerciseLineageId?.trim() || null;
+  const exerciseId = metric.exerciseId;
+  return entries
+    .filter((entry) => safeInteger(entry.week) < safeInteger(currentWeek))
+    .filter((entry) => {
+      if (lineageId && entry.exerciseLineageId?.trim() === lineageId) return true;
+      return !lineageId && entry.exerciseId === exerciseId;
+    })
+    .filter((entry) => entry.reps.some((rep) => safeNumber(rep) > 0))
+    .sort((a, b) => safeInteger(b.week) - safeInteger(a.week) || b.date.localeCompare(a.date))[0] ?? null;
 }
 
 export function resolveDashboardReadiness(entries: ExerciseEntry[], currentWeek: number): TrainingCoachReadiness | null {

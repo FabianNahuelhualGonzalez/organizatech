@@ -157,6 +157,43 @@ import {
 }
 
 {
+  const feedback = buildTrainingCoachFeedback(baseInput({
+    exercises: [exercise({ name: "prueba 24 06", kgDifference: 0, repsDifference: -10 })],
+    workout: { completedExercises: 2, totalExercises: 2, volumeDifference: -1000, volumePercentage: -15, repsDifference: -10, kgIncreasedExercises: 0 },
+  }));
+
+  assert.equal(feedback.attentions[0]?.body, "prueba 24 06 bajó 10 reps. Es el punto más importante a revisar.");
+  assert.equal(feedback.nextTarget, "Suma al menos 1 rep más o intenta recuperar las 10 reps perdidas en prueba 24 06.");
+}
+
+{
+  const feedback = buildTrainingCoachFeedback(baseInput({
+    exercises: [exercise({ name: "Remo", kgDifference: 0, repsDifference: -1 })],
+    workout: { completedExercises: 2, totalExercises: 2, volumeDifference: -100, volumePercentage: -2, repsDifference: -1, kgIncreasedExercises: 0 },
+  }));
+
+  assert.equal(feedback.nextTarget, undefined, "una caida leve no crea objetivo de recuperacion fuerte");
+}
+
+{
+  const feedback = buildTrainingCoachFeedback(baseInput({
+    exercises: [exercise({ name: "Press militar", kgDifference: 5, repsDifference: -1 })],
+    workout: { completedExercises: 2, totalExercises: 2, volumeDifference: -100, volumePercentage: -2, repsDifference: -1, kgIncreasedExercises: 1 },
+  }));
+
+  assert.equal(feedback.nextTarget, "Suma 1 rep más para recuperar tu marca anterior en Press militar.");
+}
+
+{
+  const feedback = buildTrainingCoachFeedback(baseInput({
+    exercises: [exercise({ name: "Sentadilla", kgDifference: 5, repsDifference: 4 })],
+    workout: { completedExercises: 3, totalExercises: 3, volumeDifference: 1200, volumePercentage: 12, repsDifference: 4, kgIncreasedExercises: 1 },
+  }));
+
+  assert.equal(feedback.nextTarget, "Objetivo próximo: sostener el progreso de Sentadilla una sesión más.");
+}
+
+{
   const input = baseInput({
     seed: "stable-seed",
     exercises: [exercise({ name: "Sentadilla", kgDifference: 5, repsDifference: 4 })],

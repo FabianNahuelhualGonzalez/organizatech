@@ -726,9 +726,15 @@ function resolveNextTarget(signals: DetectedSignal[]) {
   if (!targetSignal?.exercise) return undefined;
 
   const reps = safeNumber(targetSignal.exercise.repsDifference);
-  if (reps < 0) return `Objetivo próximo: recuperar ${Math.abs(reps)} reps en ${targetSignal.exercise.name}.`;
+  if (reps < 0) return formatRepsRecoveryTarget(Math.abs(reps), targetSignal.exercise.name);
   if (reps > 0) return `Objetivo próximo: sostener el progreso de ${targetSignal.exercise.name} una sesión más.`;
   return `Objetivo próximo: repetir ${targetSignal.exercise.name} con técnica estable.`;
+}
+
+function formatRepsRecoveryTarget(lostReps: number, exerciseName: string) {
+  const rounded = Math.trunc(Math.abs(lostReps));
+  if (rounded <= 1) return `Suma 1 rep más para recuperar tu marca anterior en ${exerciseName}.`;
+  return `Suma al menos 1 rep más o intenta recuperar las ${rounded} reps perdidas en ${exerciseName}.`;
 }
 
 function resolveConfidence(input: NormalizedTrainingCoachInput, signals: string[]): CoachConfidence {

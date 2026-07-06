@@ -128,6 +128,51 @@ import {
 }
 
 {
+  const mapped = buildTrainingCoachDashboardInput({
+    summary: summary({ week: 6, volumeDifference: -2000, volumePercentage: -12, repsDifference: -9, objectivesOk: 1, exerciseCount: 2 }),
+    currentMetrics: [
+      metric({
+        exerciseId: "cycle-exercise-current",
+        exerciseLineageId: "lineage-prueba",
+        exerciseName: "prueba 24 06",
+        week: 6,
+        reps: [17, 17, 17],
+        targetReps: 20,
+        targetSets: 3,
+        targetTotalReps: 60,
+        totalReps: 51,
+        repsDifference: -9,
+      }),
+    ],
+    entries: [
+      entry({
+        id: "previous",
+        exerciseId: "cycle-exercise-previous",
+        exerciseLineageId: "lineage-prueba",
+        exerciseName: "prueba 24 06",
+        week: 5,
+        reps: [21, 20, 20],
+      }),
+      entry({
+        id: "current",
+        exerciseId: "cycle-exercise-current",
+        exerciseLineageId: "lineage-prueba",
+        exerciseName: "prueba 24 06",
+        week: 6,
+        reps: [17, 17, 17],
+      }),
+    ],
+    currentWeek: 6,
+    weeklyEquivalentProgress: progress("ready"),
+  });
+
+  assert.equal(mapped.exercises?.[0]?.repsDifference, -10);
+  const feedback = buildTrainingCoachFeedback(mapped);
+  assert.match(feedback.attentions[0]?.body ?? "", /bajó 10 reps/);
+  assert.match(feedback.nextTarget ?? "", /10 reps perdidas/);
+}
+
+{
   const trend = buildDashboardWeeklyTrend([
     entry({ week: 3, id: "w3-a", exerciseName: "Press plano", reps: [10, 10, 10], weight: 100 }),
     entry({ week: 4, id: "w4-a", exerciseName: "Press plano", reps: [11, 10, 10], weight: 100 }),
@@ -232,6 +277,10 @@ function metric(input: Partial<ExerciseMetrics>): ExerciseMetrics {
   return {
     id: input.id ?? `entry-${input.exerciseName ?? "exercise"}`,
     sessionId: input.sessionId,
+    cycleId: input.cycleId,
+    cycleDayId: input.cycleDayId,
+    trainingCycleExerciseId: input.trainingCycleExerciseId,
+    exerciseLineageId: input.exerciseLineageId,
     exerciseId: input.exerciseId ?? `exercise-${input.exerciseName ?? "exercise"}`,
     exerciseName: input.exerciseName ?? "Press plano",
     routine: input.routine ?? "Pecho",
@@ -260,6 +309,10 @@ function entry(input: Partial<ExerciseEntry>): ExerciseEntry {
   return {
     id: input.id ?? "entry",
     sessionId: input.sessionId ?? "session",
+    cycleId: input.cycleId,
+    cycleDayId: input.cycleDayId,
+    trainingCycleExerciseId: input.trainingCycleExerciseId,
+    exerciseLineageId: input.exerciseLineageId,
     exerciseId: input.exerciseId ?? "exercise",
     exerciseName: input.exerciseName ?? "Press plano",
     routine: input.routine ?? "Pecho",

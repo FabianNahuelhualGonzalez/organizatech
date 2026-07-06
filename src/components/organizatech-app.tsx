@@ -2619,15 +2619,32 @@ export function OrganizatechApp({
         historicalByExerciseId[exercise.id] = { status: "unavailable", latest: null };
       }
     });
+    const plannedDaysCount = hasRoutinePlan ? dashboardCarouselDays.length : routineDays.length;
+    const completedDaysAfterSave = Math.min(
+      plannedDaysCount,
+      calculateWeeklyCompletedTrainingDays({
+        plannedDays: dashboardCarouselDays,
+        exercises: displayExercises,
+        entries: calendarNormalizedEntries,
+        sessions: calendarNormalizedTrainingSessions,
+        usesCycleScopedSessions: isCycleScopedActiveCycle,
+      }) + 1,
+    );
+    const completionTopbarMeta = buildTrainingTopbarMeta({
+      cycleLabel: trainingTopbarMeta?.cycleLabel ?? getCycleTypeTitle(displayTrainingPlan),
+      weekNumber: currentWeek,
+      completedDays: completedDaysAfterSave,
+      plannedDays: plannedDaysCount,
+    });
 
     return buildTrainingCompletionSummary({
       sessionId: input.sessionId,
       dayLabel: visibleDay,
       statusLabel: `Completado · ${input.validExercises.length} de ${input.validExercises.length}`,
       workoutName: visibleRoutine,
-      cycleLabel: trainingTopbarMeta?.cycleLabel ?? getCycleTypeTitle(displayTrainingPlan),
-      weekLabel: trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`,
-      progressLabel: trainingTopbarMeta?.progressLabel ?? `${routineDays.length} de ${routineDays.length} dias`,
+      cycleLabel: completionTopbarMeta?.cycleLabel ?? trainingTopbarMeta?.cycleLabel ?? getCycleTypeTitle(displayTrainingPlan),
+      weekLabel: completionTopbarMeta?.weekLabel ?? trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`,
+      progressLabel: completionTopbarMeta?.progressLabel ?? trainingTopbarMeta?.progressLabel ?? `${plannedDaysCount} de ${plannedDaysCount} días`,
       workoutStartedAt: input.workoutStartedAt,
       savedAt: input.savedAt,
       currentDate: input.trainedDate,
