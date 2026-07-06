@@ -3675,11 +3675,31 @@ function DashboardScreen({
     currentWeek,
     weeklyEquivalentProgress,
   })), [summary, currentMetrics, entries, currentWeek, weeklyEquivalentProgress]);
-  const coachVisualStatus = weeklyEquivalentProgress.status === "ready"
-    ? { showScore: true, label: feedbackHeadlineForStatus(coachFeedback), detail: "Factores de rendimiento", factorLabel: "Factores de rendimiento" }
+  const hasCurrentWeekTrainingRecords = entries.some((entry) => (
+    entry.week === currentWeek && entry.reps.some((rep) => rep > 0)
+  ));
+  const hasCurrentWeekMetricRecords = currentMetrics.some((metric) => (
+    metric.totalReps > 0 || metric.volumeTotal > 0
+  ));
+  const isCurrentWeekEmptyCoach = !hasCurrentWeekTrainingRecords && !hasCurrentWeekMetricRecords;
+  const displayedCoachFeedback = isCurrentWeekEmptyCoach
+    ? buildEmptyCurrentWeekCoachFeedback()
+    : coachFeedback;
+  const coachVisualStatus = isCurrentWeekEmptyCoach
+    ? {
+        showScore: false,
+        showFactors: false,
+        badgeLabel: "Semana nueva",
+        label: "Sin registros esta semana",
+        detail: "Completa tu primera sesión para generar una lectura de rendimiento.",
+        factorLabel: "Datos disponibles",
+      }
+    : weeklyEquivalentProgress.status === "ready"
+    ? { showScore: true, showFactors: true, label: feedbackHeadlineForStatus(displayedCoachFeedback), detail: "Factores de rendimiento", factorLabel: "Factores de rendimiento" }
     : weeklyEquivalentProgress.status === "no_previous"
       ? {
           showScore: false,
+          showFactors: true,
           badgeLabel: "Base creada",
           label: "Punto de partida",
           detail: "Tu primera referencia de progreso",
@@ -3687,6 +3707,7 @@ function DashboardScreen({
         }
       : {
           showScore: false,
+          showFactors: true,
           badgeLabel: "Datos disponibles",
           label: "Sin historial suficiente",
           detail: "Registro actual",
@@ -3882,7 +3903,7 @@ function DashboardScreen({
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
       </div>
-      <DashboardCoachCard feedback={coachFeedback} analytics={analytics} visualStatus={coachVisualStatus} />
+      <DashboardCoachCard feedback={displayedCoachFeedback} analytics={analytics} visualStatus={coachVisualStatus} />
     </section>
   );
 }
@@ -4194,6 +4215,20 @@ function feedbackHeadlineForStatus(feedback: TrainingCoachFeedback) {
   return feedback.headline;
 }
 
+function buildEmptyCurrentWeekCoachFeedback(): TrainingCoachFeedback {
+  return {
+    headline: "Nueva semana iniciada",
+    summary: "Aún no hay entrenamientos registrados esta semana. Cuando completes tu primera sesión, Organizatech podrá analizar tu progreso.",
+    strengths: [],
+    attentions: [],
+    nextAdvice: "Registra tu próximo entrenamiento para crear la base de esta semana.",
+    tone: "neutral",
+    confidence: "low",
+    contradictionsResolved: [],
+    sourceSignals: ["current_week_empty"],
+  };
+}
+
 function DashboardCoachCard({
   feedback,
   analytics,
@@ -4201,7 +4236,7 @@ function DashboardCoachCard({
 }: {
   feedback: TrainingCoachFeedback;
   analytics: AnalyticsSnapshot;
-  visualStatus: { showScore: boolean; label: string; detail: string; factorLabel: string; badgeLabel?: string };
+  visualStatus: { showScore: boolean; label: string; detail: string; factorLabel: string; badgeLabel?: string; showFactors?: boolean };
 }) {
   const blocks: Array<{ id: string; label: string; insight: CoachInsight }> = [];
   const strength = feedback.strengths[0];
@@ -4250,20 +4285,22 @@ function DashboardCoachCard({
           <span>{visualStatus.detail}</span>
         </div>
       </div>
-      <div className="coach-factor-list" aria-label={visualStatus.factorLabel}>
-        <span className="coach-factor-heading">{visualStatus.factorLabel}</span>
-        {factors.map((factor) => (
-          <div className="coach-factor-row" key={factor.label}>
-            <div>
-              <span>{factor.label}</span>
-              <small>{Math.round(factor.value)}/100</small>
+      {visualStatus.showFactors !== false ? (
+        <div className="coach-factor-list" aria-label={visualStatus.factorLabel}>
+          <span className="coach-factor-heading">{visualStatus.factorLabel}</span>
+          {factors.map((factor) => (
+            <div className="coach-factor-row" key={factor.label}>
+              <div>
+                <span>{factor.label}</span>
+                <small>{Math.round(factor.value)}/100</small>
+              </div>
+              <div className="coach-factor-track" aria-hidden="true">
+                <span style={{ width: `${factor.value}%` }} />
+              </div>
             </div>
-            <div className="coach-factor-track" aria-hidden="true">
-              <span style={{ width: `${factor.value}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : null}
       <div className="coach-summary-block">
         <span>Lectura rápida</span>
         <p>{feedback.summary}</p>
