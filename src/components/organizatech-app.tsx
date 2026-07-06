@@ -119,6 +119,12 @@ import {
   type LatestExercisePerformance,
 } from "@/lib/training/exercise-last-performance-repository";
 import {
+  buildTrainingCoachFeedback,
+  type CoachInsight,
+  type TrainingCoachFeedback,
+} from "@/lib/training/training-coach-feedback";
+import { buildTrainingCoachDashboardInput } from "@/lib/training/training-coach-dashboard-mapper";
+import {
   createStableWorkoutStartedAt,
   createLatestExercisePerformanceRequest,
   getLatestExercisePerformanceIdleState,
@@ -892,7 +898,6 @@ export function OrganizatechApp({
     activeCycleId: isCycleScopedActiveCycle ? persistedActiveCycle?.id ?? null : null,
     plannedDays: routineDays,
   }), [calendarNormalizedEntries, calendarNormalizedTrainingSessions, isCycleScopedActiveCycle, persistedActiveCycle?.id, routineDays]);
-  const insights = generateSmartInsights(summary, currentMetrics);
   const visibleCycleHistoryCount = isTrainingCyclesRepositoryActive ? persistedCycleHistory.length : cycleHistory.length;
   const visibleCycleNumber = isTrainingCyclesRepositoryActive
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
@@ -2614,15 +2619,32 @@ export function OrganizatechApp({
         historicalByExerciseId[exercise.id] = { status: "unavailable", latest: null };
       }
     });
+    const plannedDaysCount = hasRoutinePlan ? dashboardCarouselDays.length : routineDays.length;
+    const completedDaysAfterSave = Math.min(
+      plannedDaysCount,
+      calculateWeeklyCompletedTrainingDays({
+        plannedDays: dashboardCarouselDays,
+        exercises: displayExercises,
+        entries: calendarNormalizedEntries,
+        sessions: calendarNormalizedTrainingSessions,
+        usesCycleScopedSessions: isCycleScopedActiveCycle,
+      }) + 1,
+    );
+    const completionTopbarMeta = buildTrainingTopbarMeta({
+      cycleLabel: trainingTopbarMeta?.cycleLabel ?? getCycleTypeTitle(displayTrainingPlan),
+      weekNumber: currentWeek,
+      completedDays: completedDaysAfterSave,
+      plannedDays: plannedDaysCount,
+    });
 
     return buildTrainingCompletionSummary({
       sessionId: input.sessionId,
       dayLabel: visibleDay,
       statusLabel: `Completado · ${input.validExercises.length} de ${input.validExercises.length}`,
       workoutName: visibleRoutine,
-      cycleLabel: trainingTopbarMeta?.cycleLabel ?? getCycleTypeTitle(displayTrainingPlan),
-      weekLabel: trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`,
-      progressLabel: trainingTopbarMeta?.progressLabel ?? `${routineDays.length} de ${routineDays.length} dias`,
+      cycleLabel: completionTopbarMeta?.cycleLabel ?? trainingTopbarMeta?.cycleLabel ?? getCycleTypeTitle(displayTrainingPlan),
+      weekLabel: completionTopbarMeta?.weekLabel ?? trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`,
+      progressLabel: completionTopbarMeta?.progressLabel ?? trainingTopbarMeta?.progressLabel ?? `${plannedDaysCount} de ${plannedDaysCount} días`,
       workoutStartedAt: input.workoutStartedAt,
       savedAt: input.savedAt,
       currentDate: input.trainedDate,
@@ -3192,13 +3214,11 @@ export function OrganizatechApp({
             usesCycleScopedSessions={isCycleScopedActiveCycle}
             day={dashboardDay}
             weekDays={dashboardCarouselDays}
-            routineDays={routineDays}
             routine={dashboardRoutine}
             dayExercises={dashboardExercises}
             summary={summary}
             weeklyEquivalentProgress={weeklyEquivalentProgress}
             currentMetrics={dashboardCurrentMetrics}
-            insights={insights}
             currentWeek={currentWeek}
             entries={calendarNormalizedEntries}
             sessions={calendarNormalizedTrainingSessions}
@@ -3631,13 +3651,11 @@ function DashboardScreen({
   usesCycleScopedSessions,
   day,
   weekDays,
-  routineDays,
   routine,
   dayExercises,
   summary,
   weeklyEquivalentProgress,
   currentMetrics,
-  insights,
   currentWeek,
   entries,
   sessions,
@@ -3652,13 +3670,11 @@ function DashboardScreen({
   usesCycleScopedSessions: boolean;
   day: string;
   weekDays: string[];
-  routineDays: string[];
   routine: string;
   dayExercises: ExerciseTemplate[];
   summary: ReturnType<typeof calculateWeeklySummary>;
   weeklyEquivalentProgress: WeeklyEquivalentProgressResult;
   currentMetrics: ExerciseMetrics[];
-  insights: ReturnType<typeof generateSmartInsights>;
   currentWeek: number;
   entries: ExerciseEntry[];
   sessions: TrainingSession[];
@@ -3669,6 +3685,51 @@ function DashboardScreen({
 }) {
   const hasTodayRoutine = dayExercises.length > 0;
   const analytics = buildAnalytics(summary, currentMetrics);
+  const coachFeedback = useMemo(() => buildTrainingCoachFeedback(buildTrainingCoachDashboardInput({
+    summary,
+    currentMetrics,
+    entries,
+    currentWeek,
+    weeklyEquivalentProgress,
+  })), [summary, currentMetrics, entries, currentWeek, weeklyEquivalentProgress]);
+  const hasCurrentWeekTrainingRecords = entries.some((entry) => (
+    entry.week === currentWeek && entry.reps.some((rep) => rep > 0)
+  ));
+  const hasCurrentWeekMetricRecords = currentMetrics.some((metric) => (
+    metric.totalReps > 0 || metric.volumeTotal > 0
+  ));
+  const isCurrentWeekEmptyCoach = !hasCurrentWeekTrainingRecords && !hasCurrentWeekMetricRecords;
+  const displayedCoachFeedback = isCurrentWeekEmptyCoach
+    ? buildEmptyCurrentWeekCoachFeedback()
+    : coachFeedback;
+  const coachVisualStatus = isCurrentWeekEmptyCoach
+    ? {
+        showScore: false,
+        showFactors: false,
+        badgeLabel: "Semana nueva",
+        label: "Sin registros esta semana",
+        detail: "Completa tu primera sesión para generar una lectura de rendimiento.",
+        factorLabel: "Datos disponibles",
+      }
+    : weeklyEquivalentProgress.status === "ready"
+    ? { showScore: true, showFactors: true, label: feedbackHeadlineForStatus(displayedCoachFeedback), detail: "Factores de rendimiento", factorLabel: "Factores de rendimiento" }
+    : weeklyEquivalentProgress.status === "no_previous"
+      ? {
+          showScore: false,
+          showFactors: true,
+          badgeLabel: "Base creada",
+          label: "Punto de partida",
+          detail: "Tu primera referencia de progreso",
+          factorLabel: "Factores del registro actual",
+        }
+      : {
+          showScore: false,
+          showFactors: true,
+          badgeLabel: "Datos disponibles",
+          label: "Sin historial suficiente",
+          detail: "Registro actual",
+          factorLabel: "Datos disponibles",
+        };
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
@@ -3859,9 +3920,7 @@ function DashboardScreen({
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
       </div>
-      <DashboardSmartInsights insights={insights} />
-      <DashboardMotivationSummary entries={entries} currentWeek={currentWeek} routineDays={routineDays} />
-      <DashboardAnalytics summary={summary} analytics={analytics} />
+      <DashboardCoachCard feedback={displayedCoachFeedback} analytics={analytics} visualStatus={coachVisualStatus} />
     </section>
   );
 }
@@ -4165,6 +4224,134 @@ function buildWeeklyProgressTrendLabel(progress: WeeklyEquivalentProgressResult)
   if (progress.differenceValue > 0) return "Vas por encima del ritmo de la semana anterior";
   if (progress.differenceValue < 0) return "Vas por debajo del ritmo de la semana anterior";
   return "Mantienes un ritmo similar a la semana anterior";
+}
+
+function feedbackHeadlineForStatus(feedback: TrainingCoachFeedback) {
+  if (feedback.tone === "warning") return "Revisar progreso";
+  if (feedback.tone === "positive") return "Buen avance";
+  return feedback.headline;
+}
+
+function buildEmptyCurrentWeekCoachFeedback(): TrainingCoachFeedback {
+  return {
+    headline: "Nueva semana iniciada",
+    summary: "Aún no hay entrenamientos registrados esta semana. Cuando completes tu primera sesión, Organizatech podrá analizar tu progreso.",
+    strengths: [],
+    attentions: [],
+    nextAdvice: "Registra tu próximo entrenamiento para crear la base de esta semana.",
+    tone: "neutral",
+    confidence: "low",
+    contradictionsResolved: [],
+    sourceSignals: ["current_week_empty"],
+  };
+}
+
+function DashboardCoachCard({
+  feedback,
+  analytics,
+  visualStatus,
+}: {
+  feedback: TrainingCoachFeedback;
+  analytics: AnalyticsSnapshot;
+  visualStatus: { showScore: boolean; label: string; detail: string; factorLabel: string; badgeLabel?: string; showFactors?: boolean };
+}) {
+  const blocks: Array<{ id: string; label: string; insight: CoachInsight }> = [];
+  const strength = feedback.strengths[0];
+  const attention = feedback.attentions[0];
+  const trend = feedback.historicalInsight;
+  const hasTrend = Boolean(trend);
+  const factors = analytics.factors.slice(0, 4).map(([label, value]) => ({
+    label: getCoachFactorLabel(String(label)),
+    value: Math.min(100, Math.max(0, Number(value) || 0)),
+  }));
+
+  if (strength) blocks.push({ id: "strength", label: "Fortaleza", insight: strength });
+  if (attention) blocks.push({ id: "attention", label: "Atención", insight: attention });
+  if (feedback.readinessInsight) blocks.push({ id: "readiness", label: "Estado del cuerpo", insight: feedback.readinessInsight });
+  blocks.push({
+    id: "next",
+    label: feedback.nextTarget ? "Próximo objetivo" : "Consejo",
+    insight: {
+      title: feedback.nextTarget ?? "Siguiente paso",
+      body: feedback.nextTarget ? feedback.nextAdvice : feedback.nextAdvice,
+      tone: feedback.tone === "warning" ? "warning" : "info",
+      priority: 0,
+    },
+  });
+
+  return (
+    <div className={`card wide dashboard-coach-card ${feedback.tone}`}>
+      <div className="smart-card-header dashboard-coach-header">
+        <div>
+          <p className="eyebrow">Coach Organizatech</p>
+          <h3>{feedback.headline}</h3>
+        </div>
+        <Sparkles size={19} />
+      </div>
+      <div className="coach-status-band">
+        {visualStatus.showScore ? (
+          <div className={`coach-score ${feedback.tone}`}>
+            <strong>{analytics.score}</strong>
+            <span>/100</span>
+          </div>
+        ) : (
+          <div className={`coach-status-pill ${feedback.tone}`}>
+            <span>{visualStatus.badgeLabel ?? visualStatus.label}</span>
+          </div>
+        )}
+        <div className="coach-status-copy">
+          <strong>{visualStatus.label}</strong>
+          <span>{visualStatus.detail}</span>
+        </div>
+      </div>
+      {visualStatus.showFactors !== false ? (
+        <div className="coach-factor-list" aria-label={visualStatus.factorLabel}>
+          <span className="coach-factor-heading">{visualStatus.factorLabel}</span>
+          {factors.map((factor) => (
+            <div className="coach-factor-row" key={factor.label}>
+              <div>
+                <span>{factor.label}</span>
+                <small>{Math.round(factor.value)}/100</small>
+              </div>
+              <div className="coach-factor-track" aria-hidden="true">
+                <span style={{ width: `${factor.value}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {trend ? (
+        <div className={`coach-trend-block ${trend.tone}`}>
+          <span>Tendencia</span>
+          <strong>{trend.title}</strong>
+          <p>{trend.body}</p>
+          {trend.action ? <small>{trend.action}</small> : null}
+        </div>
+      ) : null}
+      <div className="coach-summary-block">
+        <span>Lectura rápida</span>
+        <p>{feedback.summary}</p>
+      </div>
+      <div className="coach-insight-grid">
+        {blocks.slice(0, hasTrend ? 3 : 4).map((block) => (
+          <div className={`coach-insight-block ${block.insight.tone}`} key={block.id}>
+            <span>{block.label}</span>
+            <strong>{block.insight.title}</strong>
+            <p>{block.insight.body}</p>
+            {block.insight.action ? <small>{block.insight.action}</small> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function getCoachFactorLabel(label: string) {
+  if (label.toLowerCase().includes("cumplimiento")) return "Cumplimiento";
+  if (label.toLowerCase().includes("repeticiones")) return "Reps";
+  if (label.toLowerCase().includes("carga")) return "Carga";
+  if (label.toLowerCase().includes("volumen")) return "Volumen";
+  return label;
 }
 
 function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {
