@@ -166,6 +166,193 @@ h3 {
   animation: rise 180ms ease-out;
 }
 
+.profile-screen {
+  gap: 16px;
+}
+
+.profile-hero,
+.profile-section {
+  display: grid;
+  min-width: 0;
+  border: 1px solid rgba(60, 122, 255, 0.56);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(60, 122, 255, 0.16), transparent 15rem),
+    linear-gradient(180deg, rgba(20, 34, 50, 0.94), rgba(10, 20, 31, 0.94));
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24);
+}
+
+.profile-hero {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 18px;
+}
+
+.profile-hero-copy {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.profile-hero-copy h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #fff;
+  font-size: clamp(18px, 5vw, 24px);
+  font-weight: 900;
+  line-height: 1.14;
+}
+
+.profile-hero-copy p:not(.eyebrow) {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--blue-soft);
+  font-size: clamp(11px, 3.3vw, 13px);
+  line-height: 1.35;
+}
+
+.user-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(220, 231, 255, 0.42);
+  border-radius: 999px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 32% 24%, rgba(116, 223, 113, 0.22), transparent 42%),
+    linear-gradient(135deg, rgba(60, 122, 255, 0.72), rgba(12, 24, 38, 0.96));
+  box-shadow: 0 12px 30px rgba(60, 122, 255, 0.22);
+  font-weight: 900;
+  line-height: 1;
+  object-fit: cover;
+}
+
+.user-avatar-small {
+  width: 42px;
+  height: 42px;
+  font-size: 18px;
+}
+
+.user-avatar-medium {
+  width: 52px;
+  height: 52px;
+  font-size: 22px;
+}
+
+.user-avatar-large {
+  width: 76px;
+  height: 76px;
+  font-size: 32px;
+}
+
+.profile-pill,
+.profile-coming-soon {
+  width: fit-content;
+  border: 1px solid rgba(116, 223, 113, 0.72);
+  border-radius: 999px;
+  color: var(--green);
+  background: rgba(116, 223, 113, 0.12);
+  padding: 5px 10px;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.profile-section {
+  gap: 14px;
+  padding: 16px;
+}
+
+.profile-section-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profile-section-header h3,
+.profile-privacy-section h3 {
+  margin: 0 0 5px;
+  color: #fff;
+  font-size: clamp(14px, 4vw, 17px);
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.profile-section-header p,
+.profile-privacy-section p {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(11px, 3.3vw, 13px);
+  line-height: 1.42;
+}
+
+.profile-info-list {
+  display: grid;
+  min-width: 0;
+  gap: 0;
+  margin: 0;
+}
+
+.profile-info-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid rgba(220, 231, 255, 0.12);
+  padding: 11px 0;
+}
+
+.profile-info-row:first-child {
+  border-top: 0;
+}
+
+.profile-info-row dt,
+.profile-info-row dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.28;
+}
+
+.profile-info-row dt {
+  color: var(--muted);
+  font-size: clamp(11px, 3.3vw, 13px);
+  font-weight: 800;
+}
+
+.profile-info-row dd {
+  justify-self: end;
+  color: #fff;
+  font-size: clamp(11px, 3.3vw, 13px);
+  font-weight: 900;
+  text-align: right;
+}
+
+.profile-feature-section {
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-feature-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(60, 122, 255, 0.42);
+  border-radius: 8px;
+  color: var(--primary);
+  background: rgba(60, 122, 255, 0.12);
+}
+
+.profile-privacy-section {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+}
+
 .training-completion-screen {
   display: grid;
   min-width: 0;
@@ -2695,6 +2882,47 @@ h3 {
 .menu-panel-header h3 {
   margin-bottom: 0;
   font-size: 16px;
+}
+
+.profile-menu-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(220, 231, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(7, 16, 26, 0.34);
+  padding: 12px;
+}
+
+.profile-menu-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.profile-menu-copy h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.profile-menu-copy span,
+.profile-menu-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-menu-copy small {
+  color: var(--green);
+  font-weight: 800;
 }
 
 .profile-shortcut {

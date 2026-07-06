@@ -11,7 +11,6 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronLeft,
-  Database,
   Dumbbell,
   Eye,
   EyeOff,
@@ -22,12 +21,10 @@ import {
   Minus,
   Pencil,
   Save,
-  Settings,
   Smile,
   Sparkles,
   Trash2,
   TrendingUp,
-  User,
   UserPlus,
 } from "lucide-react";
 import {
@@ -49,6 +46,9 @@ import {
   saveTrainingSessionWithEntries,
   type DataSource,
 } from "@/lib/data/repository";
+import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
+import { ProfileScreen } from "@/components/profile/ProfileScreen";
+import { buildProfileViewModel } from "@/lib/profile/profile-view-model";
 import {
   calculateExerciseMetrics,
   calculateWeeklyComparison,
@@ -903,6 +903,13 @@ export function OrganizatechApp({
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
     : cycleHistory.length + 1;
   const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
+  const profileViewModel = useMemo(() => buildProfileViewModel({
+    displayName: sessionName,
+    email: supabaseUser?.email ?? null,
+    dataSource,
+    avatarUrl: null,
+    avatarPath: null,
+  }), [dataSource, sessionName, supabaseUser?.email]);
   const trainingTopbarMeta = buildTrainingTopbarMeta({
     cycleLabel: getCycleTypeTitle(displayTrainingPlan),
     weekNumber: currentWeek,
@@ -3159,15 +3166,7 @@ export function OrganizatechApp({
             </div>
             <div className="menu-drawer-body">
               <div className="menu-panel" role="menu" aria-label="Menú principal">
-                <div className="menu-panel-header">
-                  <div>
-                    <p className="eyebrow">Bienvenido</p>
-                    <h3>{sessionName}</h3>
-                  </div>
-                  <button className="profile-shortcut" type="button" role="menuitem" onClick={() => navigateTo("perfil")}>
-                    Mi perfil
-                  </button>
-                </div>
+                <ProfileMenuHeader profile={profileViewModel} onOpenProfile={() => navigateTo("perfil")} />
                 <div className="menu-grid">
                   {menuScreens.map((item) => (
                     <button
@@ -3343,7 +3342,7 @@ export function OrganizatechApp({
           ? <PersistedCycleHistoryScreen history={persistedCycleHistory} />
           : <CycleHistoryScreen history={cycleHistory} />
       )}
-      {screen === "perfil" && <ProfileScreen name={sessionName} summary={summary} dataSource={dataSource} refreshData={refreshData} resetLocal={handleResetLocal} />}
+      {screen === "perfil" && <ProfileScreen profile={profileViewModel} />}
       {isNewCycleConfirmOpen && (
         <ConfirmNewCycleModal
           isBusy={isBusy}
@@ -5964,43 +5963,6 @@ function buildAnalytics(summary: ReturnType<typeof calculateWeeklySummary>, curr
 
 function clampScore(value: number) {
   return Math.min(100, Math.max(0, value));
-}
-
-function ProfileScreen({ name, summary, dataSource, refreshData, resetLocal }: { name: string; summary: ReturnType<typeof calculateWeeklySummary>; dataSource: DataSource; refreshData: () => void; resetLocal: () => void }) {
-  return (
-    <section className="screen">
-      <div className="card wide">
-        <div className="brand">
-          <div className="brand-mark"><User size={22} /></div>
-          <div>
-            <h2>{name}</h2>
-            <p className="eyebrow">{dataSource === "supabase" ? "Cuenta conectada" : "Cuenta local"}</p>
-          </div>
-          <button className="icon-button" aria-label="Configuración" style={{ marginLeft: "auto" }}><Settings size={17} /></button>
-        </div>
-      </div>
-      <div className="metric-grid">
-        <div className="metric"><span>Entrenamientos</span><strong>48</strong></div>
-        <div className="metric"><span>Semanas</span><strong>{summary.week + 8}</strong></div>
-        <div className="metric"><span>Racha actual</span><strong>4</strong></div>
-      </div>
-      <div className="card wide">
-        <h3>Datos</h3>
-        <div className="two-cols">
-          <button className="button secondary" type="button" onClick={refreshData}><Database size={17} /> Actualizar</button>
-          {dataSource !== "supabase" && (
-            <button className="button secondary" type="button" onClick={resetLocal}>Reiniciar perfil local</button>
-          )}
-        </div>
-      </div>
-      <div className="card wide">
-        <h3>Objetivos</h3>
-        <ProgressLine label="Fuerza" value={85} />
-        <ProgressLine label="Volumen muscular" value={60} />
-        <ProgressLine label="Definición" value={30} />
-      </div>
-    </section>
-  );
 }
 
 function RoutineMetricGrid({
