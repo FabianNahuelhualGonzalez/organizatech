@@ -4241,6 +4241,8 @@ function DashboardCoachCard({
   const blocks: Array<{ id: string; label: string; insight: CoachInsight }> = [];
   const strength = feedback.strengths[0];
   const attention = feedback.attentions[0];
+  const trend = feedback.historicalInsight;
+  const hasTrend = Boolean(trend);
   const factors = analytics.factors.slice(0, 4).map(([label, value]) => ({
     label: getCoachFactorLabel(String(label)),
     value: Math.min(100, Math.max(0, Number(value) || 0)),
@@ -4301,12 +4303,20 @@ function DashboardCoachCard({
           ))}
         </div>
       ) : null}
+      {trend ? (
+        <div className={`coach-trend-block ${trend.tone}`}>
+          <span>Tendencia</span>
+          <strong>{trend.title}</strong>
+          <p>{trend.body}</p>
+          {trend.action ? <small>{trend.action}</small> : null}
+        </div>
+      ) : null}
       <div className="coach-summary-block">
         <span>Lectura rápida</span>
         <p>{feedback.summary}</p>
       </div>
       <div className="coach-insight-grid">
-        {blocks.slice(0, 4).map((block) => (
+        {blocks.slice(0, hasTrend ? 3 : 4).map((block) => (
           <div className={`coach-insight-block ${block.insight.tone}`} key={block.id}>
             <span>{block.label}</span>
             <strong>{block.insight.title}</strong>

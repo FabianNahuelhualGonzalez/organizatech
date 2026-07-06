@@ -4083,6 +4083,49 @@ h3 {
   background: linear-gradient(90deg, var(--primary), var(--green));
 }
 
+.coach-trend-block {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid rgba(60, 122, 255, 0.38);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(60, 122, 255, 0.13), rgba(5, 16, 30, 0.48));
+}
+
+.coach-trend-block > span {
+  color: var(--muted);
+  font-size: clamp(10px, 2.9vw, 12px);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.coach-trend-block strong {
+  color: #fff;
+  font-size: clamp(13px, 3.8vw, 15px);
+}
+
+.coach-trend-block p,
+.coach-trend-block small {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(11px, 3.2vw, 13px);
+  line-height: 1.36;
+}
+
+.coach-trend-block small {
+  color: #fff;
+}
+
+.coach-trend-block.positive {
+  border-color: rgba(116, 223, 113, 0.38);
+  background: linear-gradient(135deg, rgba(116, 223, 113, 0.1), rgba(5, 16, 30, 0.48));
+}
+
+.coach-trend-block.warning {
+  border-color: rgba(255, 77, 109, 0.4);
+  background: linear-gradient(135deg, rgba(255, 77, 109, 0.1), rgba(5, 16, 30, 0.48));
+}
+
 .coach-summary-block {
   display: grid;
   gap: 5px;
