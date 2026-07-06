@@ -16,6 +16,8 @@ import {
   assert.equal(feedback.headline, "Primer punto de partida");
   assert.match(feedback.summary, /base/i);
   assert.equal(feedback.strengths[0]?.title, "Registro base creado");
+  assert.equal(feedback.strengths[0]?.action, undefined);
+  assert.equal(feedback.nextAdvice, "Repite esta base una vez más y busca mantener técnica, carga y repeticiones antes de acelerar la progresión.");
   assert.equal(feedback.confidence, "medium");
   assert.ok(feedback.sourceSignals.includes("first_reference"));
   assertNonEmptyFeedback(feedback);

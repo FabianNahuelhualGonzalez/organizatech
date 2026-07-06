@@ -219,7 +219,6 @@ function buildInsight(signal: DetectedSignal, input: NormalizedTrainingCoachInpu
     return {
       title: "Registro base creado",
       body: "Este entrenamiento queda como punto de partida para comparar tus próximas semanas.",
-      action: "Repite técnica y consistencia antes de acelerar la progresión.",
       tone: "positive",
       priority: signal.priority,
     };
@@ -404,7 +403,7 @@ function resolveSummary(input: NormalizedTrainingCoachInput, signals: string[], 
 }
 
 function resolveNextAdvice(input: NormalizedTrainingCoachInput, signals: string[], nextTarget?: string) {
-  if (signals.includes("first_reference")) return "Usa este registro como referencia y busca repetir la técnica antes de acelerar la progresión.";
+  if (signals.includes("first_reference")) return "Repite esta base una vez más y busca mantener técnica, carga y repeticiones antes de acelerar la progresión.";
   if (signals.includes("sleep_low_performance_low")) return "No fuerces marcas si el descanso sigue bajo; prioriza técnica y consistencia.";
   if (signals.includes("kg_up_reps_down")) return "Repite la carga y recupera repeticiones antes de volver a subir peso.";
   if (signals.includes("strong_exercise_drop")) return nextTarget ?? "Elige el ejercicio con mayor caída y busca igualar el registro anterior.";
