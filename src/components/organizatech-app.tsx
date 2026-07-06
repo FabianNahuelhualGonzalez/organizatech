@@ -3667,6 +3667,7 @@ function DashboardScreen({
   switchDay: (day: string) => void;
 }) {
   const hasTodayRoutine = dayExercises.length > 0;
+  const analytics = buildAnalytics(summary, currentMetrics);
   const coachFeedback = useMemo(() => buildTrainingCoachFeedback(buildTrainingCoachDashboardInput({
     summary,
     currentMetrics,
@@ -3674,6 +3675,11 @@ function DashboardScreen({
     currentWeek,
     weeklyEquivalentProgress,
   })), [summary, currentMetrics, entries, currentWeek, weeklyEquivalentProgress]);
+  const coachVisualStatus = weeklyEquivalentProgress.status === "ready"
+    ? { showScore: true, label: feedbackHeadlineForStatus(coachFeedback), detail: "Factores de rendimiento" }
+    : weeklyEquivalentProgress.status === "no_previous"
+      ? { showScore: false, label: "Base creada", detail: "Punto de partida" }
+      : { showScore: false, label: "Sin historial suficiente", detail: "Registro actual" };
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
@@ -3864,7 +3870,7 @@ function DashboardScreen({
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
       </div>
-      <DashboardCoachCard feedback={coachFeedback} />
+      <DashboardCoachCard feedback={coachFeedback} analytics={analytics} visualStatus={coachVisualStatus} />
     </section>
   );
 }
@@ -4170,10 +4176,28 @@ function buildWeeklyProgressTrendLabel(progress: WeeklyEquivalentProgressResult)
   return "Mantienes un ritmo similar a la semana anterior";
 }
 
-function DashboardCoachCard({ feedback }: { feedback: TrainingCoachFeedback }) {
+function feedbackHeadlineForStatus(feedback: TrainingCoachFeedback) {
+  if (feedback.tone === "warning") return "Revisar progreso";
+  if (feedback.tone === "positive") return "Buen avance";
+  return feedback.headline;
+}
+
+function DashboardCoachCard({
+  feedback,
+  analytics,
+  visualStatus,
+}: {
+  feedback: TrainingCoachFeedback;
+  analytics: AnalyticsSnapshot;
+  visualStatus: { showScore: boolean; label: string; detail: string };
+}) {
   const blocks: Array<{ id: string; label: string; insight: CoachInsight }> = [];
   const strength = feedback.strengths[0];
   const attention = feedback.attentions[0];
+  const factors = analytics.factors.slice(0, 4).map(([label, value]) => ({
+    label: getCoachFactorLabel(String(label)),
+    value: Math.min(100, Math.max(0, Number(value) || 0)),
+  }));
 
   if (strength) blocks.push({ id: "strength", label: "Fortaleza", insight: strength });
   if (attention) blocks.push({ id: "attention", label: "Atención", insight: attention });
@@ -4198,6 +4222,35 @@ function DashboardCoachCard({ feedback }: { feedback: TrainingCoachFeedback }) {
         </div>
         <Sparkles size={19} />
       </div>
+      <div className="coach-status-band">
+        {visualStatus.showScore ? (
+          <div className={`coach-score ${feedback.tone}`}>
+            <strong>{analytics.score}</strong>
+            <span>/100</span>
+          </div>
+        ) : (
+          <div className={`coach-status-pill ${feedback.tone}`}>
+            <span>{visualStatus.label}</span>
+          </div>
+        )}
+        <div className="coach-status-copy">
+          <strong>{visualStatus.label}</strong>
+          <span>{visualStatus.detail}</span>
+        </div>
+      </div>
+      <div className="coach-factor-list" aria-label={visualStatus.showScore ? "Factores de rendimiento" : "Factores del registro actual"}>
+        {factors.map((factor) => (
+          <div className="coach-factor-row" key={factor.label}>
+            <div>
+              <span>{factor.label}</span>
+              <small>{Math.round(factor.value)}/100</small>
+            </div>
+            <div className="coach-factor-track" aria-hidden="true">
+              <span style={{ width: `${factor.value}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
       <div className="coach-summary-block">
         <span>Lectura rápida</span>
         <p>{feedback.summary}</p>
@@ -4214,6 +4267,14 @@ function DashboardCoachCard({ feedback }: { feedback: TrainingCoachFeedback }) {
       </div>
     </div>
   );
+}
+
+function getCoachFactorLabel(label: string) {
+  if (label.toLowerCase().includes("cumplimiento")) return "Cumplimiento";
+  if (label.toLowerCase().includes("repeticiones")) return "Reps";
+  if (label.toLowerCase().includes("carga")) return "Carga";
+  if (label.toLowerCase().includes("volumen")) return "Volumen";
+  return label;
 }
 
 function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {
