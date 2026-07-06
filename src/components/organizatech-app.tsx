@@ -119,6 +119,12 @@ import {
   type LatestExercisePerformance,
 } from "@/lib/training/exercise-last-performance-repository";
 import {
+  buildTrainingCoachFeedback,
+  type CoachInsight,
+  type TrainingCoachFeedback,
+} from "@/lib/training/training-coach-feedback";
+import { buildTrainingCoachDashboardInput } from "@/lib/training/training-coach-dashboard-mapper";
+import {
   createStableWorkoutStartedAt,
   createLatestExercisePerformanceRequest,
   getLatestExercisePerformanceIdleState,
@@ -892,7 +898,6 @@ export function OrganizatechApp({
     activeCycleId: isCycleScopedActiveCycle ? persistedActiveCycle?.id ?? null : null,
     plannedDays: routineDays,
   }), [calendarNormalizedEntries, calendarNormalizedTrainingSessions, isCycleScopedActiveCycle, persistedActiveCycle?.id, routineDays]);
-  const insights = generateSmartInsights(summary, currentMetrics);
   const visibleCycleHistoryCount = isTrainingCyclesRepositoryActive ? persistedCycleHistory.length : cycleHistory.length;
   const visibleCycleNumber = isTrainingCyclesRepositoryActive
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
@@ -3192,13 +3197,11 @@ export function OrganizatechApp({
             usesCycleScopedSessions={isCycleScopedActiveCycle}
             day={dashboardDay}
             weekDays={dashboardCarouselDays}
-            routineDays={routineDays}
             routine={dashboardRoutine}
             dayExercises={dashboardExercises}
             summary={summary}
             weeklyEquivalentProgress={weeklyEquivalentProgress}
             currentMetrics={dashboardCurrentMetrics}
-            insights={insights}
             currentWeek={currentWeek}
             entries={calendarNormalizedEntries}
             sessions={calendarNormalizedTrainingSessions}
@@ -3631,13 +3634,11 @@ function DashboardScreen({
   usesCycleScopedSessions,
   day,
   weekDays,
-  routineDays,
   routine,
   dayExercises,
   summary,
   weeklyEquivalentProgress,
   currentMetrics,
-  insights,
   currentWeek,
   entries,
   sessions,
@@ -3652,13 +3653,11 @@ function DashboardScreen({
   usesCycleScopedSessions: boolean;
   day: string;
   weekDays: string[];
-  routineDays: string[];
   routine: string;
   dayExercises: ExerciseTemplate[];
   summary: ReturnType<typeof calculateWeeklySummary>;
   weeklyEquivalentProgress: WeeklyEquivalentProgressResult;
   currentMetrics: ExerciseMetrics[];
-  insights: ReturnType<typeof generateSmartInsights>;
   currentWeek: number;
   entries: ExerciseEntry[];
   sessions: TrainingSession[];
@@ -3668,7 +3667,13 @@ function DashboardScreen({
   switchDay: (day: string) => void;
 }) {
   const hasTodayRoutine = dayExercises.length > 0;
-  const analytics = buildAnalytics(summary, currentMetrics);
+  const coachFeedback = useMemo(() => buildTrainingCoachFeedback(buildTrainingCoachDashboardInput({
+    summary,
+    currentMetrics,
+    entries,
+    currentWeek,
+    weeklyEquivalentProgress,
+  })), [summary, currentMetrics, entries, currentWeek, weeklyEquivalentProgress]);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
@@ -3859,9 +3864,7 @@ function DashboardScreen({
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
       </div>
-      <DashboardSmartInsights insights={insights} />
-      <DashboardMotivationSummary entries={entries} currentWeek={currentWeek} routineDays={routineDays} />
-      <DashboardAnalytics summary={summary} analytics={analytics} />
+      <DashboardCoachCard feedback={coachFeedback} />
     </section>
   );
 }
@@ -4165,6 +4168,52 @@ function buildWeeklyProgressTrendLabel(progress: WeeklyEquivalentProgressResult)
   if (progress.differenceValue > 0) return "Vas por encima del ritmo de la semana anterior";
   if (progress.differenceValue < 0) return "Vas por debajo del ritmo de la semana anterior";
   return "Mantienes un ritmo similar a la semana anterior";
+}
+
+function DashboardCoachCard({ feedback }: { feedback: TrainingCoachFeedback }) {
+  const blocks: Array<{ id: string; label: string; insight: CoachInsight }> = [];
+  const strength = feedback.strengths[0];
+  const attention = feedback.attentions[0];
+
+  if (strength) blocks.push({ id: "strength", label: "Fortaleza", insight: strength });
+  if (attention) blocks.push({ id: "attention", label: "Atención", insight: attention });
+  if (feedback.readinessInsight) blocks.push({ id: "readiness", label: "Estado del cuerpo", insight: feedback.readinessInsight });
+  blocks.push({
+    id: "next",
+    label: feedback.nextTarget ? "Próximo objetivo" : "Consejo",
+    insight: {
+      title: feedback.nextTarget ?? "Siguiente paso",
+      body: feedback.nextTarget ? feedback.nextAdvice : feedback.nextAdvice,
+      tone: feedback.tone === "warning" ? "warning" : "info",
+      priority: 0,
+    },
+  });
+
+  return (
+    <div className={`card wide dashboard-coach-card ${feedback.tone}`}>
+      <div className="smart-card-header dashboard-coach-header">
+        <div>
+          <p className="eyebrow">Coach Organizatech</p>
+          <h3>{feedback.headline}</h3>
+        </div>
+        <Sparkles size={19} />
+      </div>
+      <div className="coach-summary-block">
+        <span>Lectura rápida</span>
+        <p>{feedback.summary}</p>
+      </div>
+      <div className="coach-insight-grid">
+        {blocks.slice(0, 4).map((block) => (
+          <div className={`coach-insight-block ${block.insight.tone}`} key={block.id}>
+            <span>{block.label}</span>
+            <strong>{block.insight.title}</strong>
+            <p>{block.insight.body}</p>
+            {block.insight.action ? <small>{block.insight.action}</small> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {

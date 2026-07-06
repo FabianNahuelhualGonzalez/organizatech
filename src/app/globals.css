@@ -3924,6 +3924,89 @@ h3 {
   box-shadow: 0 18px 44px rgba(60, 122, 255, 0.12);
 }
 
+.dashboard-coach-card {
+  display: grid;
+  gap: 14px;
+  border-color: rgba(60, 122, 255, 0.48);
+  background:
+    linear-gradient(135deg, rgba(60, 122, 255, 0.18), rgba(116, 223, 113, 0.06)),
+    var(--panel);
+  box-shadow: 0 18px 44px rgba(60, 122, 255, 0.12);
+}
+
+.dashboard-coach-card.warning {
+  border-color: rgba(255, 77, 109, 0.42);
+}
+
+.dashboard-coach-card.neutral {
+  border-color: rgba(251, 191, 36, 0.36);
+}
+
+.dashboard-coach-header {
+  margin-bottom: 0;
+}
+
+.coach-summary-block {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid rgba(220, 231, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(5, 16, 30, 0.42);
+}
+
+.coach-summary-block span,
+.coach-insight-block > span {
+  color: var(--muted);
+  font-size: clamp(10px, 2.9vw, 12px);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.coach-summary-block p,
+.coach-insight-block p,
+.coach-insight-block small {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(11px, 3.2vw, 13px);
+  line-height: 1.36;
+}
+
+.coach-insight-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.coach-insight-block {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid rgba(220, 231, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(5, 16, 30, 0.36);
+}
+
+.coach-insight-block strong {
+  color: #fff;
+  font-size: clamp(13px, 3.8vw, 15px);
+}
+
+.coach-insight-block.positive {
+  border-color: rgba(116, 223, 113, 0.38);
+}
+
+.coach-insight-block.warning {
+  border-color: rgba(255, 77, 109, 0.38);
+}
+
+.coach-insight-block.info {
+  border-color: rgba(60, 122, 255, 0.34);
+}
+
+.coach-insight-block small {
+  color: #fff;
+}
+
 .smart-card-header {
   display: flex;
   justify-content: space-between;
