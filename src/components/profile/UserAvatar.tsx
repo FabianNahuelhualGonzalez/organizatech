@@ -6,9 +6,11 @@ import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
 export function UserAvatar({
   profile,
   size = "medium",
+  onImageError,
 }: {
   profile: Pick<ProfileViewModel, "avatarInitial" | "avatarUrl" | "displayName">;
   size?: "small" | "medium" | "large";
+  onImageError?: () => void;
 }) {
   const className = `user-avatar user-avatar-${size}`;
   const [imgFailed, setImgFailed] = useState(false);
@@ -25,7 +27,10 @@ export function UserAvatar({
         alt={`Foto de perfil de ${profile.displayName}`}
         decoding="async"
         loading={size === "large" ? "eager" : "lazy"}
-        onError={() => setImgFailed(true)}
+        onError={() => {
+          setImgFailed(true);
+          onImageError?.();
+        }}
       />
     );
   }

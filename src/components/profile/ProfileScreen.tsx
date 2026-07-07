@@ -34,6 +34,7 @@ export function ProfileScreen({
   canEditAvatar,
   avatarLoading,
   avatarError,
+  onAvatarImageError,
   onReloadPersonalData,
   onSavePersonalData,
   onUploadAvatar,
@@ -47,6 +48,7 @@ export function ProfileScreen({
   canEditAvatar: boolean;
   avatarLoading: boolean;
   avatarError: string;
+  onAvatarImageError?: () => void;
   onReloadPersonalData: () => void;
   onSavePersonalData: (input: ProfileFormValues) => Promise<ProfilePersonalData>;
   onUploadAvatar: (file: File) => Promise<void>;
@@ -55,7 +57,7 @@ export function ProfileScreen({
   return (
     <section className="screen profile-screen">
       <div className="profile-hero">
-        <UserAvatar profile={profile} size="large" />
+        <UserAvatar profile={profile} size="large" onImageError={onAvatarImageError} />
         <div className="profile-hero-copy">
           <p className="eyebrow">Perfil</p>
           <h2>{profile.displayName}</h2>

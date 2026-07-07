@@ -264,7 +264,9 @@ const ROUTINE_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_FLOW_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
+const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
 const SEEN_NOTIFICATIONS_KEY = "organizatech:seen-notifications-v1";
+const SEEN_NOTIFICATIONS_MAX_RECORDS = 60;
 const blockedSignupDomains = new Set([
   "example.com",
   "example.cl",
@@ -447,6 +449,12 @@ interface AppNotification {
   title: string;
   summary: string;
   target: "dashboard" | "perfil";
+  kind: "feature" | "profile" | "week" | "progress" | "coach";
+}
+
+interface SeenNotificationRecord {
+  id: string;
+  seenAt: number;
 }
 
 interface TrainingCycleSnapshot {
@@ -516,7 +524,7 @@ export function OrganizatechApp({
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
-  const [seenNotificationIds, setSeenNotificationIds] = useState<string[]>(() => loadSeenNotificationIds());
+  const [seenNotificationRecords, setSeenNotificationRecords] = useState<SeenNotificationRecord[]>(() => loadSeenNotificationRecords());
   const [isEditingRoutinePlan, setIsEditingRoutinePlan] = useState(false);
   const [routineNotice, setRoutineNotice] = useState("");
   const [isTopbarHidden, setIsTopbarHidden] = useState(false);
@@ -541,6 +549,8 @@ export function OrganizatechApp({
   const dailyReadinessSaveInFlightRef = useRef(false);
   const workoutCompletionInFlightRef = useRef(false);
   const lastProfileAvatarRefreshAtRef = useRef(0);
+  const profileAvatarBootstrapUserIdRef = useRef<string | null>(null);
+  const lastProfileAvatarErrorRefreshAtRef = useRef(0);
   const [pendingReadinessLink, setPendingReadinessLink] = useState<PendingWorkoutReadinessLink | null>(null);
   const pendingReadinessLinkRef = useRef<PendingWorkoutReadinessLink | null>(null);
   const [hasRecoverableWorkoutStart, setHasRecoverableWorkoutStart] = useState(false);
@@ -945,9 +955,8 @@ export function OrganizatechApp({
     avatarUrl: profileAvatar.avatarUrl,
     avatarPath: profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null,
   }), [canEditProfilePersonalData, dataSource, profileAvatar.avatarPath, profileAvatar.avatarUrl, profilePersonalData?.avatarPath, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
-  const refreshProfileAvatar = useCallback(async (options?: { force?: boolean; avatarPath?: string | null }) => {
-    const hasKnownAvatarPath = Boolean(options?.avatarPath ?? profileAvatar.avatarPath ?? profilePersonalData?.avatarPath);
-    if (!canEditProfilePersonalData || !supabaseSession || !hasKnownAvatarPath) return null;
+  const refreshProfileAvatar = useCallback(async (options?: { force?: boolean; avatarPath?: string | null; allowProfileLookup?: boolean }) => {
+    if (!canEditProfilePersonalData || !supabaseSession) return null;
 
     const now = Date.now();
     if (!options?.force && now - lastProfileAvatarRefreshAtRef.current < PROFILE_AVATAR_REFRESH_THROTTLE_MS) {
@@ -956,6 +965,25 @@ export function OrganizatechApp({
 
     lastProfileAvatarRefreshAtRef.current = now;
     try {
+      let avatarPath = options?.avatarPath ?? profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null;
+      if (!avatarPath && options?.allowProfileLookup) {
+        const profile = await getProfilePersonalData();
+        setProfilePersonalData(profile);
+        setSessionName(profile.displayName);
+        avatarPath = profile.avatarPath;
+        if (!avatarPath) {
+          setProfileAvatar({
+            avatarPath: null,
+            avatarUrl: null,
+            avatarUpdatedAt: null,
+          });
+          setProfileAvatarError("");
+          return null;
+        }
+      }
+
+      if (!avatarPath) return null;
+
       const avatar = await getCurrentProfileAvatar();
       setProfileAvatar(avatar);
       setProfileAvatarError("");
@@ -1000,7 +1028,10 @@ export function OrganizatechApp({
     summary,
     weeklyEquivalentProgress,
   ]);
-  const unseenNotificationCount = appNotifications.filter((notification) => !seenNotificationIds.includes(notification.id)).length;
+  const seenNotificationIds = useMemo(() => new Set(seenNotificationRecords.map((record) => record.id)), [seenNotificationRecords]);
+  const newNotifications = appNotifications.filter((notification) => !seenNotificationIds.has(notification.id));
+  const historyNotifications = appNotifications.filter((notification) => seenNotificationIds.has(notification.id));
+  const unseenNotificationCount = newNotifications.length;
 
   useEffect(() => {
     if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
@@ -1051,6 +1082,18 @@ export function OrganizatechApp({
   }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt]);
 
   useEffect(() => {
+    const currentUserId = supabaseUser?.id ?? null;
+    if (!canEditProfilePersonalData || !currentUserId) {
+      profileAvatarBootstrapUserIdRef.current = null;
+      return;
+    }
+
+    if (profileAvatarBootstrapUserIdRef.current === currentUserId) return;
+    profileAvatarBootstrapUserIdRef.current = currentUserId;
+    void refreshProfileAvatar({ force: true, allowProfileLookup: true });
+  }, [canEditProfilePersonalData, refreshProfileAvatar, supabaseUser?.id]);
+
+  useEffect(() => {
     if (screen !== "perfil" || !canEditProfilePersonalData) {
       if (!canEditProfilePersonalData) {
         setProfilePersonalData(null);
@@ -1098,7 +1141,7 @@ export function OrganizatechApp({
 
   useEffect(() => {
     function refreshAvatarOnResume() {
-      void refreshProfileAvatar();
+      void refreshProfileAvatar({ allowProfileLookup: true });
     }
 
     function refreshAvatarOnVisibilityChange() {
@@ -1110,11 +1153,13 @@ export function OrganizatechApp({
     document.addEventListener("visibilitychange", refreshAvatarOnVisibilityChange);
     window.addEventListener("focus", refreshAvatarOnResume);
     window.addEventListener("pageshow", refreshAvatarOnResume);
+    window.addEventListener("online", refreshAvatarOnResume);
 
     return () => {
       document.removeEventListener("visibilitychange", refreshAvatarOnVisibilityChange);
       window.removeEventListener("focus", refreshAvatarOnResume);
       window.removeEventListener("pageshow", refreshAvatarOnResume);
+      window.removeEventListener("online", refreshAvatarOnResume);
     };
   }, [refreshProfileAvatar]);
 
@@ -3339,23 +3384,33 @@ export function OrganizatechApp({
     );
   }
 
+  function handleProfileAvatarImageError() {
+    const now = Date.now();
+    if (now - lastProfileAvatarErrorRefreshAtRef.current < PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS) return;
+    lastProfileAvatarErrorRefreshAtRef.current = now;
+    void refreshProfileAvatar({ force: true, allowProfileLookup: true });
+  }
+
   function markNotificationsSeen(ids: string[]) {
     if (ids.length === 0) return;
-    setSeenNotificationIds((current) => {
-      const next = [...new Set([...current, ...ids])];
-      saveSeenNotificationIds(next);
+    setSeenNotificationRecords((current) => {
+      const now = Date.now();
+      const recordsById = new Map(current.map((record) => [record.id, record]));
+      ids.forEach((id) => {
+        if (!recordsById.has(id)) {
+          recordsById.set(id, { id, seenAt: now });
+        }
+      });
+      const next = Array.from(recordsById.values())
+        .sort((a, b) => a.seenAt - b.seenAt)
+        .slice(-SEEN_NOTIFICATIONS_MAX_RECORDS);
+      saveSeenNotificationRecords(next);
       return next;
     });
   }
 
   function toggleNotifications() {
-    setIsNotificationPanelOpen((current) => {
-      const next = !current;
-      if (next) {
-        markNotificationsSeen(appNotifications.map((notification) => notification.id));
-      }
-      return next;
-    });
+    setIsNotificationPanelOpen((current) => !current);
     setIsMenuOpen(false);
   }
 
@@ -3423,21 +3478,26 @@ export function OrganizatechApp({
             <div className="notification-panel" role="dialog" aria-label="Notificaciones">
               <div className="notification-panel-header">
                 <strong>Notificaciones</strong>
-                <span>{appNotifications.length > 0 ? `${appNotifications.length} activas` : "Sin pendientes"}</span>
+                <span>{unseenNotificationCount > 0 ? `${unseenNotificationCount} nuevas` : appNotifications.length > 0 ? "Historial" : "Sin pendientes"}</span>
               </div>
               {appNotifications.length > 0 ? (
                 <div className="notification-list">
-                  {appNotifications.map((notification) => (
-                    <button
-                      type="button"
-                      className="notification-item"
-                      key={notification.id}
-                      onClick={() => openNotificationTarget(notification)}
-                    >
-                      <strong>{notification.title}</strong>
-                      <span>{notification.summary}</span>
-                    </button>
-                  ))}
+                  {newNotifications.length > 0 ? (
+                    <NotificationGroup
+                      title="Nuevas"
+                      notifications={newNotifications}
+                      seenNotificationIds={seenNotificationIds}
+                      onOpen={openNotificationTarget}
+                    />
+                  ) : null}
+                  {historyNotifications.length > 0 ? (
+                    <NotificationGroup
+                      title="Historial"
+                      notifications={historyNotifications}
+                      seenNotificationIds={seenNotificationIds}
+                      onOpen={openNotificationTarget}
+                    />
+                  ) : null}
                 </div>
               ) : (
                 <p className="notification-empty">No tienes notificaciones por ahora.</p>
@@ -3471,7 +3531,7 @@ export function OrganizatechApp({
             </div>
             <div className="menu-drawer-body">
               <div className="menu-panel" role="menu" aria-label="Menú principal">
-                <ProfileMenuHeader profile={profileViewModel} />
+                <ProfileMenuHeader profile={profileViewModel} onAvatarImageError={handleProfileAvatarImageError} />
                 <div className="menu-grid">
                   {menuScreens.map((item) => (
                     <button
@@ -3656,6 +3716,7 @@ export function OrganizatechApp({
           canEditAvatar={canEditProfilePersonalData}
           avatarLoading={profileAvatarLoading}
           avatarError={profileAvatarError}
+          onAvatarImageError={handleProfileAvatarImageError}
           onReloadPersonalData={refreshProfilePersonalData}
           onSavePersonalData={handleSaveProfilePersonalData}
           onUploadAvatar={handleUploadProfileAvatar}
@@ -4672,20 +4733,93 @@ function getCoachFactorLabel(label: string) {
   return label;
 }
 
-function loadSeenNotificationIds() {
+function NotificationGroup({
+  title,
+  notifications,
+  seenNotificationIds,
+  onOpen,
+}: {
+  title: string;
+  notifications: AppNotification[];
+  seenNotificationIds: Set<string>;
+  onOpen: (notification: AppNotification) => void;
+}) {
+  return (
+    <section className="notification-group" aria-label={title}>
+      <p className="notification-group-title">{title}</p>
+      {notifications.map((notification) => {
+        const visual = getNotificationVisual(notification.kind);
+        const isSeen = seenNotificationIds.has(notification.id);
+        return (
+          <button
+            type="button"
+            className={`notification-item notification-${notification.kind} ${isSeen ? "seen" : "new"}`}
+            key={notification.id}
+            onClick={() => onOpen(notification)}
+          >
+            <span className="notification-icon" aria-hidden="true">{visual.icon}</span>
+            <span className="notification-copy">
+              <span className="notification-item-topline">
+                <span className="notification-category">{visual.category}</span>
+                <span className="notification-state">{isSeen ? "Visto" : "Nuevo"}</span>
+              </span>
+              <strong>{notification.title}</strong>
+              <span>{notification.summary}</span>
+            </span>
+          </button>
+        );
+      })}
+    </section>
+  );
+}
+
+function getNotificationVisual(kind: AppNotification["kind"]) {
+  switch (kind) {
+    case "feature":
+      return { category: "Nuevo", icon: <Sparkles size={15} /> };
+    case "profile":
+      return { category: "Perfil", icon: <UserPlus size={15} /> };
+    case "week":
+      return { category: "Semana", icon: <CalendarDays size={15} /> };
+    case "progress":
+      return { category: "Progreso", icon: <TrendingUp size={15} /> };
+    case "coach":
+      return { category: "Coach", icon: <Activity size={15} /> };
+  }
+}
+
+function loadSeenNotificationRecords() {
   if (typeof window === "undefined") return [];
   try {
     const parsed = JSON.parse(window.localStorage.getItem(SEEN_NOTIFICATIONS_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item): SeenNotificationRecord | null => {
+        if (typeof item === "string") return { id: item, seenAt: 0 };
+        if (
+          item &&
+          typeof item === "object" &&
+          typeof (item as SeenNotificationRecord).id === "string" &&
+          typeof (item as SeenNotificationRecord).seenAt === "number"
+        ) {
+          return {
+            id: (item as SeenNotificationRecord).id,
+            seenAt: (item as SeenNotificationRecord).seenAt,
+          };
+        }
+        return null;
+      })
+      .filter((item): item is SeenNotificationRecord => Boolean(item))
+      .slice(-SEEN_NOTIFICATIONS_MAX_RECORDS);
   } catch {
     return [];
   }
 }
 
-function saveSeenNotificationIds(ids: string[]) {
+function saveSeenNotificationRecords(records: SeenNotificationRecord[]) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(SEEN_NOTIFICATIONS_KEY, JSON.stringify(ids.slice(-40)));
+    window.localStorage.setItem(SEEN_NOTIFICATIONS_KEY, JSON.stringify(records.slice(-SEEN_NOTIFICATIONS_MAX_RECORDS)));
   } catch {
     // Las notificaciones siguen funcionando aunque el navegador bloquee localStorage.
   }
@@ -4718,6 +4852,7 @@ function buildAppNotifications({
       title: "Nueva función disponible",
       summary: "Ahora puedes subir y ajustar tu foto de perfil.",
       target: "perfil",
+      kind: "feature",
     },
   ];
 
@@ -4727,6 +4862,7 @@ function buildAppNotifications({
       title: "Completa tu perfil",
       summary: "Agrega una foto para personalizar tu cuenta.",
       target: "perfil",
+      kind: "profile",
     });
   }
 
@@ -4736,6 +4872,7 @@ function buildAppNotifications({
       title: "Resumen semanal",
       summary: `Semana ${currentWeek}: llevas ${completedDays} de ${plannedDays} días completados.`,
       target: "dashboard",
+      kind: "week",
     });
   }
 
@@ -4745,6 +4882,7 @@ function buildAppNotifications({
       title: "Progreso semanal",
       summary: `Tu volumen actual es ${weeklyEquivalentProgress.currentVolumeLabel} esta semana.`,
       target: "dashboard",
+      kind: "progress",
     });
   }
 
@@ -4756,6 +4894,7 @@ function buildAppNotifications({
       title: "Análisis inteligente",
       summary: "Detectamos un cambio importante en tu rendimiento.",
       target: "dashboard",
+      kind: "coach",
     });
   } else if (loadAdjustment || summary.volumeDifference !== 0) {
     notifications.push({
@@ -4763,6 +4902,7 @@ function buildAppNotifications({
       title: "Análisis inteligente",
       summary: "Revisa tu lectura del Coach para ajustar el próximo entrenamiento.",
       target: "dashboard",
+      kind: "coach",
     });
   }
 
