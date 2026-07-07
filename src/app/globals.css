@@ -256,6 +256,122 @@ h3 {
   color: var(--blue-soft);
 }
 
+.profile-avatar-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: end center;
+  background: rgba(2, 8, 14, 0.74);
+  padding: 18px;
+}
+
+.profile-avatar-editor {
+  display: grid;
+  width: min(100%, 390px);
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  gap: 14px;
+  border: 1px solid rgba(60, 122, 255, 0.58);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(60, 122, 255, 0.2), transparent 14rem),
+    linear-gradient(180deg, rgba(20, 34, 50, 0.98), rgba(7, 16, 26, 0.98));
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+  padding: 16px;
+}
+
+.profile-avatar-editor-header {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  gap: 10px;
+  align-items: center;
+}
+
+.profile-avatar-editor-header h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.profile-avatar-editor-header button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid rgba(220, 231, 255, 0.16);
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(220, 231, 255, 0.06);
+}
+
+.profile-avatar-editor-header button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.profile-avatar-editor p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.profile-avatar-editor-preview {
+  position: relative;
+  width: min(68vw, 248px);
+  aspect-ratio: 1;
+  justify-self: center;
+  overflow: hidden;
+  border: 2px solid rgba(220, 231, 255, 0.74);
+  border-radius: 999px;
+  background: rgba(7, 16, 26, 0.82);
+  box-shadow:
+    0 0 0 999px rgba(2, 8, 14, 0.2),
+    0 18px 44px rgba(60, 122, 255, 0.18);
+  touch-action: none;
+  cursor: grab;
+}
+
+.profile-avatar-editor-preview:active {
+  cursor: grabbing;
+}
+
+.profile-avatar-editor-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.profile-avatar-editor-help {
+  color: var(--blue-soft) !important;
+}
+
+.profile-avatar-zoom {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.profile-avatar-zoom input {
+  accent-color: var(--blue);
+}
+
+.profile-avatar-editor-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .user-avatar {
   display: grid;
   flex: 0 0 auto;

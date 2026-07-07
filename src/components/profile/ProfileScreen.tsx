@@ -12,12 +12,10 @@ import {
   profileGenderValues,
   type ProfileFormValues,
 } from "@/lib/profile/profile-form";
-import {
-  PROFILE_AVATAR_ALLOWED_MIME_TYPES,
-  validateProfileAvatarFile,
-} from "@/lib/profile/profile-avatar";
+import { validateAvatarSourceFile } from "@/lib/profile/profile-avatar-image";
 import type { ProfilePersonalData } from "@/lib/profile/profile-repository";
 import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
+import { ProfileAvatarEditor } from "./ProfileAvatarEditor";
 import { UserAvatar } from "./UserAvatar";
 
 const preferenceRows = [
@@ -133,25 +131,36 @@ function ProfileAvatarControls({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [isWorking, setIsWorking] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const isBusy = isLoading || isWorking;
 
-  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     event.target.value = "";
 
-    const validation = validateProfileAvatarFile(file);
+    const validation = validateAvatarSourceFile(file);
     if (!validation.ok) {
       setStatusMessage(validation.error);
       return;
     }
 
+    setStatusMessage("");
+    setSelectedFile(file);
+  }
+
+  async function handleConfirmAvatar(file: File) {
     setIsWorking(true);
     setStatusMessage("Subiendo foto...");
     try {
-      await onUpload(file as File);
+      await onUpload(file);
       setStatusMessage("Foto actualizada.");
+      setSelectedFile(null);
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "No se pudo subir la foto de perfil.");
+      const message = error instanceof Error ? error.message : "";
+      setStatusMessage(message.includes("sesión") || message.includes("Inicia sesión")
+        ? message
+        : "No pudimos guardar la foto. Prueba con otra imagen.");
+      throw error;
     } finally {
       setIsWorking(false);
     }
@@ -176,40 +185,49 @@ function ProfileAvatarControls({
         ref={fileInputRef}
         className="profile-avatar-input"
         type="file"
-        accept={PROFILE_AVATAR_ALLOWED_MIME_TYPES.join(",")}
+        accept="image/*"
         onChange={handleFileChange}
         disabled={!canEdit || isBusy}
       />
       {canEdit ? (
-        <div className="profile-avatar-actions">
-          <button
-            className="profile-edit-button"
-            type="button"
-            disabled={isBusy}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Camera size={14} aria-hidden="true" />
-            {hasAvatar ? "Cambiar foto" : "Subir foto"}
-          </button>
-          {hasAvatar && (
+        <>
+          <p className="profile-avatar-help">Elige una foto para tu perfil.</p>
+          <div className="profile-avatar-actions">
             <button
-              className="profile-edit-button profile-avatar-delete-button"
+              className="profile-edit-button"
               type="button"
               disabled={isBusy}
-              onClick={() => void handleDeleteAvatar()}
+              onClick={() => fileInputRef.current?.click()}
             >
-              <Trash2 size={14} aria-hidden="true" />
-              Eliminar foto
+              <Camera size={14} aria-hidden="true" />
+              {hasAvatar ? "Cambiar foto" : "Subir foto"}
             </button>
-          )}
-        </div>
+            {hasAvatar && (
+              <button
+                className="profile-edit-button profile-avatar-delete-button"
+                type="button"
+                disabled={isBusy}
+                onClick={() => void handleDeleteAvatar()}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                Eliminar foto
+              </button>
+            )}
+          </div>
+        </>
       ) : (
         <p className="profile-avatar-help">Inicia sesión para guardar tu foto de perfil.</p>
       )}
-      {canEdit && <p className="profile-avatar-help">JPG, PNG o WEBP de hasta 2 MB.</p>}
       {(statusMessage || externalError) && (
         <p className="profile-avatar-status">{statusMessage || externalError}</p>
       )}
+      <ProfileAvatarEditor
+        file={selectedFile}
+        isOpen={Boolean(selectedFile)}
+        isSaving={isWorking}
+        onCancel={() => setSelectedFile(null)}
+        onConfirm={handleConfirmAvatar}
+      />
     </div>
   );
 }
