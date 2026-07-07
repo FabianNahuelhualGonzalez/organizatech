@@ -212,6 +212,50 @@ h3 {
   line-height: 1.35;
 }
 
+.profile-avatar-controls {
+  grid-column: 1 / -1;
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.profile-avatar-input {
+  display: none;
+}
+
+.profile-avatar-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-avatar-actions .profile-edit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.profile-avatar-delete-button {
+  border-color: rgba(255, 94, 108, 0.58);
+  color: #fff;
+  background: rgba(255, 94, 108, 0.12);
+}
+
+.profile-avatar-help,
+.profile-avatar-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.profile-avatar-status {
+  color: var(--blue-soft);
+}
+
 .user-avatar {
   display: grid;
   flex: 0 0 auto;

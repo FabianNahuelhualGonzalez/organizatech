@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { ShieldCheck, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { Camera, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
 
 import {
   buildProfileFormInitialValues,
@@ -12,6 +12,10 @@ import {
   profileGenderValues,
   type ProfileFormValues,
 } from "@/lib/profile/profile-form";
+import {
+  PROFILE_AVATAR_ALLOWED_MIME_TYPES,
+  validateProfileAvatarFile,
+} from "@/lib/profile/profile-avatar";
 import type { ProfilePersonalData } from "@/lib/profile/profile-repository";
 import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
 import { UserAvatar } from "./UserAvatar";
@@ -29,16 +33,26 @@ export function ProfileScreen({
   canEditPersonalData,
   personalDataLoading,
   personalDataError,
+  canEditAvatar,
+  avatarLoading,
+  avatarError,
   onReloadPersonalData,
   onSavePersonalData,
+  onUploadAvatar,
+  onDeleteAvatar,
 }: {
   profile: ProfileViewModel;
   personalData: ProfilePersonalData | null;
   canEditPersonalData: boolean;
   personalDataLoading: boolean;
   personalDataError: string;
+  canEditAvatar: boolean;
+  avatarLoading: boolean;
+  avatarError: string;
   onReloadPersonalData: () => void;
   onSavePersonalData: (input: ProfileFormValues) => Promise<ProfilePersonalData>;
+  onUploadAvatar: (file: File) => Promise<void>;
+  onDeleteAvatar: () => Promise<void>;
 }) {
   return (
     <section className="screen profile-screen">
@@ -49,6 +63,14 @@ export function ProfileScreen({
           <h2>{profile.displayName}</h2>
           {profile.email && <p>{profile.email}</p>}
         </div>
+        <ProfileAvatarControls
+          hasAvatar={Boolean(profile.avatarUrl)}
+          canEdit={canEditAvatar}
+          isLoading={avatarLoading}
+          externalError={avatarError}
+          onUpload={onUploadAvatar}
+          onDelete={onDeleteAvatar}
+        />
       </div>
 
       <PersonalDataSection
@@ -90,6 +112,105 @@ export function ProfileScreen({
         </div>
       </section>
     </section>
+  );
+}
+
+function ProfileAvatarControls({
+  hasAvatar,
+  canEdit,
+  isLoading,
+  externalError,
+  onUpload,
+  onDelete,
+}: {
+  hasAvatar: boolean;
+  canEdit: boolean;
+  isLoading: boolean;
+  externalError: string;
+  onUpload: (file: File) => Promise<void>;
+  onDelete: () => Promise<void>;
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [isWorking, setIsWorking] = useState(false);
+  const isBusy = isLoading || isWorking;
+
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+
+    const validation = validateProfileAvatarFile(file);
+    if (!validation.ok) {
+      setStatusMessage(validation.error);
+      return;
+    }
+
+    setIsWorking(true);
+    setStatusMessage("Subiendo foto...");
+    try {
+      await onUpload(file as File);
+      setStatusMessage("Foto actualizada.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "No se pudo subir la foto de perfil.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  async function handleDeleteAvatar() {
+    setIsWorking(true);
+    setStatusMessage("Eliminando foto...");
+    try {
+      await onDelete();
+      setStatusMessage("Foto eliminada.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "No se pudo eliminar la foto de perfil.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  return (
+    <div className="profile-avatar-controls">
+      <input
+        ref={fileInputRef}
+        className="profile-avatar-input"
+        type="file"
+        accept={PROFILE_AVATAR_ALLOWED_MIME_TYPES.join(",")}
+        onChange={handleFileChange}
+        disabled={!canEdit || isBusy}
+      />
+      {canEdit ? (
+        <div className="profile-avatar-actions">
+          <button
+            className="profile-edit-button"
+            type="button"
+            disabled={isBusy}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Camera size={14} aria-hidden="true" />
+            {hasAvatar ? "Cambiar foto" : "Subir foto"}
+          </button>
+          {hasAvatar && (
+            <button
+              className="profile-edit-button profile-avatar-delete-button"
+              type="button"
+              disabled={isBusy}
+              onClick={() => void handleDeleteAvatar()}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              Eliminar foto
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="profile-avatar-help">Inicia sesión para guardar tu foto de perfil.</p>
+      )}
+      {canEdit && <p className="profile-avatar-help">JPG, PNG o WEBP de hasta 2 MB.</p>}
+      {(statusMessage || externalError) && (
+        <p className="profile-avatar-status">{statusMessage || externalError}</p>
+      )}
+    </div>
   );
 }
 

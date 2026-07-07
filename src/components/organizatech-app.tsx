@@ -56,6 +56,12 @@ import {
 } from "@/lib/profile/profile-repository";
 import type { ProfileFormValues } from "@/lib/profile/profile-form";
 import {
+  deleteProfileAvatar,
+  getCurrentProfileAvatar,
+  uploadProfileAvatar,
+} from "@/lib/profile/profile-avatar-repository";
+import type { ProfileAvatarState } from "@/lib/profile/profile-avatar";
+import {
   calculateExerciseMetrics,
   calculateWeeklyComparison,
   calculateWeeklySummary,
@@ -480,6 +486,13 @@ export function OrganizatechApp({
   const [profilePersonalData, setProfilePersonalData] = useState<ProfilePersonalData | null>(null);
   const [profilePersonalDataLoading, setProfilePersonalDataLoading] = useState(false);
   const [profilePersonalDataError, setProfilePersonalDataError] = useState("");
+  const [profileAvatar, setProfileAvatar] = useState<ProfileAvatarState>({
+    avatarPath: null,
+    avatarUrl: null,
+    avatarUpdatedAt: null,
+  });
+  const [profileAvatarLoading, setProfileAvatarLoading] = useState(false);
+  const [profileAvatarError, setProfileAvatarError] = useState("");
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(() => getPasswordRecoveryRouteState() === "none");
   const [isBusy, setIsBusy] = useState(false);
@@ -917,9 +930,9 @@ export function OrganizatechApp({
     displayName: profilePersonalData?.displayName ?? sessionName,
     email: profilePersonalData?.email ?? supabaseUser?.email ?? null,
     dataSource: canEditProfilePersonalData ? "supabase" : dataSource,
-    avatarUrl: null,
-    avatarPath: null,
-  }), [canEditProfilePersonalData, dataSource, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
+    avatarUrl: profileAvatar.avatarUrl,
+    avatarPath: profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null,
+  }), [canEditProfilePersonalData, dataSource, profileAvatar.avatarPath, profileAvatar.avatarUrl, profilePersonalData?.avatarPath, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
   const trainingTopbarMeta = buildTrainingTopbarMeta({
     cycleLabel: getCycleTypeTitle(displayTrainingPlan),
     weekNumber: currentWeek,
@@ -987,6 +1000,13 @@ export function OrganizatechApp({
         setProfilePersonalData(null);
         setProfilePersonalDataLoading(false);
         setProfilePersonalDataError("");
+        setProfileAvatar({
+          avatarPath: null,
+          avatarUrl: null,
+          avatarUpdatedAt: null,
+        });
+        setProfileAvatarLoading(false);
+        setProfileAvatarError("");
       }
       return;
     }
@@ -994,19 +1014,32 @@ export function OrganizatechApp({
     let isMounted = true;
     setProfilePersonalDataLoading(true);
     setProfilePersonalDataError("");
+    setProfileAvatarLoading(true);
+    setProfileAvatarError("");
 
     void getProfilePersonalData()
-      .then((profile) => {
+      .then(async (profile) => {
         if (!isMounted) return;
         setProfilePersonalData(profile);
         setSessionName(profile.displayName);
+        try {
+          const avatar = await getCurrentProfileAvatar();
+          if (!isMounted) return;
+          setProfileAvatar(avatar);
+        } catch (error) {
+          if (!isMounted) return;
+          setProfileAvatarError(error instanceof Error ? error.message : "No pudimos cargar tu foto de perfil.");
+        }
       })
       .catch((error) => {
         if (!isMounted) return;
         setProfilePersonalDataError(error instanceof Error ? error.message : "No pudimos cargar tu perfil.");
       })
       .finally(() => {
-        if (isMounted) setProfilePersonalDataLoading(false);
+        if (isMounted) {
+          setProfilePersonalDataLoading(false);
+          setProfileAvatarLoading(false);
+        }
       });
 
     return () => {
@@ -1021,6 +1054,12 @@ export function OrganizatechApp({
     setSupabaseUser(authState.user);
     setProfilePersonalData(null);
     setProfilePersonalDataError("");
+    setProfileAvatar({
+      avatarPath: null,
+      avatarUrl: null,
+      avatarUpdatedAt: null,
+    });
+    setProfileAvatarError("");
     if (authState.user) setSessionName(getSessionDisplayName(authState.user));
   }
 
@@ -1035,6 +1074,13 @@ export function OrganizatechApp({
     setProfilePersonalData(null);
     setProfilePersonalDataLoading(false);
     setProfilePersonalDataError("");
+    setProfileAvatar({
+      avatarPath: null,
+      avatarUrl: null,
+      avatarUpdatedAt: null,
+    });
+    setProfileAvatarLoading(false);
+    setProfileAvatarError("");
     setDataMode("demo");
     setDataSource("local");
     setExercises([]);
@@ -1199,15 +1245,30 @@ export function OrganizatechApp({
       setProfilePersonalData(null);
       setProfilePersonalDataLoading(false);
       setProfilePersonalDataError("");
+      setProfileAvatar({
+        avatarPath: null,
+        avatarUrl: null,
+        avatarUpdatedAt: null,
+      });
+      setProfileAvatarLoading(false);
+      setProfileAvatarError("");
       return null;
     }
 
     setProfilePersonalDataLoading(true);
     setProfilePersonalDataError("");
+    setProfileAvatarLoading(true);
+    setProfileAvatarError("");
     try {
       const profile = await getProfilePersonalData();
       setProfilePersonalData(profile);
       setSessionName(profile.displayName);
+      try {
+        const avatar = await getCurrentProfileAvatar();
+        setProfileAvatar(avatar);
+      } catch (error) {
+        setProfileAvatarError(error instanceof Error ? error.message : "No pudimos cargar tu foto de perfil.");
+      }
       return profile;
     } catch (error) {
       const message = error instanceof Error ? error.message : "No pudimos cargar tu perfil.";
@@ -1215,6 +1276,7 @@ export function OrganizatechApp({
       return null;
     } finally {
       setProfilePersonalDataLoading(false);
+      setProfileAvatarLoading(false);
     }
   }
 
@@ -1223,6 +1285,32 @@ export function OrganizatechApp({
     setProfilePersonalData(profile);
     setSessionName(profile.displayName);
     return profile;
+  }
+
+  async function handleUploadProfileAvatar(file: File) {
+    setProfileAvatarError("");
+    const avatar = await uploadProfileAvatar(file);
+    setProfileAvatar(avatar);
+    setProfilePersonalData((current) => current
+      ? {
+        ...current,
+        avatarPath: avatar.avatarPath,
+        avatarUpdatedAt: avatar.avatarUpdatedAt,
+      }
+      : current);
+  }
+
+  async function handleDeleteProfileAvatar() {
+    setProfileAvatarError("");
+    const avatar = await deleteProfileAvatar();
+    setProfileAvatar(avatar);
+    setProfilePersonalData((current) => current
+      ? {
+        ...current,
+        avatarPath: null,
+        avatarUpdatedAt: null,
+      }
+      : current);
   }
 
   async function refreshPersistedTrainingCycles() {
@@ -3429,8 +3517,13 @@ export function OrganizatechApp({
           canEditPersonalData={canEditProfilePersonalData}
           personalDataLoading={profilePersonalDataLoading}
           personalDataError={profilePersonalDataError}
+          canEditAvatar={canEditProfilePersonalData}
+          avatarLoading={profileAvatarLoading}
+          avatarError={profileAvatarError}
           onReloadPersonalData={refreshProfilePersonalData}
           onSavePersonalData={handleSaveProfilePersonalData}
+          onUploadAvatar={handleUploadProfileAvatar}
+          onDeleteAvatar={handleDeleteProfileAvatar}
         />
       )}
       {isNewCycleConfirmOpen && (

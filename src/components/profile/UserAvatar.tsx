@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { User } from "lucide-react";
 
 import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
@@ -10,13 +11,21 @@ export function UserAvatar({
   size?: "small" | "medium" | "large";
 }) {
   const className = `user-avatar user-avatar-${size}`;
+  const [imgFailed, setImgFailed] = useState(false);
 
-  if (profile.avatarUrl) {
+  useEffect(() => {
+    setImgFailed(false);
+  }, [profile.avatarUrl]);
+
+  if (profile.avatarUrl && !imgFailed) {
     return (
       <img
         className={className}
         src={profile.avatarUrl}
         alt={`Foto de perfil de ${profile.displayName}`}
+        decoding="async"
+        loading={size === "large" ? "eager" : "lazy"}
+        onError={() => setImgFailed(true)}
       />
     );
   }
