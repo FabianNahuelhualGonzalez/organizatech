@@ -8,6 +8,8 @@ create table public.profiles (
   last_name text,
   birth_date date,
   gender text default 'not_specified',
+  avatar_path text,
+  avatar_updated_at timestamptz,
   constraint profiles_gender_allowed check (
     gender is null or gender in (
       'male',
