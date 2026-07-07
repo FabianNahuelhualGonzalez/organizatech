@@ -50,7 +50,7 @@ a {
 }
 
 .app-shell {
-  width: min(100%, 520px);
+  width: min(100%, 560px);
   overflow-x: hidden;
   min-height: 100vh;
   margin: 0 auto;
@@ -166,6 +166,11 @@ h3 {
   animation: rise 180ms ease-out;
 }
 
+.screen > * {
+  width: 100%;
+  min-width: 0;
+}
+
 .profile-screen {
   gap: 16px;
 }
@@ -206,10 +211,19 @@ h3 {
 
 .profile-hero-copy p:not(.eyebrow) {
   margin: 0;
-  overflow-wrap: anywhere;
   color: var(--blue-soft);
   font-size: clamp(11px, 3.3vw, 13px);
   line-height: 1.35;
+}
+
+.profile-email-text,
+.profile-email-value {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .profile-avatar-controls {
@@ -486,6 +500,7 @@ h3 {
 
 .profile-info-row dd {
   justify-self: end;
+  max-width: 100%;
   color: #fff;
   font-size: clamp(11px, 3.3vw, 13px);
   font-weight: 900;
@@ -527,6 +542,7 @@ h3 {
 .profile-field input,
 .profile-field select {
   width: 100%;
+  max-width: 100%;
   min-width: 0;
   min-height: 42px;
   border: 1px solid rgba(220, 231, 255, 0.16);
@@ -535,6 +551,16 @@ h3 {
   background: rgba(7, 16, 26, 0.62);
   padding: 0 12px;
   outline: none;
+}
+
+.profile-field input[type="date"] {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  color-scheme: dark;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .profile-field input:focus,
@@ -2887,6 +2913,120 @@ h3 {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.notification-shell {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  justify-items: end;
+}
+
+.notification-trigger {
+  position: relative;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid rgba(7, 16, 26, 0.9);
+  border-radius: 999px;
+  color: #07101a;
+  background: var(--green);
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.notification-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 2;
+  display: grid;
+  width: min(86vw, 330px);
+  max-height: min(62vh, 430px);
+  overflow-y: auto;
+  gap: 10px;
+  border: 1px solid rgba(60, 122, 255, 0.48);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(60, 122, 255, 0.22), transparent 12rem),
+    linear-gradient(180deg, rgba(20, 34, 50, 0.98), rgba(7, 16, 26, 0.98));
+  box-shadow: 0 20px 58px rgba(0, 0, 0, 0.42);
+  padding: 12px;
+  text-align: left;
+}
+
+.notification-panel-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notification-panel-header strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.notification-panel-header span,
+.notification-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.notification-list {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.notification-item {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 5px;
+  border: 1px solid rgba(220, 231, 255, 0.12);
+  border-radius: 8px;
+  color: inherit;
+  background: rgba(5, 16, 30, 0.52);
+  padding: 10px;
+  text-align: left;
+}
+
+.notification-item strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-item span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.notification-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  border: 0;
+  background: transparent;
+}
+
 .menu-trigger svg {
   width: 25px;
   height: 25px;
@@ -5085,8 +5225,8 @@ h3 {
 
 @media (max-width: 460px) {
   .app-shell {
-    padding-right: 10px;
-    padding-left: 10px;
+    padding-right: 6px;
+    padding-left: 6px;
   }
 
   .metric-grid,
@@ -5246,6 +5386,24 @@ h3 {
 
   .routine-day-pill {
     min-width: 74px;
+  }
+}
+
+@media (max-width: 380px) {
+  .profile-section,
+  .profile-hero {
+    padding: 14px;
+  }
+
+  .profile-info-row {
+    grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+    gap: 8px;
+  }
+
+  .profile-field input,
+  .profile-field select {
+    padding-right: 10px;
+    padding-left: 10px;
   }
 }
 

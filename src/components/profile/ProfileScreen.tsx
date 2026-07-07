@@ -59,7 +59,7 @@ export function ProfileScreen({
         <div className="profile-hero-copy">
           <p className="eyebrow">Perfil</p>
           <h2>{profile.displayName}</h2>
-          {profile.email && <p>{profile.email}</p>}
+          {profile.email && <p className="profile-email-text">{profile.email}</p>}
         </div>
         <ProfileAvatarControls
           hasAvatar={Boolean(profile.avatarUrl)}
@@ -269,7 +269,7 @@ function PersonalDataSection({
 
   const readRows = [
     { label: "Nombre completo", value: personalData?.displayName ?? profile.displayName },
-    { label: "Correo", value: profile.email ?? "No disponible" },
+    { label: "Correo", value: profile.email ?? "No disponible", kind: "email" },
     { label: "Fecha de nacimiento", value: formatBirthDateLabel(personalData?.birthDate ?? null) },
     { label: "Edad", value: formatProfileAgeLabel(personalData?.birthDate ?? null) },
     { label: "Género", value: profileGenderLabels[personalData?.gender ?? "not_specified"] },
@@ -386,7 +386,7 @@ function PersonalDataSection({
             {readRows.map((row) => (
               <div className="profile-info-row" key={row.label}>
                 <dt>{row.label}</dt>
-                <dd>{row.value}</dd>
+                <dd className={row.kind === "email" ? "profile-email-value" : undefined}>{row.value}</dd>
               </div>
             ))}
           </dl>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import {
   Activity,
   ArrowDown,
@@ -263,6 +263,8 @@ const ACTIVE_FLOW_VERSION = 1;
 const ROUTINE_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_FLOW_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
+const SEEN_NOTIFICATIONS_KEY = "organizatech:seen-notifications-v1";
 const blockedSignupDomains = new Set([
   "example.com",
   "example.cl",
@@ -440,6 +442,13 @@ interface AnalyticsSnapshot {
   factors: Array<[string, number]>;
 }
 
+interface AppNotification {
+  id: string;
+  title: string;
+  summary: string;
+  target: "dashboard" | "perfil";
+}
+
 interface TrainingCycleSnapshot {
   id: string;
   name: string;
@@ -506,6 +515,8 @@ export function OrganizatechApp({
   const [entries, setEntries] = useState<ExerciseEntry[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
+  const [seenNotificationIds, setSeenNotificationIds] = useState<string[]>(() => loadSeenNotificationIds());
   const [isEditingRoutinePlan, setIsEditingRoutinePlan] = useState(false);
   const [routineNotice, setRoutineNotice] = useState("");
   const [isTopbarHidden, setIsTopbarHidden] = useState(false);
@@ -529,6 +540,7 @@ export function OrganizatechApp({
   const workoutStartInFlightRef = useRef(false);
   const dailyReadinessSaveInFlightRef = useRef(false);
   const workoutCompletionInFlightRef = useRef(false);
+  const lastProfileAvatarRefreshAtRef = useRef(0);
   const [pendingReadinessLink, setPendingReadinessLink] = useState<PendingWorkoutReadinessLink | null>(null);
   const pendingReadinessLinkRef = useRef<PendingWorkoutReadinessLink | null>(null);
   const [hasRecoverableWorkoutStart, setHasRecoverableWorkoutStart] = useState(false);
@@ -933,18 +945,62 @@ export function OrganizatechApp({
     avatarUrl: profileAvatar.avatarUrl,
     avatarPath: profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null,
   }), [canEditProfilePersonalData, dataSource, profileAvatar.avatarPath, profileAvatar.avatarUrl, profilePersonalData?.avatarPath, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
+  const refreshProfileAvatar = useCallback(async (options?: { force?: boolean; avatarPath?: string | null }) => {
+    const hasKnownAvatarPath = Boolean(options?.avatarPath ?? profileAvatar.avatarPath ?? profilePersonalData?.avatarPath);
+    if (!canEditProfilePersonalData || !supabaseSession || !hasKnownAvatarPath) return null;
+
+    const now = Date.now();
+    if (!options?.force && now - lastProfileAvatarRefreshAtRef.current < PROFILE_AVATAR_REFRESH_THROTTLE_MS) {
+      return null;
+    }
+
+    lastProfileAvatarRefreshAtRef.current = now;
+    try {
+      const avatar = await getCurrentProfileAvatar();
+      setProfileAvatar(avatar);
+      setProfileAvatarError("");
+      return avatar;
+    } catch {
+      setProfileAvatarError("No pudimos actualizar tu foto de perfil. La mostraremos apenas vuelva a estar disponible.");
+      return null;
+    }
+  }, [canEditProfilePersonalData, profileAvatar.avatarPath, profilePersonalData?.avatarPath, supabaseSession]);
+  const completedTrainingDays = calculateWeeklyCompletedTrainingDays({
+    plannedDays: dashboardCarouselDays,
+    exercises: displayExercises,
+    entries: calendarNormalizedEntries,
+    sessions: calendarNormalizedTrainingSessions,
+    usesCycleScopedSessions: isCycleScopedActiveCycle,
+  });
+  const plannedTrainingDays = hasRoutinePlan ? dashboardCarouselDays.length : 0;
   const trainingTopbarMeta = buildTrainingTopbarMeta({
     cycleLabel: getCycleTypeTitle(displayTrainingPlan),
     weekNumber: currentWeek,
-    completedDays: calculateWeeklyCompletedTrainingDays({
-      plannedDays: dashboardCarouselDays,
-      exercises: displayExercises,
-      entries: calendarNormalizedEntries,
-      sessions: calendarNormalizedTrainingSessions,
-      usesCycleScopedSessions: isCycleScopedActiveCycle,
-    }),
+    completedDays: completedTrainingDays,
     plannedDays: hasRoutinePlan ? dashboardCarouselDays.length : 0,
   });
+  const appNotifications = useMemo(() => buildAppNotifications({
+    profile: profileViewModel,
+    currentWeek,
+    completedDays: completedTrainingDays,
+    plannedDays: plannedTrainingDays,
+    hasTrainingEntries,
+    hasRoutinePlan,
+    weeklyEquivalentProgress,
+    summary,
+    currentMetrics,
+  }), [
+    completedTrainingDays,
+    currentMetrics,
+    currentWeek,
+    hasRoutinePlan,
+    hasTrainingEntries,
+    plannedTrainingDays,
+    profileViewModel.avatarUrl,
+    summary,
+    weeklyEquivalentProgress,
+  ]);
+  const unseenNotificationCount = appNotifications.filter((notification) => !seenNotificationIds.includes(notification.id)).length;
 
   useEffect(() => {
     if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
@@ -1022,14 +1078,7 @@ export function OrganizatechApp({
         if (!isMounted) return;
         setProfilePersonalData(profile);
         setSessionName(profile.displayName);
-        try {
-          const avatar = await getCurrentProfileAvatar();
-          if (!isMounted) return;
-          setProfileAvatar(avatar);
-        } catch (error) {
-          if (!isMounted) return;
-          setProfileAvatarError(error instanceof Error ? error.message : "No pudimos cargar tu foto de perfil.");
-        }
+        await refreshProfileAvatar({ force: true, avatarPath: profile.avatarPath });
       })
       .catch((error) => {
         if (!isMounted) return;
@@ -1045,7 +1094,29 @@ export function OrganizatechApp({
     return () => {
       isMounted = false;
     };
-  }, [canEditProfilePersonalData, screen]);
+  }, [canEditProfilePersonalData, refreshProfileAvatar, screen]);
+
+  useEffect(() => {
+    function refreshAvatarOnResume() {
+      void refreshProfileAvatar();
+    }
+
+    function refreshAvatarOnVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        refreshAvatarOnResume();
+      }
+    }
+
+    document.addEventListener("visibilitychange", refreshAvatarOnVisibilityChange);
+    window.addEventListener("focus", refreshAvatarOnResume);
+    window.addEventListener("pageshow", refreshAvatarOnResume);
+
+    return () => {
+      document.removeEventListener("visibilitychange", refreshAvatarOnVisibilityChange);
+      window.removeEventListener("focus", refreshAvatarOnResume);
+      window.removeEventListener("pageshow", refreshAvatarOnResume);
+    };
+  }, [refreshProfileAvatar]);
 
   function applySessionState(authState: SupabaseSessionState) {
     setIsSupabaseConfiguredState(authState.isConfigured);
@@ -1263,12 +1334,7 @@ export function OrganizatechApp({
       const profile = await getProfilePersonalData();
       setProfilePersonalData(profile);
       setSessionName(profile.displayName);
-      try {
-        const avatar = await getCurrentProfileAvatar();
-        setProfileAvatar(avatar);
-      } catch (error) {
-        setProfileAvatarError(error instanceof Error ? error.message : "No pudimos cargar tu foto de perfil.");
-      }
+      await refreshProfileAvatar({ force: true, avatarPath: profile.avatarPath });
       return profile;
     } catch (error) {
       const message = error instanceof Error ? error.message : "No pudimos cargar tu perfil.";
@@ -1290,6 +1356,7 @@ export function OrganizatechApp({
   async function handleUploadProfileAvatar(file: File) {
     setProfileAvatarError("");
     const avatar = await uploadProfileAvatar(file);
+    lastProfileAvatarRefreshAtRef.current = Date.now();
     setProfileAvatar(avatar);
     setProfilePersonalData((current) => current
       ? {
@@ -1303,6 +1370,7 @@ export function OrganizatechApp({
   async function handleDeleteProfileAvatar() {
     setProfileAvatarError("");
     const avatar = await deleteProfileAvatar();
+    lastProfileAvatarRefreshAtRef.current = 0;
     setProfileAvatar(avatar);
     setProfilePersonalData((current) => current
       ? {
@@ -3271,6 +3339,33 @@ export function OrganizatechApp({
     );
   }
 
+  function markNotificationsSeen(ids: string[]) {
+    if (ids.length === 0) return;
+    setSeenNotificationIds((current) => {
+      const next = [...new Set([...current, ...ids])];
+      saveSeenNotificationIds(next);
+      return next;
+    });
+  }
+
+  function toggleNotifications() {
+    setIsNotificationPanelOpen((current) => {
+      const next = !current;
+      if (next) {
+        markNotificationsSeen(appNotifications.map((notification) => notification.id));
+      }
+      return next;
+    });
+    setIsMenuOpen(false);
+  }
+
+  function openNotificationTarget(notification: AppNotification) {
+    markNotificationsSeen([notification.id]);
+    setIsNotificationPanelOpen(false);
+    setTrainingCompletionSummary(null);
+    navigateTo(notification.target);
+  }
+
   const menuScreens = hasTrainingEntries
     ? primaryScreens
     : primaryScreens.filter((item) =>
@@ -3289,7 +3384,10 @@ export function OrganizatechApp({
           className={`icon-button menu-trigger ${isMenuOpen ? "active" : ""}`}
           aria-label="Abrir menú"
           aria-expanded={isMenuOpen}
-          onClick={() => setIsMenuOpen((value) => !value)}
+          onClick={() => {
+            setIsNotificationPanelOpen(false);
+            setIsMenuOpen((value) => !value);
+          }}
         >
           <span className="hamburger-line" />
           <span className="hamburger-line" />
@@ -3307,17 +3405,55 @@ export function OrganizatechApp({
             <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}</p>
           )}
         </div>
-        <button
-          className="icon-button"
-          aria-label="Ver alertas del panel principal"
-          onClick={() => {
-            setTrainingCompletionSummary(null);
-            setScreen("dashboard");
-          }}
-        >
-          <Bell size={18} />
-        </button>
+        <div className="notification-shell">
+          <button
+            className="icon-button notification-trigger"
+            aria-label="Ver notificaciones"
+            aria-expanded={isNotificationPanelOpen}
+            onClick={toggleNotifications}
+          >
+            <Bell size={18} />
+            {unseenNotificationCount > 0 ? (
+              <span className="notification-badge" aria-label={`${unseenNotificationCount} notificaciones nuevas`}>
+                {unseenNotificationCount > 9 ? "+9" : unseenNotificationCount}
+              </span>
+            ) : null}
+          </button>
+          {isNotificationPanelOpen ? (
+            <div className="notification-panel" role="dialog" aria-label="Notificaciones">
+              <div className="notification-panel-header">
+                <strong>Notificaciones</strong>
+                <span>{appNotifications.length > 0 ? `${appNotifications.length} activas` : "Sin pendientes"}</span>
+              </div>
+              {appNotifications.length > 0 ? (
+                <div className="notification-list">
+                  {appNotifications.map((notification) => (
+                    <button
+                      type="button"
+                      className="notification-item"
+                      key={notification.id}
+                      onClick={() => openNotificationTarget(notification)}
+                    >
+                      <strong>{notification.title}</strong>
+                      <span>{notification.summary}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="notification-empty">No tienes notificaciones por ahora.</p>
+              )}
+            </div>
+          ) : null}
+        </div>
       </header>
+
+      {isNotificationPanelOpen ? (
+        <button
+          className="notification-backdrop"
+          aria-label="Cerrar notificaciones"
+          onClick={() => setIsNotificationPanelOpen(false)}
+        />
+      ) : null}
 
       {isMenuOpen && (
         <>
@@ -4534,6 +4670,103 @@ function getCoachFactorLabel(label: string) {
   if (label.toLowerCase().includes("carga")) return "Carga";
   if (label.toLowerCase().includes("volumen")) return "Volumen";
   return label;
+}
+
+function loadSeenNotificationIds() {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SEEN_NOTIFICATIONS_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSeenNotificationIds(ids: string[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SEEN_NOTIFICATIONS_KEY, JSON.stringify(ids.slice(-40)));
+  } catch {
+    // Las notificaciones siguen funcionando aunque el navegador bloquee localStorage.
+  }
+}
+
+function buildAppNotifications({
+  profile,
+  currentWeek,
+  completedDays,
+  plannedDays,
+  hasTrainingEntries,
+  hasRoutinePlan,
+  weeklyEquivalentProgress,
+  summary,
+  currentMetrics,
+}: {
+  profile: ReturnType<typeof buildProfileViewModel>;
+  currentWeek: number;
+  completedDays: number;
+  plannedDays: number;
+  hasTrainingEntries: boolean;
+  hasRoutinePlan: boolean;
+  weeklyEquivalentProgress: WeeklyEquivalentProgressResult;
+  summary: ReturnType<typeof calculateWeeklySummary>;
+  currentMetrics: ExerciseMetrics[];
+}): AppNotification[] {
+  const notifications: AppNotification[] = [
+    {
+      id: "feature-avatar-profile-v1",
+      title: "Nueva función disponible",
+      summary: "Ahora puedes subir y ajustar tu foto de perfil.",
+      target: "perfil",
+    },
+  ];
+
+  if (!profile.avatarUrl) {
+    notifications.push({
+      id: "complete-profile-v1",
+      title: "Completa tu perfil",
+      summary: "Agrega una foto para personalizar tu cuenta.",
+      target: "perfil",
+    });
+  }
+
+  if (hasRoutinePlan && plannedDays > 0) {
+    notifications.push({
+      id: `weekly-summary-v1-w${currentWeek}-${completedDays}-${plannedDays}`,
+      title: "Resumen semanal",
+      summary: `Semana ${currentWeek}: llevas ${completedDays} de ${plannedDays} días completados.`,
+      target: "dashboard",
+    });
+  }
+
+  if (hasTrainingEntries && weeklyEquivalentProgress.currentEquivalentValue > 0) {
+    notifications.push({
+      id: `weekly-progress-v1-w${currentWeek}-${Math.round(weeklyEquivalentProgress.currentEquivalentValue)}`,
+      title: "Progreso semanal",
+      summary: `Tu volumen actual es ${weeklyEquivalentProgress.currentVolumeLabel} esta semana.`,
+      target: "dashboard",
+    });
+  }
+
+  const mainAlert = currentMetrics.find((metric) => metric.repsDifference <= -4 && metric.kgDifference <= 0);
+  const loadAdjustment = currentMetrics.find((metric) => metric.repsDifference < 0 && metric.kgDifference > 0);
+  if (mainAlert) {
+    notifications.push({
+      id: `smart-analysis-v1-w${currentWeek}-attention`,
+      title: "Análisis inteligente",
+      summary: "Detectamos un cambio importante en tu rendimiento.",
+      target: "dashboard",
+    });
+  } else if (loadAdjustment || summary.volumeDifference !== 0) {
+    notifications.push({
+      id: `smart-analysis-v1-w${currentWeek}-progress`,
+      title: "Análisis inteligente",
+      summary: "Revisa tu lectura del Coach para ajustar el próximo entrenamiento.",
+      target: "dashboard",
+    });
+  }
+
+  return notifications;
 }
 
 function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {

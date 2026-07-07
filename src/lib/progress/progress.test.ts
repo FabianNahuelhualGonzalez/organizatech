@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { calculateExerciseMetrics, calculateObjectiveStatus, calculateWeeklySummary } from "./calculations";
+import { calculateExerciseMetrics, calculateObjectiveStatus, calculateWeeklySummary, generateSmartInsights } from "./calculations";
 import { buildExerciseComparisonSummary } from "./exercise-history";
 import { formatKg, formatSignedKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "./weight-format";
 import { getWeeklyProgressDayIndex, getWeeklyProgressDayLabel } from "./week-day";
@@ -111,6 +111,37 @@ assert.equal(missedSets.objectiveStatus, "No cumplimos", "menos series marca No 
 const firstWeekSummary = calculateWeeklySummary([result, maintained], 4);
 assert.equal(firstWeekSummary.repsDifference, 3, "compara reps contra objetivo cuando no hay semana anterior");
 assert.equal(firstWeekSummary.exerciseDifference, 0, "no cuenta objetivos cumplidos como ejercicios nuevos");
+
+const loadAdjustmentInsights = generateSmartInsights(calculateWeeklySummary([
+  calculateExerciseMetrics({
+    id: "laterales-load",
+    exerciseId: "laterales",
+    exerciseName: "Laterales polea",
+    routine: "Hombro",
+    week: 2,
+    date: "2026-07-07",
+    targetSets: 3,
+    targetReps: 20,
+    weight: 12,
+    previousWeight: 10,
+    reps: [16, 16, 16],
+  }),
+], 2), [
+  calculateExerciseMetrics({
+    id: "laterales-load",
+    exerciseId: "laterales",
+    exerciseName: "Laterales polea",
+    routine: "Hombro",
+    week: 2,
+    date: "2026-07-07",
+    targetSets: 3,
+    targetReps: 20,
+    weight: 12,
+    previousWeight: 10,
+    reps: [16, 16, 16],
+  }),
+]);
+assert.equal(loadAdjustmentInsights.find((insight) => insight.id === "risk")?.title, "Ajuste de carga detectado", "reps bajas con kg al alza no se clasifican como fatiga");
 
 const improvedHistory = buildExerciseComparisonSummary([
   makeHistoryMetric("sentadilla-1", 1, "2026-03-12", 100, [12]),

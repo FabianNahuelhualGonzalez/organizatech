@@ -56,13 +56,25 @@ import {
 
 {
   const feedback = buildTrainingCoachFeedback(baseInput({
+    exercises: [exercise({ name: "Press inclinado", kgDifference: 5, repsDifference: 0 })],
+    workout: { completedExercises: 3, totalExercises: 3, volumeDifference: 800, volumePercentage: 8, repsDifference: 0, kgIncreasedExercises: 1 },
+  }));
+
+  assert.equal(feedback.headline, "Progreso fuerte");
+  assert.equal(feedback.strengths[0]?.title, "Progreso fuerte");
+  assert.match(feedback.strengths[0]?.body ?? "", /mantuvo o mejoró repeticiones/i);
+}
+
+{
+  const feedback = buildTrainingCoachFeedback(baseInput({
     exercises: [exercise({ name: "Press plano", kgDifference: 5, repsDifference: -3 })],
     workout: { completedExercises: 3, totalExercises: 3, volumeDifference: -300, volumePercentage: -8, repsDifference: -3, kgIncreasedExercises: 1 },
   }));
 
-  assert.equal(feedback.headline, "Carga en consolidación");
+  assert.equal(feedback.headline, "Progresión de carga detectada");
   assert.equal(feedback.tone, "neutral");
-  assert.equal(feedback.attentions[0]?.title, "Carga en consolidación");
+  assert.equal(feedback.attentions[0]?.title, "Progresión de carga detectada");
+  assert.match(feedback.attentions[0]?.body ?? "", /subiste el peso|normal al aumentar carga/i);
   assert.match(feedback.nextAdvice, /recupera repeticiones|recuperar/i);
 }
 
@@ -164,6 +176,18 @@ import {
 
   assert.equal(feedback.attentions[0]?.body, "prueba 24 06 bajó 10 reps. Es el punto más importante a revisar.");
   assert.equal(feedback.nextTarget, "Suma al menos 1 rep más o intenta recuperar las 10 reps perdidas en prueba 24 06.");
+}
+
+{
+  const feedback = buildTrainingCoachFeedback(baseInput({
+    exercises: [exercise({ name: "Laterales polea", kgDifference: 5, repsDifference: -12 })],
+    workout: { completedExercises: 2, totalExercises: 2, volumeDifference: -600, volumePercentage: -10, repsDifference: -12, kgIncreasedExercises: 1 },
+  }));
+
+  assert.ok(feedback.sourceSignals.includes("kg_up_reps_down"));
+  assert.ok(!feedback.sourceSignals.includes("strong_exercise_drop"));
+  assert.equal(feedback.attentions[0]?.title, "Progresión de carga detectada");
+  assert.doesNotMatch(JSON.stringify(feedback), /Caída fuerte detectada|punto más importante a revisar/i);
 }
 
 {

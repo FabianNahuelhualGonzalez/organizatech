@@ -170,7 +170,8 @@ export function calculateWeeklySummary(metrics: ExerciseMetrics[], week: number)
 
 export function generateSmartInsights(summary: WeeklySummary, current: ExerciseMetrics[]): SmartInsight[] {
   const bestVolume = [...current].sort((a, b) => b.volumePercentage - a.volumePercentage)[0];
-  const risk = current.find((entry) => entry.objectiveStatus === "No cumplimos" && entry.repsDifference <= -4);
+  const risk = current.find((entry) => entry.objectiveStatus === "No cumplimos" && entry.repsDifference <= -4 && entry.kgDifference <= 0);
+  const loadAdjustment = current.find((entry) => entry.repsDifference <= -4 && entry.kgDifference > 0);
   const loadIncreases = current.filter((entry) => entry.kgDifference > 0).length;
 
   return [
@@ -204,7 +205,14 @@ export function generateSmartInsights(summary: WeeklySummary, current: ExerciseM
           id: "risk",
           tone: "riesgo",
           title: "Posible fatiga detectada",
-          detail: `${risk.exerciseName}: ${risk.repsDifference} repeticiones contra el objetivo base.`,
+          detail: `${risk.exerciseName} bajó repeticiones sin aumento de carga. Revisa recuperación, técnica o fatiga acumulada.`,
+        }
+      : loadAdjustment
+        ? {
+            id: "risk",
+            tone: "info",
+            title: "Ajuste de carga detectado",
+            detail: `${loadAdjustment.exerciseName} bajó reps, pero subiste el peso. Puede ser normal mientras consolidas la nueva carga.`,
         }
       : {
           id: "risk",
