@@ -1,5 +1,6 @@
 export const PROFILE_AVATAR_BUCKET = "profile-avatars";
 export const PROFILE_AVATAR_MAX_SIZE_BYTES = 2 * 1024 * 1024;
+export const PROFILE_AVATAR_SIGNED_URL_TTL_SECONDS = 60 * 60;
 export const PROFILE_AVATAR_ALLOWED_MIME_TYPES = [
   "image/jpeg",
   "image/png",
@@ -17,6 +18,17 @@ export type ProfileAvatarFileLike = {
 export type ProfileAvatarValidationResult =
   | { ok: true }
   | { ok: false; error: string };
+
+export interface ProfileAvatarRecordInput {
+  avatar_path?: string | null;
+  avatar_updated_at?: string | null;
+}
+
+export interface ProfileAvatarState {
+  avatarPath: string | null;
+  avatarUrl: string | null;
+  avatarUpdatedAt: string | null;
+}
 
 const profileAvatarAllowedMimeTypeSet = new Set<string>(PROFILE_AVATAR_ALLOWED_MIME_TYPES);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -75,6 +87,35 @@ export function isOwnProfileAvatarPath(userId: string, path: string | null | und
   return Boolean(normalizedUserId && normalizedPath === `${normalizedUserId}/avatar`);
 }
 
+export function buildProfileAvatarUpdatePayload(path: string, avatarUpdatedAt: string) {
+  const normalizedPath = normalizeProfileAvatarPath(path);
+  const normalizedUpdatedAt = normalizeAvatarUpdatedAt(avatarUpdatedAt);
+
+  if (!normalizedPath || !normalizedUpdatedAt) {
+    throw new Error("Los datos del avatar no son válidos.");
+  }
+
+  return {
+    avatar_path: normalizedPath,
+    avatar_updated_at: normalizedUpdatedAt,
+  };
+}
+
+export function buildProfileAvatarDeletePayload() {
+  return {
+    avatar_path: null,
+    avatar_updated_at: null,
+  };
+}
+
+export function mapProfileAvatarState(record: ProfileAvatarRecordInput | null | undefined, avatarUrl: string | null): ProfileAvatarState {
+  return {
+    avatarPath: normalizeProfileAvatarPath(record?.avatar_path ?? null),
+    avatarUrl: normalizeAvatarUrl(avatarUrl),
+    avatarUpdatedAt: normalizeAvatarUpdatedAt(record?.avatar_updated_at ?? null),
+  };
+}
+
 function normalizeMimeType(value: string | null | undefined) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
@@ -87,4 +128,17 @@ function normalizeUserId(value: string | null | undefined) {
   if (normalized.includes("/") || normalized.includes("..")) return null;
 
   return normalized;
+}
+
+function normalizeAvatarUpdatedAt(value: string | null | undefined) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  if (!normalized || Number.isNaN(Date.parse(normalized))) return null;
+  return normalized;
+}
+
+function normalizeAvatarUrl(value: string | null | undefined) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
 }
