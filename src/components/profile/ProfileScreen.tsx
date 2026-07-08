@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
-import { Camera, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 
 import {
   buildProfileFormInitialValues,
@@ -22,7 +22,7 @@ import { UserAvatar } from "./UserAvatar";
 const preferenceRows = [
   { label: "Unidad de peso", value: "kg" },
   { label: "Tema", value: "Oscuro" },
-  { label: "Notificaciones", value: "No configuradas" },
+  { label: "Notificaciones de actualizaciones de sistema", value: "Activa" },
   { label: "Recordatorios", value: "Próximamente" },
 ];
 
@@ -41,6 +41,7 @@ export function ProfileScreen({
   onSavePersonalData,
   onUploadAvatar,
   onDeleteAvatar,
+  cycleContextLabel,
 }: {
   profile: ProfileViewModel;
   personalData: ProfilePersonalData | null;
@@ -56,24 +57,30 @@ export function ProfileScreen({
   onSavePersonalData: (input: ProfilePersonalDataInput) => Promise<ProfilePersonalData>;
   onUploadAvatar: (file: File) => Promise<void>;
   onDeleteAvatar: () => Promise<void>;
+  cycleContextLabel: string;
 }) {
+  const ageLabel = formatProfileAgeLabel(personalData?.birthDate ?? null);
+
   return (
     <section className="screen profile-screen">
       <div className="profile-hero" data-section="profile-avatar">
-        <UserAvatar profile={profile} size="large" onImageError={onAvatarImageError} resetKey={avatarResetKey} />
+        <div className="profile-avatar-stack">
+          <UserAvatar profile={profile} size="large" onImageError={onAvatarImageError} resetKey={avatarResetKey} />
+          <ProfileAvatarControls
+            hasAvatar={Boolean(profile.avatarUrl)}
+            canEdit={canEditAvatar}
+            isLoading={avatarLoading}
+            externalError={avatarError}
+            onUpload={onUploadAvatar}
+            onDelete={onDeleteAvatar}
+          />
+        </div>
         <div className="profile-hero-copy">
-          <p className="eyebrow">Perfil</p>
           <h2>{profile.displayName}</h2>
           {profile.email && <p className="profile-email-text">{profile.email}</p>}
+          <p>Edad: {ageLabel}</p>
+          <p>Ciclo actual: {cycleContextLabel}</p>
         </div>
-        <ProfileAvatarControls
-          hasAvatar={Boolean(profile.avatarUrl)}
-          canEdit={canEditAvatar}
-          isLoading={avatarLoading}
-          externalError={avatarError}
-          onUpload={onUploadAvatar}
-          onDelete={onDeleteAvatar}
-        />
       </div>
 
       <PersonalDataSection
@@ -87,31 +94,20 @@ export function ProfileScreen({
       />
 
       <ProfileSection
-        title="Preferencias"
-        description="Configuración preparada para futuras opciones personales."
+        title="Preferencias de sistema"
+        description="Configuración predeterminada, se esta preparando para futuras opciones personales."
         rows={preferenceRows}
+        actionLabel="Editar datos"
+        disabledAction
       />
 
       <section className="profile-section profile-feature-section">
+        <span className="profile-coming-soon">Próximamente</span>
         <div className="profile-section-header">
           <div>
             <h3>Coaching</h3>
             <p>Próximamente podrás vincularte con un coach, compartir tu progreso y recibir seguimiento personalizado.</p>
           </div>
-          <span className="profile-coming-soon">Próximamente</span>
-        </div>
-        <div className="profile-feature-icon" aria-hidden="true">
-          <Sparkles size={18} />
-        </div>
-      </section>
-
-      <section className="profile-section profile-privacy-section">
-        <div className="profile-feature-icon" aria-hidden="true">
-          <ShieldCheck size={18} />
-        </div>
-        <div>
-          <h3>Privacidad</h3>
-          <p>Tus datos personales y de salud se configurarán con permisos antes de compartirlos con un coach.</p>
         </div>
       </section>
     </section>
@@ -204,7 +200,7 @@ function ProfileAvatarControls({
               disabled={isBusy}
               onClick={() => fileInputRef.current?.click()}
             >
-              <Camera size={14} aria-hidden="true" />
+              <Pencil size={14} aria-hidden="true" />
               {hasAvatar ? "Cambiar foto" : "Subir foto"}
             </button>
             {hasAvatar && (
@@ -279,8 +275,8 @@ function PersonalDataSection({
     { label: "Fecha de nacimiento", value: formatBirthDateLabel(personalData?.birthDate ?? null) },
     { label: "Edad", value: formatProfileAgeLabel(personalData?.birthDate ?? null) },
     { label: "Género", value: profileGenderLabels[personalData?.gender ?? "not_specified"] },
-    { label: "Número de celular", value: personalData?.phoneNumber ?? "No informado" },
-    { label: "Correo electrónico", value: profile.email ?? "No disponible", kind: "email" },
+    { label: "Celular", value: personalData?.phoneNumber ?? "No informado" },
+    { label: "Correo", value: profile.email ?? "No disponible", kind: "email" },
   ];
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -332,21 +328,19 @@ function PersonalDataSection({
           <h3>Datos personales</h3>
           <p>Información base para identificar tu cuenta.</p>
         </div>
-        {!isEditing && (
-          <button
-            className="profile-edit-button"
-            type="button"
-            disabled={!canEdit || isLoading}
-            onClick={() => {
-              setValues(initialValues);
-              setIsEditing(true);
-              setStatusMessage("");
-              setFieldErrors({});
-            }}
-          >
-            Editar datos
-          </button>
-        )}
+        <button
+          className="profile-edit-button"
+          type="button"
+          disabled={!canEdit || isLoading || isEditing}
+          onClick={() => {
+            setValues(initialValues);
+            setIsEditing(true);
+            setStatusMessage("");
+            setFieldErrors({});
+          }}
+        >
+          Editar datos
+        </button>
       </div>
 
       {isEditing ? (
@@ -386,7 +380,7 @@ function PersonalDataSection({
               ))}
             </select>
           </ProfileField>
-          <ProfileField label="Número de celular" error={fieldErrors.phoneNumber}>
+          <ProfileField label="Celular" error={fieldErrors.phoneNumber}>
             <input
               value={values.phoneNumber}
               onChange={(event) => setValues((current) => ({ ...current, phoneNumber: event.target.value }))}
@@ -396,7 +390,7 @@ function PersonalDataSection({
               autoComplete="tel"
             />
           </ProfileField>
-          <ProfileField label="Correo electrónico">
+          <ProfileField label="Correo">
             <input value={profile.email ?? "No disponible"} readOnly aria-readonly="true" />
           </ProfileField>
 
@@ -457,10 +451,14 @@ function ProfileSection({
   title,
   description,
   rows,
+  actionLabel,
+  disabledAction = false,
 }: {
   title: string;
   description: string;
   rows: Array<{ label: string; value: string }>;
+  actionLabel?: string;
+  disabledAction?: boolean;
 }) {
   return (
     <section className="profile-section">
@@ -469,6 +467,11 @@ function ProfileSection({
           <h3>{title}</h3>
           <p>{description}</p>
         </div>
+        {actionLabel ? (
+          <button className="profile-edit-button" type="button" disabled={disabledAction}>
+            {actionLabel}
+          </button>
+        ) : null}
       </div>
       <dl className="profile-info-list">
         {rows.map((row) => (

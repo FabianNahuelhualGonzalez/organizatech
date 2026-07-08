@@ -3556,7 +3556,7 @@ export function OrganizatechApp({
           <div className="notification-panel" role="dialog" aria-label="Notificaciones">
             <div className="notification-panel-header">
               <strong>Notificaciones</strong>
-              <span>{unseenNotificationCount > 0 ? `${unseenNotificationCount} nuevas` : appNotifications.length > 0 ? "Historial" : "Sin pendientes"}</span>
+              <span>{unseenNotificationCount > 0 ? `${unseenNotificationCount} ${unseenNotificationCount === 1 ? "nueva noticia" : "nuevas noticias"}` : appNotifications.length > 0 ? "Historial" : "Sin pendientes"}</span>
             </div>
             {appNotifications.length > 0 ? (
               <div className="notification-list">
@@ -3795,6 +3795,7 @@ export function OrganizatechApp({
           onSavePersonalData={handleSaveProfilePersonalData}
           onUploadAvatar={handleUploadProfileAvatar}
           onDeleteAvatar={handleDeleteProfileAvatar}
+          cycleContextLabel={`${trainingTopbarMeta?.cycleLabel ?? "Ciclo"} + ${trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`}`}
         />
       )}
       {isNewCycleConfirmOpen && (
@@ -4822,7 +4823,7 @@ function NotificationGroup({
 }) {
   return (
     <section className="notification-group" aria-label={title}>
-      <p className="notification-group-title">{title}</p>
+      {title !== "Nuevas" ? <p className="notification-group-title">{title}</p> : null}
       {notifications.map((notification) => {
         const visual = getNotificationVisual(notification.kind);
         const seenRecord = seenNotificationRecordsById.get(notification.id);
@@ -4838,8 +4839,8 @@ function NotificationGroup({
             onClick={() => onOpen(notification)}
           >
             <span className="notification-icon" aria-hidden="true">{visual.icon}</span>
-              <span className="notification-copy">
-                <span className="notification-item-topline">
+            <span className="notification-copy">
+              <span className="notification-item-topline">
                 <span className="notification-category">{notification.category}</span>
                 <span className="notification-state">{isSeen ? "Visto" : "Nuevo"} · {notificationDate}</span>
               </span>
@@ -4856,15 +4857,15 @@ function NotificationGroup({
 function getNotificationVisual(kind: AppNotification["kind"]) {
   switch (kind) {
     case "feature":
-      return { category: "Nuevo", icon: <Sparkles size={15} /> };
+      return { category: "Nuevo", icon: <Sparkles size={28} /> };
     case "profile":
-      return { category: "Perfil", icon: <UserPlus size={15} /> };
+      return { category: "Perfil", icon: <UserPlus size={28} /> };
     case "week":
-      return { category: "Semana", icon: <CalendarDays size={15} /> };
+      return { category: "Semana", icon: <CalendarDays size={28} /> };
     case "progress":
-      return { category: "Progreso", icon: <TrendingUp size={15} /> };
+      return { category: "Progreso", icon: <TrendingUp size={28} /> };
     case "coach":
-      return { category: "Coach", icon: <Activity size={15} /> };
+      return { category: "Coach", icon: <Activity size={28} /> };
   }
 }
 

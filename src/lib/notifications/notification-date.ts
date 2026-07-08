@@ -1,16 +1,16 @@
 const spanishMonthLabels = [
-  "ene",
-  "feb",
-  "mar",
-  "abr",
-  "may",
-  "jun",
-  "jul",
-  "ago",
-  "sept",
-  "oct",
-  "nov",
-  "dic",
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre",
 ];
 
 const dayInMs = 24 * 60 * 60 * 1000;
@@ -27,10 +27,10 @@ export function formatNotificationDate(dateIso: string | null | undefined, now =
   if (differenceInDays === 0) return "Hoy";
   if (differenceInDays === 1) return "Ayer";
 
-  const day = String(date.getDate()).padStart(2, "0");
+  const day = date.getDate();
   const month = spanishMonthLabels[date.getMonth()] ?? "";
-  if (date.getFullYear() === reference.getFullYear()) return `${day} ${month}`;
-  return `${day} ${month} ${date.getFullYear()}`;
+  if (date.getFullYear() === reference.getFullYear()) return `${day} de ${month}`;
+  return `${day} de ${month} ${date.getFullYear()}`;
 }
 
 function parseNotificationDate(value: string | null | undefined): Date | null {
