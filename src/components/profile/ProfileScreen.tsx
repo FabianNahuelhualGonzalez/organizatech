@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Plus } from "lucide-react";
 
 import {
   buildProfileFormInitialValues,
@@ -40,7 +40,6 @@ export function ProfileScreen({
   onReloadPersonalData,
   onSavePersonalData,
   onUploadAvatar,
-  onDeleteAvatar,
   cycleContextLabel,
 }: {
   profile: ProfileViewModel;
@@ -56,7 +55,6 @@ export function ProfileScreen({
   onReloadPersonalData: () => void;
   onSavePersonalData: (input: ProfilePersonalDataInput) => Promise<ProfilePersonalData>;
   onUploadAvatar: (file: File) => Promise<void>;
-  onDeleteAvatar: () => Promise<void>;
   cycleContextLabel: string;
 }) {
   const ageLabel = formatProfileAgeLabel(personalData?.birthDate ?? null);
@@ -72,7 +70,6 @@ export function ProfileScreen({
             isLoading={avatarLoading}
             externalError={avatarError}
             onUpload={onUploadAvatar}
-            onDelete={onDeleteAvatar}
           />
         </div>
         <div className="profile-hero-copy">
@@ -95,7 +92,7 @@ export function ProfileScreen({
 
       <ProfileSection
         title="Preferencias de sistema"
-        description="Configuración predeterminada, se esta preparando para futuras opciones personales."
+        description="Configuración predeterminada, se está preparando para futuras opciones personales."
         rows={preferenceRows}
         actionLabel="Editar datos"
         disabledAction
@@ -120,14 +117,12 @@ function ProfileAvatarControls({
   isLoading,
   externalError,
   onUpload,
-  onDelete,
 }: {
   hasAvatar: boolean;
   canEdit: boolean;
   isLoading: boolean;
   externalError: string;
   onUpload: (file: File) => Promise<void>;
-  onDelete: () => Promise<void>;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
@@ -167,19 +162,6 @@ function ProfileAvatarControls({
     }
   }
 
-  async function handleDeleteAvatar() {
-    setIsWorking(true);
-    setStatusMessage("Eliminando foto...");
-    try {
-      await onDelete();
-      setStatusMessage("Foto eliminada.");
-    } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "No se pudo eliminar la foto de perfil.");
-    } finally {
-      setIsWorking(false);
-    }
-  }
-
   return (
     <div className="profile-avatar-controls">
       <input
@@ -199,21 +181,11 @@ function ProfileAvatarControls({
               type="button"
               disabled={isBusy}
               onClick={() => fileInputRef.current?.click()}
+              aria-label={hasAvatar ? "Cambiar foto de perfil" : "Subir foto de perfil"}
             >
-              <Pencil size={14} aria-hidden="true" />
+              <Plus size={20} aria-hidden="true" />
               {hasAvatar ? "Cambiar foto" : "Subir foto"}
             </button>
-            {hasAvatar && (
-              <button
-                className="profile-edit-button profile-avatar-delete-button"
-                type="button"
-                disabled={isBusy}
-                onClick={() => void handleDeleteAvatar()}
-              >
-                <Trash2 size={14} aria-hidden="true" />
-                Eliminar foto
-              </button>
-            )}
           </div>
         </>
       ) : (
