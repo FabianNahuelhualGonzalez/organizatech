@@ -508,6 +508,7 @@ export function OrganizatechApp({
     avatarUrl: null,
     avatarUpdatedAt: null,
   });
+  const [profileAvatarResetKey, setProfileAvatarResetKey] = useState(0);
   const [profileAvatarLoading, setProfileAvatarLoading] = useState(false);
   const [profileAvatarError, setProfileAvatarError] = useState("");
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
@@ -551,6 +552,7 @@ export function OrganizatechApp({
   const lastProfileAvatarRefreshAtRef = useRef(0);
   const profileAvatarBootstrapUserIdRef = useRef<string | null>(null);
   const lastProfileAvatarErrorRefreshAtRef = useRef(0);
+  const profileAvatarRefreshInFlightRef = useRef(false);
   const [pendingReadinessLink, setPendingReadinessLink] = useState<PendingWorkoutReadinessLink | null>(null);
   const pendingReadinessLinkRef = useRef<PendingWorkoutReadinessLink | null>(null);
   const [hasRecoverableWorkoutStart, setHasRecoverableWorkoutStart] = useState(false);
@@ -957,6 +959,7 @@ export function OrganizatechApp({
   }), [canEditProfilePersonalData, dataSource, profileAvatar.avatarPath, profileAvatar.avatarUrl, profilePersonalData?.avatarPath, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
   const refreshProfileAvatar = useCallback(async (options?: { force?: boolean; avatarPath?: string | null; allowProfileLookup?: boolean }) => {
     if (!canEditProfilePersonalData || !supabaseSession) return null;
+    if (profileAvatarRefreshInFlightRef.current) return null;
 
     const now = Date.now();
     if (!options?.force && now - lastProfileAvatarRefreshAtRef.current < PROFILE_AVATAR_REFRESH_THROTTLE_MS) {
@@ -964,6 +967,7 @@ export function OrganizatechApp({
     }
 
     lastProfileAvatarRefreshAtRef.current = now;
+    profileAvatarRefreshInFlightRef.current = true;
     try {
       let avatarPath = options?.avatarPath ?? profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null;
       if (!avatarPath && options?.allowProfileLookup) {
@@ -977,6 +981,7 @@ export function OrganizatechApp({
             avatarUrl: null,
             avatarUpdatedAt: null,
           });
+          setProfileAvatarResetKey((current) => current + 1);
           setProfileAvatarError("");
           return null;
         }
@@ -986,11 +991,16 @@ export function OrganizatechApp({
 
       const avatar = await getCurrentProfileAvatar();
       setProfileAvatar(avatar);
+      if (avatar.avatarUrl) {
+        setProfileAvatarResetKey((current) => current + 1);
+      }
       setProfileAvatarError("");
       return avatar;
     } catch {
       setProfileAvatarError("No pudimos actualizar tu foto de perfil. La mostraremos apenas vuelva a estar disponible.");
       return null;
+    } finally {
+      profileAvatarRefreshInFlightRef.current = false;
     }
   }, [canEditProfilePersonalData, profileAvatar.avatarPath, profilePersonalData?.avatarPath, supabaseSession]);
   const completedTrainingDays = calculateWeeklyCompletedTrainingDays({
@@ -1141,7 +1151,7 @@ export function OrganizatechApp({
 
   useEffect(() => {
     function refreshAvatarOnResume() {
-      void refreshProfileAvatar({ allowProfileLookup: true });
+      void refreshProfileAvatar({ force: true, allowProfileLookup: true });
     }
 
     function refreshAvatarOnVisibilityChange() {
@@ -1175,6 +1185,7 @@ export function OrganizatechApp({
       avatarUrl: null,
       avatarUpdatedAt: null,
     });
+    setProfileAvatarResetKey((current) => current + 1);
     setProfileAvatarError("");
     if (authState.user) setSessionName(getSessionDisplayName(authState.user));
   }
@@ -1195,6 +1206,7 @@ export function OrganizatechApp({
       avatarUrl: null,
       avatarUpdatedAt: null,
     });
+    setProfileAvatarResetKey((current) => current + 1);
     setProfileAvatarLoading(false);
     setProfileAvatarError("");
     setDataMode("demo");
@@ -1366,6 +1378,7 @@ export function OrganizatechApp({
         avatarUrl: null,
         avatarUpdatedAt: null,
       });
+      setProfileAvatarResetKey((current) => current + 1);
       setProfileAvatarLoading(false);
       setProfileAvatarError("");
       return null;
@@ -1403,6 +1416,7 @@ export function OrganizatechApp({
     const avatar = await uploadProfileAvatar(file);
     lastProfileAvatarRefreshAtRef.current = Date.now();
     setProfileAvatar(avatar);
+    setProfileAvatarResetKey((current) => current + 1);
     setProfilePersonalData((current) => current
       ? {
         ...current,
@@ -1417,6 +1431,7 @@ export function OrganizatechApp({
     const avatar = await deleteProfileAvatar();
     lastProfileAvatarRefreshAtRef.current = 0;
     setProfileAvatar(avatar);
+    setProfileAvatarResetKey((current) => current + 1);
     setProfilePersonalData((current) => current
       ? {
         ...current,
@@ -3441,7 +3456,13 @@ export function OrganizatechApp({
           aria-expanded={isMenuOpen}
           onClick={() => {
             setIsNotificationPanelOpen(false);
-            setIsMenuOpen((value) => !value);
+            setIsMenuOpen((value) => {
+              const next = !value;
+              if (next) {
+                void refreshProfileAvatar({ force: true, allowProfileLookup: true });
+              }
+              return next;
+            });
           }}
         >
           <span className="hamburger-line" />
@@ -3531,7 +3552,11 @@ export function OrganizatechApp({
             </div>
             <div className="menu-drawer-body">
               <div className="menu-panel" role="menu" aria-label="Menú principal">
-                <ProfileMenuHeader profile={profileViewModel} onAvatarImageError={handleProfileAvatarImageError} />
+                <ProfileMenuHeader
+                  profile={profileViewModel}
+                  onAvatarImageError={handleProfileAvatarImageError}
+                  avatarResetKey={profileAvatarResetKey}
+                />
                 <div className="menu-grid">
                   {menuScreens.map((item) => (
                     <button
@@ -3717,6 +3742,7 @@ export function OrganizatechApp({
           avatarLoading={profileAvatarLoading}
           avatarError={profileAvatarError}
           onAvatarImageError={handleProfileAvatarImageError}
+          avatarResetKey={profileAvatarResetKey}
           onReloadPersonalData={refreshProfilePersonalData}
           onSavePersonalData={handleSaveProfilePersonalData}
           onUploadAvatar={handleUploadProfileAvatar}

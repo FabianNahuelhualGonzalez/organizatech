@@ -35,6 +35,7 @@ export function ProfileScreen({
   avatarLoading,
   avatarError,
   onAvatarImageError,
+  avatarResetKey,
   onReloadPersonalData,
   onSavePersonalData,
   onUploadAvatar,
@@ -49,6 +50,7 @@ export function ProfileScreen({
   avatarLoading: boolean;
   avatarError: string;
   onAvatarImageError?: () => void;
+  avatarResetKey?: number;
   onReloadPersonalData: () => void;
   onSavePersonalData: (input: ProfileFormValues) => Promise<ProfilePersonalData>;
   onUploadAvatar: (file: File) => Promise<void>;
@@ -57,7 +59,7 @@ export function ProfileScreen({
   return (
     <section className="screen profile-screen">
       <div className="profile-hero">
-        <UserAvatar profile={profile} size="large" onImageError={onAvatarImageError} />
+        <UserAvatar profile={profile} size="large" onImageError={onAvatarImageError} resetKey={avatarResetKey} />
         <div className="profile-hero-copy">
           <p className="eyebrow">Perfil</p>
           <h2>{profile.displayName}</h2>

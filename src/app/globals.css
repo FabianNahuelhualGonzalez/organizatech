@@ -3114,6 +3114,40 @@ h3 {
   background: transparent;
 }
 
+@media (max-width: 560px) {
+  .notification-panel {
+    position: fixed;
+    top: auto;
+    right: max(12px, env(safe-area-inset-right));
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: max(12px, env(safe-area-inset-left));
+    z-index: 92;
+    width: auto;
+    max-width: none;
+    max-height: min(72dvh, 560px);
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow:
+      0 24px 70px rgba(0, 0, 0, 0.58),
+      0 0 0 1px rgba(60, 122, 255, 0.14);
+  }
+
+  .notification-panel::before {
+    content: "";
+    justify-self: center;
+    width: 44px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(220, 231, 255, 0.3);
+  }
+
+  .notification-backdrop {
+    z-index: 88;
+    background: rgba(3, 8, 14, 0.52);
+    backdrop-filter: blur(3px);
+  }
+}
+
 .menu-trigger svg {
   width: 25px;
   height: 25px;
@@ -3307,7 +3341,7 @@ h3 {
 
 .menu-drawer-body {
   display: grid;
-  grid-template-columns: minmax(0, min(92vw, 420px)) 1fr;
+  grid-template-columns: minmax(216px, 58%) 1fr;
   height: calc(100dvh - 56px);
   overflow: hidden;
   pointer-events: auto;

@@ -7,17 +7,19 @@ export function UserAvatar({
   profile,
   size = "medium",
   onImageError,
+  resetKey = 0,
 }: {
   profile: Pick<ProfileViewModel, "avatarInitial" | "avatarUrl" | "displayName">;
   size?: "small" | "medium" | "large";
   onImageError?: () => void;
+  resetKey?: number;
 }) {
   const className = `user-avatar user-avatar-${size}`;
   const [imgFailed, setImgFailed] = useState(false);
 
   useEffect(() => {
     setImgFailed(false);
-  }, [profile.avatarUrl]);
+  }, [profile.avatarUrl, resetKey]);
 
   if (profile.avatarUrl && !imgFailed) {
     return (
