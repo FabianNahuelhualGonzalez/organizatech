@@ -14,6 +14,7 @@ export interface ProfilePersonalData {
   lastName: string | null;
   birthDate: string | null;
   gender: ProfileGender;
+  phoneNumber: string | null;
   avatarPath: string | null;
   avatarUpdatedAt: string | null;
 }
@@ -26,6 +27,7 @@ interface ProfileRow {
   last_name: string | null;
   birth_date: string | null;
   gender: string | null;
+  phone_number: string | null;
   avatar_path: string | null;
   avatar_updated_at: string | null;
 }
@@ -41,7 +43,7 @@ export async function getProfilePersonalData(): Promise<ProfilePersonalData> {
   const { supabase, userId } = await getAuthenticatedProfileClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id,display_name,email,first_name,last_name,birth_date,gender,avatar_path,avatar_updated_at")
+    .select("id,display_name,email,first_name,last_name,birth_date,gender,phone_number,avatar_path,avatar_updated_at")
     .eq("id", userId)
     .maybeSingle();
 
@@ -61,7 +63,7 @@ export async function updateProfilePersonalData(input: ProfilePersonalDataInput)
     .from("profiles")
     .update(validation.payload)
     .eq("id", userId)
-    .select("id,display_name,email,first_name,last_name,birth_date,gender,avatar_path,avatar_updated_at")
+    .select("id,display_name,email,first_name,last_name,birth_date,gender,phone_number,avatar_path,avatar_updated_at")
     .single();
 
   if (error) throw new ProfileRepositoryError("No pudimos guardar tu perfil.", error);
@@ -92,6 +94,7 @@ function mapProfileRow(row: ProfileRow): ProfilePersonalData {
     lastName: row.last_name,
     birthDate: row.birth_date,
     gender: mapGender(row.gender),
+    phoneNumber: row.phone_number,
     avatarPath: avatar.avatarPath,
     avatarUpdatedAt: avatar.avatarUpdatedAt,
   };

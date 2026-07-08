@@ -42,11 +42,13 @@ const referenceDate = new Date(2026, 6, 6);
     lastName: "Nahuelhual",
     birthDate: "1990-07-06",
     gender: "male",
+    phoneNumber: "+56 9 1234 5678",
   }), {
     firstName: "Fabian",
     lastName: "Nahuelhual",
     birthDate: "1990-07-06",
     gender: "male",
+    phoneNumber: "+56 9 1234 5678",
   });
 
   assert.deepEqual(buildProfileFormInitialValues({
@@ -55,22 +57,26 @@ const referenceDate = new Date(2026, 6, 6);
     lastName: null,
     birthDate: null,
     gender: null,
+    phoneNumber: null,
   }), {
     firstName: "Fabian",
     lastName: "Elias Nahuelhual",
     birthDate: "",
     gender: "not_specified",
+    phoneNumber: "",
   });
 
   assert.deepEqual(buildProfileFormInitialValues({
     displayName: "Fabian Elias Nahuelhual",
     birthDate: "fecha-invalida",
     gender: "male",
+    phoneNumber: "   +56   9   1234   5678   ",
   }), {
     firstName: "Fabian",
     lastName: "Elias Nahuelhual",
     birthDate: "",
     gender: "male",
+    phoneNumber: "+56 9 1234 5678",
   });
 }
 
@@ -132,6 +138,7 @@ const referenceDate = new Date(2026, 6, 6);
     lastName: "  Elias   Nahuelhual ",
     birthDate: "1990-07-06",
     gender: null,
+    phoneNumber: "  +56   9   1234   5678  ",
   }, referenceDate);
 
   assert.equal(result.ok, true);
@@ -140,6 +147,7 @@ const referenceDate = new Date(2026, 6, 6);
     last_name: "Elias Nahuelhual",
     birth_date: "1990-07-06",
     gender: "not_specified",
+    phone_number: "+56 9 1234 5678",
     display_name: "Fabian Elias Nahuelhual",
   });
 
@@ -150,6 +158,43 @@ const referenceDate = new Date(2026, 6, 6);
 
   assert.equal(maleResult.ok, true);
   assert.equal(maleResult.payload?.gender, "male");
+}
+
+{
+  const emptyPhone = buildProfilePersonalDataPayload({
+    firstName: "Fabian",
+    phoneNumber: "   ",
+  }, referenceDate);
+  assert.equal(emptyPhone.ok, true);
+  assert.equal(emptyPhone.payload?.phone_number, null);
+
+  const validPhone = buildProfilePersonalDataPayload({
+    firstName: "Fabian",
+    phoneNumber: "+56 9 1234 5678",
+  }, referenceDate);
+  assert.equal(validPhone.ok, true);
+  assert.equal(validPhone.payload?.phone_number, "+56 9 1234 5678");
+
+  const formattedPhone = buildProfilePersonalDataPayload({
+    firstName: "Fabian",
+    phoneNumber: "+56 (9) 1234-5678",
+  }, referenceDate);
+  assert.equal(formattedPhone.ok, true);
+  assert.equal(formattedPhone.payload?.phone_number, "+56 (9) 1234-5678");
+
+  const invalidLetters = buildProfilePersonalDataPayload({
+    firstName: "Fabian",
+    phoneNumber: "+56 nueve 1234",
+  }, referenceDate);
+  assert.equal(invalidLetters.ok, false);
+  assert.equal(invalidLetters.errors.phoneNumber, "Ingresa un número de celular válido.");
+
+  const tooLong = buildProfilePersonalDataPayload({
+    firstName: "Fabian",
+    phoneNumber: "1".repeat(31),
+  }, referenceDate);
+  assert.equal(tooLong.ok, false);
+  assert.equal(tooLong.errors.phoneNumber, "Ingresa un número de celular válido.");
 }
 
 {

@@ -259,6 +259,7 @@ function PersonalDataSection({
     lastName: personalData?.lastName ?? null,
     birthDate: personalData?.birthDate ?? null,
     gender: personalData?.gender ?? "not_specified",
+    phoneNumber: personalData?.phoneNumber ?? null,
   }), [personalData, profile.displayName]);
   const [isEditing, setIsEditing] = useState(false);
   const [values, setValues] = useState<ProfileFormValues>(initialValues);
@@ -272,11 +273,13 @@ function PersonalDataSection({
   }, [initialValues]);
 
   const readRows = [
-    { label: "Nombre completo", value: personalData?.displayName ?? profile.displayName },
-    { label: "Correo", value: profile.email ?? "No disponible", kind: "email" },
+    { label: "Nombre", value: initialValues.firstName || "No informado" },
+    { label: "Apellido", value: initialValues.lastName || "No informado" },
     { label: "Fecha de nacimiento", value: formatBirthDateLabel(personalData?.birthDate ?? null) },
     { label: "Edad", value: formatProfileAgeLabel(personalData?.birthDate ?? null) },
     { label: "Género", value: profileGenderLabels[personalData?.gender ?? "not_specified"] },
+    { label: "Número de celular", value: personalData?.phoneNumber ?? "No informado" },
+    { label: "Correo electrónico", value: profile.email ?? "No disponible", kind: "email" },
   ];
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -349,9 +352,6 @@ function PersonalDataSection({
               maxLength={120}
             />
           </ProfileField>
-          <ProfileField label="Correo">
-            <input value={profile.email ?? "No disponible"} readOnly aria-readonly="true" />
-          </ProfileField>
           <ProfileField label="Fecha de nacimiento" error={fieldErrors.birthDate}>
             <input
               type="date"
@@ -372,6 +372,19 @@ function PersonalDataSection({
                 <option value={gender} key={gender}>{profileGenderLabels[gender]}</option>
               ))}
             </select>
+          </ProfileField>
+          <ProfileField label="Número de celular" error={fieldErrors.phoneNumber}>
+            <input
+              value={values.phoneNumber}
+              onChange={(event) => setValues((current) => ({ ...current, phoneNumber: event.target.value }))}
+              maxLength={30}
+              placeholder="+56 9 1234 5678"
+              inputMode="tel"
+              autoComplete="tel"
+            />
+          </ProfileField>
+          <ProfileField label="Correo electrónico">
+            <input value={profile.email ?? "No disponible"} readOnly aria-readonly="true" />
           </ProfileField>
 
           {statusMessage && <p className="profile-form-status">{statusMessage}</p>}

@@ -19,6 +19,7 @@ export interface ProfileFormInitialSource {
   lastName?: string | null;
   birthDate?: string | null;
   gender?: string | null;
+  phoneNumber?: string | null;
 }
 
 export interface ProfileFormValues {
@@ -26,6 +27,7 @@ export interface ProfileFormValues {
   lastName: string;
   birthDate: string;
   gender: ProfileGender;
+  phoneNumber: string;
 }
 
 export interface ProfilePersonalDataInput {
@@ -33,6 +35,7 @@ export interface ProfilePersonalDataInput {
   lastName?: string | null;
   birthDate?: string | null;
   gender?: string | null;
+  phoneNumber?: string | null;
 }
 
 export interface ProfilePersonalDataPayload {
@@ -40,13 +43,14 @@ export interface ProfilePersonalDataPayload {
   last_name: string | null;
   birth_date: string | null;
   gender: ProfileGender;
+  phone_number: string | null;
   display_name: string;
 }
 
 export interface ProfileValidationResult {
   ok: boolean;
   payload: ProfilePersonalDataPayload | null;
-  errors: Partial<Record<"firstName" | "lastName" | "birthDate" | "gender", string>>;
+  errors: Partial<Record<"firstName" | "lastName" | "birthDate" | "gender" | "phoneNumber", string>>;
 }
 
 export interface InitialProfileInsertPayload {
@@ -63,9 +67,11 @@ export type EnsureProfileWriteDecision =
 
 const maxFirstNameLength = 80;
 const maxLastNameLength = 120;
+const maxPhoneNumberLength = 30;
 const minProfileAge = 10;
 const maxProfileAge = 100;
 const dateOnlyPattern = /^\d{4}-\d{2}-\d{2}$/;
+const phoneNumberPattern = /^[0-9+\-\s()]+$/;
 
 export const profileGenderLabels: Record<ProfileGender, string> = {
   male: "Hombre",
@@ -92,12 +98,14 @@ export function buildProfileFormInitialValues(source: ProfileFormInitialSource):
   const lastName = normalizeSpaces(source.lastName) || legacyNameParts.lastName;
   const birthDate = normalizeBirthDate(source.birthDate) ?? "";
   const gender = normalizeGender(source.gender) ?? "not_specified";
+  const phoneNumber = normalizePhoneNumber(source.phoneNumber) ?? "";
 
   return {
     firstName,
     lastName,
     birthDate,
     gender,
+    phoneNumber,
   };
 }
 
@@ -146,6 +154,7 @@ export function buildProfilePersonalDataPayload(
   const lastName = normalizeSpaces(input.lastName);
   const birthDate = normalizeBirthDate(input.birthDate);
   const gender = normalizeGender(input.gender);
+  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
   const errors: ProfileValidationResult["errors"] = {};
 
   if (!firstName) {
@@ -181,6 +190,10 @@ export function buildProfilePersonalDataPayload(
     errors.gender = "Selecciona un género válido.";
   }
 
+  if (phoneNumber === undefined) {
+    errors.phoneNumber = "Ingresa un número de celular válido.";
+  }
+
   if (Object.keys(errors).length > 0) {
     return { ok: false, payload: null, errors };
   }
@@ -192,6 +205,7 @@ export function buildProfilePersonalDataPayload(
       last_name: lastName || null,
       birth_date: birthDate ?? null,
       gender: gender ?? "not_specified",
+      phone_number: phoneNumber ?? null,
       display_name: buildDisplayName(firstName, lastName),
     },
     errors,
@@ -250,6 +264,13 @@ function normalizeSpaces(value: string | null | undefined) {
 
 function normalizeEmail(value: string | null | undefined) {
   return normalizeSpaces(value).toLowerCase();
+}
+
+function normalizePhoneNumber(value: string | null | undefined): string | null | undefined {
+  const normalized = normalizeSpaces(value);
+  if (!normalized) return null;
+  if (normalized.length > maxPhoneNumberLength || !phoneNumberPattern.test(normalized)) return undefined;
+  return normalized;
 }
 
 function normalizeGender(value: string | null | undefined): ProfileGender | null {
