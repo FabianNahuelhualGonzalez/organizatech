@@ -2791,6 +2791,26 @@ h3 {
   box-shadow: var(--shadow);
 }
 
+[data-section] {
+  scroll-margin-top: calc(78px + env(safe-area-inset-top));
+}
+
+.section-highlighted {
+  animation: sectionTargetGlow 1800ms ease-out;
+}
+
+@keyframes sectionTargetGlow {
+  0% {
+    box-shadow:
+      0 0 0 1px rgba(60, 122, 255, 0.8),
+      0 0 0 6px rgba(60, 122, 255, 0.16),
+      0 18px 52px rgba(60, 122, 255, 0.2);
+  }
+  100% {
+    box-shadow: var(--shadow);
+  }
+}
+
 .metric-grid,
 .triple-grid {
   display: grid;

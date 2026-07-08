@@ -58,7 +58,7 @@ export function ProfileScreen({
 }) {
   return (
     <section className="screen profile-screen">
-      <div className="profile-hero">
+      <div className="profile-hero" data-section="profile-avatar">
         <UserAvatar profile={profile} size="large" onImageError={onAvatarImageError} resetKey={avatarResetKey} />
         <div className="profile-hero-copy">
           <p className="eyebrow">Perfil</p>
@@ -310,7 +310,7 @@ function PersonalDataSection({
   }
 
   return (
-    <section className="profile-section">
+    <section className="profile-section" data-section="personal-data">
       <div className="profile-section-header">
         <div>
           <h3>Datos personales</h3>

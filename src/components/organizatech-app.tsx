@@ -267,6 +267,7 @@ const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
 const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
 const SEEN_NOTIFICATIONS_KEY = "organizatech:seen-notifications-v1";
 const SEEN_NOTIFICATIONS_MAX_RECORDS = 60;
+const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
 const blockedSignupDomains = new Set([
   "example.com",
   "example.cl",
@@ -444,11 +445,22 @@ interface AnalyticsSnapshot {
   factors: Array<[string, number]>;
 }
 
+type AppNotificationTarget = Extract<Screen, "dashboard" | "perfil" | "comparacion">;
+type AppNotificationSection =
+  | "profile-avatar"
+  | "personal-data"
+  | "today-training"
+  | "training-carousel"
+  | "weekly-progress"
+  | "coach"
+  | "weekly-comparison";
+
 interface AppNotification {
   id: string;
   title: string;
   summary: string;
-  target: "dashboard" | "perfil";
+  target: AppNotificationTarget;
+  section?: AppNotificationSection;
   kind: "feature" | "profile" | "week" | "progress" | "coach";
 }
 
@@ -3434,6 +3446,22 @@ export function OrganizatechApp({
     setIsNotificationPanelOpen(false);
     setTrainingCompletionSummary(null);
     navigateTo(notification.target);
+    scrollToNotificationSection(notification.section);
+  }
+
+  function scrollToNotificationSection(section?: AppNotificationSection) {
+    if (!section || typeof document === "undefined") return;
+
+    window.setTimeout(() => {
+      const target = document.querySelector<HTMLElement>(`[data-section="${section}"]`);
+      if (!target) return;
+
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.classList.add("section-highlighted");
+      window.setTimeout(() => {
+        target.classList.remove("section-highlighted");
+      }, NOTIFICATION_SECTION_HIGHLIGHT_MS);
+    }, 160);
   }
 
   const menuScreens = hasTrainingEntries
@@ -4246,7 +4274,7 @@ function DashboardScreen({
             </button>
           ) : null}
         </div>
-        <div className="card wide dashboard-training-card">
+        <div className="card wide dashboard-training-card" data-section="training-carousel">
           <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
             {carouselDays.map((item) => {
               const itemData = getDashboardDayData(item);
@@ -4272,7 +4300,7 @@ function DashboardScreen({
   return (
     <section className="screen">
       <MetricGrid summary={summary} />
-      <div className="card wide dashboard-progress-card">
+      <div className="card wide dashboard-progress-card" data-section="weekly-progress">
         <div className="weekly-progress-summary">
           <div className="weekly-progress-value-block">
             <p className="small-label">Progreso semanal</p>
@@ -4298,7 +4326,7 @@ function DashboardScreen({
         </div>
         <WeeklyProgressSvg progress={weeklyEquivalentProgress} />
       </div>
-      <div className={`card wide dashboard-training-card ${activeDayData.status}`}>
+      <div className={`card wide dashboard-training-card ${activeDayData.status}`} data-section="training-carousel">
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
           {carouselDays.map((item) => {
             const itemData = getDashboardDayData(item);
@@ -4325,7 +4353,9 @@ function DashboardScreen({
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
       </div>
-      <DashboardCoachCard feedback={displayedCoachFeedback} analytics={analytics} visualStatus={coachVisualStatus} />
+      <div data-section="coach">
+        <DashboardCoachCard feedback={displayedCoachFeedback} analytics={analytics} visualStatus={coachVisualStatus} />
+      </div>
     </section>
   );
 }
@@ -4878,6 +4908,7 @@ function buildAppNotifications({
       title: "Nueva función disponible",
       summary: "Ahora puedes subir y ajustar tu foto de perfil.",
       target: "perfil",
+      section: "profile-avatar",
       kind: "feature",
     },
   ];
@@ -4888,6 +4919,7 @@ function buildAppNotifications({
       title: "Completa tu perfil",
       summary: "Agrega una foto para personalizar tu cuenta.",
       target: "perfil",
+      section: "profile-avatar",
       kind: "profile",
     });
   }
@@ -4898,7 +4930,19 @@ function buildAppNotifications({
       title: "Resumen semanal",
       summary: `Semana ${currentWeek}: llevas ${completedDays} de ${plannedDays} días completados.`,
       target: "dashboard",
+      section: "training-carousel",
       kind: "week",
+    });
+  }
+
+  if (hasTrainingEntries && currentMetrics.length > 0) {
+    notifications.push({
+      id: `weekly-comparison-v1-w${currentWeek}`,
+      title: "Comparación semanal disponible",
+      summary: "Revisa cómo avanzaste frente a tu semana anterior.",
+      target: "comparacion",
+      section: "weekly-comparison",
+      kind: "progress",
     });
   }
 
@@ -4908,6 +4952,7 @@ function buildAppNotifications({
       title: "Progreso semanal",
       summary: `Tu volumen actual es ${weeklyEquivalentProgress.currentVolumeLabel} esta semana.`,
       target: "dashboard",
+      section: "weekly-progress",
       kind: "progress",
     });
   }
@@ -4920,6 +4965,7 @@ function buildAppNotifications({
       title: "Análisis inteligente",
       summary: "Detectamos un cambio importante en tu rendimiento.",
       target: "dashboard",
+      section: "coach",
       kind: "coach",
     });
   } else if (loadAdjustment || summary.volumeDifference !== 0) {
@@ -4928,6 +4974,7 @@ function buildAppNotifications({
       title: "Análisis inteligente",
       summary: "Revisa tu lectura del Coach para ajustar el próximo entrenamiento.",
       target: "dashboard",
+      section: "coach",
       kind: "coach",
     });
   }
@@ -6135,7 +6182,7 @@ function ComparisonScreenV2({
   }, [comparisonModel.selectedWeek, selectedWeek]);
 
   return (
-    <section className="screen weekly-comparison-screen">
+    <section className="screen weekly-comparison-screen" data-section="weekly-comparison">
       <div className="weekly-comparison-shell">
         <div className="weekly-comparison-section select-day-section">
           <div>
