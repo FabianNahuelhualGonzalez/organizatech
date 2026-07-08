@@ -3145,11 +3145,17 @@ h3 {
     width: auto;
     max-width: none;
     max-height: min(72dvh, 560px);
+    overflow-y: auto;
     border-radius: 16px;
+    background: #07101a;
+    backdrop-filter: none;
+    filter: none;
+    opacity: 1;
     padding: 14px;
     box-shadow:
       0 24px 70px rgba(0, 0, 0, 0.58),
       0 0 0 1px rgba(60, 122, 255, 0.14);
+    pointer-events: auto;
   }
 
   .notification-panel::before {
@@ -3163,8 +3169,9 @@ h3 {
 
   .notification-backdrop {
     z-index: 88;
-    background: rgba(3, 8, 14, 0.52);
-    backdrop-filter: blur(3px);
+    background: rgba(3, 8, 14, 0.72);
+    backdrop-filter: none;
+    filter: none;
   }
 }
 
