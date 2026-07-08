@@ -3523,45 +3523,45 @@ export function OrganizatechApp({
               </span>
             ) : null}
           </button>
-          {isNotificationPanelOpen ? (
-            <div className="notification-panel" role="dialog" aria-label="Notificaciones">
-              <div className="notification-panel-header">
-                <strong>Notificaciones</strong>
-                <span>{unseenNotificationCount > 0 ? `${unseenNotificationCount} nuevas` : appNotifications.length > 0 ? "Historial" : "Sin pendientes"}</span>
-              </div>
-              {appNotifications.length > 0 ? (
-                <div className="notification-list">
-                  {newNotifications.length > 0 ? (
-                    <NotificationGroup
-                      title="Nuevas"
-                      notifications={newNotifications}
-                      seenNotificationIds={seenNotificationIds}
-                      onOpen={openNotificationTarget}
-                    />
-                  ) : null}
-                  {historyNotifications.length > 0 ? (
-                    <NotificationGroup
-                      title="Historial"
-                      notifications={historyNotifications}
-                      seenNotificationIds={seenNotificationIds}
-                      onOpen={openNotificationTarget}
-                    />
-                  ) : null}
-                </div>
-              ) : (
-                <p className="notification-empty">No tienes notificaciones por ahora.</p>
-              )}
-            </div>
-          ) : null}
         </div>
       </header>
 
       {isNotificationPanelOpen ? (
-        <button
-          className="notification-backdrop"
-          aria-label="Cerrar notificaciones"
-          onClick={() => setIsNotificationPanelOpen(false)}
-        />
+        <>
+          <button
+            className="notification-backdrop"
+            aria-label="Cerrar notificaciones"
+            onClick={() => setIsNotificationPanelOpen(false)}
+          />
+          <div className="notification-panel" role="dialog" aria-label="Notificaciones">
+            <div className="notification-panel-header">
+              <strong>Notificaciones</strong>
+              <span>{unseenNotificationCount > 0 ? `${unseenNotificationCount} nuevas` : appNotifications.length > 0 ? "Historial" : "Sin pendientes"}</span>
+            </div>
+            {appNotifications.length > 0 ? (
+              <div className="notification-list">
+                {newNotifications.length > 0 ? (
+                  <NotificationGroup
+                    title="Nuevas"
+                    notifications={newNotifications}
+                    seenNotificationIds={seenNotificationIds}
+                    onOpen={openNotificationTarget}
+                  />
+                ) : null}
+                {historyNotifications.length > 0 ? (
+                  <NotificationGroup
+                    title="Historial"
+                    notifications={historyNotifications}
+                    seenNotificationIds={seenNotificationIds}
+                    onOpen={openNotificationTarget}
+                  />
+                ) : null}
+              </div>
+            ) : (
+              <p className="notification-empty">No tienes notificaciones por ahora.</p>
+            )}
+          </div>
+        </>
       ) : null}
 
       {isMenuOpen && (

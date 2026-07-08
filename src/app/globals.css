@@ -2963,12 +2963,12 @@ h3 {
 }
 
 .notification-panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  z-index: 2;
+  position: fixed;
+  top: calc(70px + env(safe-area-inset-top));
+  right: max(16px, calc((100vw - 560px) / 2 + 16px));
+  z-index: 96;
   display: grid;
-  width: min(90vw, 360px);
+  width: min(360px, calc(100vw - 32px));
   max-height: min(66vh, 500px);
   overflow-y: auto;
   gap: 10px;
@@ -3129,19 +3129,20 @@ h3 {
 .notification-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 55;
+  z-index: 90;
   border: 0;
-  background: transparent;
+  background: rgba(3, 8, 14, 0.62);
+  backdrop-filter: none;
+  filter: none;
 }
 
 @media (max-width: 560px) {
   .notification-panel {
-    position: fixed;
     top: auto;
     right: max(12px, env(safe-area-inset-right));
     bottom: calc(12px + env(safe-area-inset-bottom));
     left: max(12px, env(safe-area-inset-left));
-    z-index: 92;
+    z-index: 96;
     width: auto;
     max-width: none;
     max-height: min(72dvh, 560px);
@@ -3168,7 +3169,6 @@ h3 {
   }
 
   .notification-backdrop {
-    z-index: 88;
     background: rgba(3, 8, 14, 0.72);
     backdrop-filter: none;
     filter: none;
