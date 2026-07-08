@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import {
   Activity,
   ArrowDown,
@@ -11,7 +11,6 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronLeft,
-  Database,
   Dumbbell,
   Eye,
   EyeOff,
@@ -22,12 +21,10 @@ import {
   Minus,
   Pencil,
   Save,
-  Settings,
   Smile,
   Sparkles,
   Trash2,
   TrendingUp,
-  User,
   UserPlus,
 } from "lucide-react";
 import {
@@ -49,6 +46,22 @@ import {
   saveTrainingSessionWithEntries,
   type DataSource,
 } from "@/lib/data/repository";
+import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
+import { ProfileScreen } from "@/components/profile/ProfileScreen";
+import { buildProfileViewModel } from "@/lib/profile/profile-view-model";
+import { formatNotificationDate } from "@/lib/notifications/notification-date";
+import {
+  getProfilePersonalData,
+  updateProfilePersonalData,
+  type ProfilePersonalData,
+} from "@/lib/profile/profile-repository";
+import type { ProfilePersonalDataInput } from "@/lib/profile/profile-form";
+import {
+  deleteProfileAvatar,
+  getCurrentProfileAvatar,
+  uploadProfileAvatar,
+} from "@/lib/profile/profile-avatar-repository";
+import type { ProfileAvatarState } from "@/lib/profile/profile-avatar";
 import {
   calculateExerciseMetrics,
   calculateWeeklyComparison,
@@ -238,7 +251,7 @@ type Screen =
   | "historial-ciclos"
   | "perfil";
 
-const primaryScreens: Screen[] = ["dashboard", "entrenamiento", "registro-entrenamiento", "historial-ciclos", "comparacion"];
+const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
 const setupDays: string[] = [...TRAINING_DAY_LABELS];
 const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
 const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
@@ -251,6 +264,12 @@ const ACTIVE_FLOW_VERSION = 1;
 const ROUTINE_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_FLOW_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
+const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
+const SEEN_NOTIFICATIONS_KEY = "organizatech:seen-notifications-v1";
+const SEEN_NOTIFICATIONS_MAX_RECORDS = 60;
+const VISIBLE_NEW_NOTIFICATIONS_LIMIT = 5;
+const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
 const blockedSignupDomains = new Set([
   "example.com",
   "example.cl",
@@ -428,6 +447,37 @@ interface AnalyticsSnapshot {
   factors: Array<[string, number]>;
 }
 
+type AppNotificationTarget = Extract<Screen, "dashboard" | "perfil" | "comparacion">;
+type AppNotificationSection =
+  | "profile-avatar"
+  | "personal-data"
+  | "today-training"
+  | "training-carousel"
+  | "weekly-progress"
+  | "coach"
+  | "weekly-comparison";
+
+interface AppNotification {
+  id: string;
+  title: string;
+  summary: string;
+  category: "Perfil" | "Entrenamiento" | "Progreso" | "Comparación" | "Coach" | "Novedades" | "Sistema";
+  tone: "info" | "success" | "warning" | "progress";
+  priority: "high" | "medium" | "low";
+  dedupeKey: string;
+  target: AppNotificationTarget;
+  section?: AppNotificationSection;
+  kind: "feature" | "profile" | "week" | "progress" | "coach";
+  createdAt: string;
+  expiresAt?: string;
+  reason?: string;
+}
+
+interface SeenNotificationRecord {
+  id: string;
+  seenAt: number;
+}
+
 interface TrainingCycleSnapshot {
   id: string;
   name: string;
@@ -471,6 +521,17 @@ export function OrganizatechApp({
   const [dataMode, setDataMode] = useState<DataMode>("demo");
   const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
+  const [profilePersonalData, setProfilePersonalData] = useState<ProfilePersonalData | null>(null);
+  const [profilePersonalDataLoading, setProfilePersonalDataLoading] = useState(false);
+  const [profilePersonalDataError, setProfilePersonalDataError] = useState("");
+  const [profileAvatar, setProfileAvatar] = useState<ProfileAvatarState>({
+    avatarPath: null,
+    avatarUrl: null,
+    avatarUpdatedAt: null,
+  });
+  const [profileAvatarResetKey, setProfileAvatarResetKey] = useState(0);
+  const [profileAvatarLoading, setProfileAvatarLoading] = useState(false);
+  const [profileAvatarError, setProfileAvatarError] = useState("");
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(() => getPasswordRecoveryRouteState() === "none");
   const [isBusy, setIsBusy] = useState(false);
@@ -484,6 +545,8 @@ export function OrganizatechApp({
   const [entries, setEntries] = useState<ExerciseEntry[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
+  const [seenNotificationRecords, setSeenNotificationRecords] = useState<SeenNotificationRecord[]>(() => loadSeenNotificationRecords());
   const [isEditingRoutinePlan, setIsEditingRoutinePlan] = useState(false);
   const [routineNotice, setRoutineNotice] = useState("");
   const [isTopbarHidden, setIsTopbarHidden] = useState(false);
@@ -507,6 +570,10 @@ export function OrganizatechApp({
   const workoutStartInFlightRef = useRef(false);
   const dailyReadinessSaveInFlightRef = useRef(false);
   const workoutCompletionInFlightRef = useRef(false);
+  const lastProfileAvatarRefreshAtRef = useRef(0);
+  const profileAvatarBootstrapUserIdRef = useRef<string | null>(null);
+  const lastProfileAvatarErrorRefreshAtRef = useRef(0);
+  const profileAvatarRefreshInFlightRef = useRef(false);
   const [pendingReadinessLink, setPendingReadinessLink] = useState<PendingWorkoutReadinessLink | null>(null);
   const pendingReadinessLinkRef = useRef<PendingWorkoutReadinessLink | null>(null);
   const [hasRecoverableWorkoutStart, setHasRecoverableWorkoutStart] = useState(false);
@@ -820,6 +887,7 @@ export function OrganizatechApp({
   }, [screen, trainingCompletionSummary]);
 
   const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
+  const canEditProfilePersonalData = Boolean(supabaseUser && getSupabaseBrowserClient());
   const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
   const persistedActiveCyclePlan = isTrainingCyclesRepositoryActive && persistedActiveCycle
     ? createTrainingPlanFromPersistedCycle(persistedActiveCycle, trainingPlan)
@@ -903,18 +971,109 @@ export function OrganizatechApp({
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
     : cycleHistory.length + 1;
   const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
+  const profileViewModel = useMemo(() => buildProfileViewModel({
+    displayName: profilePersonalData?.displayName ?? sessionName,
+    email: profilePersonalData?.email ?? supabaseUser?.email ?? null,
+    dataSource: canEditProfilePersonalData ? "supabase" : dataSource,
+    avatarUrl: profileAvatar.avatarUrl,
+    avatarPath: profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null,
+  }), [canEditProfilePersonalData, dataSource, profileAvatar.avatarPath, profileAvatar.avatarUrl, profilePersonalData?.avatarPath, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
+  const refreshProfileAvatar = useCallback(async (options?: { force?: boolean; avatarPath?: string | null; allowProfileLookup?: boolean }) => {
+    if (!canEditProfilePersonalData || !supabaseSession) return null;
+    if (profileAvatarRefreshInFlightRef.current) return null;
+
+    const now = Date.now();
+    if (!options?.force && now - lastProfileAvatarRefreshAtRef.current < PROFILE_AVATAR_REFRESH_THROTTLE_MS) {
+      return null;
+    }
+
+    lastProfileAvatarRefreshAtRef.current = now;
+    profileAvatarRefreshInFlightRef.current = true;
+    try {
+      let avatarPath = options?.avatarPath ?? profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null;
+      if (!avatarPath && options?.allowProfileLookup) {
+        const profile = await getProfilePersonalData();
+        setProfilePersonalData(profile);
+        setSessionName(profile.displayName);
+        avatarPath = profile.avatarPath;
+        if (!avatarPath) {
+          setProfileAvatar({
+            avatarPath: null,
+            avatarUrl: null,
+            avatarUpdatedAt: null,
+          });
+          setProfileAvatarResetKey((current) => current + 1);
+          setProfileAvatarError("");
+          return null;
+        }
+      }
+
+      if (!avatarPath) return null;
+
+      const avatar = await getCurrentProfileAvatar();
+      setProfileAvatar(avatar);
+      if (avatar.avatarUrl) {
+        setProfileAvatarResetKey((current) => current + 1);
+      }
+      setProfileAvatarError("");
+      return avatar;
+    } catch {
+      setProfileAvatarError("No pudimos actualizar tu foto de perfil. La mostraremos apenas vuelva a estar disponible.");
+      return null;
+    } finally {
+      profileAvatarRefreshInFlightRef.current = false;
+    }
+  }, [canEditProfilePersonalData, profileAvatar.avatarPath, profilePersonalData?.avatarPath, supabaseSession]);
+  const completedTrainingDays = calculateWeeklyCompletedTrainingDays({
+    plannedDays: dashboardCarouselDays,
+    exercises: displayExercises,
+    entries: calendarNormalizedEntries,
+    sessions: calendarNormalizedTrainingSessions,
+    usesCycleScopedSessions: isCycleScopedActiveCycle,
+  });
+  const plannedTrainingDays = hasRoutinePlan ? dashboardCarouselDays.length : 0;
   const trainingTopbarMeta = buildTrainingTopbarMeta({
     cycleLabel: getCycleTypeTitle(displayTrainingPlan),
     weekNumber: currentWeek,
-    completedDays: calculateWeeklyCompletedTrainingDays({
-      plannedDays: dashboardCarouselDays,
-      exercises: displayExercises,
-      entries: calendarNormalizedEntries,
-      sessions: calendarNormalizedTrainingSessions,
-      usesCycleScopedSessions: isCycleScopedActiveCycle,
-    }),
+    completedDays: completedTrainingDays,
     plannedDays: hasRoutinePlan ? dashboardCarouselDays.length : 0,
   });
+  const appNotifications = useMemo(() => buildAppNotifications({
+    profile: profileViewModel,
+    personalData: profilePersonalData,
+    currentWeek,
+    completedDays: completedTrainingDays,
+    plannedDays: plannedTrainingDays,
+    hasTrainingEntries,
+    hasRoutinePlan,
+    weeklyEquivalentProgress,
+    summary,
+    currentMetrics,
+  }), [
+    completedTrainingDays,
+    currentMetrics,
+    currentWeek,
+    hasRoutinePlan,
+    hasTrainingEntries,
+    plannedTrainingDays,
+    profileViewModel.avatarUrl,
+    profilePersonalData?.birthDate,
+    profilePersonalData?.firstName,
+    profilePersonalData?.gender,
+    profilePersonalData?.lastName,
+    profilePersonalData?.phoneNumber,
+    summary,
+    weeklyEquivalentProgress,
+  ]);
+  const seenNotificationIds = useMemo(() => new Set(seenNotificationRecords.map((record) => record.id)), [seenNotificationRecords]);
+  const seenNotificationRecordsById = useMemo(() => new Map(seenNotificationRecords.map((record) => [record.id, record])), [seenNotificationRecords]);
+  const newNotifications = appNotifications
+    .filter((notification) => !seenNotificationIds.has(notification.id))
+    .slice(0, VISIBLE_NEW_NOTIFICATIONS_LIMIT);
+  const historyNotifications = appNotifications
+    .filter((notification) => seenNotificationIds.has(notification.id))
+    .sort((a, b) => (seenNotificationRecordsById.get(b.id)?.seenAt ?? 0) - (seenNotificationRecordsById.get(a.id)?.seenAt ?? 0));
+  const unseenNotificationCount = newNotifications.length;
 
   useEffect(() => {
     if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
@@ -964,11 +1123,102 @@ export function OrganizatechApp({
     };
   }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt]);
 
+  useEffect(() => {
+    const currentUserId = supabaseUser?.id ?? null;
+    if (!canEditProfilePersonalData || !currentUserId) {
+      profileAvatarBootstrapUserIdRef.current = null;
+      return;
+    }
+
+    if (profileAvatarBootstrapUserIdRef.current === currentUserId) return;
+    profileAvatarBootstrapUserIdRef.current = currentUserId;
+    void refreshProfileAvatar({ force: true, allowProfileLookup: true });
+  }, [canEditProfilePersonalData, refreshProfileAvatar, supabaseUser?.id]);
+
+  useEffect(() => {
+    if (screen !== "perfil" || !canEditProfilePersonalData) {
+      if (!canEditProfilePersonalData) {
+        setProfilePersonalData(null);
+        setProfilePersonalDataLoading(false);
+        setProfilePersonalDataError("");
+        setProfileAvatar({
+          avatarPath: null,
+          avatarUrl: null,
+          avatarUpdatedAt: null,
+        });
+        setProfileAvatarLoading(false);
+        setProfileAvatarError("");
+      }
+      return;
+    }
+
+    let isMounted = true;
+    setProfilePersonalDataLoading(true);
+    setProfilePersonalDataError("");
+    setProfileAvatarLoading(true);
+    setProfileAvatarError("");
+
+    void getProfilePersonalData()
+      .then(async (profile) => {
+        if (!isMounted) return;
+        setProfilePersonalData(profile);
+        setSessionName(profile.displayName);
+        await refreshProfileAvatar({ force: true, avatarPath: profile.avatarPath });
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+        setProfilePersonalDataError(error instanceof Error ? error.message : "No pudimos cargar tu perfil.");
+      })
+      .finally(() => {
+        if (isMounted) {
+          setProfilePersonalDataLoading(false);
+          setProfileAvatarLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [canEditProfilePersonalData, refreshProfileAvatar, screen]);
+
+  useEffect(() => {
+    function refreshAvatarOnResume() {
+      void refreshProfileAvatar({ force: true, allowProfileLookup: true });
+    }
+
+    function refreshAvatarOnVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        refreshAvatarOnResume();
+      }
+    }
+
+    document.addEventListener("visibilitychange", refreshAvatarOnVisibilityChange);
+    window.addEventListener("focus", refreshAvatarOnResume);
+    window.addEventListener("pageshow", refreshAvatarOnResume);
+    window.addEventListener("online", refreshAvatarOnResume);
+
+    return () => {
+      document.removeEventListener("visibilitychange", refreshAvatarOnVisibilityChange);
+      window.removeEventListener("focus", refreshAvatarOnResume);
+      window.removeEventListener("pageshow", refreshAvatarOnResume);
+      window.removeEventListener("online", refreshAvatarOnResume);
+    };
+  }, [refreshProfileAvatar]);
+
   function applySessionState(authState: SupabaseSessionState) {
     setIsSupabaseConfiguredState(authState.isConfigured);
     setDataMode(authState.dataMode);
     setSupabaseSession(authState.session);
     setSupabaseUser(authState.user);
+    setProfilePersonalData(null);
+    setProfilePersonalDataError("");
+    setProfileAvatar({
+      avatarPath: null,
+      avatarUrl: null,
+      avatarUpdatedAt: null,
+    });
+    setProfileAvatarResetKey((current) => current + 1);
+    setProfileAvatarError("");
     if (authState.user) setSessionName(getSessionDisplayName(authState.user));
   }
 
@@ -980,6 +1230,17 @@ export function OrganizatechApp({
     setActiveWorkoutStartedAt(null);
     setSupabaseSession(null);
     setSupabaseUser(null);
+    setProfilePersonalData(null);
+    setProfilePersonalDataLoading(false);
+    setProfilePersonalDataError("");
+    setProfileAvatar({
+      avatarPath: null,
+      avatarUrl: null,
+      avatarUpdatedAt: null,
+    });
+    setProfileAvatarResetKey((current) => current + 1);
+    setProfileAvatarLoading(false);
+    setProfileAvatarError("");
     setDataMode("demo");
     setDataSource("local");
     setExercises([]);
@@ -1137,6 +1398,79 @@ export function OrganizatechApp({
     } finally {
       setIsBusy(false);
     }
+  }
+
+  async function refreshProfilePersonalData() {
+    if (!canEditProfilePersonalData) {
+      setProfilePersonalData(null);
+      setProfilePersonalDataLoading(false);
+      setProfilePersonalDataError("");
+      setProfileAvatar({
+        avatarPath: null,
+        avatarUrl: null,
+        avatarUpdatedAt: null,
+      });
+      setProfileAvatarResetKey((current) => current + 1);
+      setProfileAvatarLoading(false);
+      setProfileAvatarError("");
+      return null;
+    }
+
+    setProfilePersonalDataLoading(true);
+    setProfilePersonalDataError("");
+    setProfileAvatarLoading(true);
+    setProfileAvatarError("");
+    try {
+      const profile = await getProfilePersonalData();
+      setProfilePersonalData(profile);
+      setSessionName(profile.displayName);
+      await refreshProfileAvatar({ force: true, avatarPath: profile.avatarPath });
+      return profile;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No pudimos cargar tu perfil.";
+      setProfilePersonalDataError(message);
+      return null;
+    } finally {
+      setProfilePersonalDataLoading(false);
+      setProfileAvatarLoading(false);
+    }
+  }
+
+  async function handleSaveProfilePersonalData(input: ProfilePersonalDataInput) {
+    const profile = await updateProfilePersonalData(input);
+    setProfilePersonalData(profile);
+    setSessionName(profile.displayName);
+    return profile;
+  }
+
+  async function handleUploadProfileAvatar(file: File) {
+    setProfileAvatarError("");
+    const avatar = await uploadProfileAvatar(file);
+    lastProfileAvatarRefreshAtRef.current = Date.now();
+    setProfileAvatar(avatar);
+    setProfileAvatarResetKey((current) => current + 1);
+    setProfilePersonalData((current) => current
+      ? {
+        ...current,
+        avatarPath: avatar.avatarPath,
+        avatarUpdatedAt: avatar.avatarUpdatedAt,
+      }
+      : current);
+  }
+
+  async function handleDeleteProfileAvatar() {
+    setProfileAvatarError("");
+    const avatar = await deleteProfileAvatar();
+    lastProfileAvatarRefreshAtRef.current = 0;
+    setProfileAvatar(avatar);
+    setProfileAvatarResetKey((current) => current + 1);
+    setProfilePersonalData((current) => current
+      ? {
+        ...current,
+        avatarPath: null,
+        avatarUpdatedAt: null,
+      }
+      : current);
   }
 
   async function refreshPersistedTrainingCycles() {
@@ -3097,11 +3431,66 @@ export function OrganizatechApp({
     );
   }
 
+  function handleProfileAvatarImageError() {
+    const now = Date.now();
+    if (now - lastProfileAvatarErrorRefreshAtRef.current < PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS) return;
+    lastProfileAvatarErrorRefreshAtRef.current = now;
+    void refreshProfileAvatar({ force: true, allowProfileLookup: true });
+  }
+
+  function markNotificationsSeen(ids: string[]) {
+    if (ids.length === 0) return;
+    setSeenNotificationRecords((current) => {
+      const now = Date.now();
+      const recordsById = new Map(current.map((record) => [record.id, record]));
+      ids.forEach((id) => {
+        if (!recordsById.has(id)) {
+          recordsById.set(id, { id, seenAt: now });
+        }
+      });
+      const next = Array.from(recordsById.values())
+        .sort((a, b) => a.seenAt - b.seenAt)
+        .slice(-SEEN_NOTIFICATIONS_MAX_RECORDS);
+      saveSeenNotificationRecords(next);
+      return next;
+    });
+  }
+
+  function toggleNotifications() {
+    setIsNotificationPanelOpen((current) => !current);
+    setIsMenuOpen(false);
+  }
+
+  function openNotificationTarget(notification: AppNotification) {
+    markNotificationsSeen([notification.id]);
+    setIsNotificationPanelOpen(false);
+    setTrainingCompletionSummary(null);
+    navigateTo(notification.target);
+    scrollToNotificationSection(notification.section);
+  }
+
+  function scrollToNotificationSection(section?: AppNotificationSection) {
+    if (!section || typeof document === "undefined") return;
+
+    window.setTimeout(() => {
+      const target = document.querySelector<HTMLElement>(`[data-section="${section}"]`);
+      if (!target) return;
+
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.classList.add("section-highlighted");
+      window.setTimeout(() => {
+        target.classList.remove("section-highlighted");
+      }, NOTIFICATION_SECTION_HIGHLIGHT_MS);
+    }, 160);
+  }
+
   const menuScreens = hasTrainingEntries
     ? primaryScreens
     : primaryScreens.filter((item) =>
       item === "dashboard" ||
       item === "entrenamiento" ||
+      item === "perfil" ||
+      item === "comparacion" ||
       item === "registro-entrenamiento" ||
       (item === "historial-ciclos" && visibleCycleHistoryCount > 0)
     );
@@ -3113,7 +3502,16 @@ export function OrganizatechApp({
           className={`icon-button menu-trigger ${isMenuOpen ? "active" : ""}`}
           aria-label="Abrir menú"
           aria-expanded={isMenuOpen}
-          onClick={() => setIsMenuOpen((value) => !value)}
+          onClick={() => {
+            setIsNotificationPanelOpen(false);
+            setIsMenuOpen((value) => {
+              const next = !value;
+              if (next) {
+                void refreshProfileAvatar({ force: true, allowProfileLookup: true });
+              }
+              return next;
+            });
+          }}
         >
           <span className="hamburger-line" />
           <span className="hamburger-line" />
@@ -3131,17 +3529,60 @@ export function OrganizatechApp({
             <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}</p>
           )}
         </div>
-        <button
-          className="icon-button"
-          aria-label="Ver alertas del panel principal"
-          onClick={() => {
-            setTrainingCompletionSummary(null);
-            setScreen("dashboard");
-          }}
-        >
-          <Bell size={18} />
-        </button>
+        <div className="notification-shell">
+          <button
+            className="icon-button notification-trigger"
+            aria-label="Ver notificaciones"
+            aria-expanded={isNotificationPanelOpen}
+            onClick={toggleNotifications}
+          >
+            <Bell size={18} />
+            {unseenNotificationCount > 0 ? (
+              <span className="notification-badge" aria-label={`${unseenNotificationCount} notificaciones nuevas`}>
+                {unseenNotificationCount > 9 ? "+9" : unseenNotificationCount}
+              </span>
+            ) : null}
+          </button>
+        </div>
       </header>
+
+      {isNotificationPanelOpen ? (
+        <>
+          <button
+            className="notification-backdrop"
+            aria-label="Cerrar notificaciones"
+            onClick={() => setIsNotificationPanelOpen(false)}
+          />
+          <div className="notification-panel" role="dialog" aria-label="Notificaciones">
+            <div className="notification-panel-header">
+              <strong>Notificaciones</strong>
+              <span>{unseenNotificationCount > 0 ? `${unseenNotificationCount} ${unseenNotificationCount === 1 ? "nueva noticia" : "nuevas noticias"}` : appNotifications.length > 0 ? "Historial" : "Sin pendientes"}</span>
+            </div>
+            {appNotifications.length > 0 ? (
+              <div className="notification-list">
+                {newNotifications.length > 0 ? (
+                  <NotificationGroup
+                    title="Nuevas"
+                    notifications={newNotifications}
+                    seenNotificationRecordsById={seenNotificationRecordsById}
+                    onOpen={openNotificationTarget}
+                  />
+                ) : null}
+                {historyNotifications.length > 0 ? (
+                  <NotificationGroup
+                    title="Historial"
+                    notifications={historyNotifications}
+                    seenNotificationRecordsById={seenNotificationRecordsById}
+                    onOpen={openNotificationTarget}
+                  />
+                ) : null}
+              </div>
+            ) : (
+              <p className="notification-empty">No tienes notificaciones por ahora.</p>
+            )}
+          </div>
+        </>
+      ) : null}
 
       {isMenuOpen && (
         <>
@@ -3159,15 +3600,11 @@ export function OrganizatechApp({
             </div>
             <div className="menu-drawer-body">
               <div className="menu-panel" role="menu" aria-label="Menú principal">
-                <div className="menu-panel-header">
-                  <div>
-                    <p className="eyebrow">Bienvenido</p>
-                    <h3>{sessionName}</h3>
-                  </div>
-                  <button className="profile-shortcut" type="button" role="menuitem" onClick={() => navigateTo("perfil")}>
-                    Mi perfil
-                  </button>
-                </div>
+                <ProfileMenuHeader
+                  profile={profileViewModel}
+                  onAvatarImageError={handleProfileAvatarImageError}
+                  avatarResetKey={profileAvatarResetKey}
+                />
                 <div className="menu-grid">
                   {menuScreens.map((item) => (
                     <button
@@ -3181,7 +3618,6 @@ export function OrganizatechApp({
                   ))}
                 </div>
                 <div className="menu-account">
-                  <p className="eyebrow">Cuenta</p>
                   <button className="logout-button" role="menuitem" onClick={handleLogout} disabled={isBusy}>
                     <LogOut size={17} />
                     Cerrar sesión
@@ -3343,7 +3779,24 @@ export function OrganizatechApp({
           ? <PersistedCycleHistoryScreen history={persistedCycleHistory} />
           : <CycleHistoryScreen history={cycleHistory} />
       )}
-      {screen === "perfil" && <ProfileScreen name={sessionName} summary={summary} dataSource={dataSource} refreshData={refreshData} resetLocal={handleResetLocal} />}
+      {screen === "perfil" && (
+        <ProfileScreen
+          profile={profileViewModel}
+          personalData={profilePersonalData}
+          canEditPersonalData={canEditProfilePersonalData}
+          personalDataLoading={profilePersonalDataLoading}
+          personalDataError={profilePersonalDataError}
+          canEditAvatar={canEditProfilePersonalData}
+          avatarLoading={profileAvatarLoading}
+          avatarError={profileAvatarError}
+          onAvatarImageError={handleProfileAvatarImageError}
+          avatarResetKey={profileAvatarResetKey}
+          onReloadPersonalData={refreshProfilePersonalData}
+          onSavePersonalData={handleSaveProfilePersonalData}
+          onUploadAvatar={handleUploadProfileAvatar}
+          cycleContextLabel={`${trainingTopbarMeta?.cycleLabel ?? "Ciclo"} + ${trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`}`}
+        />
+      )}
       {isNewCycleConfirmOpen && (
         <ConfirmNewCycleModal
           isBusy={isBusy}
@@ -3841,7 +4294,7 @@ function DashboardScreen({
             </button>
           ) : null}
         </div>
-        <div className="card wide dashboard-training-card">
+        <div className="card wide dashboard-training-card" data-section="training-carousel">
           <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
             {carouselDays.map((item) => {
               const itemData = getDashboardDayData(item);
@@ -3867,7 +4320,7 @@ function DashboardScreen({
   return (
     <section className="screen">
       <MetricGrid summary={summary} />
-      <div className="card wide dashboard-progress-card">
+      <div className="card wide dashboard-progress-card" data-section="weekly-progress">
         <div className="weekly-progress-summary">
           <div className="weekly-progress-value-block">
             <p className="small-label">Progreso semanal</p>
@@ -3893,7 +4346,7 @@ function DashboardScreen({
         </div>
         <WeeklyProgressSvg progress={weeklyEquivalentProgress} />
       </div>
-      <div className={`card wide dashboard-training-card ${activeDayData.status}`}>
+      <div className={`card wide dashboard-training-card ${activeDayData.status}`} data-section="training-carousel">
         <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
           {carouselDays.map((item) => {
             const itemData = getDashboardDayData(item);
@@ -3920,7 +4373,9 @@ function DashboardScreen({
         ) : null}
         <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
       </div>
-      <DashboardCoachCard feedback={displayedCoachFeedback} analytics={analytics} visualStatus={coachVisualStatus} />
+      <div data-section="coach">
+        <DashboardCoachCard feedback={displayedCoachFeedback} analytics={analytics} visualStatus={coachVisualStatus} />
+      </div>
     </section>
   );
 }
@@ -4352,6 +4807,460 @@ function getCoachFactorLabel(label: string) {
   if (label.toLowerCase().includes("carga")) return "Carga";
   if (label.toLowerCase().includes("volumen")) return "Volumen";
   return label;
+}
+
+function NotificationGroup({
+  title,
+  notifications,
+  seenNotificationRecordsById,
+  onOpen,
+}: {
+  title: string;
+  notifications: AppNotification[];
+  seenNotificationRecordsById: Map<string, SeenNotificationRecord>;
+  onOpen: (notification: AppNotification) => void;
+}) {
+  return (
+    <section className="notification-group" aria-label={title}>
+      {title !== "Nuevas" ? <p className="notification-group-title">{title}</p> : null}
+      {notifications.map((notification) => {
+        const visual = getNotificationVisual(notification);
+        const seenRecord = seenNotificationRecordsById.get(notification.id);
+        const isSeen = Boolean(seenRecord);
+        const notificationDate = formatNotificationDate(
+          seenRecord?.seenAt ? new Date(seenRecord.seenAt).toISOString() : notification.createdAt,
+        );
+        return (
+          <button
+            type="button"
+            className={`notification-item notification-${notification.kind} ${isSeen ? "seen" : "new"}`}
+            key={notification.id}
+            onClick={() => onOpen(notification)}
+          >
+            <span className="notification-icon" aria-hidden="true">{visual.icon}</span>
+            <span className="notification-copy">
+              <span className="notification-item-topline">
+                <span className="notification-category">{notification.category}</span>
+                <span className="notification-state">{isSeen ? "Visto" : "Nuevo"} · {notificationDate}</span>
+              </span>
+              <strong>{notification.title}</strong>
+              <span>{notification.summary}</span>
+            </span>
+          </button>
+        );
+      })}
+    </section>
+  );
+}
+
+function getNotificationVisual(notification: AppNotification) {
+  switch (notification.category) {
+    case "Novedades":
+      return { icon: <NotificationBackhoeIcon /> };
+    case "Progreso":
+      return { icon: <NotificationHeartShareIcon /> };
+    case "Coach":
+      return { icon: <NotificationCoachIcon /> };
+    case "Comparación":
+      return { icon: <NotificationTrendingIcon /> };
+    case "Perfil":
+      return { icon: <UserPlus size={24} /> };
+    case "Entrenamiento":
+    case "Sistema":
+      return { icon: <CalendarDays size={24} /> };
+  }
+}
+
+function NotificationBackhoeIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+      <path d="M11 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+      <path d="M13 19l-9 0" />
+      <path d="M4 15l9 0" />
+      <path d="M8 12v-5h2a3 3 0 0 1 3 3v5" />
+      <path d="M5 15v-2a1 1 0 0 1 1 -1h7" />
+      <path d="M21.12 9.88l-3.12 -4.88l-5 5" />
+      <path d="M21.12 9.88a3 3 0 0 1 -2.12 5.12a3 3 0 0 1 -2.12 -.88l4.24 -4.24" />
+    </svg>
+  );
+}
+
+function NotificationHeartShareIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M19.5 12.572l-.468 .464m-6.077 6.019l-.955 .945l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572" />
+      <path d="M16 22l5 -5" />
+      <path d="M21 21.5v-4.5h-4.5" />
+    </svg>
+  );
+}
+
+function NotificationCoachIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 19h-3a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v11a1 1 0 0 1 -1 1" />
+      <path d="M12 14a2 2 0 1 0 4.001 -.001a2 2 0 0 0 -4.001 .001" />
+      <path d="M17 19a2 2 0 0 0 -2 -2h-2a2 2 0 0 0 -2 2" />
+    </svg>
+  );
+}
+
+function NotificationTrendingIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 17l6 -6l4 4l8 -8" />
+      <path d="M14 7l7 0l0 7" />
+    </svg>
+  );
+}
+
+function loadSeenNotificationRecords() {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SEEN_NOTIFICATIONS_KEY) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item): SeenNotificationRecord | null => {
+        if (typeof item === "string") return { id: item, seenAt: 0 };
+        if (
+          item &&
+          typeof item === "object" &&
+          typeof (item as SeenNotificationRecord).id === "string" &&
+          typeof (item as SeenNotificationRecord).seenAt === "number"
+        ) {
+          return {
+            id: (item as SeenNotificationRecord).id,
+            seenAt: (item as SeenNotificationRecord).seenAt,
+          };
+        }
+        return null;
+      })
+      .filter((item): item is SeenNotificationRecord => Boolean(item))
+      .slice(-SEEN_NOTIFICATIONS_MAX_RECORDS);
+  } catch {
+    return [];
+  }
+}
+
+function saveSeenNotificationRecords(records: SeenNotificationRecord[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SEEN_NOTIFICATIONS_KEY, JSON.stringify(records.slice(-SEEN_NOTIFICATIONS_MAX_RECORDS)));
+  } catch {
+    // Las notificaciones siguen funcionando aunque el navegador bloquee localStorage.
+  }
+}
+
+function buildAppNotifications({
+  profile,
+  personalData,
+  currentWeek,
+  completedDays,
+  plannedDays,
+  hasTrainingEntries,
+  hasRoutinePlan,
+  weeklyEquivalentProgress,
+  summary,
+  currentMetrics,
+}: {
+  profile: ReturnType<typeof buildProfileViewModel>;
+  personalData: ProfilePersonalData | null;
+  currentWeek: number;
+  completedDays: number;
+  plannedDays: number;
+  hasTrainingEntries: boolean;
+  hasRoutinePlan: boolean;
+  weeklyEquivalentProgress: WeeklyEquivalentProgressResult;
+  summary: ReturnType<typeof calculateWeeklySummary>;
+  currentMetrics: ExerciseMetrics[];
+}): AppNotification[] {
+  const createdAt = new Date().toISOString();
+  const notifications: AppNotification[] = [];
+  const hasWeeklyComparisonNotification = hasTrainingEntries && currentMetrics.length > 0;
+
+  notifications.push(createAppNotification({
+    id: "feature-notification-center-v1",
+    title: "Notificaciones mejoradas",
+    summary: "Ahora puedes revisar novedades, historial y avances desde la campanita.",
+    category: "Novedades",
+    tone: "info",
+    priority: "low",
+    dedupeKey: "feature-notification-center",
+    target: "dashboard",
+    kind: "feature",
+    createdAt,
+  }));
+
+  if (!hasWeeklyComparisonNotification) {
+    notifications.push(createAppNotification({
+      id: "feature-weekly-comparison-v1",
+      title: "Comparación semanal lista",
+      summary: "Ahora puedes ver tu avance frente a la semana anterior de forma más clara.",
+      category: "Novedades",
+      tone: "success",
+      priority: hasTrainingEntries ? "medium" : "low",
+      dedupeKey: "feature-weekly-comparison",
+      target: "comparacion",
+      section: "weekly-comparison",
+      kind: "feature",
+      createdAt,
+    }));
+  }
+
+  if (!profile.avatarUrl) {
+    notifications.push(createAppNotification({
+      id: "complete-profile-v1",
+      title: "Completa tu perfil",
+      summary: "Agrega una foto para personalizar tu cuenta.",
+      category: "Perfil",
+      tone: "info",
+      priority: "medium",
+      dedupeKey: "profile-avatar",
+      target: "perfil",
+      section: "profile-avatar",
+      kind: "profile",
+      createdAt,
+    }));
+  } else {
+    notifications.push(createAppNotification({
+      id: "feature-avatar-editor-v1",
+      title: "Foto de perfil mejorada",
+      summary: "Ahora puedes subir, ajustar y recortar tu foto de perfil.",
+      category: "Novedades",
+      tone: "success",
+      priority: "low",
+      dedupeKey: "profile-avatar",
+      target: "perfil",
+      section: "profile-avatar",
+      kind: "feature",
+      createdAt,
+    }));
+  }
+
+  const personalDataMissing = isProfilePersonalDataIncomplete(personalData);
+  if (personalDataMissing) {
+    notifications.push(createAppNotification({
+      id: "complete-personal-data-v1",
+      title: "Completa tus datos",
+      summary: "Agrega tus datos para personalizar mejor tu experiencia.",
+      category: "Perfil",
+      tone: "info",
+      priority: "medium",
+      dedupeKey: "profile-personal-data",
+      target: "perfil",
+      section: "personal-data",
+      kind: "profile",
+      createdAt,
+    }));
+  } else {
+    notifications.push(createAppNotification({
+      id: "feature-profile-phone-v1",
+      title: "Nueva mejora disponible",
+      summary: "Ahora puedes agregar tu número de celular en tu perfil.",
+      category: "Novedades",
+      tone: "info",
+      priority: "low",
+      dedupeKey: "profile-personal-data",
+      target: "perfil",
+      section: "personal-data",
+      kind: "feature",
+      createdAt,
+    }));
+  }
+
+  if (hasRoutinePlan && plannedDays > 0) {
+    const isWeekComplete = completedDays >= plannedDays;
+    notifications.push(createAppNotification({
+      id: `training-status-v1-w${currentWeek}-${completedDays}-${plannedDays}`,
+      title: isWeekComplete ? "Entrenamiento completado" : "Entrenamiento de hoy",
+      summary: isWeekComplete
+        ? "Buen trabajo, ya registraste tu sesión de hoy."
+        : "Tienes tu rutina lista para registrar.",
+      category: "Entrenamiento",
+      tone: isWeekComplete ? "success" : "progress",
+      priority: isWeekComplete ? "medium" : "high",
+      dedupeKey: "training-status",
+      target: "dashboard",
+      section: "training-carousel",
+      kind: "week",
+      createdAt,
+    }));
+  } else if (!hasTrainingEntries) {
+    notifications.push(createAppNotification({
+      id: `training-return-v1-w${currentWeek}`,
+      title: "Retoma tu ritmo",
+      summary: "Registra tu próxima sesión para mantener tu progreso.",
+      category: "Entrenamiento",
+      tone: "progress",
+      priority: "medium",
+      dedupeKey: "training-status",
+      target: "dashboard",
+      section: "training-carousel",
+      kind: "week",
+      createdAt,
+    }));
+  }
+
+  if (hasWeeklyComparisonNotification) {
+    notifications.push(createAppNotification({
+      id: `weekly-comparison-v1-w${currentWeek}`,
+      title: "Comparación semanal disponible",
+      summary: "Revisa cómo avanzaste frente a tu semana anterior.",
+      category: "Comparación",
+      tone: "progress",
+      priority: "high",
+      dedupeKey: "weekly-comparison",
+      target: "comparacion",
+      section: "weekly-comparison",
+      kind: "progress",
+      createdAt,
+    }));
+  }
+
+  if (hasTrainingEntries && weeklyEquivalentProgress.currentEquivalentValue > 0) {
+    const progressIsReady = weeklyEquivalentProgress.status === "ready";
+    const progressIsPositive = weeklyEquivalentProgress.differenceValue > 0;
+    const isAlmostDone = plannedDays > 0 && completedDays > 0 && completedDays >= plannedDays - 1 && completedDays < plannedDays;
+    notifications.push(createAppNotification({
+      id: `weekly-progress-v1-w${currentWeek}-${Math.round(weeklyEquivalentProgress.currentEquivalentValue)}-${weeklyEquivalentProgress.tone}`,
+      title: isAlmostDone
+        ? "Te falta poco"
+        : progressIsReady
+          ? progressIsPositive
+            ? "Subiste tu volumen"
+            : weeklyEquivalentProgress.differenceValue < 0
+              ? "Semana más baja"
+              : "Buen avance semanal"
+          : "Buen avance semanal",
+      summary: isAlmostDone
+        ? `Llevas ${completedDays} de ${plannedDays} días. Una sesión más puede cerrar muy bien la semana.`
+        : progressIsReady
+          ? progressIsPositive
+            ? `Tu volumen actual supera a la semana anterior por ${weeklyEquivalentProgress.primaryLabel}.`
+            : weeklyEquivalentProgress.differenceValue < 0
+              ? `Tu volumen está ${weeklyEquivalentProgress.primaryLabel} bajo la referencia. Revísalo sin castigarte.`
+              : "Tu volumen se mantiene estable frente a la semana anterior."
+          : `Tu volumen actual es ${weeklyEquivalentProgress.currentVolumeLabel} esta semana.`,
+      category: "Progreso",
+      tone: weeklyEquivalentProgress.tone === "danger" ? "warning" : weeklyEquivalentProgress.tone === "positive" ? "success" : "progress",
+      priority: progressIsReady ? "medium" : "low",
+      dedupeKey: "weekly-progress",
+      target: "dashboard",
+      section: "weekly-progress",
+      kind: "progress",
+      createdAt,
+    }));
+  }
+
+  const mainAlert = currentMetrics.find((metric) => metric.repsDifference <= -4 && metric.kgDifference <= 0);
+  const loadAdjustment = currentMetrics.find((metric) => metric.repsDifference < 0 && metric.kgDifference > 0);
+  const loadIncrease = currentMetrics.find((metric) => metric.kgDifference > 0 && metric.repsDifference >= 0);
+  if (mainAlert) {
+    notifications.push(createAppNotification({
+      id: `smart-analysis-v1-w${currentWeek}-attention`,
+      title: "Revisa tu recuperación",
+      summary: `${mainAlert.exerciseName} bajó repeticiones. Revisa descanso, técnica o fatiga acumulada.`,
+      category: "Coach",
+      tone: "warning",
+      priority: "high",
+      dedupeKey: "coach",
+      target: "dashboard",
+      section: "coach",
+      kind: "coach",
+      createdAt,
+    }));
+  } else if (loadAdjustment) {
+    notifications.push(createAppNotification({
+      id: `smart-analysis-v1-w${currentWeek}-load-adjustment`,
+      title: "Carga en consolidación",
+      summary: `${loadAdjustment.exerciseName} subió peso, pero bajó reps. Consolida antes de volver a subir.`,
+      category: "Coach",
+      tone: "progress",
+      priority: "medium",
+      dedupeKey: "coach",
+      target: "dashboard",
+      section: "coach",
+      kind: "coach",
+      createdAt,
+    }));
+  } else if (loadIncrease) {
+    notifications.push(createAppNotification({
+      id: `smart-analysis-v1-w${currentWeek}-load-up`,
+      title: "Progresión de carga detectada",
+      summary: `${loadIncrease.exerciseName} subió carga manteniendo rendimiento.`,
+      category: "Coach",
+      tone: "success",
+      priority: "medium",
+      dedupeKey: "coach",
+      target: "dashboard",
+      section: "coach",
+      kind: "coach",
+      createdAt,
+    }));
+  } else if (summary.volumeDifference !== 0) {
+    notifications.push(createAppNotification({
+      id: `smart-analysis-v1-w${currentWeek}-progress`,
+      title: "Análisis inteligente",
+      summary: summary.volumeDifference > 0
+        ? "Tu Coach detectó una mejora de volumen esta semana."
+        : "Tu Coach detectó una baja de volumen y puede ayudarte a ajustar el ritmo.",
+      category: "Coach",
+      tone: summary.volumeDifference > 0 ? "success" : "warning",
+      priority: "medium",
+      dedupeKey: "coach",
+      target: "dashboard",
+      section: "coach",
+      kind: "coach",
+      createdAt,
+    }));
+  }
+
+  return sortNotificationsByPriority(dedupeNotifications(notifications));
+}
+
+function createAppNotification(notification: AppNotification): AppNotification {
+  return notification;
+}
+
+function isProfilePersonalDataIncomplete(personalData: ProfilePersonalData | null) {
+  if (!personalData) return false;
+  return !personalData.firstName ||
+    !personalData.birthDate ||
+    personalData.gender === "not_specified" ||
+    !personalData.phoneNumber;
+}
+
+function dedupeNotifications(notifications: AppNotification[]) {
+  const byKey = new Map<string, AppNotification>();
+  notifications.forEach((notification) => {
+    const current = byKey.get(notification.dedupeKey);
+    if (!current || compareNotifications(notification, current) < 0) {
+      byKey.set(notification.dedupeKey, notification);
+    }
+  });
+  return [...byKey.values()];
+}
+
+function sortNotificationsByPriority(notifications: AppNotification[]) {
+  return [...notifications].sort(compareNotifications);
+}
+
+function compareNotifications(a: AppNotification, b: AppNotification) {
+  const priorityDifference = getNotificationPriorityRank(a.priority) - getNotificationPriorityRank(b.priority);
+  if (priorityDifference !== 0) return priorityDifference;
+  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+}
+
+function getNotificationPriorityRank(priority: AppNotification["priority"]) {
+  switch (priority) {
+    case "high":
+      return 0;
+    case "medium":
+      return 1;
+    case "low":
+      return 2;
+  }
 }
 
 function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {
@@ -5554,7 +6463,7 @@ function ComparisonScreenV2({
   }, [comparisonModel.selectedWeek, selectedWeek]);
 
   return (
-    <section className="screen weekly-comparison-screen">
+    <section className="screen weekly-comparison-screen" data-section="weekly-comparison">
       <div className="weekly-comparison-shell">
         <div className="weekly-comparison-section select-day-section">
           <div>
@@ -5964,43 +6873,6 @@ function buildAnalytics(summary: ReturnType<typeof calculateWeeklySummary>, curr
 
 function clampScore(value: number) {
   return Math.min(100, Math.max(0, value));
-}
-
-function ProfileScreen({ name, summary, dataSource, refreshData, resetLocal }: { name: string; summary: ReturnType<typeof calculateWeeklySummary>; dataSource: DataSource; refreshData: () => void; resetLocal: () => void }) {
-  return (
-    <section className="screen">
-      <div className="card wide">
-        <div className="brand">
-          <div className="brand-mark"><User size={22} /></div>
-          <div>
-            <h2>{name}</h2>
-            <p className="eyebrow">{dataSource === "supabase" ? "Cuenta conectada" : "Cuenta local"}</p>
-          </div>
-          <button className="icon-button" aria-label="Configuración" style={{ marginLeft: "auto" }}><Settings size={17} /></button>
-        </div>
-      </div>
-      <div className="metric-grid">
-        <div className="metric"><span>Entrenamientos</span><strong>48</strong></div>
-        <div className="metric"><span>Semanas</span><strong>{summary.week + 8}</strong></div>
-        <div className="metric"><span>Racha actual</span><strong>4</strong></div>
-      </div>
-      <div className="card wide">
-        <h3>Datos</h3>
-        <div className="two-cols">
-          <button className="button secondary" type="button" onClick={refreshData}><Database size={17} /> Actualizar</button>
-          {dataSource !== "supabase" && (
-            <button className="button secondary" type="button" onClick={resetLocal}>Reiniciar perfil local</button>
-          )}
-        </div>
-      </div>
-      <div className="card wide">
-        <h3>Objetivos</h3>
-        <ProgressLine label="Fuerza" value={85} />
-        <ProgressLine label="Volumen muscular" value={60} />
-        <ProgressLine label="Definición" value={30} />
-      </div>
-    </section>
-  );
 }
 
 function RoutineMetricGrid({
@@ -7668,12 +8540,12 @@ function screenLabel(screen: Screen) {
     "nueva-password": "Nueva contraseña",
     "recovery-expired": "Enlace expirado",
     dashboard: "Panel principal",
-    entrenamiento: "Entrenamiento",
+    entrenamiento: "Entrenemos",
     "training-summary": "Resumen de entrenamiento",
-    "registro-entrenamiento": "Registro de entrenamiento",
+    "registro-entrenamiento": "Modificar ciclo de entrenamiento",
     "historial-ciclos": "Historial ciclo de entrenamiento",
     comparacion: "Comparación semanal",
-    perfil: "Perfil",
+    perfil: "Mi perfil",
   };
   return labels[screen];
 }

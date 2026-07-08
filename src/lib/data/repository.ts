@@ -7,6 +7,7 @@ import type {
   TrainingSession,
   TrainingSessionStatus,
 } from "@/lib/progress/types";
+import { resolveEnsureProfileWrite } from "@/lib/profile/profile-form";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export type DataSource = "local" | "supabase";
@@ -316,12 +317,35 @@ async function ensureProfile(userId: string, email: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return;
 
-  const { error } = await supabase.from("profiles").upsert({
-    id: userId,
+  const existing = await supabase
+    .from("profiles")
+    .select("id,email")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (existing.error) throw existing.error;
+
+  const decision = resolveEnsureProfileWrite({
+    existing: existing.data?.id ? { id: existing.data.id, email: existing.data.email } : null,
+    userId,
     email,
-    display_name: email.split("@")[0] || "Usuario",
   });
-  if (error) throw error;
+
+  if (decision.type === "update-email") {
+    const { error } = await supabase
+      .from("profiles")
+      .update({ email: decision.email })
+      .eq("id", userId);
+    if (error) throw error;
+    return;
+  }
+
+  if (decision.type === "insert") {
+    const { error } = await supabase
+      .from("profiles")
+      .insert(decision.payload);
+    if (error) throw error;
+  }
 }
 
 async function upsertRoutine(userId: string, routine: RoutineName) {

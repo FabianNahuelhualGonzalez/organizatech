@@ -211,12 +211,12 @@ function detectCoachSignals(input: NormalizedTrainingCoachInput): DetectedSignal
   const signals: DetectedSignal[] = [];
   const workout = input.workout;
   const exercises = input.exercises;
-  const bestProgress = exercises.find((exercise) => positive(exercise.kgDifference) && positive(exercise.repsDifference));
+  const bestProgress = exercises.find((exercise) => positive(exercise.kgDifference) && !negative(exercise.repsDifference));
   const kgUpRepsDown = exercises.find((exercise) => positive(exercise.kgDifference) && negative(exercise.repsDifference));
   const sameKgRepsUp = exercises.find((exercise) => neutral(exercise.kgDifference) && positive(exercise.repsDifference));
   const sameKgRepsDown = exercises.find((exercise) => neutral(exercise.kgDifference) && negative(exercise.repsDifference));
   const strongestDrop = [...exercises]
-    .filter((exercise) => safeNumber(exercise.repsDifference) <= STRONG_REPS_DROP)
+    .filter((exercise) => safeNumber(exercise.repsDifference) <= STRONG_REPS_DROP && !positive(exercise.kgDifference))
     .sort((a, b) => safeNumber(a.repsDifference) - safeNumber(b.repsDifference))[0];
   const routineComplete = isRoutineComplete(workout);
   const volumePercentage = safeNumber(workout.volumePercentage);
@@ -278,7 +278,7 @@ function buildInsight(signal: DetectedSignal, input: NormalizedTrainingCoachInpu
   if (signal.id === "kg_up_reps_up") {
     return {
       title: "Progreso fuerte",
-      body: `${exerciseName} subió carga y también repeticiones. Mejoraste intensidad y rendimiento al mismo tiempo.`,
+      body: `${exerciseName} subió carga y mantuvo o mejoró repeticiones. Es una excelente señal de avance.`,
       action: "Mantén esa carga una sesión más; si repites el rendimiento, considera una subida pequeña.",
       tone: "positive",
       priority: signal.priority,
@@ -307,9 +307,9 @@ function buildInsight(signal: DetectedSignal, input: NormalizedTrainingCoachInpu
 
   if (signal.id === "kg_up_reps_down") {
     return {
-      title: "Carga en consolidación",
-      body: `${exerciseName} subió peso, pero perdió repeticiones. No es retroceso: la carga todavía necesita estabilizarse.`,
-      action: "Repite el mismo peso e intenta recuperar reps antes de volver a subir.",
+      title: "Progresión de carga detectada",
+      body: `${exerciseName} bajó ${Math.abs(safeNumber(signal.exercise?.repsDifference))} reps, pero subiste el peso. Puede ser normal al aumentar carga si la técnica se mantiene.`,
+      action: "Repite esta carga y monitoreemos si recuperas repeticiones con el nuevo peso.",
       tone: "warning",
       priority: signal.priority,
     };
@@ -674,7 +674,7 @@ function resolveTone(signals: string[], contradictions: string[]): CoachTone {
 function resolveHeadline(input: NormalizedTrainingCoachInput, signals: string[], tone: CoachTone) {
   if (signals.includes("first_reference")) return "Primer punto de partida";
   if (input.comparisonStatus === "none") return "Aún falta historial";
-  if (signals.includes("kg_up_reps_down")) return "Carga en consolidación";
+  if (signals.includes("kg_up_reps_down")) return "Progresión de carga detectada";
   if (signals.includes("volume_down_complete")) return "Semana controlada";
   if (tone === "neutral" && hasPositiveAndNegative(signals)) return "Progreso mixto";
   if (signals.includes("kg_up_reps_up")) return "Progreso fuerte";
@@ -711,7 +711,7 @@ function resolveSummary(input: NormalizedTrainingCoachInput, signals: string[], 
 function resolveNextAdvice(input: NormalizedTrainingCoachInput, signals: string[], nextTarget?: string) {
   if (signals.includes("first_reference")) return "Repite esta base una vez más y busca mantener técnica, carga y repeticiones antes de acelerar la progresión.";
   if (signals.includes("sleep_low_performance_low")) return "No fuerces marcas si el descanso sigue bajo; prioriza técnica y consistencia.";
-  if (signals.includes("kg_up_reps_down")) return "Repite la carga y recupera repeticiones antes de aumentar la exigencia.";
+  if (signals.includes("kg_up_reps_down")) return "Mantén foco en técnica y busca recuperar repeticiones antes de aumentar otra vez la carga.";
   if (signals.includes("strong_exercise_drop")) return nextTarget ?? "Elige el ejercicio con mayor caída y busca igualar el registro anterior.";
   if (signals.includes("same_kg_reps_up")) return "Mantén el peso y confirma la mejora de reps; luego considera una subida pequeña.";
   if (signals.includes("kg_up_reps_up")) return "Consolida una sesión más ese avance antes de aumentar nuevamente la carga.";
