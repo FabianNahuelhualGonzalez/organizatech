@@ -3106,6 +3106,7 @@ h3 {
 .notification-state {
   justify-self: end;
   color: rgba(220, 231, 255, 0.64);
+  white-space: nowrap;
 }
 
 .notification-item strong {
