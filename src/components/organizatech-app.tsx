@@ -54,7 +54,7 @@ import {
   updateProfilePersonalData,
   type ProfilePersonalData,
 } from "@/lib/profile/profile-repository";
-import type { ProfileFormValues } from "@/lib/profile/profile-form";
+import type { ProfilePersonalDataInput } from "@/lib/profile/profile-form";
 import {
   deleteProfileAvatar,
   getCurrentProfileAvatar,
@@ -1416,7 +1416,7 @@ export function OrganizatechApp({
     }
   }
 
-  async function handleSaveProfilePersonalData(input: ProfileFormValues) {
+  async function handleSaveProfilePersonalData(input: ProfilePersonalDataInput) {
     const profile = await updateProfilePersonalData(input);
     setProfilePersonalData(profile);
     setSessionName(profile.displayName);

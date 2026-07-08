@@ -189,6 +189,27 @@ const referenceDate = new Date(2026, 6, 6);
   assert.equal(invalidLetters.ok, false);
   assert.equal(invalidLetters.errors.phoneNumber, "Ingresa un número de celular válido.");
 
+  const invalidOnlyLetters = buildProfilePersonalDataPayload({
+    firstName: "Fabian",
+    phoneNumber: "abc",
+  }, referenceDate);
+  assert.equal(invalidOnlyLetters.ok, false);
+  assert.equal(invalidOnlyLetters.errors.phoneNumber, "Ingresa un número de celular válido.");
+
+  const invalidSymbols = buildProfilePersonalDataPayload({
+    firstName: "Fabian",
+    phoneNumber: "+56 @#! 1234",
+  }, referenceDate);
+  assert.equal(invalidSymbols.ok, false);
+  assert.equal(invalidSymbols.errors.phoneNumber, "Ingresa un número de celular válido.");
+
+  const invalidEmoji = buildProfilePersonalDataPayload({
+    firstName: "Fabian",
+    phoneNumber: "+56 😊 1234",
+  }, referenceDate);
+  assert.equal(invalidEmoji.ok, false);
+  assert.equal(invalidEmoji.errors.phoneNumber, "Ingresa un número de celular válido.");
+
   const tooLong = buildProfilePersonalDataPayload({
     firstName: "Fabian",
     phoneNumber: "1".repeat(31),

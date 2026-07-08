@@ -11,6 +11,7 @@ import {
   profileGenderLabels,
   profileGenderValues,
   type ProfileFormValues,
+  type ProfilePersonalDataInput,
 } from "@/lib/profile/profile-form";
 import { validateAvatarSourceFile } from "@/lib/profile/profile-avatar-image";
 import type { ProfilePersonalData } from "@/lib/profile/profile-repository";
@@ -52,7 +53,7 @@ export function ProfileScreen({
   onAvatarImageError?: () => void;
   avatarResetKey?: number;
   onReloadPersonalData: () => void;
-  onSavePersonalData: (input: ProfileFormValues) => Promise<ProfilePersonalData>;
+  onSavePersonalData: (input: ProfilePersonalDataInput) => Promise<ProfilePersonalData>;
   onUploadAvatar: (file: File) => Promise<void>;
   onDeleteAvatar: () => Promise<void>;
 }) {
@@ -251,7 +252,7 @@ function PersonalDataSection({
   isLoading: boolean;
   loadError: string;
   onReload: () => void;
-  onSave: (input: ProfileFormValues) => Promise<ProfilePersonalData>;
+  onSave: (input: ProfilePersonalDataInput) => Promise<ProfilePersonalData>;
 }) {
   const initialValues = useMemo(() => buildProfileFormInitialValues({
     displayName: personalData?.displayName ?? profile.displayName,
@@ -290,12 +291,24 @@ function PersonalDataSection({
       setStatusMessage("Revisa los datos antes de guardar.");
       return;
     }
+    const payload = validation.payload;
+    if (!payload) {
+      setFieldErrors({ phoneNumber: "Ingresa un número de celular válido." });
+      setStatusMessage("Revisa los datos antes de guardar.");
+      return;
+    }
 
     setIsSaving(true);
     setFieldErrors({});
     setStatusMessage("Guardando...");
     try {
-      await onSave(values);
+      await onSave({
+        firstName: payload.first_name,
+        lastName: payload.last_name,
+        birthDate: payload.birth_date,
+        gender: payload.gender,
+        phoneNumber: payload.phone_number,
+      });
       setIsEditing(false);
       setStatusMessage("Cambios guardados.");
     } catch (error) {
