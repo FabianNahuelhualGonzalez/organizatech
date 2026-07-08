@@ -94,7 +94,7 @@ export function ProfileScreen({
         title="Preferencias de sistema"
         description="Configuración predeterminada, se está preparando para futuras opciones personales."
         rows={preferenceRows}
-        actionLabel="Editar datos"
+        actionLabel="Próximamente"
         disabledAction
       />
 

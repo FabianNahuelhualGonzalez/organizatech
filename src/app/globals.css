@@ -68,7 +68,9 @@ a {
   grid-template-columns: 48px minmax(0, 1fr) 48px;
   align-items: center;
   gap: 10px;
-  padding: 10px 0 12px;
+  width: calc(100% + clamp(10px, 3.6vw, 16px) * 2);
+  margin-inline: calc(clamp(10px, 3.6vw, 16px) * -1);
+  padding: 10px clamp(10px, 3.6vw, 16px) 12px;
   background: linear-gradient(180deg, rgba(7, 16, 26, 0.96), rgba(7, 16, 26, 0.72));
   backdrop-filter: blur(16px);
   transition: transform 180ms ease, opacity 180ms ease;
@@ -511,6 +513,11 @@ h3 {
   -webkit-line-clamp: 2;
 }
 
+.profile-section:not([data-section="personal-data"]) > .profile-section-header h3 {
+  font-size: clamp(17px, 4vw, 23px);
+  white-space: nowrap;
+}
+
 .profile-info-list {
   display: grid;
   min-width: 0;
@@ -651,7 +658,8 @@ h3 {
 .profile-form-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px;
+  margin-top: 28px;
 }
 
 .profile-inline-notice {
@@ -695,6 +703,14 @@ h3 {
   background: transparent;
   padding: 7px 12px;
   font-size: 12px;
+}
+
+.profile-section > .profile-section-header > .profile-edit-button:disabled,
+.profile-coming-soon {
+  border-color: #3536ff;
+  color: var(--muted);
+  background: transparent;
+  opacity: 1;
 }
 
 .profile-feature-section .profile-section-header {
@@ -3017,10 +3033,10 @@ h3 {
   min-width: 18px;
   height: 18px;
   place-items: center;
-  border: 1px solid rgba(7, 16, 26, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   border-radius: 999px;
-  color: #07101a;
-  background: var(--green);
+  color: #fff;
+  background: #1d5cff;
   padding: 0 4px;
   font-size: 9px;
   font-weight: 900;
@@ -3128,12 +3144,12 @@ h3 {
 }
 
 .notification-item.seen {
-  background: #1d5cff;
+  background: #1f2a35;
   opacity: 1;
 }
 
 .notification-item.new {
-  background: #1f2a35;
+  background: #1d5cff;
 }
 
 .notification-icon {
@@ -3192,7 +3208,7 @@ h3 {
 }
 
 .notification-copy > span:last-child {
-  color: var(--muted);
+  color: #fff;
   display: -webkit-box;
   overflow: hidden;
   font-size: 12px;
