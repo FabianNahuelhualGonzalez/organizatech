@@ -467,10 +467,17 @@ interface AppNotification {
   dedupeKey: string;
   target: AppNotificationTarget;
   section?: AppNotificationSection;
+  day?: string;
   kind: "feature" | "profile" | "week" | "progress" | "coach";
   createdAt: string;
   expiresAt?: string;
   reason?: string;
+}
+
+interface TrainingNotificationContext {
+  day: string;
+  routine: string;
+  status: "completed" | "pending";
 }
 
 interface SeenNotificationRecord {
@@ -1031,6 +1038,13 @@ export function OrganizatechApp({
     sessions: calendarNormalizedTrainingSessions,
     usesCycleScopedSessions: isCycleScopedActiveCycle,
   });
+  const todayTrainingNotificationContext = useMemo(() => getTodayTrainingNotificationContext({
+    plannedDays: dashboardCarouselDays,
+    exercises: displayExercises,
+    entries: calendarNormalizedEntries,
+    sessions: calendarNormalizedTrainingSessions,
+    usesCycleScopedSessions: isCycleScopedActiveCycle,
+  }), [calendarNormalizedEntries, calendarNormalizedTrainingSessions, dashboardCarouselDays, displayExercises, isCycleScopedActiveCycle]);
   const plannedTrainingDays = hasRoutinePlan ? dashboardCarouselDays.length : 0;
   const trainingTopbarMeta = buildTrainingTopbarMeta({
     cycleLabel: getCycleTypeTitle(displayTrainingPlan),
@@ -1049,6 +1063,7 @@ export function OrganizatechApp({
     weeklyEquivalentProgress,
     summary,
     currentMetrics,
+    todayTraining: todayTrainingNotificationContext,
   }), [
     completedTrainingDays,
     currentMetrics,
@@ -1063,6 +1078,7 @@ export function OrganizatechApp({
     profilePersonalData?.lastName,
     profilePersonalData?.phoneNumber,
     summary,
+    todayTrainingNotificationContext,
     weeklyEquivalentProgress,
   ]);
   const seenNotificationIds = useMemo(() => new Set(seenNotificationRecords.map((record) => record.id)), [seenNotificationRecords]);
@@ -3465,6 +3481,12 @@ export function OrganizatechApp({
     markNotificationsSeen([notification.id]);
     setIsNotificationPanelOpen(false);
     setTrainingCompletionSummary(null);
+    if (notification.day && notification.target === "dashboard") {
+      setDashboardDayOverride(notification.day);
+    }
+    if (notification.day && notification.target === "comparacion") {
+      setComparisonDay(notification.day);
+    }
     navigateTo(notification.target);
     scrollToNotificationSection(notification.section);
   }
@@ -4137,52 +4159,6 @@ function DashboardScreen({
   switchDay: (day: string) => void;
 }) {
   const hasTodayRoutine = dayExercises.length > 0;
-  const analytics = buildAnalytics(summary, currentMetrics);
-  const coachFeedback = useMemo(() => buildTrainingCoachFeedback(buildTrainingCoachDashboardInput({
-    summary,
-    currentMetrics,
-    entries,
-    currentWeek,
-    weeklyEquivalentProgress,
-  })), [summary, currentMetrics, entries, currentWeek, weeklyEquivalentProgress]);
-  const hasCurrentWeekTrainingRecords = entries.some((entry) => (
-    entry.week === currentWeek && entry.reps.some((rep) => rep > 0)
-  ));
-  const hasCurrentWeekMetricRecords = currentMetrics.some((metric) => (
-    metric.totalReps > 0 || metric.volumeTotal > 0
-  ));
-  const isCurrentWeekEmptyCoach = !hasCurrentWeekTrainingRecords && !hasCurrentWeekMetricRecords;
-  const displayedCoachFeedback = isCurrentWeekEmptyCoach
-    ? buildEmptyCurrentWeekCoachFeedback()
-    : coachFeedback;
-  const coachVisualStatus = isCurrentWeekEmptyCoach
-    ? {
-        showScore: false,
-        showFactors: false,
-        badgeLabel: "Semana nueva",
-        label: "Sin registros esta semana",
-        detail: "Completa tu primera sesión para generar una lectura de rendimiento.",
-        factorLabel: "Datos disponibles",
-      }
-    : weeklyEquivalentProgress.status === "ready"
-    ? { showScore: true, showFactors: true, label: feedbackHeadlineForStatus(displayedCoachFeedback), detail: "Factores de rendimiento", factorLabel: "Factores de rendimiento" }
-    : weeklyEquivalentProgress.status === "no_previous"
-      ? {
-          showScore: false,
-          showFactors: true,
-          badgeLabel: "Base creada",
-          label: "Punto de partida",
-          detail: "Tu primera referencia de progreso",
-          factorLabel: "Factores del registro actual",
-        }
-      : {
-          showScore: false,
-          showFactors: true,
-          badgeLabel: "Datos disponibles",
-          label: "Sin historial suficiente",
-          detail: "Registro actual",
-          factorLabel: "Datos disponibles",
-        };
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
@@ -4255,6 +4231,55 @@ function DashboardScreen({
   }
 
   const activeDayData = getDashboardDayData(activeCarouselDay);
+  const activeCoachEntries = getDashboardCoachEntries(entries, activeDayData.exercises, usesCycleScopedSessions);
+  const activeCoachMetrics = activeDayData.metrics;
+  const activeCoachSummary = calculateWeeklySummary(activeCoachMetrics, currentWeek);
+  const analytics = buildAnalytics(activeCoachSummary, activeCoachMetrics);
+  const coachFeedback = useMemo(() => buildTrainingCoachFeedback(buildTrainingCoachDashboardInput({
+    summary: activeCoachSummary,
+    currentMetrics: activeCoachMetrics,
+    entries: activeCoachEntries,
+    currentWeek,
+    weeklyEquivalentProgress,
+  })), [activeCoachSummary, activeCoachMetrics, activeCoachEntries, currentWeek, weeklyEquivalentProgress]);
+  const hasCurrentWeekTrainingRecords = activeCoachEntries.some((entry) => (
+    entry.week === currentWeek && entry.reps.some((rep) => rep > 0)
+  ));
+  const hasCurrentWeekMetricRecords = activeCoachMetrics.some((metric) => (
+    metric.totalReps > 0 || metric.volumeTotal > 0
+  ));
+  const isCurrentWeekEmptyCoach = !hasCurrentWeekTrainingRecords && !hasCurrentWeekMetricRecords;
+  const displayedCoachFeedback = isCurrentWeekEmptyCoach
+    ? buildEmptyCurrentWeekCoachFeedback()
+    : coachFeedback;
+  const coachVisualStatus = isCurrentWeekEmptyCoach
+    ? {
+        showScore: false,
+        showFactors: false,
+        badgeLabel: "Semana nueva",
+        label: "Sin registros esta semana",
+        detail: "Completa tu primera sesión para generar una lectura de rendimiento.",
+        factorLabel: "Datos disponibles",
+      }
+    : weeklyEquivalentProgress.status === "ready"
+    ? { showScore: true, showFactors: true, label: feedbackHeadlineForStatus(displayedCoachFeedback), detail: "Factores de rendimiento", factorLabel: "Factores de rendimiento" }
+    : weeklyEquivalentProgress.status === "no_previous"
+      ? {
+          showScore: false,
+          showFactors: true,
+          badgeLabel: "Base creada",
+          label: "Punto de partida",
+          detail: "Tu primera referencia de progreso",
+          factorLabel: "Factores del registro actual",
+        }
+      : {
+          showScore: false,
+          showFactors: true,
+          badgeLabel: "Datos disponibles",
+          label: "Sin historial suficiente",
+          detail: "Registro actual",
+          factorLabel: "Datos disponibles",
+        };
   const activeDayAction = resolveTrainingCarouselAction(activeDayData.status);
 
   function handleTrainingCarouselScroll(event: UIEvent<HTMLDivElement>) {
@@ -4963,6 +4988,7 @@ function buildAppNotifications({
   weeklyEquivalentProgress,
   summary,
   currentMetrics,
+  todayTraining,
 }: {
   profile: ReturnType<typeof buildProfileViewModel>;
   personalData: ProfilePersonalData | null;
@@ -4974,6 +5000,7 @@ function buildAppNotifications({
   weeklyEquivalentProgress: WeeklyEquivalentProgressResult;
   summary: ReturnType<typeof calculateWeeklySummary>;
   currentMetrics: ExerciseMetrics[];
+  todayTraining: TrainingNotificationContext | null;
 }): AppNotification[] {
   const createdAt = new Date().toISOString();
   const notifications: AppNotification[] = [];
@@ -5069,20 +5096,21 @@ function buildAppNotifications({
     }));
   }
 
-  if (hasRoutinePlan && plannedDays > 0) {
-    const isWeekComplete = completedDays >= plannedDays;
+  if (hasRoutinePlan && plannedDays > 0 && todayTraining) {
+    const isTodayCompleted = todayTraining.status === "completed";
     notifications.push(createAppNotification({
-      id: `training-status-v1-w${currentWeek}-${completedDays}-${plannedDays}`,
-      title: isWeekComplete ? "Entrenamiento completado" : "Entrenamiento de hoy",
-      summary: isWeekComplete
-        ? "Buen trabajo, ya registraste tu sesión de hoy."
-        : "Tienes tu rutina lista para registrar.",
+      id: `training-status-v2-w${currentWeek}-${todayTraining.day}-${todayTraining.status}`,
+      title: isTodayCompleted ? "Entrenamiento registrado" : "Hoy te toca entrenar",
+      summary: isTodayCompleted
+        ? "Tu rutina ya fue registrada con éxito. Puedes ver el detalle en Comparación semanal."
+        : `Hoy ${todayTraining.day} te toca entrenar ${todayTraining.routine}.`,
       category: "Entrenamiento",
-      tone: isWeekComplete ? "success" : "progress",
-      priority: isWeekComplete ? "medium" : "high",
+      tone: isTodayCompleted ? "success" : "progress",
+      priority: isTodayCompleted ? "medium" : "high",
       dedupeKey: "training-status",
-      target: "dashboard",
-      section: "training-carousel",
+      target: isTodayCompleted ? "comparacion" : "dashboard",
+      section: isTodayCompleted ? "weekly-comparison" : "training-carousel",
+      day: todayTraining.day,
       kind: "week",
       createdAt,
     }));
@@ -8139,6 +8167,56 @@ function calculateWeeklyCompletedTrainingDays({
   }, 0);
 }
 
+function getTodayTrainingNotificationContext({
+  plannedDays,
+  exercises,
+  entries,
+  sessions,
+  usesCycleScopedSessions,
+}: {
+  plannedDays: string[];
+  exercises: ExerciseTemplate[];
+  entries: ExerciseEntry[];
+  sessions: TrainingSession[];
+  usesCycleScopedSessions: boolean;
+}): TrainingNotificationContext | null {
+  const currentWeekDates = getCurrentSantiagoWeekDates();
+  const todayKey = getSantiagoDateKey(new Date());
+  const todayDay = Object.entries(currentWeekDates).find(([, date]) => date === todayKey)?.[0] ?? getCalendarTrainingDay();
+  if (!plannedDays.includes(todayDay)) return null;
+
+  const dayExercises = exercises.filter((exercise) => (exercise.day ?? todayDay) === todayDay);
+  if (dayExercises.length === 0) return null;
+
+  const currentWeekStart = currentWeekDates.Lunes;
+  const activeSessions = sessions.filter((session) => (
+    session.status === "completed" &&
+    !session.deletedAt &&
+    (usesCycleScopedSessions
+      ? getSessionEffectiveCalendarWeekStart(session) === currentWeekStart
+      : session.calendarWeekStart === currentWeekStart)
+  ));
+  const plannedDay = getTrainingDayCode(todayDay);
+  const session = findDashboardSessionForDay(activeSessions, dayExercises, todayKey, plannedDay, usesCycleScopedSessions);
+  const sessionEntries = session ? findDashboardEntries(session.entries, dayExercises, todayKey, usesCycleScopedSessions) : [];
+  const fallbackEntries = usesCycleScopedSessions ? [] : findDashboardEntries(entries, dayExercises, todayKey, false);
+  const itemEntries = usesCycleScopedSessions
+    ? sessionEntries
+    : sessionEntries.length > 0
+      ? sessionEntries
+      : fallbackEntries;
+  const coverage = usesCycleScopedSessions
+    ? getCycleScopedDayCoverage(dayExercises, itemEntries)
+    : null;
+  const status = coverage?.status ?? (Boolean(session) || fallbackEntries.length > 0 ? "completed" : "pending");
+
+  return {
+    day: todayDay,
+    routine: dayExercises[0]?.routine ?? todayDay,
+    status: status === "completed" ? "completed" : "pending",
+  };
+}
+
 function normalizeCycleScopedSessionsByCalendarWeek(sessions: TrainingSession[], plannedStartDate: string) {
   return sessions.map((session) => {
     const effectiveWeekNumber = getSessionEffectiveCycleWeekNumber(plannedStartDate, session) ?? session.weekNumber;
@@ -8204,6 +8282,28 @@ function getDashboardExerciseIdentity(exercise: ExerciseTemplate, usesCycleScope
 
 function getDashboardEntryExerciseIdentity(entry: ExerciseEntry, usesCycleScopedSessions: boolean) {
   return usesCycleScopedSessions ? entry.trainingCycleExerciseId ?? entry.exerciseId : entry.exerciseId;
+}
+
+function getDashboardCoachEntries(
+  entries: ExerciseEntry[],
+  dayExercises: ExerciseTemplate[],
+  usesCycleScopedSessions: boolean,
+) {
+  if (dayExercises.length === 0) return [];
+
+  const exerciseIds = new Set(dayExercises.map((exercise) => getDashboardExerciseIdentity(exercise, usesCycleScopedSessions)));
+  const lineageIds = new Set(dayExercises.map((exercise) => exercise.exerciseLineageId?.trim()).filter(Boolean));
+  const legacyIds = new Set(dayExercises.map((exercise) => exercise.sourceLegacyExerciseId?.trim()).filter(Boolean));
+
+  return entries.filter((entry) => {
+    const identity = getDashboardEntryExerciseIdentity(entry, usesCycleScopedSessions);
+    if (exerciseIds.has(identity)) return true;
+
+    const lineageId = entry.exerciseLineageId?.trim();
+    if (lineageId && lineageIds.has(lineageId)) return true;
+
+    return legacyIds.has(entry.exerciseId);
+  });
 }
 
 function normalizeEntryDateKey(value: string) {

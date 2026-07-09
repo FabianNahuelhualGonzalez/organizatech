@@ -308,9 +308,9 @@ function buildInsight(signal: DetectedSignal, input: NormalizedTrainingCoachInpu
   if (signal.id === "kg_up_reps_down") {
     return {
       title: "Progresión de carga detectada",
-      body: `${exerciseName} bajó ${Math.abs(safeNumber(signal.exercise?.repsDifference))} reps, pero subiste el peso. Puede ser normal al aumentar carga si la técnica se mantiene.`,
-      action: "Repite esta carga y monitoreemos si recuperas repeticiones con el nuevo peso.",
-      tone: "warning",
+      body: `${exerciseName} bajó ${Math.abs(safeNumber(signal.exercise?.repsDifference))} reps, pero subiste el peso. Es una progresión normal cuando aumentas intensidad y mantienes buena técnica.`,
+      action: "Consolida esta carga una sesión más y busca recuperar reps de forma gradual.",
+      tone: "info",
       priority: signal.priority,
     };
   }
@@ -711,7 +711,7 @@ function resolveSummary(input: NormalizedTrainingCoachInput, signals: string[], 
 function resolveNextAdvice(input: NormalizedTrainingCoachInput, signals: string[], nextTarget?: string) {
   if (signals.includes("first_reference")) return "Repite esta base una vez más y busca mantener técnica, carga y repeticiones antes de acelerar la progresión.";
   if (signals.includes("sleep_low_performance_low")) return "No fuerces marcas si el descanso sigue bajo; prioriza técnica y consistencia.";
-  if (signals.includes("kg_up_reps_down")) return "Mantén foco en técnica y busca recuperar repeticiones antes de aumentar otra vez la carga.";
+  if (signals.includes("kg_up_reps_down")) return "Consolida la nueva carga y busca recuperar repeticiones antes de aumentar otra vez el peso.";
   if (signals.includes("strong_exercise_drop")) return nextTarget ?? "Elige el ejercicio con mayor caída y busca igualar el registro anterior.";
   if (signals.includes("same_kg_reps_up")) return "Mantén el peso y confirma la mejora de reps; luego considera una subida pequeña.";
   if (signals.includes("kg_up_reps_up")) return "Consolida una sesión más ese avance antes de aumentar nuevamente la carga.";
@@ -726,6 +726,9 @@ function resolveNextTarget(signals: DetectedSignal[]) {
   if (!targetSignal?.exercise) return undefined;
 
   const reps = safeNumber(targetSignal.exercise.repsDifference);
+  if (targetSignal.id === "kg_up_reps_down") {
+    return `Objetivo próximo: sostener la nueva carga en ${targetSignal.exercise.name} y recuperar reps de a poco.`;
+  }
   if (reps < 0) return formatRepsRecoveryTarget(Math.abs(reps), targetSignal.exercise.name);
   if (reps > 0) return `Objetivo próximo: sostener el progreso de ${targetSignal.exercise.name} una sesión más.`;
   return `Objetivo próximo: repetir ${targetSignal.exercise.name} con técnica estable.`;

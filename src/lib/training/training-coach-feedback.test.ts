@@ -205,7 +205,7 @@ import {
     workout: { completedExercises: 2, totalExercises: 2, volumeDifference: -100, volumePercentage: -2, repsDifference: -1, kgIncreasedExercises: 1 },
   }));
 
-  assert.equal(feedback.nextTarget, "Suma 1 rep más para recuperar tu marca anterior en Press militar.");
+  assert.equal(feedback.nextTarget, "Objetivo próximo: sostener la nueva carga en Press militar y recuperar reps de a poco.");
 }
 
 {
