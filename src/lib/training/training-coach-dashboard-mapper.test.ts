@@ -173,6 +173,34 @@ import {
 }
 
 {
+  const mapped = buildTrainingCoachDashboardInput({
+    summary: summary({ week: 6, volumeDifference: 500, volumePercentage: 8, repsDifference: -4, objectivesOk: 1, exerciseCount: 1 }),
+    currentMetrics: [
+      metric({
+        exerciseName: "Hack",
+        week: 6,
+        kgDifference: 10,
+        repsDifference: -4,
+        weight: 110,
+        previousWeight: 100,
+      }),
+    ],
+    entries: [
+      entry({ week: 6, exerciseName: "Hack", reps: [9, 9, 8], weight: 110, previousWeight: 100 }),
+    ],
+    currentWeek: 6,
+    weeklyEquivalentProgress: progress("ready"),
+  });
+  const feedback = buildTrainingCoachFeedback(mapped);
+  const text = JSON.stringify(feedback);
+
+  assert.ok(feedback.sourceSignals.includes("kg_up_reps_down"));
+  assert.match(text, /subiste el peso/);
+  assert.match(text, /progresión normal/);
+  assert.doesNotMatch(text, /reps perdidas/);
+}
+
+{
   const trend = buildDashboardWeeklyTrend([
     entry({ week: 3, id: "w3-a", exerciseName: "Press plano", reps: [10, 10, 10], weight: 100 }),
     entry({ week: 4, id: "w4-a", exerciseName: "Press plano", reps: [11, 10, 10], weight: 100 }),
