@@ -417,8 +417,10 @@ async function fetchEntries(userId: string): Promise<ExerciseEntry[]> {
 
   const { data, error } = await supabase
     .from("exercise_entries")
-    .select("id,session_id,weight,previous_weight,reps,rir,notes,training_sessions(week_number,trained_at),exercises(id,name,target_sets,target_reps,base_weight,notes,routines(name))")
+    .select("id,session_id,weight,previous_weight,reps,rir,notes,training_sessions!inner(week_number,trained_at,deleted_at),exercises(id,name,target_sets,target_reps,base_weight,notes,routines(name))")
     .eq("user_id", userId)
+    .eq("training_sessions.user_id", userId)
+    .is("training_sessions.deleted_at", null)
     .order("created_at");
 
   if (error) throw error;
@@ -517,9 +519,11 @@ export async function fetchTrainingSessionEntries(sessionId: string, mode: Repos
   const { supabase, userId } = auth;
   const { data, error } = await supabase
     .from("exercise_entries")
-    .select("id,session_id,weight,previous_weight,reps,rir,notes,training_sessions(week_number,trained_at,trained_date),exercises(id,name,target_sets,target_reps,base_weight,notes,routines(name))")
+    .select("id,session_id,weight,previous_weight,reps,rir,notes,training_sessions!inner(week_number,trained_at,trained_date,deleted_at),exercises(id,name,target_sets,target_reps,base_weight,notes,routines(name))")
     .eq("user_id", userId)
     .eq("session_id", sessionId)
+    .eq("training_sessions.user_id", userId)
+    .is("training_sessions.deleted_at", null)
     .order("created_at");
 
   if (error) throw error;
@@ -680,7 +684,7 @@ interface SupabaseEntryRow {
   reps: number[];
   rir: string | null;
   notes: string | null;
-  training_sessions: { week_number: number; trained_at: string; trained_date?: string | null } | Array<{ week_number: number; trained_at: string; trained_date?: string | null }>;
+  training_sessions: { week_number: number; trained_at: string; trained_date?: string | null; deleted_at?: string | null } | Array<{ week_number: number; trained_at: string; trained_date?: string | null; deleted_at?: string | null }>;
   exercises: {
     id: string;
     name: string;

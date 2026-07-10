@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { ExerciseEntry } from "@/lib/progress/types";
 import type { CycleScopedExercise } from "./cycle-scoped-training-repository";
 import {
@@ -15,6 +16,11 @@ import {
   isCycleScopedExerciseRetired,
   removeTechnicalMarkersForDisplay,
 } from "./cycle-scoped-plan-edit";
+
+const cycleScopedRepositorySource = readFileSync(
+  "src/lib/training/cycle-scoped-training-repository.ts",
+  "utf8",
+);
 
 const existingExercises = [
   createExercise("registered", "Gemelos hack"),
@@ -161,6 +167,17 @@ assert.equal(
   getCycleScopedDayCoverage(existingExercises, []).status,
   "pending",
   "el dia queda Pendiente cuando ningun ejercicio tiene entry",
+);
+
+assert.match(
+  cycleScopedRepositorySource,
+  /from\("exercise_entries"\)[\s\S]*?training_sessions!inner\(id,user_id,deleted_at\)[\s\S]*?\.eq\("training_sessions\.user_id", userId\)[\s\S]*?\.is\("training_sessions\.deleted_at", null\)/,
+  "la edicion del plan considera historial solo de sesiones activas del usuario",
+);
+assert.match(
+  cycleScopedRepositorySource,
+  /export async function getCycleScopedTrainingSessionData[\s\S]*?\.from\("training_sessions"\)[\s\S]*?\.is\("deleted_at", null\)[\s\S]*?\.from\("exercise_entries"\)[\s\S]*?\.in\("session_id", sessionIds\)/,
+  "el loader cycle-scoped conserva entries de sesiones activas y excluye las soft-deleted desde los sessionIds",
 );
 
 assert.deepEqual(
