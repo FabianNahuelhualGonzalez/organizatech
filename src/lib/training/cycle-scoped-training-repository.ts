@@ -516,7 +516,7 @@ export async function addCycleScopedTrainingDaysAndExercises(
     existingKeys.add(key);
   }
 
-  let updatedExercises: Array<{ id: string }> = [];
+  const updatedExercises: Array<{ id: string }> = [];
   if (updates.length > 0) {
     for (const update of updates) {
       const { data, error } = await supabase
@@ -588,7 +588,7 @@ export async function addCycleScopedTrainingDaysAndExercises(
   }
 
   const retiredAt = new Date().toISOString();
-  let retiredExercises: Array<{ id: string }> = [];
+  const retiredExercises: Array<{ id: string }> = [];
   if (retiredIds.length > 0) {
     for (const exerciseId of retiredIds) {
       const current = existingById.get(exerciseId);

@@ -147,6 +147,8 @@ export function ProfileAvatarEditor({
           onPointerCancel={handlePointerEnd}
         >
           {previewUrl && !error && (
+            // The blob preview is transformed directly while the user crops it.
+            // eslint-disable-next-line @next/next/no-img-element
             <img src={previewUrl} alt="" draggable={false} style={imageStyle} />
           )}
         </div>

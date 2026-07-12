@@ -23,6 +23,8 @@ export function UserAvatar({
 
   if (profile.avatarUrl && !imgFailed) {
     return (
+      // Signed avatar URLs need the native error fallback and loading behavior.
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         className={className}
         src={profile.avatarUrl}
