@@ -14,7 +14,6 @@ import {
   Dumbbell,
   Eye,
   EyeOff,
-  HelpCircle,
   Lock,
   LogOut,
   Mail,
@@ -41,7 +40,6 @@ import {
   deleteExercise,
   loadAppData,
   replaceLocalData,
-  resetLocalData,
   saveExercise,
   saveTrainingSessionWithEntries,
   type DataSource,
@@ -56,42 +54,26 @@ import {
   type ProfilePersonalData,
 } from "@/lib/profile/profile-repository";
 import type { ProfilePersonalDataInput } from "@/lib/profile/profile-form";
-import {
-  deleteProfileAvatar,
-  getCurrentProfileAvatar,
-  uploadProfileAvatar,
-} from "@/lib/profile/profile-avatar-repository";
+import { getCurrentProfileAvatar, uploadProfileAvatar } from "@/lib/profile/profile-avatar-repository";
 import type { ProfileAvatarState } from "@/lib/profile/profile-avatar";
 import {
   calculateExerciseMetrics,
   calculateWeeklyComparison,
   calculateWeeklySummary,
   formatSigned,
-  generateSmartInsights,
-  getObjectiveStatusLabel,
 } from "@/lib/progress/calculations";
-import { buildExerciseComparisonSummary, getExerciseHistory } from "@/lib/progress/exercise-history";
 import { formatDecimalEs, formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import { buildWeeklyProgressChart } from "@/lib/progress/weekly-progress-chart";
 import {
   buildWeeklyExerciseComparisonModel,
   type WeeklyExerciseComparisonModel,
-  type WeeklyExerciseComparisonSeriesPoint,
   type WeeklyExerciseMetricSummary,
 } from "@/lib/progress/weekly-exercise-comparison";
 import {
   calculateEquivalentWeeklyProgress,
   type WeeklyEquivalentProgressResult,
 } from "@/lib/progress/weekly-equivalent-progress";
-import type {
-  ExerciseComparisonSummary,
-  ExerciseEntry,
-  ExerciseMetrics,
-  ExerciseTemplate,
-  ObjectiveStatus,
-  TrainingDayCode,
-  TrainingSession,
-} from "@/lib/progress/types";
+import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode, TrainingSession } from "@/lib/progress/types";
 import { isSessionExpiredError, translateAuthError, translatePersistenceError } from "@/lib/supabase/auth-errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
@@ -159,7 +141,6 @@ import {
 import {
   clearWorkoutDraft as clearStoredWorkoutDraft,
   getDraftUserKey,
-  getWorkoutDraftKey as getStoredWorkoutDraftKey,
   saveWorkoutDraft as saveStoredWorkoutDraft,
   loadWorkoutDraft as loadStoredWorkoutDraft,
   type PendingWorkoutReadinessLink,
@@ -200,7 +181,6 @@ import {
   type CycleScopedTrainingPlan,
 } from "@/lib/training/cycle-scoped-training-repository";
 import {
-  getCalendarWeekStartDateKey,
   getCycleCalendarPlannedDate,
   getCycleCalendarWeekNumber,
   getSessionEffectiveCalendarWeekStart,
@@ -217,7 +197,6 @@ import {
 import {
   dedupeExerciseRowsByName,
   dedupeExercisesByDayAndRoutine,
-  getExercisesForTrainingDay,
   getRemovedExerciseIds,
 } from "@/lib/training/training-exercise-selection";
 import {
@@ -566,7 +545,7 @@ export function OrganizatechApp({
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
   const [exerciseDrafts, setExerciseDrafts] = useState<Record<string, ExerciseDraft>>({});
   const [readiness, setReadiness] = useState<TrainingReadiness | null>(null);
-  const [dailyReadinessRecord, setDailyReadinessRecord] = useState<TrainingDailyReadinessRecord | null>(null);
+  const [, setDailyReadinessRecord] = useState<TrainingDailyReadinessRecord | null>(null);
   const [checkingDailyReadiness, setCheckingDailyReadiness] = useState(false);
   const [savingDailyReadiness, setSavingDailyReadiness] = useState(false);
   const [dailyReadinessError, setDailyReadinessError] = useState("");
@@ -600,6 +579,14 @@ export function OrganizatechApp({
   const [isDeleteCycleConfirmOpen, setIsDeleteCycleConfirmOpen] = useState(false);
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
+
+  const resetWorkoutAttemptState = useCallback(() => {
+    activeWorkoutAttemptIdRef.current = null;
+    activeWorkoutReadinessContextRef.current = null;
+    setActiveWorkoutAttemptId(null);
+    setPendingWorkoutReadinessLink(null);
+    setHasRecoverableWorkoutStart(false);
+  }, []);
 
   function clearCycleScopedPlanState() {
     isCycleScopedDisplayLockedRef.current = false;
@@ -751,6 +738,9 @@ export function OrganizatechApp({
       isMounted = false;
       authSubscription?.unsubscribe();
     };
+    // This effect owns the auth subscription lifecycle and must run once. The
+    // local orchestration callbacks are intentionally captured at bootstrap.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -885,7 +875,7 @@ export function OrganizatechApp({
       setActiveWorkoutStartedAt(null);
       resetWorkoutAttemptState();
     }
-  }, [activeWorkoutAttemptId, activeWorkoutStartedAt, hasRecoverableWorkoutStart, hasStartedTraining, pendingReadinessLink, screen]);
+  }, [activeWorkoutAttemptId, activeWorkoutStartedAt, hasRecoverableWorkoutStart, hasStartedTraining, pendingReadinessLink, resetWorkoutAttemptState, screen]);
 
   useEffect(() => {
     if (screen === "training-summary" && !trainingCompletionSummary) {
@@ -908,8 +898,14 @@ export function OrganizatechApp({
     ? (cycleScopedExercises ?? [])
     : exercises;
   const displayExercises = dedupeExercisesByDayAndRoutine(selectedExercises);
-  const displayEntries = isCycleScopedLookupPending ? [] : entries;
-  const displayTrainingSessions = isCycleScopedLookupPending ? [] : trainingSessions;
+  const displayEntries = useMemo(
+    () => isCycleScopedLookupPending ? [] : entries,
+    [entries, isCycleScopedLookupPending],
+  );
+  const displayTrainingSessions = useMemo(
+    () => isCycleScopedLookupPending ? [] : trainingSessions,
+    [isCycleScopedLookupPending, trainingSessions],
+  );
   const isCycleScopedPlanLoading = (isCycleScopedLookupPending || isCycleScopedActiveCycle) && cycleScopedExercises === null && !cycleScopedLoadError;
   const isCycleScopedPlanEmpty = isCycleScopedActiveCycle && cycleScopedExercises !== null && (
     cycleScopedExercises.length === 0 ||
@@ -960,11 +956,8 @@ export function OrganizatechApp({
   const activeWorkoutExerciseLineageId = activeWorkoutExercise?.exerciseLineageId ?? null;
   const activeWorkoutExerciseId = activeWorkoutExercise?.id ?? null;
   const visibleRoutine = dayExercises[0]?.routine ?? setupByDay[visibleDay]?.routineName ?? visibleDay;
-  const dashboardRoutine = dashboardExercises[0]?.routine ?? setupByDay[dashboardDay]?.routineName ?? dashboardDay;
   const targetSummary = calculateTargetSummary(dayExercises);
   const currentMetrics = metrics.filter((entry) => entry.week === currentWeek);
-  const dashboardExerciseIds = new Set(dashboardExercises.map((exercise) => exercise.id));
-  const dashboardCurrentMetrics = currentMetrics.filter((entry) => dashboardExerciseIds.has(entry.exerciseId));
   const summary = calculateWeeklySummary(metrics, currentWeek);
   const weeklyEquivalentProgress = useMemo(() => calculateEquivalentWeeklyProgress({
     entries: calendarNormalizedEntries,
@@ -1071,12 +1064,8 @@ export function OrganizatechApp({
     hasRoutinePlan,
     hasTrainingEntries,
     plannedTrainingDays,
-    profileViewModel.avatarUrl,
-    profilePersonalData?.birthDate,
-    profilePersonalData?.firstName,
-    profilePersonalData?.gender,
-    profilePersonalData?.lastName,
-    profilePersonalData?.phoneNumber,
+    profilePersonalData,
+    profileViewModel,
     summary,
     todayTrainingNotificationContext,
     weeklyEquivalentProgress,
@@ -1474,21 +1463,6 @@ export function OrganizatechApp({
       : current);
   }
 
-  async function handleDeleteProfileAvatar() {
-    setProfileAvatarError("");
-    const avatar = await deleteProfileAvatar();
-    lastProfileAvatarRefreshAtRef.current = 0;
-    setProfileAvatar(avatar);
-    setProfileAvatarResetKey((current) => current + 1);
-    setProfilePersonalData((current) => current
-      ? {
-        ...current,
-        avatarPath: null,
-        avatarUpdatedAt: null,
-      }
-      : current);
-  }
-
   async function refreshPersistedTrainingCycles() {
     if (!isTrainingCyclesRepositoryActive) {
       setPersistedActiveCycle(null);
@@ -1635,6 +1609,9 @@ export function OrganizatechApp({
 
   useEffect(() => {
     void refreshPersistedTrainingCycles();
+    // The refresh is keyed to repository activation and authenticated user.
+    // Including the local async function would refetch on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTrainingCyclesRepositoryActive, supabaseUser?.id]);
 
   function handlePersistenceError(error: unknown) {
@@ -1850,15 +1827,6 @@ export function OrganizatechApp({
     } finally {
       setIsBusy(false);
     }
-  }
-
-  function handleResetLocal() {
-    if (dataMode === "supabase") {
-      setStatusMessage("No se puede realizar esta acción durante tu sesión actual.");
-      return;
-    }
-    resetLocalData();
-    void refreshData("demo");
   }
 
   function navigateTo(nextScreen: Screen) {
@@ -2614,18 +2582,6 @@ export function OrganizatechApp({
   function setPendingWorkoutReadinessLink(link: PendingWorkoutReadinessLink | null) {
     pendingReadinessLinkRef.current = link;
     setPendingReadinessLink(link);
-  }
-
-  function resetWorkoutAttemptState() {
-    activeWorkoutAttemptIdRef.current = null;
-    activeWorkoutReadinessContextRef.current = null;
-    setActiveWorkoutAttemptId(null);
-    setPendingWorkoutReadinessLink(null);
-    setHasRecoverableWorkoutStart(false);
-  }
-
-  function markWorkoutStartedAt() {
-    setActiveWorkoutStartedAt((current) => current ?? createStableWorkoutStartedAt());
   }
 
   function prepareWorkoutStartSnapshot(nextActiveExerciseIndex: number) {
@@ -3672,11 +3628,9 @@ export function OrganizatechApp({
             usesCycleScopedSessions={isCycleScopedActiveCycle}
             day={dashboardDay}
             weekDays={dashboardCarouselDays}
-            routine={dashboardRoutine}
             dayExercises={dashboardExercises}
             summary={summary}
             weeklyEquivalentProgress={weeklyEquivalentProgress}
-            currentMetrics={dashboardCurrentMetrics}
             currentWeek={currentWeek}
             entries={calendarNormalizedEntries}
             sessions={calendarNormalizedTrainingSessions}
@@ -4126,11 +4080,9 @@ function DashboardScreen({
   usesCycleScopedSessions,
   day,
   weekDays,
-  routine,
   dayExercises,
   summary,
   weeklyEquivalentProgress,
-  currentMetrics,
   currentWeek,
   entries,
   sessions,
@@ -4145,11 +4097,9 @@ function DashboardScreen({
   usesCycleScopedSessions: boolean;
   day: string;
   weekDays: string[];
-  routine: string;
   dayExercises: ExerciseTemplate[];
   summary: ReturnType<typeof calculateWeeklySummary>;
   weeklyEquivalentProgress: WeeklyEquivalentProgressResult;
-  currentMetrics: ExerciseMetrics[];
   currentWeek: number;
   entries: ExerciseEntry[];
   sessions: TrainingSession[];
@@ -5291,78 +5241,6 @@ function getNotificationPriorityRank(priority: AppNotification["priority"]) {
   }
 }
 
-function DashboardSmartInsights({ insights }: { insights: ReturnType<typeof generateSmartInsights> }) {
-  const visibleInsights = insights.slice(0, 3);
-
-  return (
-    <div className="card wide dashboard-smart-card">
-      <div className="smart-card-header">
-        <div>
-          <p className="eyebrow">Análisis inteligente</p>
-          <h3>Alertas para tu entrenamiento</h3>
-        </div>
-        <Sparkles size={19} />
-      </div>
-      <div className="insight-list">
-        {visibleInsights.map((insight) => (
-          <div className={`insight-row smart-insight-row ${getInsightToneClass(insight.tone)}`} key={insight.id}>
-            <span className={`insight-icon ${insight.tone === "positivo" ? "ok" : insight.tone === "riesgo" ? "fail" : "keep"}`}>
-              {insight.tone === "positivo" ? <ArrowUp size={18} /> : insight.tone === "riesgo" ? <ArrowDown size={18} /> : <Activity size={18} />}
-            </span>
-            <div className="insight-copy">
-              <strong>{insight.title}</strong>
-              <p>{insight.detail}</p>
-            </div>
-            <span className={`badge ${insight.tone === "positivo" ? "ok" : insight.tone === "riesgo" ? "fail" : "keep"}`}>
-              {insight.tone === "riesgo" ? "alerta" : insight.tone === "positivo" ? "positivo" : "info"}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function DashboardMotivationSummary({
-  entries,
-  currentWeek,
-  routineDays,
-}: {
-  entries: ExerciseEntry[];
-  currentWeek: number;
-  routineDays: string[];
-}) {
-  const analysis = buildReadinessAiSummary(entries, currentWeek, routineDays);
-
-  return (
-    <div className="card wide motivation-summary-card">
-      <div className="smart-card-header">
-        <div>
-          <p className="eyebrow">Resumen de motivación IA</p>
-          <h3>{analysis.title}</h3>
-        </div>
-        <Sparkles size={19} />
-      </div>
-      <div className="insight-list">
-        {analysis.signals.map((signal) => {
-          const label = signal.label.replace(` ${signal.toneLabel}`, "");
-
-          return (
-            <div className={`insight-row smart-insight-row compact-insight-row ${signal.tone === "ok" ? "tone-positive" : signal.tone === "fail" ? "tone-negative" : "tone-warning"}`} key={signal.label}>
-              <div>
-                <strong>{label}</strong>
-                <p className="eyebrow">{signal.value}</p>
-              </div>
-              <span className={`badge ${signal.tone}`}>{signal.toneLabel}</span>
-            </div>
-          );
-        })}
-      </div>
-      <p className="ai-suggestion">{analysis.suggestion}</p>
-    </div>
-  );
-}
-
 function EmptyDashboard({ startRegistration }: { startRegistration: () => void }) {
   return (
     <section className="empty-dashboard">
@@ -5757,39 +5635,6 @@ function PersistedCycleHistoryScreen({ history }: { history: PersistedTrainingCy
         })
       )}
     </section>
-  );
-}
-
-function DashboardAnalytics({ summary, analytics }: { summary: ReturnType<typeof calculateWeeklySummary>; analytics: AnalyticsSnapshot }) {
-  const [isHelpOpen, setIsHelpOpen] = useState(false);
-
-  return (
-    <div className="card wide dashboard-analytics">
-      <div className="analytics-score-row">
-        <div className="score compact-score"><div><strong>{analytics.score}</strong><span>/100</span></div></div>
-        <div>
-          <p className="eyebrow">Analitica integrada</p>
-          <h3>{analytics.score >= 80 ? "Progreso solido" : analytics.score >= 60 ? "Buen avance" : "Necesita atencion"}</h3>
-          <p className={summary.volumePercentage >= 0 ? "positive" : "danger"}>
-            {formatSigned(summary.volumePercentage)}% volumen semanal
-          </p>
-        </div>
-      </div>
-      <div>
-        <div className="analytics-help-title">
-          <h3>Factores de rendimiento</h3>
-          <button className="inline-help-button" type="button" onClick={() => setIsHelpOpen((value) => !value)} aria-label="Explicar analitica integrada">
-            <HelpCircle size={14} />
-          </button>
-          {isHelpOpen && (
-            <span className="field-help-popover analytics-help-popover" role="dialog">
-              El puntaje se calcula con 40% cumplimiento de ejercicios, 25% repeticiones logradas, 20% carga mantenida/subida y 15% volumen total versus objetivo o semana anterior.
-            </span>
-          )}
-        </div>
-        {analytics.factors.map(([label, value]) => <ProgressLine key={String(label)} label={String(label)} value={Number(value)} />)}
-      </div>
-    </div>
   );
 }
 
@@ -6790,80 +6635,6 @@ function buildMetricInsight(value: number | null, metric: "kg" | "reps") {
     : "Mantienes las mismas repeticiones desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio.";
 }
 
-function ExerciseHistorySummaryCard({ summary }: { summary: ExerciseComparisonSummary }) {
-  return (
-    <div className={`exercise-history-summary ${getTrendTone(summary.trend)}`}>
-      <div className="exercise-history-title">
-        <div>
-          <p className="eyebrow">Ejercicio seleccionado</p>
-          <h3>{summary.exerciseName}</h3>
-        </div>
-        <span>{summary.trend}</span>
-      </div>
-      <div className="history-summary-grid">
-        <div>
-          <span>Inicio</span>
-          <strong>{formatKg(summary.firstWeight)}</strong>
-          <small>Fecha inicio: {formatDate(summary.firstDate)}</small>
-        </div>
-        <div>
-          <span>Actual</span>
-          <strong>{formatKg(summary.latestWeight)}</strong>
-          <small>Fecha actual: {formatDate(summary.latestDate)}</small>
-        </div>
-      </div>
-      <div className="history-gain-row">
-        <span>Ganancia total</span>
-        <strong className={summary.weightGain > 0 ? "positive" : summary.weightGain < 0 ? "danger" : "neutral"}>
-          {formatSigned(summary.weightGain, 2)} kg en {summary.exerciseName.toLowerCase()}
-        </strong>
-      </div>
-      <p>{summary.insight}</p>
-    </div>
-  );
-}
-
-function ExerciseBestMarkCard({ summary }: { summary: ExerciseComparisonSummary }) {
-  return (
-    <div className="exercise-best-card">
-      <div>
-        <p className="eyebrow">Mejor marca registrada</p>
-        <h3>{formatKg(summary.bestWeight)}</h3>
-      </div>
-      <span>Fecha: {formatDate(summary.bestWeightDate)}</span>
-    </div>
-  );
-}
-
-function ExerciseHistoryList({ summary }: { summary: ExerciseComparisonSummary }) {
-  return (
-    <div className="exercise-history-list">
-      <h3>Historial resumido</h3>
-      <div className="history-list">
-        {summary.history.map((point) => (
-          <div className="history-row exercise-history-row" key={`${point.date}-${point.weight}-${point.totalReps}`}>
-            <div>
-              <strong>{point.weekLabel ?? "Registro"}</strong>
-              <span>{formatDate(point.date)}</span>
-            </div>
-            <div>
-              <span>{formatKg(point.weight)}</span>
-              <span>{point.totalReps} reps</span>
-              <span>volumen {formatKg(point.volumeTotal)}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function getTrendTone(trend: ExerciseComparisonSummary["trend"]) {
-  if (trend === "Mejora") return "ok";
-  if (trend === "Retroceso") return "fail";
-  return "keep";
-}
-
 function buildAnalytics(summary: ReturnType<typeof calculateWeeklySummary>, currentMetrics: ExerciseMetrics[]): AnalyticsSnapshot {
   const targetReps = currentMetrics.reduce((total, entry) => total + entry.targetTotalReps, 0);
   const completedWithLoad = currentMetrics.filter((entry) => entry.totalReps > 0 && entry.kgDifference >= 0).length;
@@ -6978,109 +6749,6 @@ function TrendValue({ value, suffix = "" }: { value: number; suffix?: string }) 
       {formatSigned(value)}
       {suffix}
     </span>
-  );
-}
-
-function ExerciseRow({ entry, showVolume = false }: { entry: ExerciseMetrics; showVolume?: boolean }) {
-  const tone = getObjectiveTone(entry.objectiveStatus);
-  return (
-    <div className={`exercise-row ${tone}`}>
-      <div>
-        <strong>{entry.exerciseName}</strong>
-        <div className="exercise-progress">
-          <WeightValue value={entry.weight} label="kg actual" />
-          <DeltaValue value={entry.repsDifference} suffix="reps" />
-          <DeltaValue value={entry.kgDifference} suffix="kg" />
-          {showVolume ? <DeltaValue value={entry.volumePercentage} suffix="% volumen" /> : null}
-        </div>
-      </div>
-      <div className="status-stack">
-        <StatusBadge status={entry.objectiveStatus} />
-        <ChangeBadge value={entry.kgDifference} positive="Subimos kg" negative="Bajamos kg" neutral="Mismo kg" />
-        <ChangeBadge value={entry.repsDifference} positive="Subimos reps" negative="Bajamos reps" neutral="Mismas reps" />
-      </div>
-    </div>
-  );
-}
-
-function ProgrammedExerciseCard({ exercise, showStatus = true }: { exercise: ExerciseTemplate; showStatus?: boolean }) {
-  return (
-    <div className="plan-row programmed-exercise-card">
-      <div className="programmed-exercise-header">
-        <strong>{exercise.name}</strong>
-        {showStatus ? <span className="programmed-status">Pendiente</span> : null}
-      </div>
-      <div className="programmed-exercise-values">
-        <span>Series: <b>{exercise.targetSets}</b></span>
-        <span>Reps: <b>{exercise.targetReps}</b></span>
-        <span>Kg: <b>{formatKg(exercise.baseWeight)}</b></span>
-      </div>
-    </div>
-  );
-}
-
-function RegisteredExerciseCard({ entry }: { entry: ExerciseMetrics }) {
-  return (
-    <div className="registered-exercise-card">
-      <strong>{entry.exerciseName}</strong>
-      <span className="registered-status">Registrado</span>
-    </div>
-  );
-}
-
-function WeightValue({ value, label }: { value: number; label: string }) {
-  return <span className="current-weight-value">{label}: {formatKg(value)}</span>;
-}
-
-function DeltaValue({ value, suffix, neutralWhenZero = true }: { value: number; suffix: string; neutralWhenZero?: boolean }) {
-  const tone = value > 0 ? "positive" : value < 0 ? "danger" : neutralWhenZero ? "neutral" : "positive";
-  const Icon = value > 0 ? ArrowUp : value < 0 ? ArrowDown : ArrowRight;
-  const formattedValue = suffix === "kg" ? formatSigned(value, 2) : formatSigned(value);
-
-  return (
-    <span className={`delta-value ${tone}`}>
-      <Icon size={12} strokeWidth={3} />
-      {neutralWhenZero ? formattedValue : value}
-      {suffix ? ` ${suffix}` : ""}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: ObjectiveStatus }) {
-  const className = getObjectiveTone(status);
-  return <span className={`badge ${className}`}>{getObjectiveStatusLabel(status)}</span>;
-}
-
-function ChangeBadge({ value, positive, negative, neutral }: { value: number; positive: string; negative: string; neutral: string }) {
-  const className = value > 0 ? "ok" : value < 0 ? "fail" : "keep";
-  const label = value > 0 ? positive : value < 0 ? negative : neutral;
-  return <span className={`badge mini ${className}`}>{label}</span>;
-}
-
-function getObjectiveTone(status: ObjectiveStatus) {
-  if (status === "Cumplimos" || status === "Mejoramos") return "ok";
-  if (status === "No cumplimos") return "fail";
-  return "keep";
-}
-
-function getInsightToneClass(tone: "positivo" | "alerta" | "riesgo" | "info") {
-  if (tone === "positivo") return "tone-positive";
-  if (tone === "riesgo") return "tone-negative";
-  return "tone-warning";
-}
-
-function ProgressLine({ label, value }: { label: string; value: number }) {
-  const normalized = Math.min(100, Math.max(0, value));
-  return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
-        <span className="eyebrow">{label}</span>
-        <span className="eyebrow">{Math.round(normalized)}/100</span>
-      </div>
-      <div className="progress-track">
-        <div className="progress-fill" style={{ width: `${normalized}%` }} />
-      </div>
-    </div>
   );
 }
 
@@ -7432,10 +7100,6 @@ function getRoutineDraftKey(mode: DataMode, userId?: string) {
   return `${ROUTINE_DRAFT_KEY_PREFIX}:${getDraftUserKey(mode, userId)}`;
 }
 
-function getWorkoutDraftKey(mode: DataMode, userId?: string) {
-  return getStoredWorkoutDraftKey(mode, userId);
-}
-
 function getActiveFlowKey(mode: DataMode, userId?: string) {
   return `${ACTIVE_FLOW_KEY_PREFIX}:${getDraftUserKey(mode, userId)}`;
 }
@@ -7607,17 +7271,6 @@ function createTrainingCycleSnapshot(index: number, plan: TrainingPlan, exercise
   };
 }
 
-function createPersistedCyclePlanSnapshot(plan: TrainingPlan, exercises: ExerciseTemplate[], source: string): PersistedTrainingCycleSnapshot {
-  return {
-    source,
-    cycleType: plan.cycleType,
-    goal: getCycleObjectiveValue(plan),
-    duration: getCycleDurationValue(plan),
-    trainingDays: sortTrainingDaysByWeekOrder(plan.trainingDays),
-    exerciseCount: exercises.length,
-  };
-}
-
 function createPersistedCycleSummarySnapshot(
   plan: TrainingPlan,
   exercises: ExerciseTemplate[],
@@ -7778,81 +7431,6 @@ interface ReadinessScores {
   hydration: number;
   sleep: number;
   energy: number;
-}
-
-function buildReadinessAiSummary(entries: ExerciseEntry[], currentWeek: number, routineDays: string[]) {
-  const uniqueCheckIns = new Map<string, ReadinessScores>();
-
-  for (const entry of entries.filter((item) => item.week === currentWeek)) {
-    const parsed = parseReadiness(entry.notes);
-    if (parsed) {
-      uniqueCheckIns.set(`${entry.date}-${entry.notes}`, parsed);
-    }
-  }
-
-  const values = [...uniqueCheckIns.values()];
-
-  if (values.length === 0) {
-    return {
-      title: "Sin lectura de ánimo todavía",
-      suggestion: `Completa el formulario de motivación antes de entrenar. Tienes ${routineDays.length} día${routineDays.length === 1 ? "" : "s"} planificado${routineDays.length === 1 ? "" : "s"}.`,
-      signals: [
-        { label: "Formulario de motivación pendiente", value: "Aún no hay datos de ánimo", tone: "keep", toneLabel: "info" },
-      ],
-    };
-  }
-
-  const averages = {
-    motivation: average(values.map((item) => item.motivation)),
-    hydration: average(values.map((item) => item.hydration)),
-    sleep: average(values.map((item) => item.sleep)),
-    energy: average(values.map((item) => item.energy)),
-  };
-  const total = average(Object.values(averages));
-  const weakest = Object.entries(averages).sort((a, b) => a[1] - b[1])[0];
-  const weakestLabel = readinessLabels[weakest[0] as keyof ReadinessScores];
-  const title = total >= 5.5 ? "Listo para entrenar" : total >= 4 ? "Entrena con control" : "Baja la exigencia";
-  const suggestion = total >= 5.5
-    ? "Buen contexto para cumplir la rutina. Sube carga solo si las repeticiones salen limpias."
-    : total >= 4
-      ? `Cuida ${weakestLabel.toLowerCase()}, calienta mejor y mantén pesos si la técnica no se siente firme.`
-      : "Hoy prioriza técnica, descanso entre series y completar sin forzar marcas.";
-
-  return {
-    title,
-    suggestion,
-    signals: [
-      createReadinessSignal("Motivación", averages.motivation),
-      createReadinessSignal("Hidratación", averages.hydration),
-      createReadinessSignal("Sueño", averages.sleep),
-      createReadinessSignal("Energía", averages.energy),
-    ],
-  };
-}
-
-function createReadinessSignal(label: string, value: number) {
-  const tone = value >= 5.5 ? "ok" : value >= 4 ? "keep" : "fail";
-  const toneLabel = value >= 5.5 ? "alto" : value >= 4 ? "medio" : "bajo";
-  return {
-    label: `${label} ${toneLabel}`,
-    value: `${formatReadinessScore(value)}/7`,
-    tone,
-    toneLabel,
-  };
-}
-const readinessLabels: Record<keyof ReadinessScores, string> = {
-  motivation: "Motivación",
-  hydration: "Hidratación",
-  sleep: "Sueño",
-  energy: "Energía física",
-};
-
-function average(values: number[]) {
-  return values.length > 0 ? values.reduce((total, value) => total + value, 0) / values.length : 0;
-}
-
-function formatReadinessScore(value: number) {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function parseReadiness(notes: string | undefined) {
@@ -8108,17 +7686,6 @@ function calculateTargetSummary(exercises: ExerciseTemplate[]) {
       };
     },
     { totalWeight: 0, volume: 0, reps: 0, exerciseCount: 0 },
-  );
-}
-
-function calculateRegisteredDashboardSummary(metrics: ExerciseMetrics[]) {
-  return metrics.reduce(
-    (summary, entry) => ({
-      totalWeight: summary.totalWeight + entry.weight,
-      totalReps: summary.totalReps + entry.totalReps,
-      exerciseCount: summary.exerciseCount + 1,
-    }),
-    { totalWeight: 0, totalReps: 0, exerciseCount: 0 },
   );
 }
 
@@ -8464,51 +8031,6 @@ function isAppScreen(value: unknown): value is Screen {
   );
 }
 
-function dedupeMetricsByWeekAndExercise(metrics: ExerciseMetrics[]) {
-  const byWeekAndExercise = new Map<string, ExerciseMetrics>();
-  for (const entry of metrics) {
-    byWeekAndExercise.set(`${entry.week}:${entry.exerciseId}`, entry);
-  }
-  return Array.from(byWeekAndExercise.values());
-}
-
-function getWeekNumbers(metrics: ExerciseMetrics[]) {
-  return Array.from(new Set(metrics.map((entry) => entry.week))).sort((a, b) => b - a);
-}
-
-function getSafeSelectedWeek(weekNumbers: number[], activeWeek: number, currentWeek: number) {
-  if (weekNumbers.includes(activeWeek)) return activeWeek;
-  return weekNumbers[0] ?? currentWeek;
-}
-
-function getWeeklyComparisonContext(metrics: ExerciseMetrics[], week: number, day: string) {
-  const weeks = Array.from(new Set(metrics.map((entry) => entry.week))).sort((a, b) => a - b);
-  const hasExactPreviousWeek = weeks.includes(week - 1);
-  const latestPreviousWeek = [...weeks].reverse().find((candidate) => candidate < week);
-
-  if (week <= 1 || !latestPreviousWeek) {
-    return {
-      title: `Rutina registrada vs Semana ${week} | ${day}`,
-      detail: `Semana ${week} se compara contra la rutina registrada de ${day}.`,
-      referenceWeek: null,
-    };
-  }
-
-  if (hasExactPreviousWeek) {
-    return {
-      title: `Semana ${latestPreviousWeek} vs Semana ${week} | ${day}`,
-      detail: `Semana ${week} se compara contra Semana ${latestPreviousWeek}, solo con ejercicios de ${day}.`,
-      referenceWeek: latestPreviousWeek,
-    };
-  }
-
-  return {
-    title: `Último registro disponible vs Semana ${week} | ${day}`,
-    detail: `No hay Semana ${week - 1} registrada para ${day}; se compara contra Semana ${latestPreviousWeek}.`,
-    referenceWeek: latestPreviousWeek,
-  };
-}
-
 function removeAccents(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
@@ -8562,10 +8084,6 @@ function getPasswordRecoveryRouteState(): "none" | "active" | "expired" {
   }
 
   return "none";
-}
-
-function isPasswordRecoveryFlow() {
-  return getPasswordRecoveryRouteState() === "active";
 }
 
 function markPasswordRecoveryFlow() {

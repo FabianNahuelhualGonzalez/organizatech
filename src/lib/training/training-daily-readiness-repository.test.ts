@@ -144,9 +144,9 @@ assert.notEqual(
 assert.equal(store.get("user-a", "2026-06-16")?.id, saved.id, "usuario A lee solo su fila");
 assert.equal(store.get("user-b", "2026-06-16")?.id.startsWith("user-b:"), true, "usuario B no sobrescribe datos de A");
 
-let trainingSessionsWrites = 0;
-let exerciseEntriesWrites = 0;
-let trainingCyclesWrites = 0;
+const trainingSessionsWrites = 0;
+const exerciseEntriesWrites = 0;
+const trainingCyclesWrites = 0;
 const failed = simulateSaveFailure(() => {
   throw new Error("network");
 });
