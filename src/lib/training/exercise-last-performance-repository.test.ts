@@ -15,6 +15,10 @@ const repositorySource = readFileSync(
   "src/lib/training/exercise-last-performance-repository.ts",
   "utf8",
 );
+const dataRepositorySource = readFileSync(
+  "src/lib/data/repository.ts",
+  "utf8",
+);
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 const OTHER_USER_ID = "00000000-0000-4000-8000-000000000002";
@@ -271,6 +275,29 @@ function testWorksWithLegacyExerciseIdNull() {
   assert.equal(performance?.sessionId, "session-exercise-id-null");
 }
 
+function testEntryRepositoriesRequireAnActiveParentSession() {
+  assert.match(
+    dataRepositorySource,
+    /async function fetchEntries[\s\S]*?training_sessions!inner\(week_number,trained_at,deleted_at\)[\s\S]*?\.eq\("training_sessions\.user_id", userId\)[\s\S]*?\.is\("training_sessions\.deleted_at", null\)/,
+    "fetchEntries mantiene entries legacy activas y excluye sesiones soft-deleted o inexistentes",
+  );
+  assert.match(
+    dataRepositorySource,
+    /export async function fetchTrainingSessionEntries[\s\S]*?training_sessions!inner\(week_number,trained_at,trained_date,deleted_at\)[\s\S]*?\.eq\("training_sessions\.user_id", userId\)[\s\S]*?\.is\("training_sessions\.deleted_at", null\)/,
+    "fetchTrainingSessionEntries solo devuelve entries de una sesion activa del usuario",
+  );
+  assert.match(
+    dataRepositorySource,
+    /if \(isMissingTrainingSessionSourceColumnError\(error\)\) \{\s*return deriveLegacyTrainingSessions\(await fetchEntries\(userId\)\);\s*\}/,
+    "el fallback legacy activo se conserva y reutiliza fetchEntries ya filtrado por sesion activa",
+  );
+  assert.match(
+    repositorySource,
+    /training_sessions!inner\([^)]*deleted_at[^)]*\)[\s\S]*?\.is\("training_sessions\.deleted_at", null\)/,
+    "el historial de rendimiento mantiene el filtro de sesion activa",
+  );
+}
+
 function testDeterministicSessionAndEntryOrdering() {
   const sessionA = session("session-a", {
     completed_at: "2026-06-15T10:00:00.000Z",
@@ -328,6 +355,7 @@ testExcludesOtherUser();
 testReturnsNullWithoutHistory();
 testReturnsNullForMissingLineage();
 testWorksWithLegacyExerciseIdNull();
+testEntryRepositoriesRequireAnActiveParentSession();
 testDeterministicSessionAndEntryOrdering();
 testTimestampNormalization();
 testRepositoryDoesNotFallbackByNameOrExerciseId();

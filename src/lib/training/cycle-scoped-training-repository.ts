@@ -446,9 +446,11 @@ export async function addCycleScopedTrainingDaysAndExercises(
   const { data: linkedEntries, error: entriesError } = affectedExerciseIds.length > 0
     ? await supabase
       .from("exercise_entries")
-      .select("training_cycle_exercise_id")
+      .select("training_cycle_exercise_id,training_sessions!inner(id,user_id,deleted_at)")
       .eq("user_id", userId)
       .in("training_cycle_exercise_id", affectedExerciseIds)
+      .eq("training_sessions.user_id", userId)
+      .is("training_sessions.deleted_at", null)
     : { data: [], error: null };
 
   if (entriesError) throw mapCycleScopedRepositoryError(entriesError);
