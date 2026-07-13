@@ -9,6 +9,13 @@ import type {
 } from "@/lib/progress/types";
 import { resolveEnsureProfileWrite } from "@/lib/profile/profile-form";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import {
+  BROWSER_STORAGE_PREFIXES,
+  getScopedBrowserStorageKey,
+  migrateLegacyBrowserStorageToDemo,
+  readScopedJson,
+  writeScopedJson,
+} from "@/lib/storage/browser-storage";
 
 export type DataSource = "local" | "supabase";
 export type RepositoryMode = "demo" | "supabase";
@@ -20,9 +27,9 @@ export interface AppData {
   source: DataSource;
 }
 
-const LOCAL_EXERCISES_KEY = "organizatech:exercises";
-const LOCAL_ENTRIES_KEY = "organizatech:entries";
-const LOCAL_SESSIONS_KEY = "organizatech:training-sessions";
+const LOCAL_EXERCISES_KEY = getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.exercises, "demo");
+const LOCAL_ENTRIES_KEY = getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.entries, "demo");
+const LOCAL_SESSIONS_KEY = getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingSessions, "demo");
 
 export interface TrainingSessionEntryInput {
   id: string;
@@ -295,22 +302,27 @@ function loadLocalData(): AppData {
     return { exercises: exerciseTemplates, entries: demoEntries, sessions: deriveLegacyTrainingSessions(demoEntries), source: "local" };
   }
 
-  const savedExercises = window.localStorage.getItem(LOCAL_EXERCISES_KEY);
-  const savedEntries = window.localStorage.getItem(LOCAL_ENTRIES_KEY);
-  const savedSessions = window.localStorage.getItem(LOCAL_SESSIONS_KEY);
-  const exercises = savedExercises ? (JSON.parse(savedExercises) as ExerciseTemplate[]) : [];
-  const entries = savedEntries ? (JSON.parse(savedEntries) as ExerciseEntry[]) : [];
-  const sessions = savedSessions ? (JSON.parse(savedSessions) as TrainingSession[]) : deriveLegacyTrainingSessions(entries);
+  migrateLegacyBrowserStorageToDemo(window.localStorage);
+  const exercises = readScopedJson(window.localStorage, LOCAL_EXERCISES_KEY, isUnknownArray) as ExerciseTemplate[] | null;
+  const entries = readScopedJson(window.localStorage, LOCAL_ENTRIES_KEY, isUnknownArray) as ExerciseEntry[] | null;
+  const sessions = readScopedJson(window.localStorage, LOCAL_SESSIONS_KEY, isUnknownArray) as TrainingSession[] | null;
+  const nextExercises = exercises ?? [];
+  const nextEntries = entries ?? [];
+  const nextSessions = sessions ?? deriveLegacyTrainingSessions(nextEntries);
 
-  if (!savedExercises || !savedEntries || !savedSessions) saveLocalData(exercises, entries, sessions);
-  return { exercises, entries, sessions, source: "local" };
+  if (!exercises || !entries || !sessions) saveLocalData(nextExercises, nextEntries, nextSessions);
+  return { exercises: nextExercises, entries: nextEntries, sessions: nextSessions, source: "local" };
 }
 
 function saveLocalData(exercises: ExerciseTemplate[], entries: ExerciseEntry[], sessions: TrainingSession[] = deriveLegacyTrainingSessions(entries)) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(LOCAL_EXERCISES_KEY, JSON.stringify(exercises));
-  window.localStorage.setItem(LOCAL_ENTRIES_KEY, JSON.stringify(entries));
-  window.localStorage.setItem(LOCAL_SESSIONS_KEY, JSON.stringify(sessions));
+  writeScopedJson(window.localStorage, LOCAL_EXERCISES_KEY, exercises);
+  writeScopedJson(window.localStorage, LOCAL_ENTRIES_KEY, entries);
+  writeScopedJson(window.localStorage, LOCAL_SESSIONS_KEY, sessions);
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
 }
 
 async function ensureProfile(userId: string, email: string) {

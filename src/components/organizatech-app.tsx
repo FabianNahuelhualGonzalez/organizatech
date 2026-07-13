@@ -84,6 +84,23 @@ import {
   type SupabaseSessionState,
 } from "@/lib/supabase/session";
 import {
+  BROWSER_STORAGE_PREFIXES,
+  PASSWORD_RECOVERY_STORAGE_KEY,
+  clearPasswordRecoveryStorage,
+  getBrowserStorageScope,
+  getScopedBrowserStorageKey,
+  loadPasswordRecoveryFlow,
+  loadSeenNotificationRecords as loadStoredSeenNotificationRecords,
+  migrateLegacyBrowserStorageToDemo,
+  readScopedJson,
+  removeScopedBrowserStorage,
+  saveSeenNotificationRecords as saveStoredSeenNotificationRecords,
+  startPasswordRecoveryFlow,
+  writeScopedJson,
+  type BrowserStorageScope,
+  type SeenNotificationStorageRecord,
+} from "@/lib/storage/browser-storage";
+import {
   cancelTrainingCycle,
   completeTrainingCycle,
   getActiveTrainingCycle,
@@ -232,11 +249,6 @@ type Screen =
 
 const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
 const setupDays: string[] = [...TRAINING_DAY_LABELS];
-const LOCAL_TRAINING_PLAN_KEY = "organizatech:training-plan";
-const LOCAL_CYCLE_HISTORY_KEY = "organizatech:cycle-history";
-const ROUTINE_DRAFT_KEY_PREFIX = "organizatech:routine-draft";
-const ACTIVE_FLOW_KEY_PREFIX = "organizatech:active-flow";
-const PASSWORD_RECOVERY_FLOW_KEY = "organizatech:password-recovery-flow";
 const ROUTINE_DRAFT_VERSION = 1;
 const WORKOUT_DRAFT_VERSION = 1;
 const ACTIVE_FLOW_VERSION = 1;
@@ -245,7 +257,6 @@ const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_FLOW_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
 const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
-const SEEN_NOTIFICATIONS_KEY = "organizatech:seen-notifications-v1";
 const SEEN_NOTIFICATIONS_MAX_RECORDS = 60;
 const VISIBLE_NEW_NOTIFICATIONS_LIMIT = 5;
 const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
@@ -353,7 +364,7 @@ interface RoutineDraft {
   version: number;
   updatedAt: number;
   dataMode: DataMode;
-  userKey: string;
+  userKey: BrowserStorageScope;
   screen: Screen;
   setupDay: string;
   setupByDay: Record<string, SetupDayState>;
@@ -378,7 +389,7 @@ interface ActiveFlowState {
   version: number;
   updatedAt: number;
   dataMode: DataMode;
-  userKey: string;
+  userKey: BrowserStorageScope;
   flow: ActiveFlow;
 }
 
@@ -459,10 +470,7 @@ interface TrainingNotificationContext {
   status: "completed" | "pending";
 }
 
-interface SeenNotificationRecord {
-  id: string;
-  seenAt: number;
-}
+type SeenNotificationRecord = SeenNotificationStorageRecord;
 
 interface TrainingCycleSnapshot {
   id: string;
@@ -532,13 +540,13 @@ export function OrganizatechApp({
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
-  const [seenNotificationRecords, setSeenNotificationRecords] = useState<SeenNotificationRecord[]>(() => loadSeenNotificationRecords());
+  const [seenNotificationRecords, setSeenNotificationRecords] = useState<SeenNotificationRecord[]>([]);
   const [isEditingRoutinePlan, setIsEditingRoutinePlan] = useState(false);
   const [routineNotice, setRoutineNotice] = useState("");
   const [isTopbarHidden, setIsTopbarHidden] = useState(false);
   const [setupDay, setSetupDay] = useState("Lunes");
   const [setupByDay, setSetupByDay] = useState<Record<string, SetupDayState>>(() => createSetupByDay());
-  const [trainingPlan, setTrainingPlan] = useState<TrainingPlan>(() => loadTrainingPlan());
+  const [trainingPlan, setTrainingPlan] = useState<TrainingPlan>(() => createDefaultTrainingPlan());
   const [activeRoutineDay, setActiveRoutineDay] = useState("Lunes");
   const [dashboardDayOverride, setDashboardDayOverride] = useState("");
   const [comparisonDay, setComparisonDay] = useState("Lunes");
@@ -570,7 +578,7 @@ export function OrganizatechApp({
   const latestExercisePerformanceRequestKeyRef = useRef<string | null>(null);
   const [trainingCompletionSummary, setTrainingCompletionSummary] = useState<TrainingCompletionSummary | null>(null);
   const [routineEditorReturnScreen, setRoutineEditorReturnScreen] = useState<Screen | null>(null);
-  const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>(() => loadCycleHistory());
+  const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>([]);
   const [persistedActiveCycle, setPersistedActiveCycle] = useState<PersistedTrainingCycle | null>(null);
   const [persistedCycleHistory, setPersistedCycleHistory] = useState<PersistedTrainingCycle[]>([]);
   const [isPersistedCyclesLoading, setIsPersistedCyclesLoading] = useState(false);
@@ -579,6 +587,7 @@ export function OrganizatechApp({
   const [isDeleteCycleConfirmOpen, setIsDeleteCycleConfirmOpen] = useState(false);
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
+  const activeBrowserStorageScopeRef = useRef<BrowserStorageScope | null>(null);
 
   const resetWorkoutAttemptState = useCallback(() => {
     activeWorkoutAttemptIdRef.current = null;
@@ -667,6 +676,7 @@ export function OrganizatechApp({
         user: session?.user ?? null,
       };
 
+      const previousStorageScope = activeBrowserStorageScopeRef.current;
       applySessionState(nextState);
       const recoveryState = getPasswordRecoveryRouteState();
       if (recoveryState === "expired") {
@@ -707,10 +717,10 @@ export function OrganizatechApp({
       if (event === "SIGNED_OUT") {
         if (passwordUpdateSuccessRef.current) {
           passwordUpdateSuccessRef.current = false;
-          clearUserSessionState("Contraseña actualizada correctamente. Ya puedes iniciar sesión.");
+          clearUserSessionState("Contraseña actualizada correctamente. Ya puedes iniciar sesión.", previousStorageScope);
           return;
         }
-        clearUserSessionState("Sesión cerrada correctamente.");
+        clearUserSessionState("Sesión cerrada correctamente.", previousStorageScope);
       }
     }).data.subscription;
 
@@ -757,8 +767,16 @@ export function OrganizatechApp({
   }, []);
 
   useEffect(() => {
-    saveTrainingPlan(trainingPlan);
-  }, [trainingPlan]);
+    const scope = getBrowserStorageScope(dataMode, supabaseUser?.id);
+    if (!scope || activeBrowserStorageScopeRef.current !== scope) return;
+    saveTrainingPlan(trainingPlan, scope);
+  }, [dataMode, supabaseUser?.id, trainingPlan]);
+
+  useEffect(() => {
+    const scope = getBrowserStorageScope(dataMode, supabaseUser?.id);
+    if (!scope || activeBrowserStorageScopeRef.current !== scope) return;
+    saveCycleHistory(cycleHistory, scope);
+  }, [cycleHistory, dataMode, supabaseUser?.id]);
 
   const hasRoutinePlanForDraft = exercises.length > 0;
 
@@ -773,11 +791,13 @@ export function OrganizatechApp({
     const flow = getActiveFlow(screen, hasRoutinePlanForDraft, isEditingRoutinePlan, hasStartedTraining, readiness);
 
     function persistFlow() {
+      const userKey = getDraftUserKey(dataMode, supabaseUser?.id);
+      if (!userKey) return;
       saveActiveFlow({
         version: ACTIVE_FLOW_VERSION,
         updatedAt: Date.now(),
         dataMode,
-        userKey: getDraftUserKey(dataMode, supabaseUser?.id),
+        userKey,
         flow,
       });
     }
@@ -797,11 +817,13 @@ export function OrganizatechApp({
     if (!isRoutineDraftActive) return;
 
     function persistDraft() {
+      const userKey = getDraftUserKey(dataMode, supabaseUser?.id);
+      if (!userKey) return;
       saveRoutineDraft({
         version: ROUTINE_DRAFT_VERSION,
         updatedAt: Date.now(),
         dataMode,
-        userKey: getDraftUserKey(dataMode, supabaseUser?.id),
+        userKey,
         screen,
         setupDay,
         setupByDay,
@@ -828,11 +850,13 @@ export function OrganizatechApp({
     const stableWorkoutStartedAt = activeWorkoutStartedAt;
 
     function persistWorkoutDraft() {
+      const userKey = getDraftUserKey(dataMode, supabaseUser?.id);
+      if (!userKey) return;
       saveWorkoutDraft({
         version: WORKOUT_DRAFT_VERSION,
         updatedAt: Date.now(),
         dataMode,
-        userKey: getDraftUserKey(dataMode, supabaseUser?.id),
+        userKey,
         activeRoutineDay,
         activeExerciseIndex,
         activeWorkoutStartedAt: stableWorkoutStartedAt,
@@ -1211,6 +1235,27 @@ export function OrganizatechApp({
   }, [refreshProfileAvatar]);
 
   function applySessionState(authState: SupabaseSessionState) {
+    const nextStorageScope = getBrowserStorageScope(authState.dataMode, authState.user?.id);
+    const hasStorageScopeChanged = activeBrowserStorageScopeRef.current !== nextStorageScope;
+    if (hasStorageScopeChanged) {
+      setExercises([]);
+      setEntries([]);
+      setTrainingSessions([]);
+      setPersistedActiveCycle(null);
+      setPersistedCycleHistory([]);
+      clearCycleScopedPlanState();
+      setTrainingPlan(createDefaultTrainingPlan());
+      setCycleHistory([]);
+      setSeenNotificationRecords([]);
+      activeBrowserStorageScopeRef.current = nextStorageScope;
+
+      if (typeof window !== "undefined" && nextStorageScope) {
+        migrateLegacyBrowserStorageToDemo(window.localStorage);
+        setTrainingPlan(loadTrainingPlan(nextStorageScope));
+        setCycleHistory(loadCycleHistory(nextStorageScope));
+        setSeenNotificationRecords(loadSeenNotificationRecords(nextStorageScope));
+      }
+    }
     setIsSupabaseConfiguredState(authState.isConfigured);
     setDataMode(authState.dataMode);
     setSupabaseSession(authState.session);
@@ -1227,10 +1272,10 @@ export function OrganizatechApp({
     if (authState.user) setSessionName(getSessionDisplayName(authState.user));
   }
 
-  function clearUserSessionState(message: string) {
-    clearActiveFlow(dataMode, supabaseUser?.id);
-    clearRoutineDraft(dataMode, supabaseUser?.id);
-    clearWorkoutDraft(dataMode, supabaseUser?.id);
+  function clearUserSessionState(message: string, storageScope = activeBrowserStorageScopeRef.current) {
+    clearBrowserStorageScope(storageScope);
+    clearPasswordRecoveryFlow();
+    activeBrowserStorageScopeRef.current = null;
     resetWorkoutAttemptState();
     setActiveWorkoutStartedAt(null);
     setSupabaseSession(null);
@@ -1251,6 +1296,9 @@ export function OrganizatechApp({
     setExercises([]);
     setEntries([]);
     setTrainingSessions([]);
+    setTrainingPlan(createDefaultTrainingPlan());
+    setCycleHistory([]);
+    setSeenNotificationRecords([]);
     setPersistedActiveCycle(null);
     setPersistedCycleHistory([]);
     clearCycleScopedPlanState();
@@ -1265,6 +1313,11 @@ export function OrganizatechApp({
     setIsMenuOpen(false);
     setStatusMessage(message);
     setScreen("login");
+  }
+
+  function clearBrowserStorageScope(scope: BrowserStorageScope | null) {
+    if (typeof window === "undefined" || !scope) return;
+    removeScopedBrowserStorage(window.localStorage, scope);
   }
 
   function restoreActiveFlowForSession(mode: DataMode, userId?: string) {
@@ -1483,7 +1536,6 @@ export function OrganizatechApp({
       if (activeCycle) {
         setTrainingPlan((current) => {
           const next = createTrainingPlanFromPersistedCycle(activeCycle, current);
-          saveTrainingPlan(next);
           return next;
         });
         if (isCycleScopedTrainingCycle(activeCycle)) {
@@ -1544,7 +1596,6 @@ export function OrganizatechApp({
     const planInput = createCycleScopedPlanInput(plan, setupState, trainingCyclesSnapshotSource);
     if (!planInput) {
       setTrainingPlan(plan);
-      saveTrainingPlan(plan);
       setSetupByDay(setupState);
       setIsEditingRoutinePlan(true);
       setScreen("registro-entrenamiento");
@@ -1588,7 +1639,6 @@ export function OrganizatechApp({
     const scopedExercises = createExerciseTemplatesFromCycleScopedPlan(scopedPlan);
     isCycleScopedDisplayLockedRef.current = true;
     setTrainingPlan(plan);
-    saveTrainingPlan(plan);
     setCycleScopedPlan(scopedPlan);
     setCycleScopedExercises(scopedExercises);
     setCycleScopedLoadError(scopedExercises.length === 0
@@ -2301,12 +2351,15 @@ export function OrganizatechApp({
   async function handleLogout() {
     setIsBusy(true);
     try {
+      const currentStorageScope = activeBrowserStorageScopeRef.current;
+      clearBrowserStorageScope(currentStorageScope);
+      clearPasswordRecoveryFlow();
       const supabase = getSupabaseBrowserClient();
       if (supabase) {
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
       }
-      clearUserSessionState("Sesión cerrada correctamente.");
+      clearUserSessionState("Sesión cerrada correctamente.", currentStorageScope);
     } catch (error) {
       setStatusMessage(translateAuthError(error));
     } finally {
@@ -2372,7 +2425,6 @@ export function OrganizatechApp({
         setSetupByDay(freshSetup);
         setSetupDay("Lunes");
         setTrainingPlan(nextPlan);
-        saveTrainingPlan(nextPlan);
         setExercises([]);
         setEntries([]);
         setTrainingSessions([]);
@@ -2401,7 +2453,6 @@ export function OrganizatechApp({
     clearRoutineDraft(dataMode, supabaseUser?.id);
     const nextHistory = [...cycleHistory, snapshot];
     setCycleHistory(nextHistory);
-    saveCycleHistory(nextHistory);
 
     const nextPlan = createDefaultTrainingPlan();
     replaceLocalData([], []);
@@ -2411,7 +2462,6 @@ export function OrganizatechApp({
     setSetupByDay(createSetupByDay());
     setSetupDay("Lunes");
     setTrainingPlan(nextPlan);
-    saveTrainingPlan(nextPlan);
     setActiveRoutineDay("Lunes");
     setDashboardDayOverride("");
     setComparisonDay("Lunes");
@@ -2459,7 +2509,6 @@ export function OrganizatechApp({
         setActiveWorkoutStartedAt(null);
         clearCycleScopedPlanState();
         setTrainingPlan(nextPlan);
-        saveTrainingPlan(nextPlan);
         setSetupByDay(createSetupByDay());
         setSetupDay("Lunes");
         setActiveRoutineDay("Lunes");
@@ -2485,7 +2534,6 @@ export function OrganizatechApp({
 
       const nextPlan = createDefaultTrainingPlan();
       setTrainingPlan(nextPlan);
-      saveTrainingPlan(nextPlan);
       setSetupByDay(createSetupByDay());
       setSetupDay("Lunes");
       setActiveRoutineDay("Lunes");
@@ -3276,10 +3324,8 @@ export function OrganizatechApp({
   }
 
   function switchAuthScreen(nextScreen: "login" | "registro" | "recuperar-password") {
-    if (nextScreen === "recuperar-password") {
-      clearPasswordRecoveryFlow();
-      clearPasswordRecoveryUrl();
-    }
+    clearPasswordRecoveryFlow();
+    clearPasswordRecoveryUrl();
     clearAuthForms();
     setStatusMessage("");
     setScreen(nextScreen);
@@ -3423,7 +3469,8 @@ export function OrganizatechApp({
       const next = Array.from(recordsById.values())
         .sort((a, b) => a.seenAt - b.seenAt)
         .slice(-SEEN_NOTIFICATIONS_MAX_RECORDS);
-      saveSeenNotificationRecords(next);
+      const scope = activeBrowserStorageScopeRef.current;
+      if (scope) saveSeenNotificationRecords(next, scope);
       return next;
     });
   }
@@ -4890,41 +4937,15 @@ function NotificationTrendingIcon() {
   );
 }
 
-function loadSeenNotificationRecords() {
+function loadSeenNotificationRecords(scope: BrowserStorageScope) {
   if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(SEEN_NOTIFICATIONS_KEY) ?? "[]");
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item): SeenNotificationRecord | null => {
-        if (typeof item === "string") return { id: item, seenAt: 0 };
-        if (
-          item &&
-          typeof item === "object" &&
-          typeof (item as SeenNotificationRecord).id === "string" &&
-          typeof (item as SeenNotificationRecord).seenAt === "number"
-        ) {
-          return {
-            id: (item as SeenNotificationRecord).id,
-            seenAt: (item as SeenNotificationRecord).seenAt,
-          };
-        }
-        return null;
-      })
-      .filter((item): item is SeenNotificationRecord => Boolean(item))
-      .slice(-SEEN_NOTIFICATIONS_MAX_RECORDS);
-  } catch {
-    return [];
-  }
+  migrateLegacyBrowserStorageToDemo(window.localStorage);
+  return loadStoredSeenNotificationRecords(window.localStorage, scope, SEEN_NOTIFICATIONS_MAX_RECORDS);
 }
 
-function saveSeenNotificationRecords(records: SeenNotificationRecord[]) {
+function saveSeenNotificationRecords(records: SeenNotificationRecord[], scope: BrowserStorageScope) {
   if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(SEEN_NOTIFICATIONS_KEY, JSON.stringify(records.slice(-SEEN_NOTIFICATIONS_MAX_RECORDS)));
-  } catch {
-    // Las notificaciones siguen funcionando aunque el navegador bloquee localStorage.
-  }
+  saveStoredSeenNotificationRecords(window.localStorage, scope, records, SEEN_NOTIFICATIONS_MAX_RECORDS);
 }
 
 function buildAppNotifications({
@@ -7041,67 +7062,62 @@ function normalizeSetupByDay(value: unknown) {
   })) as Record<string, SetupDayState>;
 }
 
-function loadTrainingPlan(): TrainingPlan {
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+function loadTrainingPlan(scope: BrowserStorageScope): TrainingPlan {
   if (typeof window === "undefined") return createDefaultTrainingPlan();
 
-  try {
-    const saved = window.localStorage.getItem(LOCAL_TRAINING_PLAN_KEY);
-    if (!saved) return createDefaultTrainingPlan();
-    const parsed = JSON.parse(saved) as Partial<TrainingPlan>;
-    const fallback = createDefaultTrainingPlan();
-    const trainingDays = Array.isArray(parsed.trainingDays)
-      ? parsed.trainingDays.filter((day) => setupDays.includes(day))
-      : fallback.trainingDays;
-
-    return {
-      cycleType: isTrainingCycleId(parsed.cycleType) ? parsed.cycleType : fallback.cycleType,
-      macroObjective: parsed.macroObjective || fallback.macroObjective,
-      macroDurationMonths: macroDurations.includes(Number(parsed.macroDurationMonths)) ? Number(parsed.macroDurationMonths) : fallback.macroDurationMonths,
-      mesoObjective: parsed.mesoObjective || fallback.mesoObjective,
-      mesoDurationWeeks: mesoDurations.includes(Number(parsed.mesoDurationWeeks)) ? Number(parsed.mesoDurationWeeks) : fallback.mesoDurationWeeks,
-      microDurationWeeks: Number(parsed.microDurationWeeks) === 1 ? 1 : fallback.microDurationWeeks,
-      sessionDurationDays: Number(parsed.sessionDurationDays) === 1 ? 1 : fallback.sessionDurationDays,
-      trainingDays: sortTrainingDaysByWeekOrder(
-        trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
-      ),
-      microFocus: parsed.microFocus || fallback.microFocus,
-      sessionFocus: parsed.sessionFocus || fallback.sessionFocus,
-    };
-  } catch {
-    return createDefaultTrainingPlan();
-  }
+  migrateLegacyBrowserStorageToDemo(window.localStorage);
+  const parsed = readScopedJson(
+    window.localStorage,
+    getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, scope),
+    isUnknownRecord,
+  );
+  return parsed ? normalizeTrainingPlan(parsed) : createDefaultTrainingPlan();
 }
 
-function saveTrainingPlan(plan: TrainingPlan) {
+function saveTrainingPlan(plan: TrainingPlan, scope: BrowserStorageScope) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(LOCAL_TRAINING_PLAN_KEY, JSON.stringify({
+  writeScopedJson(window.localStorage, getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, scope), {
     ...plan,
     trainingDays: sortTrainingDaysByWeekOrder(plan.trainingDays),
-  }));
+  });
 }
 
-function loadCycleHistory(): TrainingCycleSnapshot[] {
+function loadCycleHistory(scope: BrowserStorageScope): TrainingCycleSnapshot[] {
   if (typeof window === "undefined") return [];
 
-  try {
-    const saved = window.localStorage.getItem(LOCAL_CYCLE_HISTORY_KEY);
-    return saved ? (JSON.parse(saved) as TrainingCycleSnapshot[]) : [];
-  } catch {
-    return [];
-  }
+  migrateLegacyBrowserStorageToDemo(window.localStorage);
+  return readScopedJson(
+    window.localStorage,
+    getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.cycleHistory, scope),
+    isUnknownArray,
+  ) as TrainingCycleSnapshot[] | null ?? [];
 }
 
-function saveCycleHistory(history: TrainingCycleSnapshot[]) {
+function saveCycleHistory(history: TrainingCycleSnapshot[], scope: BrowserStorageScope) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(LOCAL_CYCLE_HISTORY_KEY, JSON.stringify(history));
+  writeScopedJson(
+    window.localStorage,
+    getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.cycleHistory, scope),
+    history,
+  );
 }
 
 function getRoutineDraftKey(mode: DataMode, userId?: string) {
-  return `${ROUTINE_DRAFT_KEY_PREFIX}:${getDraftUserKey(mode, userId)}`;
+  const scope = getDraftUserKey(mode, userId);
+  return scope ? getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.routineDraft, scope) : null;
 }
 
 function getActiveFlowKey(mode: DataMode, userId?: string) {
-  return `${ACTIVE_FLOW_KEY_PREFIX}:${getDraftUserKey(mode, userId)}`;
+  const scope = getDraftUserKey(mode, userId);
+  return scope ? getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.activeFlow, scope) : null;
 }
 
 function getActiveFlow(
@@ -7127,18 +7143,21 @@ function getActiveFlow(
 
 function saveActiveFlow(flow: ActiveFlowState) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(`${ACTIVE_FLOW_KEY_PREFIX}:${flow.userKey}`, JSON.stringify(flow));
+  writeScopedJson(window.localStorage, getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.activeFlow, flow.userKey), flow);
 }
 
 function loadActiveFlow(mode: DataMode, userId?: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(getActiveFlowKey(mode, userId));
-    if (!raw) return null;
+    migrateLegacyBrowserStorageToDemo(window.localStorage);
+    const key = getActiveFlowKey(mode, userId);
+    const userKey = getDraftUserKey(mode, userId);
+    if (!key || !userKey) return null;
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return null;
 
     const parsed = JSON.parse(raw) as Partial<ActiveFlowState>;
-    const userKey = getDraftUserKey(mode, userId);
     const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
     const isExpired = updatedAt === 0 || Date.now() - updatedAt > ACTIVE_FLOW_MAX_AGE_MS;
     if (
@@ -7167,7 +7186,8 @@ function loadActiveFlow(mode: DataMode, userId?: string) {
 
 function clearActiveFlow(mode: DataMode, userId?: string) {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(getActiveFlowKey(mode, userId));
+  const key = getActiveFlowKey(mode, userId);
+  if (key) window.localStorage.removeItem(key);
 }
 
 function isActiveFlow(value: unknown): value is ActiveFlow {
@@ -7186,18 +7206,21 @@ function isActiveFlow(value: unknown): value is ActiveFlow {
 
 function saveRoutineDraft(draft: RoutineDraft) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(`${ROUTINE_DRAFT_KEY_PREFIX}:${draft.userKey}`, JSON.stringify(draft));
+  writeScopedJson(window.localStorage, getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.routineDraft, draft.userKey), draft);
 }
 
 function loadRoutineDraft(mode: DataMode, userId?: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(getRoutineDraftKey(mode, userId));
-    if (!raw) return null;
+    migrateLegacyBrowserStorageToDemo(window.localStorage);
+    const key = getRoutineDraftKey(mode, userId);
+    const userKey = getDraftUserKey(mode, userId);
+    if (!key || !userKey) return null;
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return null;
 
     const parsed = JSON.parse(raw) as Partial<RoutineDraft>;
-    const userKey = getDraftUserKey(mode, userId);
     const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
     const isExpired = updatedAt === 0 || Date.now() - updatedAt > ROUTINE_DRAFT_MAX_AGE_MS;
     if (parsed.version !== ROUTINE_DRAFT_VERSION || parsed.userKey !== userKey || parsed.dataMode !== mode || isExpired) {
@@ -7208,7 +7231,10 @@ function loadRoutineDraft(mode: DataMode, userId?: string) {
     const setupDay = typeof parsed.setupDay === "string" && setupDays.includes(parsed.setupDay) ? parsed.setupDay : "Lunes";
     const trainingPlan = normalizeTrainingPlan(parsed.trainingPlan);
     const setupByDay = normalizeSetupByDay(parsed.setupByDay);
-    if (!hasSetupDraftContent(setupByDay)) return null;
+    if (!hasSetupDraftContent(setupByDay)) {
+      clearRoutineDraft(mode, userId);
+      return null;
+    }
 
     return {
       version: ROUTINE_DRAFT_VERSION,
@@ -7235,11 +7261,13 @@ function loadRoutineDraft(mode: DataMode, userId?: string) {
 
 function clearRoutineDraft(mode: DataMode, userId?: string) {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(getRoutineDraftKey(mode, userId));
+  const key = getRoutineDraftKey(mode, userId);
+  if (key) window.localStorage.removeItem(key);
 }
 
-function saveWorkoutDraft(draft: WorkoutDraft) {
-  saveStoredWorkoutDraft(draft);
+function saveWorkoutDraft(draft: Omit<WorkoutDraft, "userKey"> & { userKey: BrowserStorageScope | null }) {
+  if (!draft.userKey) return false;
+  return saveStoredWorkoutDraft({ ...draft, userKey: draft.userKey });
 }
 
 function loadWorkoutDraft(mode: DataMode, userId?: string) {
@@ -8073,29 +8101,32 @@ function getPasswordRecoveryRouteState(): "none" | "active" | "expired" {
   const error = searchParams.get("error") ?? hashParams.get("error");
   if (errorCode === "otp_expired" || error === "access_denied") return "expired";
 
-  if (searchParams.get("flow") === "password-recovery") return "active";
-  if (searchParams.get("type") === "recovery" || hashParams.get("type") === "recovery") return "active";
+  const hadStoredRecovery = window.sessionStorage.getItem(PASSWORD_RECOVERY_STORAGE_KEY) !== null;
+  const storedRecovery = loadPasswordRecoveryFlow(window.sessionStorage, window.localStorage);
+  if (hadStoredRecovery && !storedRecovery) return "expired";
 
-  if (
-    window.sessionStorage.getItem(PASSWORD_RECOVERY_FLOW_KEY) === "true" ||
-    window.localStorage.getItem(PASSWORD_RECOVERY_FLOW_KEY) === "true"
-  ) {
+  const hasRecoveryRoute =
+    searchParams.get("flow") === "password-recovery" ||
+    searchParams.get("type") === "recovery" ||
+    hashParams.get("type") === "recovery";
+  if (hasRecoveryRoute) {
+    if (!storedRecovery) startPasswordRecoveryFlow(window.sessionStorage, window.localStorage);
     return "active";
   }
+
+  if (storedRecovery) return "active";
 
   return "none";
 }
 
 function markPasswordRecoveryFlow() {
   if (typeof window === "undefined") return;
-  window.sessionStorage.setItem(PASSWORD_RECOVERY_FLOW_KEY, "true");
-  window.localStorage.setItem(PASSWORD_RECOVERY_FLOW_KEY, "true");
+  startPasswordRecoveryFlow(window.sessionStorage, window.localStorage);
 }
 
 function clearPasswordRecoveryFlow() {
   if (typeof window === "undefined") return;
-  window.sessionStorage.removeItem(PASSWORD_RECOVERY_FLOW_KEY);
-  window.localStorage.removeItem(PASSWORD_RECOVERY_FLOW_KEY);
+  clearPasswordRecoveryStorage(window.sessionStorage, window.localStorage);
 }
 
 function clearPasswordRecoveryUrl() {
