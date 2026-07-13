@@ -1,7 +1,15 @@
 import type { DataMode } from "@/lib/supabase/session";
+import {
+  BROWSER_STORAGE_PREFIXES,
+  getBrowserStorageScope,
+  getScopedBrowserStorageKey,
+  isBrowserStorageScope,
+  migrateLegacyBrowserStorageToDemo,
+  type BrowserStorageScope,
+} from "@/lib/storage/browser-storage";
 import { resolveStableWorkoutStartedAt } from "@/lib/training/exercise-last-performance-loader";
 
-export const WORKOUT_DRAFT_KEY_PREFIX = "organizatech:workout-draft";
+export const WORKOUT_DRAFT_KEY_PREFIX = BROWSER_STORAGE_PREFIXES.workoutDraft;
 
 export interface PendingWorkoutReadinessLink {
   workoutAttemptId: string;
@@ -12,7 +20,7 @@ export interface WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts> {
   version: number;
   updatedAt: number;
   dataMode: DataMode;
-  userKey: string;
+  userKey: BrowserStorageScope;
   activeRoutineDay: string;
   activeExerciseIndex: number;
   activeWorkoutStartedAt: string;
@@ -62,20 +70,21 @@ export interface LoadWorkoutDraftOptions<TReadiness, TExerciseDrafts> {
 }
 
 export function getDraftUserKey(mode: DataMode, userId?: string) {
-  return mode === "supabase" ? `supabase:${userId ?? "anonymous"}` : "demo:local";
+  return getBrowserStorageScope(mode, userId);
 }
 
 export function getWorkoutDraftKey(mode: DataMode, userId?: string) {
-  return `${WORKOUT_DRAFT_KEY_PREFIX}:${getDraftUserKey(mode, userId)}`;
+  const scope = getDraftUserKey(mode, userId);
+  return scope ? getScopedBrowserStorageKey(WORKOUT_DRAFT_KEY_PREFIX, scope) : null;
 }
 
 export function saveWorkoutDraft<TReadiness, TExerciseDrafts>(
   draft: WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts>,
   storage = getWorkoutDraftStorage(),
 ): boolean {
-  if (!storage) return false;
+  if (!storage || !isBrowserStorageScope(draft.userKey)) return false;
   try {
-    storage.setItem(`${WORKOUT_DRAFT_KEY_PREFIX}:${draft.userKey}`, JSON.stringify(draft));
+    storage.setItem(getScopedBrowserStorageKey(WORKOUT_DRAFT_KEY_PREFIX, draft.userKey), JSON.stringify(draft));
     return true;
   } catch {
     return false;
@@ -87,16 +96,25 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
 ): LoadedWorkoutDraftStorageRecord<TReadiness, TExerciseDrafts> | null {
   const storage = options.storage ?? getWorkoutDraftStorage();
   if (!storage) return null;
+  migrateLegacyBrowserStorageToDemo(storage);
+  const key = getWorkoutDraftKey(options.mode, options.userId);
+  const userKey = getDraftUserKey(options.mode, options.userId);
+  if (!key || !userKey) return null;
 
   try {
-    const raw = storage.getItem(getWorkoutDraftKey(options.mode, options.userId));
-    if (!raw) return null;
+    const raw = storage.getItem(key);
+    if (raw === null) return null;
 
     const parsed = JSON.parse(raw) as Partial<WorkoutDraftStorageRecord<unknown, unknown>>;
-    if (!isPlainObject(parsed)) return null;
+    if (!isPlainObject(parsed)) {
+      storage.removeItem(key);
+      return null;
+    }
 
-    const userKey = getDraftUserKey(options.mode, options.userId);
-    if (parsed.userKey !== userKey) return null;
+    if (parsed.userKey !== userKey) {
+      storage.removeItem(key);
+      return null;
+    }
 
     const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
     const now = options.now?.() ?? Date.now();
@@ -107,15 +125,24 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
     }
 
     const workoutAttemptId = normalizeWorkoutAttemptId(parsed);
-    if (workoutAttemptId === false) return null;
+    if (workoutAttemptId === false) {
+      storage.removeItem(key);
+      return null;
+    }
 
     const pendingReadinessLink = normalizePendingReadinessLink(parsed, workoutAttemptId);
-    if (pendingReadinessLink === false) return null;
+    if (pendingReadinessLink === false) {
+      storage.removeItem(key);
+      return null;
+    }
     const cycleId = normalizeOptionalString(parsed.cycleId);
     const cycleDayId = normalizeOptionalString(parsed.cycleDayId);
     const plannedDay = normalizeOptionalString(parsed.plannedDay);
     const plannedDate = normalizeOptionalString(parsed.plannedDate);
-    if (cycleId === false || cycleDayId === false || plannedDay === false || plannedDate === false) return null;
+    if (cycleId === false || cycleDayId === false || plannedDay === false || plannedDate === false) {
+      storage.removeItem(key);
+      return null;
+    }
 
     const startedAt = resolveStableWorkoutStartedAt(parsed.activeWorkoutStartedAt, options.createStartedAt);
     const draft = {
@@ -146,6 +173,11 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
 
     return draft;
   } catch {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // Loading remains safe when storage cleanup is blocked.
+    }
     return null;
   }
 }
@@ -156,8 +188,10 @@ export function clearWorkoutDraft(
   storage = getWorkoutDraftStorage(),
 ): boolean {
   if (!storage) return false;
+  const key = getWorkoutDraftKey(mode, userId);
+  if (!key) return false;
   try {
-    storage.removeItem(getWorkoutDraftKey(mode, userId));
+    storage.removeItem(key);
     return true;
   } catch {
     return false;

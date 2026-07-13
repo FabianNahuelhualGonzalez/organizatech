@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import type { DataMode } from "@/lib/supabase/session";
 import {
   clearWorkoutDraft,
-  getDraftUserKey,
-  getWorkoutDraftKey,
+  getDraftUserKey as getStoredDraftUserKey,
+  getWorkoutDraftKey as getStoredWorkoutDraftKey,
   loadWorkoutDraft,
   saveWorkoutDraft,
   type PendingWorkoutReadinessLink,
@@ -18,6 +19,22 @@ const NOW = 1_000_000;
 const FIRST_STARTED_AT = "2026-06-18T12:00:00.000Z";
 const SECOND_STARTED_AT = "2026-06-18T13:00:00.000Z";
 const SETUP_DAYS = ["Lunes", "Martes", "Miercoles"];
+const TEST_USER_IDS: Record<string, string> = {
+  "user-1": "11111111-1111-4111-8111-111111111111",
+  "user-2": "22222222-2222-4222-8222-222222222222",
+};
+
+function getDraftUserKey(mode: DataMode, userId?: string) {
+  const scope = getStoredDraftUserKey(mode, userId ? TEST_USER_IDS[userId] ?? userId : userId);
+  assert.ok(scope);
+  return scope;
+}
+
+function getWorkoutDraftKey(mode: DataMode, userId?: string) {
+  const key = getStoredWorkoutDraftKey(mode, userId ? TEST_USER_IDS[userId] ?? userId : userId);
+  assert.ok(key);
+  return key;
+}
 
 interface Readiness {
   skipped: boolean;
@@ -96,7 +113,7 @@ function createDraft(
 function load(storage: WorkoutDraftStorageLike, createStartedAt = () => SECOND_STARTED_AT) {
   return loadWorkoutDraft({
     mode: "supabase",
-    userId: "user-1",
+    userId: TEST_USER_IDS["user-1"],
     version: VERSION,
     maxAgeMs: MAX_AGE_MS,
     setupDays: SETUP_DAYS,
@@ -115,31 +132,35 @@ async function run() {
   }
 
   {
-    const { storage, values } = createStorage();
+    const { storage, values, removes } = createStorage();
     const key = getWorkoutDraftKey("supabase", "user-1");
     values.set(key, "");
     assert.equal(load(storage), null);
+    assert.deepEqual(removes, [key]);
   }
 
   {
-    const { storage, values } = createStorage();
+    const { storage, values, removes } = createStorage();
     const key = getWorkoutDraftKey("supabase", "user-1");
     values.set(key, "{not-json");
     assert.equal(load(storage), null);
+    assert.deepEqual(removes, [key]);
   }
 
   {
-    const { storage, values } = createStorage();
+    const { storage, values, removes } = createStorage();
     const key = getWorkoutDraftKey("supabase", "user-1");
     values.set(key, JSON.stringify("not-object"));
     assert.equal(load(storage), null);
+    assert.deepEqual(removes, [key]);
   }
 
   {
-    const { storage, values } = createStorage();
+    const { storage, values, removes } = createStorage();
     const key = getWorkoutDraftKey("supabase", "user-1");
     values.set(key, JSON.stringify({ ...createDraft(), userKey: getDraftUserKey("supabase", "user-2") }));
     assert.equal(load(storage), null);
+    assert.deepEqual(removes, [key]);
   }
 
   {
@@ -157,7 +178,7 @@ async function run() {
     assert.equal(load(storage)?.activeWorkoutStartedAt, FIRST_STARTED_AT);
     const userTwoLoaded = loadWorkoutDraft({
       mode: "supabase",
-      userId: "user-2",
+      userId: TEST_USER_IDS["user-2"],
       version: VERSION,
       maxAgeMs: MAX_AGE_MS,
       setupDays: SETUP_DAYS,
@@ -272,7 +293,7 @@ async function run() {
     const { storage, removes } = createStorage();
     const draft = createDraft();
     saveWorkoutDraft(draft, storage);
-    assert.equal(clearWorkoutDraft("supabase", "user-1", storage), true);
+    assert.equal(clearWorkoutDraft("supabase", TEST_USER_IDS["user-1"], storage), true);
 
     assert.equal(load(storage), null);
     assert.deepEqual(removes, [getWorkoutDraftKey("supabase", "user-1")]);
@@ -305,13 +326,13 @@ async function run() {
 
   {
     const { storage } = createStorage({ throwOnRemove: true });
-    assert.equal(clearWorkoutDraft("supabase", "user-1", storage), false);
+    assert.equal(clearWorkoutDraft("supabase", TEST_USER_IDS["user-1"], storage), false);
   }
 
   {
     const { storage, removes } = createStorage();
     saveWorkoutDraft(createDraft(), storage);
-    clearWorkoutDraft("supabase", "user-2", storage);
+    clearWorkoutDraft("supabase", TEST_USER_IDS["user-2"], storage);
 
     assert.deepEqual(removes, [getWorkoutDraftKey("supabase", "user-2")]);
     assert.equal(load(storage)?.activeWorkoutStartedAt, FIRST_STARTED_AT);
@@ -451,13 +472,15 @@ async function run() {
     ["plannedDay", ""],
     ["plannedDate", []],
   ] as const) {
-    const { storage, values } = createStorage();
-    values.set(getWorkoutDraftKey("supabase", "user-1"), JSON.stringify({
+    const { storage, values, removes } = createStorage();
+    const key = getWorkoutDraftKey("supabase", "user-1");
+    values.set(key, JSON.stringify({
       ...createDraft(),
       workoutAttemptId: "attempt-v2-1",
       [field]: value,
     }));
     assert.equal(load(storage), null, `draft invalido por ${field}`);
+    assert.deepEqual(removes, [key]);
   }
 
   {
@@ -486,7 +509,7 @@ async function run() {
       pendingReadinessLink: { workoutAttemptId: "attempt-1", trainingSessionId: "session-1" },
     };
     saveWorkoutDraft(draft, storage);
-    assert.equal(clearWorkoutDraft("supabase", "user-1", storage), true);
+    assert.equal(clearWorkoutDraft("supabase", TEST_USER_IDS["user-1"], storage), true);
     assert.equal(values.has(getWorkoutDraftKey("supabase", "user-1")), false);
   }
 
@@ -632,7 +655,7 @@ async function run() {
     assert.equal(saveWorkoutDraft(createDraft(), null), false);
     assert.equal(loadWorkoutDraft({
       mode: "supabase",
-      userId: "user-1",
+      userId: TEST_USER_IDS["user-1"],
       version: VERSION,
       maxAgeMs: MAX_AGE_MS,
       setupDays: SETUP_DAYS,
@@ -640,7 +663,7 @@ async function run() {
       normalizeExerciseDrafts,
       storage: null,
     }), null);
-    assert.equal(clearWorkoutDraft("supabase", "user-1", null), false);
+    assert.equal(clearWorkoutDraft("supabase", TEST_USER_IDS["user-1"], null), false);
   }
 }
 
