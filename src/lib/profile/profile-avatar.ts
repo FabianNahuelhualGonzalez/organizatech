@@ -87,16 +87,16 @@ export function isOwnProfileAvatarPath(userId: string, path: string | null | und
   return Boolean(normalizedUserId && normalizedPath === `${normalizedUserId}/avatar`);
 }
 
-export function buildProfileAvatarUpdatePayload(path: string, avatarUpdatedAt: string) {
-  const normalizedPath = normalizeProfileAvatarPath(path);
+export function buildProfileAvatarUpdatePayload(userId: string, avatarUpdatedAt: string) {
+  const avatarPath = buildProfileAvatarPath(userId);
   const normalizedUpdatedAt = normalizeAvatarUpdatedAt(avatarUpdatedAt);
 
-  if (!normalizedPath || !normalizedUpdatedAt) {
+  if (!normalizedUpdatedAt) {
     throw new Error("Los datos del avatar no son válidos.");
   }
 
   return {
-    avatar_path: normalizedPath,
+    avatar_path: avatarPath,
     avatar_updated_at: normalizedUpdatedAt,
   };
 }
