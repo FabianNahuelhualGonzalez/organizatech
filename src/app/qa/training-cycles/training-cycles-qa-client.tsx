@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
@@ -13,83 +13,36 @@ import {
   type TrainingCycle,
 } from "@/lib/training/training-cycles-repository";
 
-export interface TrainingCyclesQaAccessState {
-  vercelEnv: string;
-  qaToolsEnabled: boolean;
-  supabaseEnv: string;
-  allowed: boolean;
-}
+import {
+  canMutateQaCycle,
+  canRunQaAction,
+  getQaActionErrorMessage,
+  releaseQaMutationLock,
+  rememberCreatedQaCycle,
+  tryAcquireQaMutationLock,
+  type QaActionKind,
+  type QaAuthStatus,
+} from "./training-cycles-qa-policy";
 
-export function TrainingCyclesQaClient({ accessState }: { accessState: TrainingCyclesQaAccessState }) {
+export function TrainingCyclesQaClient() {
   const [activeCycle, setActiveCycle] = useState<TrainingCycle | null>(null);
   const [history, setHistory] = useState<TrainingCycle[]>([]);
-  const [hasSession, setHasSession] = useState<boolean | null>(null);
+  const [authStatus, setAuthStatus] = useState<QaAuthStatus>("checking");
+  const [createdCycleIds, setCreatedCycleIds] = useState<Set<string>>(() => new Set());
   const [isBusy, setIsBusy] = useState(false);
   const [logs, setLogs] = useState<QaLog[]>([]);
+  const mutationLockRef = useRef(false);
 
-  async function runAction(label: string, action: () => Promise<void>) {
-    setIsBusy(true);
-    try {
-      await action();
-      pushLog("success", label, "OK");
-    } catch (error) {
-      pushLog("error", label, describeRepositoryError(error));
-    } finally {
-      setIsBusy(false);
-    }
-  }
+  const clearQaSessionState = useCallback(() => {
+    setAuthStatus("unauthenticated");
+    setActiveCycle(null);
+    setHistory([]);
+    setCreatedCycleIds(new Set());
+    setLogs([]);
+    setIsBusy(false);
+  }, []);
 
-  async function refreshCycles() {
-    const supabase = getSupabaseBrowserClient();
-    const sessionResult = await supabase?.auth.getSession();
-    setHasSession(Boolean(sessionResult?.data.session));
-
-    const [nextActive, nextHistory] = await Promise.all([
-      getActiveTrainingCycle(),
-      getTrainingCycleHistory(),
-    ]);
-
-    setActiveCycle(nextActive);
-    setHistory(nextHistory);
-  }
-
-  async function handleCreateCycle() {
-    await createTrainingCycle({
-      name: `QA ciclo temporal ${new Date().toISOString()}`,
-      cycleNumber: getNextQaCycleNumber(activeCycle, history),
-      cycleType: "qa",
-      goal: "Validacion QA",
-      planSnapshot: {
-        source: "qa-helper",
-        createdBy: "authenticated-user",
-      },
-    });
-    await refreshCycles();
-  }
-
-  async function handleCompleteCycle() {
-    await completeTrainingCycle({
-      summarySnapshot: {
-        source: "qa-helper",
-        result: "completed",
-        volumeTotal: 0,
-        totalReps: 0,
-      },
-    });
-    await refreshCycles();
-  }
-
-  async function handleCancelCycle() {
-    await cancelTrainingCycle({
-      summarySnapshot: {
-        source: "qa-helper",
-        result: "cancelled",
-      },
-    });
-    await refreshCycles();
-  }
-
-  function pushLog(type: QaLog["type"], action: string, message: string) {
+  const pushLog = useCallback((type: QaLog["type"], action: string, message: string) => {
     setLogs((current) => [
       {
         id: `${Date.now()}:${Math.random().toString(36).slice(2)}`,
@@ -100,49 +53,228 @@ export function TrainingCyclesQaClient({ accessState }: { accessState: TrainingC
       },
       ...current.slice(0, 19),
     ]);
+  }, []);
+
+  const loadCycles = useCallback(async () => {
+    const [nextActive, nextHistory] = await Promise.all([
+      getActiveTrainingCycle(),
+      getTrainingCycleHistory(),
+    ]);
+    setActiveCycle(nextActive);
+    setHistory(nextHistory);
+  }, []);
+
+  const handleActionFailure = useCallback((action: QaActionKind, error: unknown) => {
+    if (isSessionRepositoryError(error)) {
+      clearQaSessionState();
+      return;
+    }
+    pushLog("error", actionLabel(action), getQaActionErrorMessage(action));
+  }, [clearQaSessionState, pushLog]);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      clearQaSessionState();
+      return;
+    }
+    const supabaseClient = supabase;
+
+    let mounted = true;
+
+    async function validateSession() {
+      const { data, error } = await supabaseClient.auth.getUser();
+      if (!mounted) return;
+      if (error || !data.user) {
+        clearQaSessionState();
+        return;
+      }
+
+      setAuthStatus("authenticated");
+      try {
+        await loadCycles();
+      } catch (loadError) {
+        if (!mounted) return;
+        handleActionFailure("load", loadError);
+      }
+    }
+
+    const { data: authListener } = supabaseClient.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+      if (event === "SIGNED_OUT" || !session?.user) {
+        clearQaSessionState();
+        return;
+      }
+
+      if (event === "SIGNED_IN") {
+        setAuthStatus("authenticated");
+        void loadCycles().catch((loadError: unknown) => {
+          if (mounted) handleActionFailure("load", loadError);
+        });
+      }
+    });
+
+    void validateSession().catch(() => {
+      if (mounted) clearQaSessionState();
+    });
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, [clearQaSessionState, handleActionFailure, loadCycles]);
+
+  async function runAction(
+    action: QaActionKind,
+    successMessage: string,
+    operation: () => Promise<void>,
+  ) {
+    if (
+      !canRunQaAction(authStatus, isBusy) ||
+      mutationLockRef.current ||
+      !tryAcquireQaMutationLock(mutationLockRef)
+    ) {
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      await operation();
+      pushLog("success", actionLabel(action), successMessage);
+    } catch (error) {
+      handleActionFailure(action, error);
+    } finally {
+      releaseQaMutationLock(mutationLockRef);
+      setIsBusy(false);
+    }
   }
+
+  async function handleCreateCycle() {
+    const createdCycle = await createTrainingCycle({
+      name: `QA ciclo temporal ${new Date().toISOString()}`,
+      cycleNumber: getNextQaCycleNumber(activeCycle, history),
+      cycleType: "qa",
+      goal: "Validacion QA",
+      planSnapshot: {
+        source: "qa-helper",
+        createdBy: "authenticated-user",
+      },
+    });
+    setCreatedCycleIds((current) => rememberCreatedQaCycle(current, createdCycle.id));
+    await loadCycles();
+  }
+
+  async function handleCompleteCycle() {
+    if (!canChangeActiveCycle) return;
+    if (!window.confirm("¿Completar el ciclo de prueba creado en esta sesión?")) return;
+
+    await completeTrainingCycle({
+      summarySnapshot: {
+        source: "qa-helper",
+        result: "completed",
+        volumeTotal: 0,
+        totalReps: 0,
+      },
+    });
+    await loadCycles();
+  }
+
+  async function handleCancelCycle() {
+    if (!canChangeActiveCycle) return;
+    if (!window.confirm("¿Cancelar el ciclo de prueba creado en esta sesión?")) return;
+
+    await cancelTrainingCycle({
+      summarySnapshot: {
+        source: "qa-helper",
+        result: "cancelled",
+      },
+    });
+    await loadCycles();
+  }
+
+  if (authStatus === "checking") {
+    return <QaMessage title="Validando sesión" body="Espera mientras verificamos el acceso." />;
+  }
+
+  if (authStatus === "unauthenticated") {
+    return (
+      <QaMessage
+        title="Sesión requerida"
+        body="Inicia sesión para usar esta herramienta de prueba."
+        link={{ href: "/", label: "Volver al inicio" }}
+      />
+    );
+  }
+
+  const controlsDisabled = isBusy;
+  const canChangeActiveCycle = canMutateQaCycle(
+    authStatus,
+    isBusy,
+    activeCycle?.id,
+    createdCycleIds,
+  );
 
   return (
     <main style={styles.shell}>
       <section style={styles.panel}>
-        <p style={styles.eyebrow}>Herramienta QA temporal - no usar en produccion</p>
+        <p style={styles.eyebrow}>Herramienta QA temporal</p>
         <h1 style={styles.title}>Training cycles QA</h1>
-        <p style={styles.text}>
-          Valida el repository de ciclos usando la sesion Supabase real del navegador, anon key y RLS.
-        </p>
-        <AccessStateView accessState={accessState} />
-        <p style={styles.session}>Sesion activa: {hasSession === null ? "No validada" : hasSession ? "Si" : "No"}</p>
+        <p style={styles.text}>Valida ciclos de prueba con una sesión autenticada.</p>
       </section>
 
       <section style={styles.panel}>
         <h2 style={styles.subtitle}>Acciones</h2>
         <div style={styles.actions}>
-          <button style={styles.button} type="button" disabled={isBusy} onClick={() => runAction("Cargar ciclos", refreshCycles)}>
+          <button
+            style={styles.button}
+            type="button"
+            disabled={controlsDisabled}
+            onClick={() => void runAction("load", "Ciclos cargados.", loadCycles)}
+          >
             Cargar ciclos
           </button>
-          <button style={styles.button} type="button" disabled={isBusy} onClick={() => runAction("Crear ciclo QA active", handleCreateCycle)}>
-            Crear ciclo QA active
+          <button
+            style={styles.button}
+            type="button"
+            disabled={controlsDisabled || Boolean(activeCycle)}
+            onClick={() => void runAction("create", "Ciclo de prueba creado.", handleCreateCycle)}
+          >
+            Crear ciclo de prueba
           </button>
-          <button style={styles.button} type="button" disabled={isBusy} onClick={() => runAction("Intentar segundo ciclo active", handleCreateCycle)}>
-            Intentar segundo ciclo active
-          </button>
-          <button style={styles.button} type="button" disabled={isBusy} onClick={() => runAction("Completar ciclo active", handleCompleteCycle)}>
-            Completar ciclo active
-          </button>
-          <button style={styles.button} type="button" disabled={isBusy} onClick={() => runAction("Cancelar ciclo active", handleCancelCycle)}>
-            Cancelar ciclo active
-          </button>
+          {canChangeActiveCycle ? (
+            <>
+              <button
+                style={styles.button}
+                type="button"
+                disabled={controlsDisabled}
+                onClick={() => void runAction("update", "Ciclo de prueba completado.", handleCompleteCycle)}
+              >
+                Completar ciclo creado aquí
+              </button>
+              <button
+                style={styles.button}
+                type="button"
+                disabled={controlsDisabled}
+                onClick={() => void runAction("update", "Ciclo de prueba cancelado.", handleCancelCycle)}
+              >
+                Cancelar ciclo creado aquí
+              </button>
+            </>
+          ) : null}
         </div>
+        {activeCycle && !createdCycleIds.has(activeCycle.id) ? (
+          <p style={styles.notice}>El ciclo activo preexistente se muestra en modo de solo lectura.</p>
+        ) : null}
       </section>
 
       <section style={styles.grid}>
         <div style={styles.panel}>
-          <h2 style={styles.subtitle}>Ciclo active</h2>
-          {activeCycle ? <CycleView cycle={activeCycle} /> : <p style={styles.text}>Sin ciclo active.</p>}
+          <h2 style={styles.subtitle}>Ciclo activo</h2>
+          {activeCycle ? <CycleView cycle={activeCycle} /> : <p style={styles.text}>Sin ciclo activo.</p>}
         </div>
         <div style={styles.panel}>
           <h2 style={styles.subtitle}>Historial</h2>
-          <p style={styles.text}>Total completed/cancelled: {history.length}</p>
+          <p style={styles.text}>Total completados o cancelados: {history.length}</p>
           <div style={styles.list}>
             {history.map((cycle) => <CycleView key={cycle.id} cycle={cycle} />)}
           </div>
@@ -150,11 +282,11 @@ export function TrainingCyclesQaClient({ accessState }: { accessState: TrainingC
       </section>
 
       <section style={styles.panel}>
-        <h2 style={styles.subtitle}>Logs sanitizados</h2>
+        <h2 style={styles.subtitle}>Actividad</h2>
         <div style={styles.list}>
           {logs.map((log) => (
             <article key={log.id} style={styles.log}>
-              <strong>{log.type.toUpperCase()} - {log.action}</strong>
+              <strong>{log.type === "success" ? "OK" : "ERROR"} - {log.action}</strong>
               <span>{log.message}</span>
               <small>{log.at}</small>
             </article>
@@ -165,26 +297,23 @@ export function TrainingCyclesQaClient({ accessState }: { accessState: TrainingC
   );
 }
 
-function AccessStateView({ accessState }: { accessState: TrainingCyclesQaAccessState }) {
+function QaMessage({
+  title,
+  body,
+  link,
+}: {
+  title: string;
+  body: string;
+  link?: { href: string; label: string };
+}) {
   return (
-    <dl style={styles.stateGrid}>
-      <div>
-        <dt>VERCEL_ENV</dt>
-        <dd>{accessState.vercelEnv}</dd>
-      </div>
-      <div>
-        <dt>QA tools</dt>
-        <dd>{accessState.qaToolsEnabled ? "enabled" : "disabled"}</dd>
-      </div>
-      <div>
-        <dt>Supabase env</dt>
-        <dd>{accessState.supabaseEnv}</dd>
-      </div>
-      <div>
-        <dt>Acceso</dt>
-        <dd>{accessState.allowed ? "permitido" : "bloqueado"}</dd>
-      </div>
-    </dl>
+    <main style={styles.shell}>
+      <section style={styles.panel}>
+        <h1 style={styles.title}>{title}</h1>
+        <p style={styles.text}>{body}</p>
+        {link ? <a href={link.href}>{link.label}</a> : null}
+      </section>
+    </main>
   );
 }
 
@@ -192,22 +321,25 @@ function CycleView({ cycle }: { cycle: TrainingCycle }) {
   return (
     <article style={styles.cycle}>
       <strong>{cycle.name}</strong>
-      <span>Status: {cycle.status}</span>
-      <span>Numero: {cycle.cycleNumber}</span>
+      <span>Estado: {cycle.status}</span>
+      <span>Número: {cycle.cycleNumber}</span>
       <span>Inicio: {formatDate(cycle.startedAt)}</span>
-      <span>Termino: {cycle.endedAt ? formatDate(cycle.endedAt) : "Pendiente"}</span>
-      <span>Snapshot plan: {Object.keys(cycle.planSnapshot).length} campos</span>
-      <span>Snapshot resumen: {cycle.summarySnapshot ? Object.keys(cycle.summarySnapshot).length : 0} campos</span>
+      <span>Término: {cycle.endedAt ? formatDate(cycle.endedAt) : "Pendiente"}</span>
+      <span>Plan: {Object.keys(cycle.planSnapshot).length} campos</span>
+      <span>Resumen: {cycle.summarySnapshot ? Object.keys(cycle.summarySnapshot).length : 0} campos</span>
     </article>
   );
 }
 
-function describeRepositoryError(error: unknown) {
-  if (error instanceof TrainingCycleRepositoryError) {
-    return `${error.code}: ${error.message}`;
-  }
-  if (error instanceof Error) return error.message;
-  return "Error inesperado";
+function isSessionRepositoryError(error: unknown): boolean {
+  return error instanceof TrainingCycleRepositoryError &&
+    (error.code === "session_required" || error.code === "session_expired");
+}
+
+function actionLabel(action: QaActionKind): string {
+  if (action === "create") return "Crear";
+  if (action === "update") return "Actualizar";
+  return "Cargar";
 }
 
 function formatDate(value: string) {
@@ -265,15 +397,9 @@ const styles = {
     margin: "0 0 12px",
     color: "#4a5568",
   },
-  session: {
+  notice: {
     margin: "12px 0 0",
-    fontWeight: 700,
-  },
-  stateGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-    gap: 12,
-    margin: "16px 0 0",
+    color: "#4a5568",
   },
   actions: {
     display: "flex",
