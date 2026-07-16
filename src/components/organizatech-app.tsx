@@ -101,6 +101,14 @@ import {
   type SeenNotificationStorageRecord,
 } from "@/lib/storage/browser-storage";
 import {
+  advanceSessionDataEpoch as createAdvancedSessionDataEpoch,
+  captureSessionDataRequestToken as createSessionDataRequestToken,
+  createSessionDataEpoch,
+  isSessionDataRequestTokenCurrent,
+  type SessionDataIdentity,
+  type SessionDataRequestToken,
+} from "@/lib/session/session-data-epoch";
+import {
   cancelTrainingCycle,
   completeTrainingCycle,
   getActiveTrainingCycle,
@@ -588,6 +596,8 @@ export function OrganizatechApp({
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
   const activeBrowserStorageScopeRef = useRef<BrowserStorageScope | null>(null);
+  const sessionDataEpochRef = useRef(createSessionDataEpoch());
+  const sessionDataMountedRef = useRef(true);
 
   const resetWorkoutAttemptState = useCallback(() => {
     activeWorkoutAttemptIdRef.current = null;
@@ -604,11 +614,50 @@ export function OrganizatechApp({
     setCycleScopedLoadError("");
   }
 
+  const advanceSessionDataIdentity = useCallback((
+    identity: SessionDataIdentity,
+    options: { force?: boolean } = {},
+  ) => {
+    const current = sessionDataEpochRef.current;
+    const next = createAdvancedSessionDataEpoch(current, identity, options);
+    if (next === current) return false;
+
+    sessionDataEpochRef.current = next;
+    profileAvatarRefreshInFlightRef.current = false;
+    profileAvatarBootstrapUserIdRef.current = null;
+    lastProfileAvatarRefreshAtRef.current = 0;
+    lastProfileAvatarErrorRefreshAtRef.current = 0;
+    latestExercisePerformanceRequestKeyRef.current = null;
+    return true;
+  }, []);
+
+  const captureSessionDataRequestToken = useCallback((): SessionDataRequestToken => {
+    return createSessionDataRequestToken(sessionDataEpochRef.current);
+  }, []);
+
+  const isSessionDataRequestCurrent = useCallback((token: SessionDataRequestToken) => {
+    return sessionDataMountedRef.current &&
+      isSessionDataRequestTokenCurrent(sessionDataEpochRef.current, token);
+  }, []);
+
+  useEffect(() => {
+    sessionDataMountedRef.current = true;
+    return () => {
+      sessionDataMountedRef.current = false;
+      sessionDataEpochRef.current = createAdvancedSessionDataEpoch(
+        sessionDataEpochRef.current,
+        { userId: null, scope: null },
+        { force: true },
+      );
+    };
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     const supabase = getSupabaseBrowserClient();
 
     async function bootstrapSession() {
+      let requestToken = captureSessionDataRequestToken();
       const recoveryState = getPasswordRecoveryRouteState();
       if (recoveryState === "expired") {
         clearPasswordRecoveryFlow();
@@ -630,9 +679,10 @@ export function OrganizatechApp({
       }
       try {
         const authState = await getInitialSupabaseSession();
-        if (!isMounted) return;
+        if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
 
         applySessionState(authState);
+        requestToken = captureSessionDataRequestToken();
         const currentRecoveryState = getPasswordRecoveryRouteState();
         if (currentRecoveryState === "expired") {
           clearPasswordRecoveryFlow();
@@ -651,16 +701,21 @@ export function OrganizatechApp({
         if (authState.session) {
           setStatusMessage("");
           await refreshData(authState.dataMode);
-          if (isMounted && !restoreActiveFlowForSession(authState.dataMode, authState.user?.id)) {
+          if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
+          if (!restoreActiveFlowForSession(authState.dataMode, authState.user?.id)) {
             setScreen("dashboard");
           }
         } else {
           setStatusMessage(authState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
         }
       } catch (error) {
-        if (isMounted) setStatusMessage(translateAuthError(error));
+        if (isMounted && isSessionDataRequestCurrent(requestToken)) {
+          setStatusMessage(translateAuthError(error));
+        }
       } finally {
-        if (isMounted) setIsAuthLoading(false);
+        if (isMounted && isSessionDataRequestCurrent(requestToken)) {
+          setIsAuthLoading(false);
+        }
       }
     }
 
@@ -677,7 +732,18 @@ export function OrganizatechApp({
       };
 
       const previousStorageScope = activeBrowserStorageScopeRef.current;
+      if (event === "SIGNED_OUT") {
+        if (passwordUpdateSuccessRef.current) {
+          passwordUpdateSuccessRef.current = false;
+          clearUserSessionState("Contraseña actualizada correctamente. Ya puedes iniciar sesión.", previousStorageScope);
+          return;
+        }
+        clearUserSessionState("Sesión cerrada correctamente.", previousStorageScope);
+        return;
+      }
+
       applySessionState(nextState);
+      const requestToken = captureSessionDataRequestToken();
       const recoveryState = getPasswordRecoveryRouteState();
       if (recoveryState === "expired") {
         clearPasswordRecoveryFlow();
@@ -695,7 +761,7 @@ export function OrganizatechApp({
         setScreen("nueva-password");
         return;
       }
-      if (event === "SIGNED_IN") {
+      if (event === "SIGNED_IN" || (event === "INITIAL_SESSION" && session)) {
         if (recoveryState === "active") {
           markPasswordRecoveryFlow();
           setIsAuthLoading(false);
@@ -706,21 +772,19 @@ export function OrganizatechApp({
         }
         setStatusMessage("");
         void refreshData(nextState.dataMode).then(() => {
-          if (isMounted && !restoreActiveFlowForSession(nextState.dataMode, nextState.user?.id)) {
+          if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
+          setIsAuthLoading(false);
+          if (!restoreActiveFlowForSession(nextState.dataMode, nextState.user?.id)) {
             setScreen("dashboard");
           }
         });
       }
+      if (event === "INITIAL_SESSION" && !session) {
+        setIsAuthLoading(false);
+        setStatusMessage(nextState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
+      }
       if (event === "TOKEN_REFRESHED") {
         setStatusMessage("");
-      }
-      if (event === "SIGNED_OUT") {
-        if (passwordUpdateSuccessRef.current) {
-          passwordUpdateSuccessRef.current = false;
-          clearUserSessionState("Contraseña actualizada correctamente. Ya puedes iniciar sesión.", previousStorageScope);
-          return;
-        }
-        clearUserSessionState("Sesión cerrada correctamente.", previousStorageScope);
       }
     }).data.subscription;
 
@@ -1003,6 +1067,8 @@ export function OrganizatechApp({
     avatarPath: profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null,
   }), [canEditProfilePersonalData, dataSource, profileAvatar.avatarPath, profileAvatar.avatarUrl, profilePersonalData?.avatarPath, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
   const refreshProfileAvatar = useCallback(async (options?: { force?: boolean; avatarPath?: string | null; allowProfileLookup?: boolean }) => {
+    const requestToken = captureSessionDataRequestToken();
+    if (!isSessionDataRequestCurrent(requestToken) || !requestToken.userId || !requestToken.scope) return null;
     if (!canEditProfilePersonalData || !supabaseSession) return null;
     if (profileAvatarRefreshInFlightRef.current) return null;
 
@@ -1017,6 +1083,7 @@ export function OrganizatechApp({
       let avatarPath = options?.avatarPath ?? profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null;
       if (!avatarPath && options?.allowProfileLookup) {
         const profile = await getProfilePersonalData();
+        if (!isSessionDataRequestCurrent(requestToken)) return null;
         setProfilePersonalData(profile);
         setSessionName(profile.displayName);
         avatarPath = profile.avatarPath;
@@ -1035,6 +1102,7 @@ export function OrganizatechApp({
       if (!avatarPath) return null;
 
       const avatar = await getCurrentProfileAvatar();
+      if (!isSessionDataRequestCurrent(requestToken)) return null;
       setProfileAvatar(avatar);
       if (avatar.avatarUrl) {
         setProfileAvatarResetKey((current) => current + 1);
@@ -1042,12 +1110,15 @@ export function OrganizatechApp({
       setProfileAvatarError("");
       return avatar;
     } catch {
+      if (!isSessionDataRequestCurrent(requestToken)) return null;
       setProfileAvatarError("No pudimos actualizar tu foto de perfil. La mostraremos apenas vuelva a estar disponible.");
       return null;
     } finally {
-      profileAvatarRefreshInFlightRef.current = false;
+      if (isSessionDataRequestCurrent(requestToken)) {
+        profileAvatarRefreshInFlightRef.current = false;
+      }
     }
-  }, [canEditProfilePersonalData, profileAvatar.avatarPath, profilePersonalData?.avatarPath, supabaseSession]);
+  }, [canEditProfilePersonalData, captureSessionDataRequestToken, isSessionDataRequestCurrent, profileAvatar.avatarPath, profilePersonalData?.avatarPath, supabaseSession]);
   const completedTrainingDays = calculateWeeklyCompletedTrainingDays({
     plannedDays: dashboardCarouselDays,
     exercises: displayExercises,
@@ -1105,6 +1176,8 @@ export function OrganizatechApp({
   const unseenNotificationCount = newNotifications.length;
 
   useEffect(() => {
+    const requestToken = captureSessionDataRequestToken();
+
     if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
       latestExercisePerformanceRequestKeyRef.current = null;
       const idle = getLatestExercisePerformanceIdleState();
@@ -1141,7 +1214,7 @@ export function OrganizatechApp({
       fetcher: getLatestExercisePerformanceByLineage,
       getCurrentRequestKey: () => latestExercisePerformanceRequestKeyRef.current,
     }).then((result) => {
-      if (!isMounted || result.stale) return;
+      if (!isMounted || result.stale || !isSessionDataRequestCurrent(requestToken)) return;
       setLatestExercisePerformance(result.performance);
       setLatestExercisePerformanceLoading(result.loading);
       setLatestExercisePerformanceError(result.error);
@@ -1150,7 +1223,7 @@ export function OrganizatechApp({
     return () => {
       isMounted = false;
     };
-  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt]);
+  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, isSessionDataRequestCurrent]);
 
   useEffect(() => {
     const currentUserId = supabaseUser?.id ?? null;
@@ -1182,6 +1255,8 @@ export function OrganizatechApp({
     }
 
     let isMounted = true;
+    const requestToken = captureSessionDataRequestToken();
+    if (!isSessionDataRequestCurrent(requestToken) || !requestToken.userId || !requestToken.scope) return;
     setProfilePersonalDataLoading(true);
     setProfilePersonalDataError("");
     setProfileAvatarLoading(true);
@@ -1189,17 +1264,18 @@ export function OrganizatechApp({
 
     void getProfilePersonalData()
       .then(async (profile) => {
-        if (!isMounted) return;
+        if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
         setProfilePersonalData(profile);
         setSessionName(profile.displayName);
         await refreshProfileAvatar({ force: true, avatarPath: profile.avatarPath });
+        if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
       })
       .catch((error) => {
-        if (!isMounted) return;
+        if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
         setProfilePersonalDataError(error instanceof Error ? error.message : "No pudimos cargar tu perfil.");
       })
       .finally(() => {
-        if (isMounted) {
+        if (isMounted && isSessionDataRequestCurrent(requestToken)) {
           setProfilePersonalDataLoading(false);
           setProfileAvatarLoading(false);
         }
@@ -1208,7 +1284,7 @@ export function OrganizatechApp({
     return () => {
       isMounted = false;
     };
-  }, [canEditProfilePersonalData, refreshProfileAvatar, screen]);
+  }, [canEditProfilePersonalData, captureSessionDataRequestToken, isSessionDataRequestCurrent, refreshProfileAvatar, screen]);
 
   useEffect(() => {
     function refreshAvatarOnResume() {
@@ -1236,6 +1312,10 @@ export function OrganizatechApp({
 
   function applySessionState(authState: SupabaseSessionState) {
     const nextStorageScope = getBrowserStorageScope(authState.dataMode, authState.user?.id);
+    const identityChanged = advanceSessionDataIdentity({
+      userId: authState.user?.id ?? null,
+      scope: nextStorageScope,
+    });
     const hasStorageScopeChanged = activeBrowserStorageScopeRef.current !== nextStorageScope;
     if (hasStorageScopeChanged) {
       setExercises([]);
@@ -1247,6 +1327,11 @@ export function OrganizatechApp({
       setTrainingPlan(createDefaultTrainingPlan());
       setCycleHistory([]);
       setSeenNotificationRecords([]);
+      setIsPersistedCyclesLoading(false);
+      const latestPerformanceIdle = getLatestExercisePerformanceIdleState();
+      setLatestExercisePerformance(latestPerformanceIdle.performance);
+      setLatestExercisePerformanceLoading(latestPerformanceIdle.loading);
+      setLatestExercisePerformanceError(latestPerformanceIdle.error);
       activeBrowserStorageScopeRef.current = nextStorageScope;
 
       if (typeof window !== "undefined" && nextStorageScope) {
@@ -1255,6 +1340,10 @@ export function OrganizatechApp({
         setCycleHistory(loadCycleHistory(nextStorageScope));
         setSeenNotificationRecords(loadSeenNotificationRecords(nextStorageScope));
       }
+    }
+    if (identityChanged) {
+      setProfilePersonalDataLoading(false);
+      setProfileAvatarLoading(false);
     }
     setIsSupabaseConfiguredState(authState.isConfigured);
     setDataMode(authState.dataMode);
@@ -1273,6 +1362,7 @@ export function OrganizatechApp({
   }
 
   function clearUserSessionState(message: string, storageScope = activeBrowserStorageScopeRef.current) {
+    advanceSessionDataIdentity({ userId: null, scope: null }, { force: true });
     clearBrowserStorageScope(storageScope);
     clearPasswordRecoveryFlow();
     activeBrowserStorageScopeRef.current = null;
@@ -1293,6 +1383,7 @@ export function OrganizatechApp({
     setProfileAvatarError("");
     setDataMode("demo");
     setDataSource("local");
+    setIsBusy(false);
     setExercises([]);
     setEntries([]);
     setTrainingSessions([]);
@@ -1301,6 +1392,7 @@ export function OrganizatechApp({
     setSeenNotificationRecords([]);
     setPersistedActiveCycle(null);
     setPersistedCycleHistory([]);
+    setIsPersistedCyclesLoading(false);
     clearCycleScopedPlanState();
     setExerciseDrafts({});
     setReadiness(null);
@@ -1308,6 +1400,10 @@ export function OrganizatechApp({
     setDailyReadinessError("");
     setCheckingDailyReadiness(false);
     setSavingDailyReadiness(false);
+    const latestPerformanceIdle = getLatestExercisePerformanceIdleState();
+    setLatestExercisePerformance(latestPerformanceIdle.performance);
+    setLatestExercisePerformanceLoading(latestPerformanceIdle.loading);
+    setLatestExercisePerformanceError(latestPerformanceIdle.error);
     setHasStartedTraining(false);
     setScreenHistory([]);
     setIsMenuOpen(false);
@@ -1432,9 +1528,13 @@ export function OrganizatechApp({
   }
 
   async function refreshData(mode = dataMode) {
+    const requestToken = captureSessionDataRequestToken();
+    const requestScope = getBrowserStorageScope(mode, requestToken.userId);
+    if (!isSessionDataRequestCurrent(requestToken) || !requestScope || requestScope !== requestToken.scope) return null;
     setIsBusy(true);
     try {
       const next = await loadAppData(mode);
+      if (!isSessionDataRequestCurrent(requestToken)) return null;
       const shouldPreserveCycleScopedDisplay =
         mode === "supabase" &&
         trainingCyclesRepositoryEnabled &&
@@ -1451,14 +1551,19 @@ export function OrganizatechApp({
       setStatusMessage(next.source === "supabase" ? "Progreso actualizado." : "Modo de prueba activo.");
       return next;
     } catch (error) {
+      if (!isSessionDataRequestCurrent(requestToken)) return null;
       handlePersistenceError(error);
       return null;
     } finally {
-      setIsBusy(false);
+      if (isSessionDataRequestCurrent(requestToken)) {
+        setIsBusy(false);
+      }
     }
   }
 
   async function refreshProfilePersonalData() {
+    const requestToken = captureSessionDataRequestToken();
+    if (!isSessionDataRequestCurrent(requestToken) || !requestToken.userId || !requestToken.scope) return null;
     if (!canEditProfilePersonalData) {
       setProfilePersonalData(null);
       setProfilePersonalDataLoading(false);
@@ -1480,17 +1585,22 @@ export function OrganizatechApp({
     setProfileAvatarError("");
     try {
       const profile = await getProfilePersonalData();
+      if (!isSessionDataRequestCurrent(requestToken)) return null;
       setProfilePersonalData(profile);
       setSessionName(profile.displayName);
       await refreshProfileAvatar({ force: true, avatarPath: profile.avatarPath });
+      if (!isSessionDataRequestCurrent(requestToken)) return null;
       return profile;
     } catch (error) {
+      if (!isSessionDataRequestCurrent(requestToken)) return null;
       const message = error instanceof Error ? error.message : "No pudimos cargar tu perfil.";
       setProfilePersonalDataError(message);
       return null;
     } finally {
-      setProfilePersonalDataLoading(false);
-      setProfileAvatarLoading(false);
+      if (isSessionDataRequestCurrent(requestToken)) {
+        setProfilePersonalDataLoading(false);
+        setProfileAvatarLoading(false);
+      }
     }
   }
 
@@ -1517,6 +1627,8 @@ export function OrganizatechApp({
   }
 
   async function refreshPersistedTrainingCycles() {
+    const requestToken = captureSessionDataRequestToken();
+    if (!isSessionDataRequestCurrent(requestToken) || !requestToken.userId || !requestToken.scope) return;
     if (!isTrainingCyclesRepositoryActive) {
       setPersistedActiveCycle(null);
       setPersistedCycleHistory([]);
@@ -1531,6 +1643,7 @@ export function OrganizatechApp({
         getActiveTrainingCycle(),
         getTrainingCycleHistory(),
       ]);
+      if (!isSessionDataRequestCurrent(requestToken)) return;
       setPersistedActiveCycle(activeCycle);
       setPersistedCycleHistory(history);
       if (activeCycle) {
@@ -1540,6 +1653,7 @@ export function OrganizatechApp({
         });
         if (isCycleScopedTrainingCycle(activeCycle)) {
           await loadCycleScopedPlanIntoState(activeCycle.id);
+          if (!isSessionDataRequestCurrent(requestToken)) return;
         } else {
           clearCycleScopedPlanState();
         }
@@ -1547,21 +1661,28 @@ export function OrganizatechApp({
         clearCycleScopedPlanState();
       }
     } catch (error) {
+      if (!isSessionDataRequestCurrent(requestToken)) return;
       setStatusMessage(translateTrainingCycleRepositoryError(error));
     } finally {
-      setIsPersistedCyclesLoading(false);
+      if (isSessionDataRequestCurrent(requestToken)) {
+        setIsPersistedCyclesLoading(false);
+      }
     }
   }
 
   async function loadCycleScopedPlanIntoState(cycleId: string) {
+    const requestToken = captureSessionDataRequestToken();
+    if (!isSessionDataRequestCurrent(requestToken) || !requestToken.userId || !requestToken.scope) return;
     isCycleScopedDisplayLockedRef.current = true;
     setCycleScopedPlan(null);
     setCycleScopedExercises(null);
     setCycleScopedLoadError("");
     try {
       const scopedPlan = await getCycleScopedTrainingPlan(cycleId);
+      if (!isSessionDataRequestCurrent(requestToken)) return;
       const scopedExercises = createExerciseTemplatesFromCycleScopedPlan(scopedPlan);
       const scopedSessionData = await getCycleScopedTrainingSessionData(cycleId, scopedPlan);
+      if (!isSessionDataRequestCurrent(requestToken)) return;
       setCycleScopedPlan(scopedPlan);
       setCycleScopedExercises(scopedExercises);
       setEntries(scopedSessionData.entries);
@@ -1573,6 +1694,7 @@ export function OrganizatechApp({
       setActiveRoutineDay((current) => getVisibleTrainingDay(scopedExercises, current));
       setComparisonDay((current) => getVisibleTrainingDay(scopedExercises, current));
     } catch (error) {
+      if (!isSessionDataRequestCurrent(requestToken)) return;
       isCycleScopedDisplayLockedRef.current = false;
       setCycleScopedPlan(null);
       setCycleScopedExercises([]);
@@ -1680,6 +1802,7 @@ export function OrganizatechApp({
     const password = String(formData.get(mode === "registro" ? "register-password" : "login-password") || "");
     const confirm = String(formData.get("register-confirm-password") || "");
     const supabase = getSupabaseBrowserClient();
+    let appliedIdentityToken: SessionDataRequestToken | null = null;
     if (mode === "registro" && !name) {
       setStatusMessage("Ingresa tu nombre.");
       return;
@@ -1729,9 +1852,16 @@ export function OrganizatechApp({
 
     if (!supabase) {
       setSessionName(name || email.split("@")[0] || "Usuario");
-      setDataMode("demo");
+      applySessionState({
+        isConfigured: false,
+        dataMode: "demo",
+        session: null,
+        user: null,
+      });
+      appliedIdentityToken = captureSessionDataRequestToken();
       setStatusMessage(getMissingSupabaseMessage());
       await refreshData("demo");
+      if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
       setStatusMessage(getMissingSupabaseMessage());
       clearAuthForms();
       setScreen("dashboard");
@@ -1764,6 +1894,7 @@ export function OrganizatechApp({
         session,
         user: session?.user ?? result.data.user ?? null,
       });
+      appliedIdentityToken = captureSessionDataRequestToken();
 
       if (!session && mode === "registro") {
         setStatusMessage("Cuenta creada. Revisa tu correo para confirmar el registro.");
@@ -1774,12 +1905,16 @@ export function OrganizatechApp({
 
       setStatusMessage("");
       await refreshData("supabase");
+      if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
       clearAuthForms();
       setScreen("dashboard");
     } catch (error) {
+      if (appliedIdentityToken && !isSessionDataRequestCurrent(appliedIdentityToken)) return;
       setStatusMessage(translateAuthError(error));
     } finally {
-      setIsBusy(false);
+      if (!appliedIdentityToken || isSessionDataRequestCurrent(appliedIdentityToken)) {
+        setIsBusy(false);
+      }
     }
   }
 
