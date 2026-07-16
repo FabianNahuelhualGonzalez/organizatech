@@ -261,10 +261,6 @@ export async function saveTrainingSessionWithEntries(
   };
 }
 
-export function resetLocalData() {
-  saveLocalData(exerciseTemplates, demoEntries, deriveLegacyTrainingSessions(demoEntries));
-}
-
 export function replaceLocalData(exercises: ExerciseTemplate[], entries: ExerciseEntry[]) {
   saveLocalData(exercises, entries, deriveLegacyTrainingSessions(entries));
 }
