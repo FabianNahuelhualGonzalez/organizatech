@@ -7,8 +7,6 @@ export const PROFILE_AVATAR_ALLOWED_MIME_TYPES = [
   "image/webp",
 ] as const;
 
-export type ProfileAvatarAllowedMimeType = (typeof PROFILE_AVATAR_ALLOWED_MIME_TYPES)[number];
-
 export type ProfileAvatarFileLike = {
   size: number;
   type: string;

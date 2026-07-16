@@ -4750,7 +4750,7 @@ function DashboardCoachCard({
     label: feedback.nextTarget ? "Próximo objetivo" : "Consejo",
     insight: {
       title: feedback.nextTarget ?? "Siguiente paso",
-      body: feedback.nextTarget ? feedback.nextAdvice : feedback.nextAdvice,
+      body: feedback.nextAdvice,
       tone: feedback.tone === "warning" ? "warning" : "info",
       priority: 0,
     },
@@ -6675,20 +6675,6 @@ function buildAnalytics(summary: ReturnType<typeof calculateWeeklySummary>, curr
     ["Volumen vs objetivo/semana anterior", volumeScore],
   ];
   return { score, factors };
-  /*
-  return (
-    <section className="screen">
-      <div className="card wide">
-        <div className="score"><div><strong>{score}</strong><span>/100</span></div></div>
-        <p className="positive" style={{ textAlign: "center" }}>Excelente · +7 pts vs semana anterior</p>
-      </div>
-      <div className="card wide">
-        <h3>Factores de rendimiento</h3>
-        {factors.map(([label, value]) => <ProgressLine key={String(label)} label={String(label)} value={Number(value)} />)}
-      </div>
-    </section>
-  );
-  */
 }
 
 function clampScore(value: number) {

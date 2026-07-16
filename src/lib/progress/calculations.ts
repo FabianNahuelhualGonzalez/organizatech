@@ -48,17 +48,8 @@ export function evaluateExerciseObjective(input: ObjectiveEvaluationInput): Obje
   return "Cumplimos";
 }
 
-export function getObjectiveStatusLabel(status: ObjectiveStatus) {
-  if (status === "Mejoramos") return "Cumplimos · Mejoramos";
-  return status;
-}
-
 export function isObjectiveMet(status: ObjectiveStatus) {
   return status === "Cumplimos" || status === "Mejoramos";
-}
-
-export function isObjectiveImproved(status: ObjectiveStatus) {
-  return status === "Mejoramos";
 }
 
 export function calculateSetDifference(actualReps: number[], targetSets: number) {
@@ -79,13 +70,6 @@ export function calculateVolume(totalReps: number, weight: number) {
 
 export function calculateVolumePercentage(volumeDifference: number, previousVolume: number) {
   return previousVolume > 0 ? roundDecimal((volumeDifference / previousVolume) * 100) : 0;
-}
-
-export function calculateLegacyObjectiveStatus(repsDifference: number, kgDifference: number): ObjectiveStatus {
-  const roundedKgDifference = roundDecimal(kgDifference);
-  if (repsDifference < 0 || roundedKgDifference < 0) return "No cumplimos";
-  if (repsDifference > 0 || roundedKgDifference > 0) return "Mejoramos";
-  return "Cumplimos";
 }
 
 export function calculateExerciseMetrics(entry: ExerciseEntry, previous?: ExerciseMetrics): ExerciseMetrics {

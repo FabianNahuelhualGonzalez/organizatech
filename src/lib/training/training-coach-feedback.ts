@@ -163,7 +163,7 @@ export function buildTrainingCoachFeedback(input: TrainingCoachFeedbackInput): T
   const headline = resolveHeadline(normalized, sourceSignals, tone);
   const summary = resolveSummary(normalized, sourceSignals, tone);
   const nextTarget = resolveNextTarget(signals);
-  const nextAdvice = resolveNextAdvice(normalized, sourceSignals, nextTarget);
+  const nextAdvice = resolveNextAdvice(sourceSignals, nextTarget);
   const confidence = resolveConfidence(normalized, sourceSignals);
 
   return compactFeedback({
@@ -708,7 +708,7 @@ function resolveSummary(input: NormalizedTrainingCoachInput, signals: string[], 
   return "La lectura es mixta: hay puntos buenos, pero también señales para ajustar la próxima sesión.";
 }
 
-function resolveNextAdvice(input: NormalizedTrainingCoachInput, signals: string[], nextTarget?: string) {
+function resolveNextAdvice(signals: string[], nextTarget?: string) {
   if (signals.includes("first_reference")) return "Repite esta base una vez más y busca mantener técnica, carga y repeticiones antes de acelerar la progresión.";
   if (signals.includes("sleep_low_performance_low")) return "No fuerces marcas si el descanso sigue bajo; prioriza técnica y consistencia.";
   if (signals.includes("kg_up_reps_down")) return "Consolida la nueva carga y busca recuperar repeticiones antes de aumentar otra vez el peso.";
