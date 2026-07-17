@@ -1,31 +1,38 @@
 import type { WeeklyEquivalentProgressResult } from "@/lib/progress/weekly-equivalent-progress";
 import type { ExerciseEntry, ExerciseMetrics, WeeklySummary } from "@/lib/progress/types";
 import type {
+  CoachComparisonStatus,
   TrainingCoachFeedbackInput,
   TrainingCoachReadiness,
   TrainingCoachWeeklyTrend,
   TrainingCoachWeeklyTrendWeek,
 } from "@/lib/training/training-coach-feedback";
 
+export interface TrainingCoachActiveDayCoverage {
+  registeredExercises: number;
+  plannedExercises: number;
+}
+
 export interface TrainingCoachDashboardInput {
+  activeDay: string;
+  activeDayCoverage: TrainingCoachActiveDayCoverage;
   summary: WeeklySummary;
   currentMetrics: ExerciseMetrics[];
+  /** Entries already scoped to the active day, including its historical records. */
   entries: ExerciseEntry[];
   currentWeek: number;
+  /** Global weekly context. It must never decide the active-day comparison status. */
   weeklyEquivalentProgress: Pick<WeeklyEquivalentProgressResult, "status">;
 }
 
 export function buildTrainingCoachDashboardInput(input: TrainingCoachDashboardInput): TrainingCoachFeedbackInput {
-  const hasRealRecords = input.entries.length > 0 || input.currentMetrics.length > 0;
-  const comparisonStatus = input.weeklyEquivalentProgress.status === "ready"
-    ? "ready"
-    : hasRealRecords
-      ? "first_reference"
-      : "none";
+  const activeDayComparison = resolveActiveDayComparison(input);
+  const comparisonStatus = activeDayComparison.status;
   const readiness = resolveDashboardReadiness(input.entries, input.currentWeek);
   const weeklyTrend = buildDashboardWeeklyTrend(input.entries, input.currentWeek);
   const seed = [
     "coach",
+    input.activeDay.trim(),
     safeInteger(input.currentWeek),
     safeInteger(input.summary.exerciseCount),
     safeNumber(input.summary.volumeDifference),
@@ -50,17 +57,67 @@ export function buildTrainingCoachDashboardInput(input: TrainingCoachDashboardIn
         id: metric.exerciseId,
         name: metric.exerciseName.trim(),
         kgDifference: finiteOrNull(metric.kgDifference),
-        repsDifference: finiteOrNull(resolveComparableRepsDifference(metric, input.entries, input.currentWeek) ?? metric.repsDifference),
+        repsDifference: finiteOrNull(
+          resolveComparableRepsDifference(metric, input.entries, activeDayComparison.referenceWeek) ?? metric.repsDifference,
+        ),
         volumeDifference: finiteOrNull(metric.volumeDifference),
         volumePercentage: finiteOrNull(metric.volumePercentage),
       }))
       .filter((exercise) => exercise.name.length > 0),
     readiness,
     currentWeek: finiteOrNull(input.currentWeek),
-    referenceWeek: comparisonStatus === "ready" ? Math.max(1, safeInteger(input.currentWeek) - 1) : null,
+    referenceWeek: activeDayComparison.referenceWeek,
     weeklyTrend,
     seed,
   };
+}
+
+interface ActiveDayComparison {
+  status: CoachComparisonStatus;
+  referenceWeek: number | null;
+}
+
+function resolveActiveDayComparison(input: TrainingCoachDashboardInput): ActiveDayComparison {
+  const currentWeek = safeInteger(input.currentWeek);
+  const currentMetrics = input.currentMetrics.filter((metric) => (
+    safeInteger(metric.week) === currentWeek &&
+    metric.exerciseName.trim().length > 0 &&
+    metric.reps.some((rep) => safeNumber(rep) > 0)
+  ));
+  const hasCurrentEntry = input.entries.some((entry) => (
+    safeInteger(entry.week) === currentWeek && entry.reps.some((rep) => safeNumber(rep) > 0)
+  ));
+  const registeredExercises = Math.max(0, safeInteger(input.activeDayCoverage.registeredExercises));
+  const plannedExercises = Math.max(0, safeInteger(input.activeDayCoverage.plannedExercises));
+  const hasCurrentRecords = currentMetrics.length > 0 || hasCurrentEntry || registeredExercises > 0;
+
+  if (!hasCurrentRecords) {
+    return { status: "none", referenceWeek: null };
+  }
+
+  const isPartiallyRegistered = plannedExercises > 0 && registeredExercises < plannedExercises;
+  if (isPartiallyRegistered || currentMetrics.length === 0) {
+    return { status: "first_reference", referenceWeek: null };
+  }
+
+  const referenceWeek = findLatestCommonReferenceWeek(currentMetrics, input.entries, currentWeek);
+  return referenceWeek === null
+    ? { status: "first_reference", referenceWeek: null }
+    : { status: "ready", referenceWeek };
+}
+
+function findLatestCommonReferenceWeek(metrics: ExerciseMetrics[], entries: ExerciseEntry[], currentWeek: number) {
+  const referenceWeeksByMetric = metrics.map((metric) => new Set(
+    findComparableEntries(metric, entries, currentWeek).map((entry) => safeInteger(entry.week)),
+  ));
+  const firstReferenceWeeks = referenceWeeksByMetric[0];
+  if (!firstReferenceWeeks || firstReferenceWeeks.size === 0) return null;
+
+  const commonWeeks = [...firstReferenceWeeks]
+    .filter((week) => referenceWeeksByMetric.every((weeks) => weeks.has(week)))
+    .sort((a, b) => b - a);
+
+  return commonWeeks[0] ?? null;
 }
 
 export function buildDashboardWeeklyTrend(entries: ExerciseEntry[], currentWeek: number): TrainingCoachWeeklyTrend {
@@ -150,16 +207,19 @@ function isTrendWeekComplete(currentWeek: TrainingCoachWeeklyTrendWeek, weeks: T
     safeNumber(currentWeek.complianceRate) >= 100;
 }
 
-function resolveComparableRepsDifference(metric: ExerciseMetrics, entries: ExerciseEntry[], currentWeek: number) {
+function resolveComparableRepsDifference(metric: ExerciseMetrics, entries: ExerciseEntry[], referenceWeek: number | null) {
+  if (referenceWeek === null) return null;
   const currentTotalReps = sumFinite(metric.reps);
-  const previous = findPreviousComparableEntry(metric, entries, currentWeek);
+  const previous = findComparableEntries(metric, entries, safeInteger(metric.week))
+    .filter((entry) => safeInteger(entry.week) === referenceWeek)
+    .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
   if (!previous) return null;
   const previousTotalReps = sumFinite(previous.reps);
   if (currentTotalReps === null || previousTotalReps === null) return null;
   return currentTotalReps - previousTotalReps;
 }
 
-function findPreviousComparableEntry(metric: ExerciseMetrics, entries: ExerciseEntry[], currentWeek: number) {
+function findComparableEntries(metric: ExerciseMetrics, entries: ExerciseEntry[], currentWeek: number) {
   const lineageId = metric.exerciseLineageId?.trim() || null;
   const exerciseId = metric.exerciseId;
   return entries
@@ -169,7 +229,7 @@ function findPreviousComparableEntry(metric: ExerciseMetrics, entries: ExerciseE
       return !lineageId && entry.exerciseId === exerciseId;
     })
     .filter((entry) => entry.reps.some((rep) => safeNumber(rep) > 0))
-    .sort((a, b) => safeInteger(b.week) - safeInteger(a.week) || b.date.localeCompare(a.date))[0] ?? null;
+    .sort((a, b) => safeInteger(b.week) - safeInteger(a.week) || b.date.localeCompare(a.date));
 }
 
 export function resolveDashboardReadiness(entries: ExerciseEntry[], currentWeek: number): TrainingCoachReadiness | null {

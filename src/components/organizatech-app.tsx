@@ -4367,13 +4367,28 @@ function DashboardScreen({
   const activeCoachMetrics = activeDayData.metrics;
   const activeCoachSummary = calculateWeeklySummary(activeCoachMetrics, currentWeek);
   const analytics = buildAnalytics(activeCoachSummary, activeCoachMetrics);
-  const coachFeedback = useMemo(() => buildTrainingCoachFeedback(buildTrainingCoachDashboardInput({
+  const coachInput = useMemo(() => buildTrainingCoachDashboardInput({
+    activeDay: activeCarouselDay,
+    activeDayCoverage: {
+      registeredExercises: activeDayData.registeredCount,
+      plannedExercises: activeDayData.plannedCount,
+    },
     summary: activeCoachSummary,
     currentMetrics: activeCoachMetrics,
     entries: activeCoachEntries,
     currentWeek,
     weeklyEquivalentProgress,
-  })), [activeCoachSummary, activeCoachMetrics, activeCoachEntries, currentWeek, weeklyEquivalentProgress]);
+  }), [
+    activeCarouselDay,
+    activeCoachEntries,
+    activeCoachMetrics,
+    activeCoachSummary,
+    activeDayData.plannedCount,
+    activeDayData.registeredCount,
+    currentWeek,
+    weeklyEquivalentProgress,
+  ]);
+  const coachFeedback = useMemo(() => buildTrainingCoachFeedback(coachInput), [coachInput]);
   const hasCurrentWeekTrainingRecords = activeCoachEntries.some((entry) => (
     entry.week === currentWeek && entry.reps.some((rep) => rep > 0)
   ));
@@ -4393,9 +4408,9 @@ function DashboardScreen({
         detail: "Completa tu primera sesión para generar una lectura de rendimiento.",
         factorLabel: "Datos disponibles",
       }
-    : weeklyEquivalentProgress.status === "ready"
+    : coachInput.comparisonStatus === "ready"
     ? { showScore: true, showFactors: true, label: feedbackHeadlineForStatus(displayedCoachFeedback), detail: "Factores de rendimiento", factorLabel: "Factores de rendimiento" }
-    : weeklyEquivalentProgress.status === "no_previous"
+    : coachInput.comparisonStatus === "first_reference"
       ? {
           showScore: false,
           showFactors: true,
