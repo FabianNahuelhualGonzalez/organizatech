@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import type { WeeklyEquivalentProgressResult } from "@/lib/progress/weekly-equivalent-progress";
 import type { ExerciseEntry, ExerciseMetrics, WeeklySummary } from "@/lib/progress/types";
@@ -8,13 +9,17 @@ import {
   buildTrainingCoachDashboardInput,
   parseReadinessFromNotes,
   resolveDashboardReadiness,
+  type TrainingCoachDashboardInput,
 } from "@/lib/training/training-coach-dashboard-mapper";
 
 {
-  const input = buildTrainingCoachDashboardInput({
+  const input = mapDashboardInput({
     summary: summary({ week: 5 }),
-    currentMetrics: [metric({ exerciseName: "Press plano", kgDifference: 5, repsDifference: 3 })],
-    entries: [entry({ week: 5 })],
+    currentMetrics: [metric({ exerciseId: "press-plano", exerciseName: "Press plano", kgDifference: 5, repsDifference: 3 })],
+    entries: [
+      entry({ id: "press-w4", exerciseId: "press-plano", week: 4 }),
+      entry({ id: "press-w5", exerciseId: "press-plano", week: 5 }),
+    ],
     currentWeek: 5,
     weeklyEquivalentProgress: progress("ready"),
   });
@@ -23,11 +28,11 @@ import {
   assert.equal(input.referenceWeek, 4);
   assert.equal(input.workout?.kgIncreasedExercises, 1);
   assert.equal(input.exercises?.[0]?.name, "Press plano");
-  assert.equal(input.weeklyTrend?.phase, "first_reference");
+  assert.equal(input.weeklyTrend?.phase, "initial_comparison");
 }
 
 {
-  const input = buildTrainingCoachDashboardInput({
+  const input = mapDashboardInput({
     summary: summary({ week: 3 }),
     currentMetrics: [metric({ exerciseName: "Sentadilla" })],
     entries: [entry({ week: 3 })],
@@ -40,7 +45,7 @@ import {
 }
 
 {
-  const input = buildTrainingCoachDashboardInput({
+  const input = mapDashboardInput({
     summary: summary({ week: 1, exerciseCount: 0 }),
     currentMetrics: [],
     entries: [],
@@ -52,6 +57,156 @@ import {
   assert.equal(input.readiness, null);
   assert.deepEqual(input.exercises, []);
   assert.equal(input.weeklyTrend?.phase, "no_history");
+}
+
+// Escenario 1: el estado semanal global no convierte en ready un día sin referencia.
+{
+  const input = mapDashboardInput({
+    activeDay: "Miércoles",
+    summary: summary({ week: 6 }),
+    currentMetrics: [metric({ exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 })],
+    entries: [entry({ id: "sentadilla-w6", exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 })],
+    currentWeek: 6,
+    weeklyEquivalentProgress: progress("ready"),
+  });
+
+  assert.equal(input.comparisonStatus, "first_reference");
+  assert.equal(input.referenceWeek, null);
+}
+
+// Escenario 2: la referencia de otro día queda fuera del input del día activo.
+{
+  const monday = mapDashboardInput({
+    activeDay: "Lunes",
+    summary: summary({ week: 6 }),
+    currentMetrics: [metric({ exerciseId: "press", exerciseName: "Press plano", week: 6 })],
+    entries: [
+      entry({ id: "press-w5", exerciseId: "press", exerciseName: "Press plano", week: 5 }),
+      entry({ id: "press-w6", exerciseId: "press", exerciseName: "Press plano", week: 6 }),
+    ],
+    currentWeek: 6,
+    weeklyEquivalentProgress: progress("ready"),
+  });
+  const activeWednesdayEntries = [
+    entry({ id: "curl-w6", exerciseId: "curl", exerciseName: "Curl femoral", week: 6 }),
+  ];
+
+  const wednesday = mapDashboardInput({
+    activeDay: "Miércoles",
+    summary: summary({ week: 6 }),
+    currentMetrics: [metric({ exerciseId: "curl", exerciseName: "Curl femoral", week: 6 })],
+    entries: activeWednesdayEntries,
+    currentWeek: 6,
+    weeklyEquivalentProgress: progress("ready"),
+  });
+
+  assert.equal(monday.comparisonStatus, "ready", "el otro día sí tiene referencia");
+  assert.equal(wednesday.comparisonStatus, "first_reference");
+}
+
+// Escenario 3: una referencia histórica del mismo día habilita la comparación.
+{
+  const input = mapDashboardInput({
+    activeDay: "Miércoles",
+    summary: summary({ week: 6 }),
+    currentMetrics: [metric({ exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 })],
+    entries: [
+      entry({ id: "sentadilla-w5", exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 5 }),
+      entry({ id: "sentadilla-w6", exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 }),
+    ],
+    currentWeek: 6,
+    weeklyEquivalentProgress: progress("neutral"),
+  });
+
+  assert.equal(input.comparisonStatus, "ready");
+  assert.equal(input.referenceWeek, 5);
+}
+
+// Escenario 4: cambiar de un día con referencia a otro sin ella recalcula el estado.
+{
+  const dayA = mapDashboardInput({
+    activeDay: "Lunes",
+    summary: summary({ week: 6 }),
+    currentMetrics: [metric({ exerciseId: "press", exerciseName: "Press plano", week: 6 })],
+    entries: [
+      entry({ id: "press-w5", exerciseId: "press", exerciseName: "Press plano", week: 5 }),
+      entry({ id: "press-w6", exerciseId: "press", exerciseName: "Press plano", week: 6 }),
+    ],
+    currentWeek: 6,
+    weeklyEquivalentProgress: progress("ready"),
+  });
+  const dayB = mapDashboardInput({
+    activeDay: "Miércoles",
+    summary: summary({ week: 6 }),
+    currentMetrics: [metric({ exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 })],
+    entries: [entry({ id: "sentadilla-w6", exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 })],
+    currentWeek: 6,
+    weeklyEquivalentProgress: progress("ready"),
+  });
+
+  assert.equal(dayA.comparisonStatus, "ready");
+  assert.equal(dayB.comparisonStatus, "first_reference");
+  assert.notEqual(dayA.seed, dayB.seed, "el día activo participa del seed estable");
+}
+
+// Escenario 5: un día parcialmente registrado no se presenta como comparación completa.
+{
+  const input = mapDashboardInput({
+    activeDay: "Miércoles",
+    activeDayCoverage: { registeredExercises: 1, plannedExercises: 2 },
+    summary: summary({ week: 6, exerciseCount: 1 }),
+    currentMetrics: [metric({ exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 })],
+    entries: [
+      entry({ id: "sentadilla-w5", exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 5 }),
+      entry({ id: "sentadilla-w6", exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 }),
+    ],
+    currentWeek: 6,
+    weeklyEquivalentProgress: progress("ready"),
+  });
+
+  assert.equal(input.comparisonStatus, "first_reference");
+  assert.equal(input.referenceWeek, null);
+}
+
+// Escenario 6: todos los ejercicios registrados deben compartir una referencia válida.
+{
+  const input = mapDashboardInput({
+    activeDay: "Miércoles",
+    activeDayCoverage: { registeredExercises: 2, plannedExercises: 2 },
+    summary: summary({ week: 6, exerciseCount: 2 }),
+    currentMetrics: [
+      metric({ exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 }),
+      metric({ exerciseId: "curl", exerciseName: "Curl femoral", week: 6 }),
+    ],
+    entries: [
+      entry({ id: "sentadilla-w5", exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 5 }),
+      entry({ id: "sentadilla-w6", exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 }),
+      entry({ id: "curl-w6", exerciseId: "curl", exerciseName: "Curl femoral", week: 6 }),
+    ],
+    currentWeek: 6,
+    weeklyEquivalentProgress: progress("ready"),
+  });
+
+  assert.equal(input.comparisonStatus, "first_reference");
+  assert.equal(input.referenceWeek, null);
+}
+
+// Escenario 8: el contexto semanal permanece disponible, pero no decide el estado del día.
+{
+  const base = {
+    activeDay: "Miércoles",
+    summary: summary({ week: 6, volumeDifference: 777, repsDifference: 9 }),
+    currentMetrics: [metric({ exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 })],
+    entries: [entry({ id: "sentadilla-w6", exerciseId: "sentadilla", exerciseName: "Sentadilla", week: 6 })],
+    currentWeek: 6,
+  };
+  const globalReady = mapDashboardInput({ ...base, weeklyEquivalentProgress: progress("ready") });
+  const globalNeutral = mapDashboardInput({ ...base, weeklyEquivalentProgress: progress("neutral") });
+
+  assert.equal(globalReady.comparisonStatus, "first_reference");
+  assert.equal(globalNeutral.comparisonStatus, "first_reference");
+  assert.equal(globalReady.workout?.volumeDifference, 777, "las métricas agregadas siguen disponibles");
+  assert.equal(globalReady.workout?.repsDifference, 9);
 }
 
 {
@@ -70,14 +225,14 @@ import {
 }
 
 {
-  const first = buildTrainingCoachDashboardInput({
+  const first = mapDashboardInput({
     summary: summary({ week: 5, volumeDifference: -1200, repsDifference: -4 }),
     currentMetrics: [metric({ exerciseName: "Hack", repsDifference: -4 })],
     entries: [entry({ week: 5 })],
     currentWeek: 5,
     weeklyEquivalentProgress: progress("ready"),
   });
-  const second = buildTrainingCoachDashboardInput({
+  const second = mapDashboardInput({
     summary: summary({ week: 5, volumeDifference: -1200, repsDifference: -4 }),
     currentMetrics: [metric({ exerciseName: "Hack", repsDifference: -4 })],
     entries: [entry({ week: 5 })],
@@ -88,8 +243,9 @@ import {
   assert.equal(first.seed, second.seed, "seed estable para la misma entrada");
 }
 
+// Escenario 7: los valores no finitos continúan normalizados.
 {
-  const input = buildTrainingCoachDashboardInput({
+  const input = mapDashboardInput({
     summary: summary({
       week: 5,
       exerciseCount: Number.NaN,
@@ -113,10 +269,13 @@ import {
 }
 
 {
-  const mapped = buildTrainingCoachDashboardInput({
+  const mapped = mapDashboardInput({
     summary: summary({ week: 5, volumeDifference: -3000, volumePercentage: -30, repsDifference: -8, objectivesOk: 3, exerciseCount: 3 }),
-    currentMetrics: [metric({ exerciseName: "Press plano", repsDifference: -8, volumePercentage: -30 })],
-    entries: [entry({ week: 5 })],
+    currentMetrics: [metric({ exerciseId: "press-plano", exerciseName: "Press plano", repsDifference: -8, volumePercentage: -30 })],
+    entries: [
+      entry({ id: "press-w4", exerciseId: "press-plano", week: 4, reps: [13, 13, 12] }),
+      entry({ id: "press-w5", exerciseId: "press-plano", week: 5, reps: [10, 10, 10] }),
+    ],
     currentWeek: 5,
     weeklyEquivalentProgress: progress("ready"),
   });
@@ -128,7 +287,7 @@ import {
 }
 
 {
-  const mapped = buildTrainingCoachDashboardInput({
+  const mapped = mapDashboardInput({
     summary: summary({ week: 6, volumeDifference: -2000, volumePercentage: -12, repsDifference: -9, objectivesOk: 1, exerciseCount: 2 }),
     currentMetrics: [
       metric({
@@ -173,20 +332,24 @@ import {
 }
 
 {
-  const mapped = buildTrainingCoachDashboardInput({
+  const mapped = mapDashboardInput({
     summary: summary({ week: 6, volumeDifference: 500, volumePercentage: 8, repsDifference: -4, objectivesOk: 1, exerciseCount: 1 }),
     currentMetrics: [
       metric({
+        exerciseId: "hack",
         exerciseName: "Hack",
         week: 6,
         kgDifference: 10,
         repsDifference: -4,
         weight: 110,
         previousWeight: 100,
+        reps: [9, 9, 8],
+        totalReps: 26,
       }),
     ],
     entries: [
-      entry({ week: 6, exerciseName: "Hack", reps: [9, 9, 8], weight: 110, previousWeight: 100 }),
+      entry({ id: "hack-w5", exerciseId: "hack", week: 5, exerciseName: "Hack", reps: [10, 10, 10], weight: 100 }),
+      entry({ id: "hack-w6", exerciseId: "hack", week: 6, exerciseName: "Hack", reps: [9, 9, 8], weight: 110, previousWeight: 100 }),
     ],
     currentWeek: 6,
     weeklyEquivalentProgress: progress("ready"),
@@ -261,7 +424,7 @@ import {
 }
 
 {
-  const mapped = buildTrainingCoachDashboardInput({
+  const mapped = mapDashboardInput({
     summary: summary({ week: 5 }),
     currentMetrics: [metric({ exerciseName: "Press plano", week: 5 })],
     entries: [
@@ -278,7 +441,49 @@ import {
   assert.ok(feedback.trendSignals?.includes("historical_early_trend"));
 }
 
+{
+  const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+  const scopedEntriesDeclaration = appSource.indexOf(
+    "const activeCoachEntries = getDashboardCoachEntries(entries, activeDayData.exercises, usesCycleScopedSessions);",
+  );
+  const coachInputStart = appSource.indexOf("const coachInput = useMemo(() => buildTrainingCoachDashboardInput({");
+  const coachFeedbackStart = appSource.indexOf("const coachFeedback = useMemo", coachInputStart);
+
+  assert.ok(scopedEntriesDeclaration >= 0, "el historial del Coach se filtra con los ejercicios del día activo");
+  assert.ok(coachInputStart > scopedEntriesDeclaration, "el día activo se resuelve antes de construir el input");
+  assert.ok(coachFeedbackStart > coachInputStart, "el input puro se construye antes del feedback");
+
+  const coachInputSource = appSource.slice(coachInputStart, coachFeedbackStart);
+  assert.match(coachInputSource, /activeDay: activeCarouselDay/);
+  assert.match(coachInputSource, /registeredExercises: activeDayData\.registeredCount/);
+  assert.match(coachInputSource, /plannedExercises: activeDayData\.plannedCount/);
+  assert.match(coachInputSource, /entries: activeCoachEntries/);
+  assert.match(coachInputSource, /summary: activeCoachSummary/);
+  assert.match(coachInputSource, /weeklyEquivalentProgress/);
+  assert.match(coachInputSource, /\[\s*activeCarouselDay,[\s\S]*activeCoachEntries,[\s\S]*weeklyEquivalentProgress,/);
+}
+
 console.log("training-coach-dashboard-mapper tests passed");
+
+type DashboardInputOverrides = Omit<TrainingCoachDashboardInput, "activeDay" | "activeDayCoverage"> &
+  Partial<Pick<TrainingCoachDashboardInput, "activeDay" | "activeDayCoverage">>;
+
+function mapDashboardInput(input: DashboardInputOverrides) {
+  const {
+    activeDay = "Lunes",
+    activeDayCoverage = {
+      registeredExercises: input.currentMetrics.length,
+      plannedExercises: input.currentMetrics.length,
+    },
+    ...rest
+  } = input;
+
+  return buildTrainingCoachDashboardInput({
+    activeDay,
+    activeDayCoverage,
+    ...rest,
+  });
+}
 
 function progress(status: WeeklyEquivalentProgressResult["status"]): Pick<WeeklyEquivalentProgressResult, "status"> {
   return { status };
