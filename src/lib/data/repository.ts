@@ -10,6 +10,10 @@ import type {
 import { resolveEnsureProfileWrite } from "@/lib/profile/profile-form";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
+  hydrateLegacyExerciseTemplatesWithLineage,
+  type LegacyExerciseLineageRow,
+} from "@/lib/training/legacy-exercise-lineage-hydration";
+import {
   BROWSER_STORAGE_PREFIXES,
   getScopedBrowserStorageKey,
   migrateLegacyBrowserStorageToDemo,
@@ -420,7 +424,7 @@ async function fetchExercises(userId: string): Promise<ExerciseTemplate[]> {
 
   if (error) throw error;
 
-  return ((data ?? []) as unknown as SupabaseExerciseRow[])
+  const legacyExercises = ((data ?? []) as unknown as SupabaseExerciseRow[])
     .filter((row) => !isInactiveCycleNote(row.notes))
     .map((row) => ({
       id: row.id,
@@ -433,6 +437,21 @@ async function fetchExercises(userId: string): Promise<ExerciseTemplate[]> {
       day: readExerciseDay(row.day, row.notes),
       notes: row.notes ?? undefined,
     }));
+
+  if (legacyExercises.length === 0) return legacyExercises;
+
+  const { data: lineageRows, error: lineageError } = await supabase
+    .from("training_exercise_lineages")
+    .select("id,source_legacy_exercise_id")
+    .eq("user_id", userId)
+    .in("source_legacy_exercise_id", legacyExercises.map((exercise) => exercise.id));
+
+  if (lineageError) throw lineageError;
+
+  return hydrateLegacyExerciseTemplatesWithLineage(
+    legacyExercises,
+    (lineageRows ?? []) as unknown as LegacyExerciseLineageRow[],
+  );
 }
 
 async function fetchEntries(userId: string): Promise<ExerciseEntry[]> {
