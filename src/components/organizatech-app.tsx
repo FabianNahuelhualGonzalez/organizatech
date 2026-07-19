@@ -77,8 +77,6 @@ import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode,
 import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
 import {
   getActiveFlow,
-  isActiveFlow,
-  isAppScreen,
   screenLabel,
   type ActiveFlow,
   type Screen,
@@ -109,6 +107,16 @@ import {
   type BrowserStorageScope,
   type SeenNotificationStorageRecord,
 } from "@/lib/storage/browser-storage";
+import {
+  ACTIVE_FLOW_VERSION,
+  ROUTINE_DRAFT_VERSION,
+  clearActiveFlow,
+  clearRoutineDraft,
+  loadActiveFlow,
+  loadRoutineDraft,
+  saveActiveFlow,
+  saveRoutineDraft,
+} from "@/lib/storage/app-flow-storage";
 import {
   advanceSessionDataEpoch as createAdvancedSessionDataEpoch,
   captureSessionDataRequestToken as createSessionDataRequestToken,
@@ -252,12 +260,8 @@ import {
 
 const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
 const setupDays: string[] = [...TRAINING_DAY_LABELS];
-const ROUTINE_DRAFT_VERSION = 1;
 const WORKOUT_DRAFT_VERSION = 1;
-const ACTIVE_FLOW_VERSION = 1;
-const ROUTINE_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const ACTIVE_FLOW_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
 const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
 const SEEN_NOTIFICATIONS_MAX_RECORDS = 60;
@@ -331,28 +335,6 @@ interface SetupExerciseRow {
 interface SetupDayState {
   routineName: string;
   rows: SetupExerciseRow[];
-}
-
-interface RoutineDraft {
-  version: number;
-  updatedAt: number;
-  dataMode: DataMode;
-  userKey: BrowserStorageScope;
-  screen: Screen;
-  setupDay: string;
-  setupByDay: Record<string, SetupDayState>;
-  trainingPlan: TrainingPlan;
-  isEditingRoutinePlan: boolean;
-  routineEditorReturnScreen: Screen | null;
-  activeRoutineDay: string;
-}
-
-interface ActiveFlowState {
-  version: number;
-  updatedAt: number;
-  dataMode: DataMode;
-  userKey: BrowserStorageScope;
-  flow: ActiveFlow;
 }
 
 type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>>;
@@ -1406,7 +1388,12 @@ export function OrganizatechApp({
   }
 
   function restoreRoutineDraftForSession(mode: DataMode, userId?: string) {
-    const draft = loadRoutineDraft(mode, userId);
+    const draft = loadRoutineDraft(mode, userId, {
+      setupDays,
+      normalizeSetupByDay,
+      normalizeTrainingPlan,
+      hasSetupDraftContent,
+    });
     if (!draft) return false;
 
     setSetupDay(draft.setupDay);
@@ -7198,126 +7185,6 @@ function saveCycleHistory(history: TrainingCycleSnapshot[], scope: BrowserStorag
     getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.cycleHistory, scope),
     history,
   );
-}
-
-function getRoutineDraftKey(mode: DataMode, userId?: string) {
-  const scope = getDraftUserKey(mode, userId);
-  return scope ? getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.routineDraft, scope) : null;
-}
-
-function getActiveFlowKey(mode: DataMode, userId?: string) {
-  const scope = getDraftUserKey(mode, userId);
-  return scope ? getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.activeFlow, scope) : null;
-}
-
-function saveActiveFlow(flow: ActiveFlowState) {
-  if (typeof window === "undefined") return;
-  writeScopedJson(window.localStorage, getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.activeFlow, flow.userKey), flow);
-}
-
-function loadActiveFlow(mode: DataMode, userId?: string) {
-  if (typeof window === "undefined") return null;
-
-  try {
-    migrateLegacyBrowserStorageToDemo(window.localStorage);
-    const key = getActiveFlowKey(mode, userId);
-    const userKey = getDraftUserKey(mode, userId);
-    if (!key || !userKey) return null;
-    const raw = window.localStorage.getItem(key);
-    if (raw === null) return null;
-
-    const parsed = JSON.parse(raw) as Partial<ActiveFlowState>;
-    const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
-    const isExpired = updatedAt === 0 || Date.now() - updatedAt > ACTIVE_FLOW_MAX_AGE_MS;
-    if (
-      parsed.version !== ACTIVE_FLOW_VERSION ||
-      parsed.userKey !== userKey ||
-      parsed.dataMode !== mode ||
-      !isActiveFlow(parsed.flow) ||
-      isExpired
-    ) {
-      clearActiveFlow(mode, userId);
-      return null;
-    }
-
-    return {
-      version: ACTIVE_FLOW_VERSION,
-      updatedAt,
-      dataMode: mode,
-      userKey,
-      flow: parsed.flow,
-    } satisfies ActiveFlowState;
-  } catch {
-    clearActiveFlow(mode, userId);
-    return null;
-  }
-}
-
-function clearActiveFlow(mode: DataMode, userId?: string) {
-  if (typeof window === "undefined") return;
-  const key = getActiveFlowKey(mode, userId);
-  if (key) window.localStorage.removeItem(key);
-}
-
-function saveRoutineDraft(draft: RoutineDraft) {
-  if (typeof window === "undefined") return;
-  writeScopedJson(window.localStorage, getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.routineDraft, draft.userKey), draft);
-}
-
-function loadRoutineDraft(mode: DataMode, userId?: string) {
-  if (typeof window === "undefined") return null;
-
-  try {
-    migrateLegacyBrowserStorageToDemo(window.localStorage);
-    const key = getRoutineDraftKey(mode, userId);
-    const userKey = getDraftUserKey(mode, userId);
-    if (!key || !userKey) return null;
-    const raw = window.localStorage.getItem(key);
-    if (raw === null) return null;
-
-    const parsed = JSON.parse(raw) as Partial<RoutineDraft>;
-    const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
-    const isExpired = updatedAt === 0 || Date.now() - updatedAt > ROUTINE_DRAFT_MAX_AGE_MS;
-    if (parsed.version !== ROUTINE_DRAFT_VERSION || parsed.userKey !== userKey || parsed.dataMode !== mode || isExpired) {
-      clearRoutineDraft(mode, userId);
-      return null;
-    }
-
-    const setupDay = typeof parsed.setupDay === "string" && setupDays.includes(parsed.setupDay) ? parsed.setupDay : "Lunes";
-    const trainingPlan = normalizeTrainingPlan(parsed.trainingPlan);
-    const setupByDay = normalizeSetupByDay(parsed.setupByDay);
-    if (!hasSetupDraftContent(setupByDay)) {
-      clearRoutineDraft(mode, userId);
-      return null;
-    }
-
-    return {
-      version: ROUTINE_DRAFT_VERSION,
-      updatedAt,
-      dataMode: mode,
-      userKey,
-      screen: "registro-entrenamiento" as Screen,
-      setupDay,
-      setupByDay,
-      trainingPlan,
-      isEditingRoutinePlan: Boolean(parsed.isEditingRoutinePlan),
-      routineEditorReturnScreen: parsed.routineEditorReturnScreen && isAppScreen(parsed.routineEditorReturnScreen)
-        ? parsed.routineEditorReturnScreen
-        : null,
-      activeRoutineDay: typeof parsed.activeRoutineDay === "string" && setupDays.includes(parsed.activeRoutineDay)
-        ? parsed.activeRoutineDay
-        : setupDay,
-    } satisfies RoutineDraft;
-  } catch {
-    clearRoutineDraft(mode, userId);
-    return null;
-  }
-}
-
-function clearRoutineDraft(mode: DataMode, userId?: string) {
-  if (typeof window === "undefined") return;
-  const key = getRoutineDraftKey(mode, userId);
-  if (key) window.localStorage.removeItem(key);
 }
 
 function saveWorkoutDraft(draft: Omit<WorkoutDraft, "userKey"> & { userKey: BrowserStorageScope | null }) {
