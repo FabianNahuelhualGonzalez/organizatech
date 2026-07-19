@@ -516,7 +516,7 @@ async function run() {
   {
     const storageSource = readFileSync("src/lib/training/workout-draft-storage.ts", "utf8");
     const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
-    const pageSource = readFileSync("src/app/page.tsx", "utf8");
+    const loginPageSource = readFileSync("src/app/login/page.tsx", "utf8");
     const legacyReadinessSource = readFileSync("src/lib/training/training-daily-readiness-repository.ts", "utf8");
     const packageJson = readFileSync("package.json", "utf8");
     assert.match(appSource, /saveTrainingWorkoutReadiness/, "organizatech-app importa save readiness v2");
@@ -637,11 +637,11 @@ async function run() {
     assert.doesNotMatch(legacyCompletionBranch, /createWorkoutReadinessPendingLink|linkTrainingWorkoutReadinessSession|pendingReadinessLinkRef/, "rama legacy no crea pending ni llama link");
     const useEffectBlocks = appSource.match(/useEffect\(\(\) => \{[\s\S]*?\n  \}, \[.*?\]\);/g) ?? [];
     assert.equal(useEffectBlocks.some((block) => block.includes("linkTrainingWorkoutReadinessSession")), false, "no existe link automatico en useEffect");
-    assert.match(pageSource, /process\.env\.ENABLE_TRAINING_WORKOUT_READINESS_V2 === "true"/, "page.tsx activa readiness v2 solo con true exacto");
-    assert.doesNotMatch(pageSource, /NEXT_PUBLIC_ENABLE_TRAINING_WORKOUT_READINESS_V2/, "readiness v2 usa flag server-only");
-    assert.doesNotMatch(pageSource, /ENABLE_TRAINING_WORKOUT_READINESS_V2[\s\S]*(?:trim|toLowerCase|\|\| true|!== "false"|=== "1")/, "readiness v2 no acepta activacion laxa ni default activo");
-    assert.doesNotMatch(pageSource, /VERCEL_ENV !== "production"/, "page.tsx no bloquea readiness v2 por entorno Production");
-    assert.match(pageSource, /<OrganizatechApp[\s\S]*trainingWorkoutReadinessV2Enabled=\{trainingWorkoutReadinessV2Enabled\}/, "OrganizatechApp recibe la flag calculada server-side");
+    assert.match(loginPageSource, /process\.env\.ENABLE_TRAINING_WORKOUT_READINESS_V2 === "true"/, "login/page.tsx activa readiness v2 solo con true exacto");
+    assert.doesNotMatch(loginPageSource, /NEXT_PUBLIC_ENABLE_TRAINING_WORKOUT_READINESS_V2/, "readiness v2 usa flag server-only");
+    assert.doesNotMatch(loginPageSource, /ENABLE_TRAINING_WORKOUT_READINESS_V2[\s\S]*(?:trim|toLowerCase|\|\| true|!== "false"|=== "1")/, "readiness v2 no acepta activacion laxa ni default activo");
+    assert.doesNotMatch(loginPageSource, /VERCEL_ENV !== "production"/, "login/page.tsx no bloquea readiness v2 por entorno Production");
+    assert.match(loginPageSource, /<OrganizatechApp[\s\S]*trainingWorkoutReadinessV2Enabled=\{trainingWorkoutReadinessV2Enabled\}/, "OrganizatechApp recibe la flag calculada server-side");
     assert.doesNotMatch(storageSource, /save_training_workout_readiness_v2|link_training_workout_readiness_session_v2|crypto\.randomUUID|getSupabaseBrowserClient/, "storage no llama RPCs, Supabase ni genera UUIDs");
     assert.match(legacyReadinessSource, /save_daily_training_readiness/, "readiness legacy permanece intacto");
     assert.equal((packageJson.match(/src\/lib\/training\/training-workout-readiness-repository\.test\.ts/g) ?? []).length, 1);
