@@ -45,6 +45,7 @@ interface ExerciseDraft {
   reps: Array<number | "">;
   rir: string;
   registered: boolean;
+  observation: string;
 }
 
 function normalizeReadiness(value: unknown): Readiness | null {
@@ -105,6 +106,7 @@ function createDraft(
         reps: [10, 10, ""],
         rir: "2",
         registered: false,
+        observation: "Molestia leve en el hombro",
       },
     },
   };
@@ -214,6 +216,42 @@ async function run() {
     assert.equal(loaded?.activeWorkoutStartedAt, FIRST_STARTED_AT);
     assert.equal(loaded?.futureField, "preserved");
     assert.equal(writes.length, 1);
+  }
+
+  {
+    const { storage } = createStorage();
+    const draft = {
+      ...createDraft(),
+      exerciseDrafts: {
+        "exercise-1": {
+          weight: "80",
+          reps: [10, 10, ""],
+          rir: "2",
+          registered: false,
+          observation: "Molestia leve en el hombro",
+        },
+        "exercise-2": {
+          weight: "40",
+          reps: [12, 12],
+          rir: "",
+          registered: false,
+          observation: "",
+        },
+      },
+    } satisfies ReturnType<typeof createDraft>;
+    saveWorkoutDraft(draft, storage);
+    const loaded = load(storage);
+
+    assert.equal(
+      loaded?.exerciseDrafts["exercise-1"]?.observation,
+      "Molestia leve en el hombro",
+      "observation con texto sobrevive el round-trip JSON del draft",
+    );
+    assert.equal(
+      loaded?.exerciseDrafts["exercise-2"]?.observation,
+      "",
+      "observation vacia de un ejercicio no se filtra desde otro ejercicio del mismo draft",
+    );
   }
 
   {

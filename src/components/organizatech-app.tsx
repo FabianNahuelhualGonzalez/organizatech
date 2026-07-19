@@ -39,6 +39,7 @@ import {
   deactivateActiveCycle,
   deleteExercise,
   loadAppData,
+  normalizeExerciseObservation,
   replaceLocalData,
   saveExercise,
   saveTrainingSessionWithEntries,
@@ -172,6 +173,20 @@ import {
   buildExerciseLastPerformancePresentation,
   type ExerciseLastPerformancePresentation,
 } from "@/lib/training/exercise-last-performance-presentation";
+import {
+  getLatestExerciseObservationByLineage,
+  type LatestExerciseObservation,
+} from "@/lib/training/exercise-last-observation-repository";
+import {
+  createLatestExerciseObservationRequest,
+  getLatestExerciseObservationIdleState,
+  getLatestExerciseObservationLoadingState,
+  loadLatestExerciseObservationForRequest,
+} from "@/lib/training/exercise-last-observation-loader";
+import {
+  buildExerciseLastObservationPresentation,
+  type ExerciseLastObservationPresentation,
+} from "@/lib/training/exercise-last-observation-presentation";
 import { buildExerciseCurrentResultPresentation } from "@/lib/training/exercise-current-result-presentation";
 import {
   acquireWorkoutSaveLock,
@@ -366,6 +381,7 @@ interface ExerciseDraft {
   rir: string;
   reps: Array<number | "">;
   registered: boolean;
+  observation: string;
 }
 
 interface TrainingReadiness {
@@ -520,6 +536,11 @@ export function OrganizatechApp({
   const [latestExercisePerformanceLoading, setLatestExercisePerformanceLoading] = useState(false);
   const [latestExercisePerformanceError, setLatestExercisePerformanceError] = useState("");
   const latestExercisePerformanceRequestKeyRef = useRef<string | null>(null);
+  const [latestExerciseObservation, setLatestExerciseObservation] = useState<LatestExerciseObservation | null>(null);
+  const [latestExerciseObservationLoading, setLatestExerciseObservationLoading] = useState(false);
+  const [latestExerciseObservationError, setLatestExerciseObservationError] = useState("");
+  const [latestExerciseObservationDidQuery, setLatestExerciseObservationDidQuery] = useState(false);
+  const latestExerciseObservationRequestKeyRef = useRef<string | null>(null);
   const [trainingCompletionSummary, setTrainingCompletionSummary] = useState<TrainingCompletionSummary | null>(null);
   const [routineEditorReturnScreen, setRoutineEditorReturnScreen] = useState<Screen | null>(null);
   const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>([]);
@@ -564,6 +585,7 @@ export function OrganizatechApp({
     lastProfileAvatarRefreshAtRef.current = 0;
     lastProfileAvatarErrorRefreshAtRef.current = 0;
     latestExercisePerformanceRequestKeyRef.current = null;
+    latestExerciseObservationRequestKeyRef.current = null;
     return true;
   }, []);
 
@@ -1160,6 +1182,62 @@ export function OrganizatechApp({
       isMounted = false;
     };
   }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, isSessionDataRequestCurrent]);
+
+  useEffect(() => {
+    const requestToken = captureSessionDataRequestToken();
+    const observationUserId = supabaseUser?.id ?? null;
+
+    if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
+      latestExerciseObservationRequestKeyRef.current = null;
+      const idle = getLatestExerciseObservationIdleState();
+      setLatestExerciseObservation(idle.observation);
+      setLatestExerciseObservationLoading(idle.loading);
+      setLatestExerciseObservationError(idle.error);
+      setLatestExerciseObservationDidQuery(false);
+      return;
+    }
+
+    const request = createLatestExerciseObservationRequest({
+      userId: observationUserId,
+      exerciseLineageId: activeWorkoutExerciseLineageId,
+      currentSessionId: null,
+      beforeTimestamp: activeWorkoutStartedAt,
+    });
+
+    latestExerciseObservationRequestKeyRef.current = request?.key ?? null;
+
+    if (!request) {
+      const idle = getLatestExerciseObservationIdleState();
+      setLatestExerciseObservation(idle.observation);
+      setLatestExerciseObservationLoading(idle.loading);
+      setLatestExerciseObservationError(idle.error);
+      setLatestExerciseObservationDidQuery(false);
+      return;
+    }
+
+    const loading = getLatestExerciseObservationLoadingState();
+    setLatestExerciseObservation(loading.observation);
+    setLatestExerciseObservationLoading(loading.loading);
+    setLatestExerciseObservationError(loading.error);
+    setLatestExerciseObservationDidQuery(false);
+
+    let isMounted = true;
+    void loadLatestExerciseObservationForRequest({
+      request,
+      fetcher: getLatestExerciseObservationByLineage,
+      getCurrentRequestKey: () => latestExerciseObservationRequestKeyRef.current,
+    }).then((result) => {
+      if (!isMounted || result.stale || !isSessionDataRequestCurrent(requestToken)) return;
+      setLatestExerciseObservation(result.observation);
+      setLatestExerciseObservationLoading(result.loading);
+      setLatestExerciseObservationError(result.error);
+      setLatestExerciseObservationDidQuery(result.didQuery);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, isSessionDataRequestCurrent, supabaseUser?.id]);
 
   useEffect(() => {
     const currentUserId = supabaseUser?.id ?? null;
@@ -3205,6 +3283,7 @@ export function OrganizatechApp({
             reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
             rir: draft.rir,
             notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
+            observation: draft.observation,
           });
         }
 
@@ -3350,6 +3429,7 @@ export function OrganizatechApp({
             reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
             rir: draft.rir,
             notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
+            observation: draft.observation,
           };
         }),
         }, dataMode);
@@ -3849,6 +3929,10 @@ export function OrganizatechApp({
           latestExercisePerformance={latestExercisePerformance}
           latestExercisePerformanceLoading={latestExercisePerformanceLoading}
           latestExercisePerformanceError={latestExercisePerformanceError}
+          latestExerciseObservation={latestExerciseObservation}
+          latestExerciseObservationLoading={latestExerciseObservationLoading}
+          latestExerciseObservationError={latestExerciseObservationError}
+          latestExerciseObservationDidQuery={latestExerciseObservationDidQuery}
           updateDraft={updateExerciseDraft}
           registerExercise={registerCurrentExercise}
           saveCompletedTraining={saveCompletedTraining}
@@ -6125,6 +6209,10 @@ function GuidedTrainingScreen({
   latestExercisePerformance,
   latestExercisePerformanceLoading,
   latestExercisePerformanceError,
+  latestExerciseObservation,
+  latestExerciseObservationLoading,
+  latestExerciseObservationError,
+  latestExerciseObservationDidQuery,
   updateDraft,
   registerExercise,
   saveCompletedTraining,
@@ -6144,6 +6232,10 @@ function GuidedTrainingScreen({
   latestExercisePerformance: LatestExercisePerformance | null;
   latestExercisePerformanceLoading: boolean;
   latestExercisePerformanceError: string;
+  latestExerciseObservation: LatestExerciseObservation | null;
+  latestExerciseObservationLoading: boolean;
+  latestExerciseObservationError: string;
+  latestExerciseObservationDidQuery: boolean;
   updateDraft: (exercise: ExerciseTemplate, patch: Partial<ExerciseDraft>) => void;
   registerExercise: () => void;
   saveCompletedTraining: () => void;
@@ -6190,6 +6282,12 @@ function GuidedTrainingScreen({
         error: latestExercisePerformanceError,
       })
     : null;
+  const observationPresentation = buildExerciseLastObservationPresentation({
+    observation: latestExerciseObservation,
+    loading: latestExerciseObservationLoading,
+    error: latestExerciseObservationError,
+    hasQueried: latestExerciseObservationDidQuery,
+  });
 
   if (!activeExercise || !draft || !preview || !performancePresentation) {
     return (
@@ -6274,7 +6372,13 @@ function GuidedTrainingScreen({
           <h3>{activeExercise.name}</h3>
         </div>
         <div className="series-exercise-card">
-          <ExerciseLastPerformancePanel presentation={performancePresentation} exerciseId={activeExercise.id} />
+          <ExerciseLastPerformancePanel
+            presentation={performancePresentation}
+            exerciseId={activeExercise.id}
+            observationPresentation={observationPresentation}
+            observationValue={draft.observation}
+            onObservationChange={(value) => updateDraft(activeExercise, { observation: value })}
+          />
           <label className="series-weight-field">
             <span>Peso usado</span>
             <input
@@ -6328,10 +6432,18 @@ function GuidedTrainingScreen({
 function ExerciseLastPerformancePanel({
   presentation,
   exerciseId,
+  observationPresentation,
+  observationValue,
+  onObservationChange,
 }: {
   presentation: ExerciseLastPerformancePresentation;
   exerciseId: string;
+  observationPresentation: ExerciseLastObservationPresentation;
+  observationValue: string;
+  onObservationChange: (value: string) => void;
 }) {
+  const observationFieldId = `exercise-observation-${exerciseId}`;
+  const hasCurrentObservation = observationValue.trim().length > 0;
   return (
     <div className="exercise-reference-card" key={exerciseId}>
       <div className="exercise-reference-header">
@@ -6375,6 +6487,39 @@ function ExerciseLastPerformancePanel({
         <p className="exercise-reference-label">Meta de hoy</p>
         <strong className="exercise-reference-value">{presentation.todayGoalText}</strong>
       </div>
+
+      <details className="exercise-reference-block observation" key={`observation-${exerciseId}`}>
+        <summary>
+          <span>{hasCurrentObservation ? "Observación registrada" : "Añadir nuevo comentario"}</span>
+          <ChevronDown size={16} aria-hidden="true" />
+        </summary>
+        <div className="exercise-observation-content">
+          <p className="exercise-reference-label">Observación del ejercicio</p>
+
+          <div className="exercise-observation-history">
+            <p className="exercise-observation-history-label">{observationPresentation.historyLabel}</p>
+            {observationPresentation.status === "loading" ? (
+              <div className="exercise-performance-skeleton" aria-label="Cargando observación anterior" />
+            ) : (
+              <p className="exercise-observation-history-text">{observationPresentation.historyText}</p>
+            )}
+          </div>
+
+          <label className="exercise-observation-field" htmlFor={observationFieldId}>
+            <span className="exercise-observation-field-label">Añadir nuevo comentario</span>
+            <textarea
+              id={observationFieldId}
+              className="exercise-observation-textarea"
+              rows={3}
+              value={observationValue}
+              onChange={(event) => onObservationChange(event.target.value)}
+            />
+            <span className="exercise-observation-hint">
+              Registra sensaciones, técnica o algún detalle para tu próxima sesión.
+            </span>
+          </label>
+        </div>
+      </details>
     </div>
   );
 }
@@ -7570,6 +7715,7 @@ function createExerciseDraft(exercise: ExerciseTemplate): ExerciseDraft {
     rir: "",
     reps: Array.from({ length: exercise.targetSets }, () => ""),
     registered: false,
+    observation: "",
   };
 }
 
@@ -7603,6 +7749,7 @@ function normalizeExerciseDrafts(value: unknown): Record<string, ExerciseDraft> 
       rir: typeof draft.rir === "string" ? draft.rir : "",
       reps,
       registered: Boolean(draft.registered),
+      observation: normalizeExerciseObservation(draft.observation),
     } satisfies ExerciseDraft]];
   }));
 }

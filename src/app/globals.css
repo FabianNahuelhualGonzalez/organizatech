@@ -2420,6 +2420,117 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.exercise-reference-block.observation summary {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  color: #e8f4ff;
+  font-size: 12px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.exercise-reference-block.observation summary::-webkit-details-marker {
+  display: none;
+}
+
+.exercise-reference-block.observation summary svg {
+  flex: 0 0 auto;
+  color: #96c8ff;
+  transition: transform 160ms ease;
+}
+
+.exercise-reference-block.observation[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.exercise-reference-block.observation summary:focus-visible {
+  outline: 2px solid rgba(96, 207, 255, 0.7);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.exercise-observation-content {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.exercise-observation-history {
+  display: grid;
+  gap: 4px;
+  border-radius: 8px;
+  background: rgba(220, 231, 255, 0.05);
+  padding: 8px 10px;
+}
+
+.exercise-observation-history-label {
+  margin: 0;
+  color: #9eb3d8;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.exercise-observation-history-text {
+  margin: 0;
+  color: #eef5ff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.exercise-observation-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.exercise-observation-field-label {
+  color: #dce7ff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.exercise-observation-textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 76px;
+  resize: vertical;
+  border: 1px solid rgba(220, 231, 255, 0.14);
+  border-radius: 8px;
+  color: white;
+  background: rgba(2, 8, 23, 0.58);
+  padding: 10px 11px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.exercise-observation-textarea::placeholder {
+  color: rgba(220, 231, 255, 0.48);
+}
+
+.exercise-observation-textarea:focus {
+  border-color: rgba(60, 122, 255, 0.78);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(60, 122, 255, 0.16);
+}
+
+.exercise-observation-hint {
+  margin: 0;
+  color: #9eb3d8;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 @keyframes subtle-shimmer {
   from {
     background-position: 100% 0;
