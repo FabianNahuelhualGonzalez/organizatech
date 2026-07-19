@@ -136,22 +136,22 @@ function testDemoLocalPreservesObservation() {
   );
 }
 
-// 15. Source-contract confirma que aun no existe una casilla visual en esta fase.
-function testNoVisualObservationInputYet() {
-  assert.doesNotMatch(
+// 15. [OBS-2B2] La casilla visual de observacion ya existe y esta conectada a draft.observation.
+function testVisualObservationInputExistsAndIsConnectedToDraft() {
+  assert.match(
     appSource,
-    /<textarea/,
-    "esta fase no debe introducir ningun <textarea> visual todavia",
+    /<textarea\s*\n\s*id=\{observationFieldId\}/,
+    "debe existir un <textarea> identificado por observationFieldId dentro del panel de referencia",
   );
-  assert.doesNotMatch(
+  assert.match(
     appSource,
-    /value=\{draft\.observation\}/,
-    "esta fase no debe enlazar observation a un input/textarea controlado todavia",
+    /observationValue=\{draft\.observation\}/,
+    "el valor pasado al panel debe provenir de draft.observation",
   );
-  assert.doesNotMatch(
+  assert.match(
     appSource,
-    /placeholder=(["'`]).*[Oo]bservaci/,
-    "esta fase no debe agregar placeholder de observacion en JSX todavia",
+    /value=\{observationValue\}/,
+    "el textarea debe estar controlado por observationValue (que a su vez viene de draft.observation)",
   );
 }
 
@@ -163,6 +163,92 @@ function testHistoricalDraftsRemainCompatible() {
   assert.equal(normalizeExerciseObservation(true), "");
   assert.equal(normalizeExerciseObservation({}), "");
   assert.equal(normalizeExerciseObservation([]), "");
+}
+
+// [OBS-2B2 / PASO 7 caso 13-14] onChange actualiza exclusivamente el draft del ejercicio activo.
+function testOnChangeUpdatesOnlyTheActiveExerciseDraft() {
+  assert.match(
+    appSource,
+    /onObservationChange=\{\(value\) => updateDraft\(activeExercise, \{ observation: value \}\)\}/,
+    "el cambio en el textarea debe llamar updateDraft con activeExercise y solo el campo observation",
+  );
+}
+
+// [OBS-2B2 / PASO 7 caso 15] El draft activo se recalcula por exercise.id, aislando el texto al cambiar de ejercicio.
+function testDraftIsRecomputedPerActiveExerciseId() {
+  assert.match(
+    appSource,
+    /const draft = activeExercise \? normalizeExerciseDraft\(activeExercise, drafts\[activeExercise\.id\]\) : null;/,
+    "el draft mostrado debe derivarse siempre de drafts[activeExercise.id], nunca de un valor compartido entre ejercicios",
+  );
+}
+
+// [OBS-2B2 / PASO 7 caso 16] El historico nunca se copia al draft actual.
+function testHistoryNeverAutofillsDraft() {
+  assert.doesNotMatch(
+    appSource,
+    /updateDraft\([^)]*latestExerciseObservation/,
+    "updateDraft nunca debe recibir latestExerciseObservation como fuente de datos",
+  );
+  assert.doesNotMatch(
+    appSource,
+    /updateDraft\([^)]*observationPresentation/,
+    "updateDraft nunca debe recibir observationPresentation como fuente de datos",
+  );
+  assert.doesNotMatch(
+    appSource,
+    /observation:\s*observationPresentation/,
+    "ningun draft debe inicializarse leyendo el texto historico de observationPresentation",
+  );
+}
+
+// [OBS-2B2 / PASO 7 caso 17] El historico no se usa como placeholder del textarea.
+function testHistoryIsNotUsedAsPlaceholder() {
+  const textareaBlock = appSource.match(/<textarea[\s\S]*?\/>/);
+  assert.ok(textareaBlock, "no se encontro el bloque JSX del textarea de observacion");
+  assert.doesNotMatch(
+    textareaBlock![0],
+    /placeholder/,
+    "el textarea de observacion no debe usar placeholder para mostrar el historico",
+  );
+}
+
+// [OBS-2B2 / PASO 7 caso 18] El bloque de observacion no reutiliza notes.
+function testObservationBlockDoesNotUseNotes() {
+  const observationBlock = appSource.match(
+    /<details className="exercise-reference-block observation"[\s\S]*?<\/details>/,
+  );
+  assert.ok(observationBlock, "no se encontro el bloque JSX de la observacion del ejercicio");
+  assert.doesNotMatch(
+    observationBlock![0],
+    /\.notes\b/,
+    "el bloque visual de observacion no debe leer ni mostrar notes",
+  );
+}
+
+// [OBS-2B2 / PASO 7 caso 20] El texto se renderiza como texto plano, sin HTML/Markdown interpretado.
+function testObservationTextRendersAsPlainText() {
+  assert.doesNotMatch(
+    appSource,
+    /dangerouslySetInnerHTML/,
+    "la funcionalidad de observacion no debe introducir dangerouslySetInnerHTML en ningun punto",
+  );
+}
+
+// [OBS-2B2 / PASO 7 caso 22] El input de observacion vive a nivel ejercicio, no dentro del map de series.
+function testObservationInputIsNotInsideSeriesMap() {
+  const seriesRepGridBlock = appSource.match(/<div className="series-rep-grid">[\s\S]*?<\/div>\s*\n\s*<\/div>/);
+  assert.ok(seriesRepGridBlock, "no se encontro el bloque series-rep-grid");
+  assert.doesNotMatch(
+    seriesRepGridBlock![0],
+    /<textarea|exercise-observation/,
+    "el textarea de observacion no debe estar dentro del grid/map de series",
+  );
+  assert.match(
+    appSource,
+    /function ExerciseLastPerformancePanel\(\{[\s\S]*?<textarea/,
+    "el textarea de observacion debe vivir dentro de ExerciseLastPerformancePanel, a nivel ejercicio",
+  );
 }
 
 testNewDraftStartsWithEmptyObservation();
@@ -177,7 +263,14 @@ testNotesRemainsIndependent();
 testLegacyPayloadDoesNotIntroduceClientLineage();
 testRegistrationRemainsValidWithoutObservation();
 testDemoLocalPreservesObservation();
-testNoVisualObservationInputYet();
+testVisualObservationInputExistsAndIsConnectedToDraft();
 testHistoricalDraftsRemainCompatible();
+testOnChangeUpdatesOnlyTheActiveExerciseDraft();
+testDraftIsRecomputedPerActiveExerciseId();
+testHistoryNeverAutofillsDraft();
+testHistoryIsNotUsedAsPlaceholder();
+testObservationBlockDoesNotUseNotes();
+testObservationTextRendersAsPlainText();
+testObservationInputIsNotInsideSeriesMap();
 
 console.log("exercise-observation-write-pipeline tests passed");
