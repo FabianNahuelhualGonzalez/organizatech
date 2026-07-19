@@ -75,6 +75,14 @@ import {
 } from "@/lib/progress/weekly-equivalent-progress";
 import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode, TrainingSession } from "@/lib/progress/types";
 import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
+import {
+  getActiveFlow,
+  isActiveFlow,
+  isAppScreen,
+  screenLabel,
+  type ActiveFlow,
+  type Screen,
+} from "@/lib/navigation/app-navigation";
 import { isSessionExpiredError, translateAuthError, translatePersistenceError } from "@/lib/supabase/auth-errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
@@ -242,20 +250,6 @@ import {
   type TrainingCompletionSummary,
 } from "@/lib/training/training-completion-summary";
 
-type Screen =
-  | "login"
-  | "registro"
-  | "recuperar-password"
-  | "nueva-password"
-  | "recovery-expired"
-  | "dashboard"
-  | "entrenamiento"
-  | "training-summary"
-  | "registro-entrenamiento"
-  | "comparacion"
-  | "historial-ciclos"
-  | "perfil";
-
 const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
 const setupDays: string[] = [...TRAINING_DAY_LABELS];
 const ROUTINE_DRAFT_VERSION = 1;
@@ -352,17 +346,6 @@ interface RoutineDraft {
   routineEditorReturnScreen: Screen | null;
   activeRoutineDay: string;
 }
-
-type ActiveFlow =
-  | "dashboard"
-  | "routine_setup"
-  | "routine_edit"
-  | "training_start"
-  | "motivation_form"
-  | "active_workout"
-  | "comparison"
-  | "cycle_history"
-  | "profile";
 
 interface ActiveFlowState {
   version: number;
@@ -7227,27 +7210,6 @@ function getActiveFlowKey(mode: DataMode, userId?: string) {
   return scope ? getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.activeFlow, scope) : null;
 }
 
-function getActiveFlow(
-  screen: Screen,
-  hasRoutinePlan: boolean,
-  isEditingRoutinePlan: boolean,
-  hasStartedTraining: boolean,
-  readiness: TrainingReadiness | null,
-): ActiveFlow {
-  if (screen === "registro-entrenamiento" && (!hasRoutinePlan || isEditingRoutinePlan)) {
-    return isEditingRoutinePlan && hasRoutinePlan ? "routine_edit" : "routine_setup";
-  }
-  if (screen === "entrenamiento") {
-    if (hasStartedTraining && readiness) return "active_workout";
-    if (hasStartedTraining) return "motivation_form";
-    return "training_start";
-  }
-  if (screen === "comparacion") return "comparison";
-  if (screen === "historial-ciclos") return "cycle_history";
-  if (screen === "perfil") return "profile";
-  return "dashboard";
-}
-
 function saveActiveFlow(flow: ActiveFlowState) {
   if (typeof window === "undefined") return;
   writeScopedJson(window.localStorage, getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.activeFlow, flow.userKey), flow);
@@ -7295,20 +7257,6 @@ function clearActiveFlow(mode: DataMode, userId?: string) {
   if (typeof window === "undefined") return;
   const key = getActiveFlowKey(mode, userId);
   if (key) window.localStorage.removeItem(key);
-}
-
-function isActiveFlow(value: unknown): value is ActiveFlow {
-  return typeof value === "string" && [
-    "dashboard",
-    "routine_setup",
-    "routine_edit",
-    "training_start",
-    "motivation_form",
-    "active_workout",
-    "comparison",
-    "cycle_history",
-    "profile",
-  ].includes(value);
 }
 
 function saveRoutineDraft(draft: RoutineDraft) {
@@ -8149,23 +8097,6 @@ function sameDayList(left: string[], right: string[]) {
   return normalizedLeft.every((day, index) => day === normalizedRight[index]);
 }
 
-function isAppScreen(value: unknown): value is Screen {
-  return typeof value === "string" && (
-    value === "login" ||
-    value === "registro" ||
-    value === "recuperar-password" ||
-    value === "nueva-password" ||
-    value === "recovery-expired" ||
-    value === "dashboard" ||
-    value === "entrenamiento" ||
-    value === "training-summary" ||
-    value === "registro-entrenamiento" ||
-    value === "comparacion" ||
-    value === "historial-ciclos" ||
-    value === "perfil"
-  );
-}
-
 function removeAccents(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
@@ -8255,24 +8186,6 @@ function readPreviewWeight(value: string, fallback: number) {
 function readOptionalNumber(value: string): number | "" {
   if (value.trim() === "") return "";
   return parseDecimalWeightInput(value) ?? "";
-}
-
-function screenLabel(screen: Screen) {
-  const labels: Record<Screen, string> = {
-    login: "Iniciar sesión",
-    registro: "Registro",
-    "recuperar-password": "Recuperar contraseña",
-    "nueva-password": "Nueva contraseña",
-    "recovery-expired": "Enlace expirado",
-    dashboard: "Panel principal",
-    entrenamiento: "Entrenemos",
-    "training-summary": "Resumen de entrenamiento",
-    "registro-entrenamiento": "Modificar ciclo de entrenamiento",
-    "historial-ciclos": "Historial ciclo de entrenamiento",
-    comparacion: "Comparación semanal",
-    perfil: "Mi perfil",
-  };
-  return labels[screen];
 }
 
 function formatReadinessNote(value: TrainingReadiness | null) {
