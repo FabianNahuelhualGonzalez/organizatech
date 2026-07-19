@@ -39,6 +39,7 @@ import {
   deactivateActiveCycle,
   deleteExercise,
   loadAppData,
+  normalizeExerciseObservation,
   replaceLocalData,
   saveExercise,
   saveTrainingSessionWithEntries,
@@ -366,6 +367,7 @@ interface ExerciseDraft {
   rir: string;
   reps: Array<number | "">;
   registered: boolean;
+  observation: string;
 }
 
 interface TrainingReadiness {
@@ -3205,6 +3207,7 @@ export function OrganizatechApp({
             reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
             rir: draft.rir,
             notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
+            observation: draft.observation,
           });
         }
 
@@ -3350,6 +3353,7 @@ export function OrganizatechApp({
             reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
             rir: draft.rir,
             notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
+            observation: draft.observation,
           };
         }),
         }, dataMode);
@@ -7570,6 +7574,7 @@ function createExerciseDraft(exercise: ExerciseTemplate): ExerciseDraft {
     rir: "",
     reps: Array.from({ length: exercise.targetSets }, () => ""),
     registered: false,
+    observation: "",
   };
 }
 
@@ -7603,6 +7608,7 @@ function normalizeExerciseDrafts(value: unknown): Record<string, ExerciseDraft> 
       rir: typeof draft.rir === "string" ? draft.rir : "",
       reps,
       registered: Boolean(draft.registered),
+      observation: normalizeExerciseObservation(draft.observation),
     } satisfies ExerciseDraft]];
   }));
 }

@@ -40,6 +40,7 @@ export interface ExerciseEntry {
   previousWeight: number;
   reps: number[];
   notes?: string;
+  observation?: string;
   rir?: string;
 }
 

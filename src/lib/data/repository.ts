@@ -43,6 +43,17 @@ export interface TrainingSessionEntryInput {
   reps: number[];
   rir?: string;
   notes?: string;
+  observation?: string;
+}
+
+export function normalizeExerciseObservation(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+export function toPersistedExerciseObservation(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 export interface SaveTrainingSessionInput {
@@ -203,6 +214,7 @@ export async function saveTrainingSessionWithEntries(
       reps: entry.reps,
       notes: entry.notes,
       rir: entry.rir,
+      observation: toPersistedExerciseObservation(entry.observation),
     }))
     : [];
 
@@ -239,15 +251,19 @@ export async function saveTrainingSessionWithEntries(
     p_week_number: input.weekNumber,
     p_notes: input.notes ?? null,
     p_entries: input.status === "completed"
-      ? input.entries.map((entry) => ({
-        id: entry.id,
-        exercise_id: entry.exerciseId,
-        weight: entry.weight,
-        previous_weight: entry.previousWeight,
-        reps: entry.reps,
-        rir: entry.rir ?? "",
-        notes: entry.notes ?? "",
-      }))
+      ? input.entries.map((entry) => {
+        const observation = toPersistedExerciseObservation(entry.observation);
+        return {
+          id: entry.id,
+          exercise_id: entry.exerciseId,
+          weight: entry.weight,
+          previous_weight: entry.previousWeight,
+          reps: entry.reps,
+          rir: entry.rir ?? "",
+          notes: entry.notes ?? "",
+          ...(observation ? { observation } : {}),
+        };
+      })
       : [],
   });
 

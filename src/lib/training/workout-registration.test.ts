@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { toPersistedExerciseObservation } from "@/lib/data/repository";
 import {
   acquireWorkoutSaveLock,
   buildCurrentWorkoutSavePlan,
@@ -155,6 +156,58 @@ assert.deepEqual(
   "el flujo legacy sigue usando exerciseId y drafts actuales",
 );
 
+const cycleScopedWithObservation = createCycleScopedEntryInput(mondayBench, {
+  weight: "110",
+  reps: [12, 12, 8],
+  registered: true,
+  notes: "Entrenamiento Lunes: Piernas. Motivacion alta",
+  observation: "  Sentí molestia leve en el hombro  ",
+});
+assert.equal(
+  cycleScopedWithObservation.observation,
+  "Sentí molestia leve en el hombro",
+  "el payload cycle-scoped incluye observation recortada cuando hay texto",
+);
+assert.equal(
+  cycleScopedWithObservation.notes,
+  "Entrenamiento Lunes: Piernas. Motivacion alta",
+  "notes permanece intacto e independiente de observation en el payload cycle-scoped",
+);
+assert.ok(
+  !("exerciseLineageId" in buildLegacyEntryInput(mondayBench, { weight: "100", reps: [10, 10, 10], registered: true })),
+  "el payload legacy nunca incluye exerciseLineageId desde el cliente",
+);
+
+const cycleScopedWithoutObservation = createCycleScopedEntryInput(mondayBench, {
+  weight: "110",
+  reps: [12, 12, 8],
+  registered: true,
+  notes: "Entrenamiento Lunes: Piernas. Motivacion alta",
+  observation: "   ",
+});
+assert.ok(
+  !("observation" in cycleScopedWithoutObservation),
+  "observation vacia o solo espacios se omite del payload cycle-scoped, no se envia como string vacio",
+);
+
+const legacyWithObservation = buildLegacyEntryInput(mondayBench, {
+  weight: "100",
+  reps: [10, 10, 10],
+  registered: true,
+  observation: "Buena ejecucion, subir peso la proxima",
+});
+assert.equal(
+  legacyWithObservation.observation,
+  "Buena ejecucion, subir peso la proxima",
+  "el payload legacy incluye observation valida cuando hay texto",
+);
+
+const legacyWithoutObservation = buildLegacyEntryInput(mondayBench, { weight: "100", reps: [10, 10, 10], registered: true });
+assert.ok(
+  !("observation" in legacyWithoutObservation),
+  "el registro legacy sigue siendo valido sin observation: la propiedad se omite, no se envia null",
+);
+
 console.log("workout-registration tests passed");
 
 function createExercise(id: string, trainingCycleExerciseId: string): WorkoutRegistrationExercise & {
@@ -174,24 +227,28 @@ function maybeInvokeWhenNotBusy<T>(isBusy: boolean, action: () => T) {
 
 function createCycleScopedEntryInput(
   exercise: WorkoutRegistrationExercise & { exerciseLineageId: string },
-  draft: WorkoutRegistrationDraft & { weight: string; reps: number[]; notes: string },
+  draft: WorkoutRegistrationDraft & { weight: string; reps: number[]; notes: string; observation?: string },
 ) {
+  const observation = toPersistedExerciseObservation(draft.observation);
   return {
     trainingCycleExerciseId: exercise.trainingCycleExerciseId,
     exerciseLineageId: exercise.exerciseLineageId,
     weight: Number(draft.weight),
     reps: draft.reps,
     notes: draft.notes,
+    ...(observation ? { observation } : {}),
   };
 }
 
 function buildLegacyEntryInput(
   exercise: WorkoutRegistrationExercise,
-  draft: WorkoutRegistrationDraft & { weight: string; reps: number[] },
+  draft: WorkoutRegistrationDraft & { weight: string; reps: number[]; observation?: string },
 ) {
+  const observation = toPersistedExerciseObservation(draft.observation);
   return {
     exerciseId: exercise.id,
     weight: Number(draft.weight),
     reps: draft.reps,
+    ...(observation ? { observation } : {}),
   };
 }

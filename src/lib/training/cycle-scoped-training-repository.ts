@@ -1,3 +1,4 @@
+import { toPersistedExerciseObservation } from "@/lib/data/repository";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ExerciseEntry, TrainingDayCode, TrainingSession, TrainingSessionStatus } from "@/lib/progress/types";
 import {
@@ -79,6 +80,7 @@ export interface CycleScopedTrainingSessionEntryInput {
   reps: number[];
   rir?: string | null;
   notes?: string | null;
+  observation?: string | null;
 }
 
 export interface AddCycleScopedTrainingPlanInput {
@@ -238,17 +240,21 @@ export async function createTrainingSessionWithCycleEntries(input: CycleScopedTr
     p_status: input.status,
     p_week_number: input.weekNumber,
     p_notes: input.notes ?? null,
-    p_entries: input.entries.map((entry) => ({
-      id: entry.id,
-      training_cycle_exercise_id: entry.trainingCycleExerciseId,
-      exercise_id: entry.exerciseId ?? null,
-      exercise_lineage_id: resolveExerciseLineageIdForSessionEntry(entry),
-      weight: entry.weight,
-      previous_weight: entry.previousWeight,
-      reps: entry.reps,
-      rir: entry.rir ?? "",
-      notes: entry.notes ?? "",
-    })),
+    p_entries: input.entries.map((entry) => {
+      const observation = toPersistedExerciseObservation(entry.observation);
+      return {
+        id: entry.id,
+        training_cycle_exercise_id: entry.trainingCycleExerciseId,
+        exercise_id: entry.exerciseId ?? null,
+        exercise_lineage_id: resolveExerciseLineageIdForSessionEntry(entry),
+        weight: entry.weight,
+        previous_weight: entry.previousWeight,
+        reps: entry.reps,
+        rir: entry.rir ?? "",
+        notes: entry.notes ?? "",
+        ...(observation ? { observation } : {}),
+      };
+    }),
   });
 
   if (error) throw mapCycleScopedRepositoryError(error);
