@@ -9,9 +9,13 @@ import {
   clearActiveFlow,
   clearRoutineDraft,
   loadActiveFlow,
+  loadCycleHistory,
   loadRoutineDraft,
+  loadTrainingPlan,
   saveActiveFlow,
+  saveCycleHistory,
   saveRoutineDraft,
+  saveTrainingPlan,
   type RoutineDraftStorageRecord,
 } from "@/lib/storage/app-flow-storage";
 import {
@@ -37,16 +41,20 @@ interface TestTrainingPlan {
 type TestSetupByDay = Record<string, TestSetupDay>;
 type TestRoutineDraft = RoutineDraftStorageRecord<TestSetupByDay, TestTrainingPlan>;
 
-function createStorage(options: { throwOnSet?: boolean } = {}) {
+function createStorage(options: { throwOnGet?: boolean; throwOnSet?: boolean; throwOnRemove?: boolean } = {}) {
   const values = new Map<string, string>();
   const removes: string[] = [];
   const storage: BrowserStorageLike = {
-    getItem: (key) => values.get(key) ?? null,
+    getItem: (key) => {
+      if (options.throwOnGet) throw new Error("getItem failed");
+      return values.get(key) ?? null;
+    },
     setItem: (key, value) => {
       if (options.throwOnSet) throw new Error("setItem failed");
       values.set(key, value);
     },
     removeItem: (key) => {
+      if (options.throwOnRemove) throw new Error("removeItem failed");
       removes.push(key);
       values.delete(key);
     },
@@ -293,9 +301,79 @@ function run() {
   }
 
   {
+    const { storage, values } = createStorage();
+    const plan = { name: "Plan actual", days: ["Martes", "Lunes"] };
+    assert.equal(saveTrainingPlan(plan, getScope(), {
+      storage,
+      serialize: (value) => ({ ...value, days: [...value.days].sort() }),
+    }), true);
+    assert.deepEqual(
+      loadTrainingPlan(getScope(), {
+        storage,
+        normalize: (value) => value as typeof plan,
+        createDefault: () => ({ name: "Fallback", days: [] }),
+      }),
+      { name: "Plan actual", days: ["Lunes", "Martes"] },
+    );
+    assert.deepEqual(plan.days, ["Martes", "Lunes"]);
+    assert.ok(values.has(getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, getScope())));
+  }
+
+  {
+    const { storage, values } = createStorage();
+    const planKey = getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, getScope());
+    values.set(planKey, "{invalid-json");
+    assert.deepEqual(loadTrainingPlan(getScope(), {
+      storage,
+      normalize: (value) => value as TestTrainingPlan,
+      createDefault: () => ({ name: "Fallback" }),
+    }), { name: "Fallback" });
+    assert.equal(values.has(planKey), false);
+  }
+
+  {
+    const { storage, values } = createStorage();
+    const history = [{ id: "cycle-1" }, { id: "cycle-2" }];
+    assert.equal(saveCycleHistory(history, getScope(), { storage }), true);
+    assert.deepEqual(loadCycleHistory<{ id: string }>(getScope(), { storage }), history);
+    assert.equal(loadCycleHistory<{ id: string }>(getScope(USER_B), { storage }).length, 0);
+    assert.ok(values.has(getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.cycleHistory, getScope())));
+  }
+
+  {
+    const blockedRead = createStorage({ throwOnGet: true }).storage;
+    const blockedWrite = createStorage({ throwOnSet: true }).storage;
+    const blockedRemove = createStorage({ throwOnRemove: true }).storage;
+    assert.deepEqual(loadTrainingPlan(getScope(), {
+      storage: blockedRead,
+      normalize: (value) => value as TestTrainingPlan,
+      createDefault: () => ({ name: "Fallback" }),
+    }), { name: "Fallback" });
+    assert.equal(saveTrainingPlan({ name: "Plan" }, getScope(), { storage: blockedWrite }), false);
+    assert.deepEqual(loadCycleHistory(getScope(), { storage: blockedRead }), []);
+    assert.equal(saveCycleHistory([{ id: "cycle" }], getScope(), { storage: blockedWrite }), false);
+    assert.doesNotThrow(() => clearActiveFlow("supabase", USER_A, blockedRemove));
+    assert.doesNotThrow(() => clearRoutineDraft("supabase", USER_A, blockedRemove));
+  }
+
+  {
+    assert.deepEqual(loadTrainingPlan(getScope(), {
+      storage: null,
+      normalize: (value) => value as TestTrainingPlan,
+      createDefault: () => ({ name: "Fallback" }),
+    }), { name: "Fallback" });
+    assert.equal(saveTrainingPlan({ name: "Plan" }, getScope(), { storage: null }), false);
+    assert.deepEqual(loadCycleHistory(getScope(), { storage: null }), []);
+    assert.equal(saveCycleHistory([], getScope(), { storage: null }), false);
+  }
+
+  {
     const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
     assert.doesNotMatch(appSource, /function (?:get|save|load|clear)(?:ActiveFlow|RoutineDraft)/);
     assert.doesNotMatch(appSource, /BROWSER_STORAGE_PREFIXES\.(?:activeFlow|routineDraft)/);
+    assert.doesNotMatch(appSource, /function (?:save|load)(?:TrainingPlan|CycleHistory)/);
+    assert.doesNotMatch(appSource, /BROWSER_STORAGE_PREFIXES\.(?:trainingPlan|cycleHistory)/);
+    assert.doesNotMatch(appSource, /window\.sessionStorage|PASSWORD_RECOVERY_STORAGE_KEY/);
     assert.match(appSource, /from "@\/lib\/storage\/app-flow-storage"/);
   }
 }

@@ -81,6 +81,24 @@ export function getScopedBrowserStorageKey(prefix: string, scope: BrowserStorage
   return `${prefix}:${scope}`;
 }
 
+export function getBrowserLocalStorage(): BrowserStorageLike | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function getBrowserSessionStorage(): BrowserStorageLike | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 export function migrateLegacyBrowserStorageToDemo(storage: BrowserStorageLike): void {
   legacyDemoMigrations.forEach(({ legacyKey, targetPrefix, validate }) => {
     migrateLegacyValue(storage, legacyKey, getScopedBrowserStorageKey(targetPrefix, "demo"), validate);
@@ -108,12 +126,12 @@ export function readScopedJson<T>(
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!validate(parsed)) {
-      safeRemove(storage, key);
+      removeBrowserStorageItem(storage, key);
       return null;
     }
     return parsed;
   } catch {
-    safeRemove(storage, key);
+    removeBrowserStorageItem(storage, key);
     return null;
   }
 }
@@ -143,7 +161,15 @@ export function removeScopedBrowserStorage(storage: BrowserStorageLike, scope: B
   ];
 
   [...sharedPrefixes, ...(scope === "demo" ? demoPrefixes : [])]
-    .forEach((prefix) => safeRemove(storage, getScopedBrowserStorageKey(prefix, scope)));
+    .forEach((prefix) => removeBrowserStorageItem(storage, getScopedBrowserStorageKey(prefix, scope)));
+}
+
+export function clearBrowserStorageScope(
+  scope: BrowserStorageScope | null,
+  storage = getBrowserLocalStorage(),
+): void {
+  if (!storage || !scope) return;
+  removeScopedBrowserStorage(storage, scope);
 }
 
 export function loadSeenNotificationRecords(
@@ -182,11 +208,12 @@ export function saveSeenNotificationRecords(
 }
 
 export function startPasswordRecoveryFlow(
-  sessionStorage: BrowserStorageLike,
-  localStorage?: BrowserStorageLike | null,
+  sessionStorage: BrowserStorageLike | null = getBrowserSessionStorage(),
+  localStorage: BrowserStorageLike | null = getBrowserLocalStorage(),
   now = Date.now(),
 ): void {
-  if (localStorage) safeRemove(localStorage, PASSWORD_RECOVERY_STORAGE_KEY);
+  if (!sessionStorage) return;
+  if (localStorage) removeBrowserStorageItem(localStorage, PASSWORD_RECOVERY_STORAGE_KEY);
   const current = loadPasswordRecoveryFlow(sessionStorage, null, now);
   if (current) return;
   writeScopedJson(sessionStorage, PASSWORD_RECOVERY_STORAGE_KEY, {
@@ -197,26 +224,33 @@ export function startPasswordRecoveryFlow(
 }
 
 export function loadPasswordRecoveryFlow(
-  sessionStorage: BrowserStorageLike,
-  localStorage?: BrowserStorageLike | null,
+  sessionStorage: BrowserStorageLike | null = getBrowserSessionStorage(),
+  localStorage: BrowserStorageLike | null = getBrowserLocalStorage(),
   now = Date.now(),
 ): PasswordRecoveryStorageRecord | null {
-  if (localStorage) safeRemove(localStorage, PASSWORD_RECOVERY_STORAGE_KEY);
+  if (!sessionStorage) return null;
+  if (localStorage) removeBrowserStorageItem(localStorage, PASSWORD_RECOVERY_STORAGE_KEY);
   const record = readScopedJson(sessionStorage, PASSWORD_RECOVERY_STORAGE_KEY, isPasswordRecoveryRecord);
   if (!record) return null;
   if (record.expiresAt <= now || record.startedAt > now || record.expiresAt - record.startedAt > PASSWORD_RECOVERY_TTL_MS) {
-    safeRemove(sessionStorage, PASSWORD_RECOVERY_STORAGE_KEY);
+    removeBrowserStorageItem(sessionStorage, PASSWORD_RECOVERY_STORAGE_KEY);
     return null;
   }
   return record;
 }
 
+export function hasStoredPasswordRecoveryFlow(
+  sessionStorage: BrowserStorageLike | null = getBrowserSessionStorage(),
+): boolean {
+  return sessionStorage ? safeGet(sessionStorage, PASSWORD_RECOVERY_STORAGE_KEY) !== null : false;
+}
+
 export function clearPasswordRecoveryStorage(
-  sessionStorage: BrowserStorageLike,
-  localStorage?: BrowserStorageLike | null,
+  sessionStorage: BrowserStorageLike | null = getBrowserSessionStorage(),
+  localStorage: BrowserStorageLike | null = getBrowserLocalStorage(),
 ): void {
-  safeRemove(sessionStorage, PASSWORD_RECOVERY_STORAGE_KEY);
-  if (localStorage) safeRemove(localStorage, PASSWORD_RECOVERY_STORAGE_KEY);
+  if (sessionStorage) removeBrowserStorageItem(sessionStorage, PASSWORD_RECOVERY_STORAGE_KEY);
+  if (localStorage) removeBrowserStorageItem(localStorage, PASSWORD_RECOVERY_STORAGE_KEY);
 }
 
 function migrateLegacyValue(
@@ -230,7 +264,7 @@ function migrateLegacyValue(
   if (legacyRaw === null) return;
 
   if (safeGet(storage, targetKey) !== null) {
-    safeRemove(storage, legacyKey);
+    removeBrowserStorageItem(storage, legacyKey);
     return;
   }
 
@@ -238,12 +272,12 @@ function migrateLegacyValue(
   try {
     parsed = JSON.parse(legacyRaw);
   } catch {
-    safeRemove(storage, legacyKey);
+    removeBrowserStorageItem(storage, legacyKey);
     return;
   }
 
   if (!validate(parsed)) {
-    safeRemove(storage, legacyKey);
+    removeBrowserStorageItem(storage, legacyKey);
     return;
   }
 
@@ -252,11 +286,11 @@ function migrateLegacyValue(
     storage.setItem(targetKey, targetRaw);
   } catch {
     // Preserve the valid legacy value when browser storage cannot accept it.
-    safeRemove(storage, targetKey);
+    removeBrowserStorageItem(storage, targetKey);
     return;
   }
 
-  safeRemove(storage, legacyKey);
+  removeBrowserStorageItem(storage, legacyKey);
 }
 
 function isLegacyExerciseArray(value: unknown): boolean {
@@ -320,10 +354,12 @@ function safeGet(storage: BrowserStorageLike, key: string): string | null {
   }
 }
 
-function safeRemove(storage: BrowserStorageLike, key: string): void {
+export function removeBrowserStorageItem(storage: BrowserStorageLike, key: string): boolean {
   try {
     storage.removeItem(key);
+    return true;
   } catch {
     // Storage cleanup is best effort when the browser blocks persistence.
+    return false;
   }
 }

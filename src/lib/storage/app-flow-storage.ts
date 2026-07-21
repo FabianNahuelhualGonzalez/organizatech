@@ -3,8 +3,11 @@ import type { DataMode } from "@/lib/supabase/session";
 import {
   BROWSER_STORAGE_PREFIXES,
   getBrowserStorageScope,
+  getBrowserLocalStorage,
   getScopedBrowserStorageKey,
   migrateLegacyBrowserStorageToDemo,
+  readScopedJson,
+  removeBrowserStorageItem,
   writeScopedJson,
   type BrowserStorageLike,
   type BrowserStorageScope,
@@ -51,9 +54,24 @@ export interface LoadRoutineDraftOptions<TSetupByDay, TTrainingPlan> {
   storage?: BrowserStorageLike | null;
 }
 
+export interface LoadTrainingPlanOptions<TTrainingPlan> {
+  normalize: (value: unknown) => TTrainingPlan;
+  createDefault: () => TTrainingPlan;
+  storage?: BrowserStorageLike | null;
+}
+
+export interface SaveTrainingPlanOptions<TTrainingPlan> {
+  serialize?: (plan: TTrainingPlan) => unknown;
+  storage?: BrowserStorageLike | null;
+}
+
+export interface AppFlowStorageOptions {
+  storage?: BrowserStorageLike | null;
+}
+
 export function saveActiveFlow(
   flow: ActiveFlowStorageRecord,
-  storage = getAppFlowStorage(),
+  storage = getBrowserLocalStorage(),
 ): void {
   if (!storage) return;
   writeScopedJson(storage, getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.activeFlow, flow.userKey), flow);
@@ -64,7 +82,7 @@ export function loadActiveFlow(
   userId?: string,
   options: LoadActiveFlowOptions = {},
 ): ActiveFlowStorageRecord | null {
-  const storage = options.storage === undefined ? getAppFlowStorage() : options.storage;
+  const storage = options.storage === undefined ? getBrowserLocalStorage() : options.storage;
   if (!storage) return null;
 
   try {
@@ -72,10 +90,8 @@ export function loadActiveFlow(
     const key = getActiveFlowKey(mode, userId);
     const userKey = getBrowserStorageScope(mode, userId);
     if (!key || !userKey) return null;
-    const raw = storage.getItem(key);
-    if (raw === null) return null;
-
-    const parsed = JSON.parse(raw) as Partial<ActiveFlowStorageRecord>;
+    const parsed = readScopedJson(storage, key, isUnknownRecord) as Partial<ActiveFlowStorageRecord> | null;
+    if (!parsed) return null;
     const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
     const now = options.now?.() ?? Date.now();
     const isExpired = updatedAt === 0 || now - updatedAt > ACTIVE_FLOW_MAX_AGE_MS;
@@ -106,16 +122,16 @@ export function loadActiveFlow(
 export function clearActiveFlow(
   mode: DataMode,
   userId?: string,
-  storage = getAppFlowStorage(),
+  storage = getBrowserLocalStorage(),
 ): void {
   if (!storage) return;
   const key = getActiveFlowKey(mode, userId);
-  if (key) storage.removeItem(key);
+  if (key) removeBrowserStorageItem(storage, key);
 }
 
 export function saveRoutineDraft<TSetupByDay, TTrainingPlan>(
   draft: RoutineDraftStorageRecord<TSetupByDay, TTrainingPlan>,
-  storage = getAppFlowStorage(),
+  storage = getBrowserLocalStorage(),
 ): void {
   if (!storage) return;
   writeScopedJson(storage, getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.routineDraft, draft.userKey), draft);
@@ -126,7 +142,7 @@ export function loadRoutineDraft<TSetupByDay, TTrainingPlan>(
   userId: string | undefined,
   options: LoadRoutineDraftOptions<TSetupByDay, TTrainingPlan>,
 ): RoutineDraftStorageRecord<TSetupByDay, TTrainingPlan> | null {
-  const storage = options.storage === undefined ? getAppFlowStorage() : options.storage;
+  const storage = options.storage === undefined ? getBrowserLocalStorage() : options.storage;
   if (!storage) return null;
 
   try {
@@ -134,10 +150,8 @@ export function loadRoutineDraft<TSetupByDay, TTrainingPlan>(
     const key = getRoutineDraftKey(mode, userId);
     const userKey = getBrowserStorageScope(mode, userId);
     if (!key || !userKey) return null;
-    const raw = storage.getItem(key);
-    if (raw === null) return null;
-
-    const parsed = JSON.parse(raw) as Partial<RoutineDraftStorageRecord<unknown, unknown>>;
+    const parsed = readScopedJson(storage, key, isUnknownRecord) as Partial<RoutineDraftStorageRecord<unknown, unknown>> | null;
+    if (!parsed) return null;
     const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
     const now = options.now?.() ?? Date.now();
     const isExpired = updatedAt === 0 || now - updatedAt > ROUTINE_DRAFT_MAX_AGE_MS;
@@ -187,11 +201,70 @@ export function loadRoutineDraft<TSetupByDay, TTrainingPlan>(
 export function clearRoutineDraft(
   mode: DataMode,
   userId?: string,
-  storage = getAppFlowStorage(),
+  storage = getBrowserLocalStorage(),
 ): void {
   if (!storage) return;
   const key = getRoutineDraftKey(mode, userId);
-  if (key) storage.removeItem(key);
+  if (key) removeBrowserStorageItem(storage, key);
+}
+
+export function loadTrainingPlan<TTrainingPlan>(
+  scope: BrowserStorageScope,
+  options: LoadTrainingPlanOptions<TTrainingPlan>,
+): TTrainingPlan {
+  const storage = options.storage === undefined ? getBrowserLocalStorage() : options.storage;
+  if (!storage) return options.createDefault();
+
+  migrateLegacyBrowserStorageToDemo(storage);
+  const storedPlan = readScopedJson(
+    storage,
+    getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, scope),
+    isUnknownRecord,
+  );
+  return storedPlan ? options.normalize(storedPlan) : options.createDefault();
+}
+
+export function saveTrainingPlan<TTrainingPlan>(
+  plan: TTrainingPlan,
+  scope: BrowserStorageScope,
+  options: SaveTrainingPlanOptions<TTrainingPlan> = {},
+): boolean {
+  const storage = options.storage === undefined ? getBrowserLocalStorage() : options.storage;
+  if (!storage) return false;
+  return writeScopedJson(
+    storage,
+    getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, scope),
+    options.serialize ? options.serialize(plan) : plan,
+  );
+}
+
+export function loadCycleHistory<TCycleSnapshot>(
+  scope: BrowserStorageScope,
+  options: AppFlowStorageOptions = {},
+): TCycleSnapshot[] {
+  const storage = options.storage === undefined ? getBrowserLocalStorage() : options.storage;
+  if (!storage) return [];
+
+  migrateLegacyBrowserStorageToDemo(storage);
+  return readScopedJson(
+    storage,
+    getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.cycleHistory, scope),
+    isUnknownArray,
+  ) as TCycleSnapshot[] | null ?? [];
+}
+
+export function saveCycleHistory<TCycleSnapshot>(
+  history: TCycleSnapshot[],
+  scope: BrowserStorageScope,
+  options: AppFlowStorageOptions = {},
+): boolean {
+  const storage = options.storage === undefined ? getBrowserLocalStorage() : options.storage;
+  if (!storage) return false;
+  return writeScopedJson(
+    storage,
+    getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.cycleHistory, scope),
+    history,
+  );
 }
 
 function getActiveFlowKey(mode: DataMode, userId?: string) {
@@ -204,6 +277,10 @@ function getRoutineDraftKey(mode: DataMode, userId?: string) {
   return scope ? getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.routineDraft, scope) : null;
 }
 
-function getAppFlowStorage(): BrowserStorageLike | null {
-  return typeof window === "undefined" ? null : window.localStorage;
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
 }
