@@ -681,6 +681,7 @@ async function run() {
     assert.doesNotMatch(loginPageSource, /VERCEL_ENV !== "production"/, "login/page.tsx no bloquea readiness v2 por entorno Production");
     assert.match(loginPageSource, /<OrganizatechApp[\s\S]*trainingWorkoutReadinessV2Enabled=\{trainingWorkoutReadinessV2Enabled\}/, "OrganizatechApp recibe la flag calculada server-side");
     assert.doesNotMatch(storageSource, /save_training_workout_readiness_v2|link_training_workout_readiness_session_v2|crypto\.randomUUID|getSupabaseBrowserClient/, "storage no llama RPCs, Supabase ni genera UUIDs");
+    assert.doesNotMatch(storageSource, /window\.localStorage|JSON\.(?:parse|stringify)/, "workout draft delega acceso y serializacion al browser storage compartido");
     assert.match(legacyReadinessSource, /save_daily_training_readiness/, "readiness legacy permanece intacto");
     assert.equal((packageJson.match(/src\/lib\/training\/training-workout-readiness-repository\.test\.ts/g) ?? []).length, 1);
     assert.equal((packageJson.match(/src\/lib\/training\/workout-draft-storage\.test\.ts/g) ?? []).length, 1);
