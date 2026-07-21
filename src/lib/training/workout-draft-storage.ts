@@ -2,9 +2,14 @@ import type { DataMode } from "@/lib/supabase/session";
 import {
   BROWSER_STORAGE_PREFIXES,
   getBrowserStorageScope,
+  getBrowserLocalStorage,
   getScopedBrowserStorageKey,
   isBrowserStorageScope,
   migrateLegacyBrowserStorageToDemo,
+  readScopedJson,
+  removeBrowserStorageItem,
+  writeScopedJson,
+  type BrowserStorageLike,
   type BrowserStorageScope,
 } from "@/lib/storage/browser-storage";
 import { resolveStableWorkoutStartedAt } from "@/lib/training/exercise-last-performance-loader";
@@ -50,11 +55,7 @@ export type LoadedWorkoutDraftStorageRecord<
   plannedDate: string | null;
 };
 
-export interface WorkoutDraftStorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
-}
+export type WorkoutDraftStorageLike = BrowserStorageLike;
 
 export interface LoadWorkoutDraftOptions<TReadiness, TExerciseDrafts> {
   mode: DataMode;
@@ -80,21 +81,16 @@ export function getWorkoutDraftKey(mode: DataMode, userId?: string) {
 
 export function saveWorkoutDraft<TReadiness, TExerciseDrafts>(
   draft: WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts>,
-  storage = getWorkoutDraftStorage(),
+  storage = getBrowserLocalStorage(),
 ): boolean {
   if (!storage || !isBrowserStorageScope(draft.userKey)) return false;
-  try {
-    storage.setItem(getScopedBrowserStorageKey(WORKOUT_DRAFT_KEY_PREFIX, draft.userKey), JSON.stringify(draft));
-    return true;
-  } catch {
-    return false;
-  }
+  return writeScopedJson(storage, getScopedBrowserStorageKey(WORKOUT_DRAFT_KEY_PREFIX, draft.userKey), draft);
 }
 
 export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
   options: LoadWorkoutDraftOptions<TReadiness, TExerciseDrafts>,
 ): LoadedWorkoutDraftStorageRecord<TReadiness, TExerciseDrafts> | null {
-  const storage = options.storage ?? getWorkoutDraftStorage();
+  const storage = options.storage === undefined ? getBrowserLocalStorage() : options.storage;
   if (!storage) return null;
   migrateLegacyBrowserStorageToDemo(storage);
   const key = getWorkoutDraftKey(options.mode, options.userId);
@@ -102,17 +98,11 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
   if (!key || !userKey) return null;
 
   try {
-    const raw = storage.getItem(key);
-    if (raw === null) return null;
-
-    const parsed = JSON.parse(raw) as Partial<WorkoutDraftStorageRecord<unknown, unknown>>;
-    if (!isPlainObject(parsed)) {
-      storage.removeItem(key);
-      return null;
-    }
+    const parsed = readScopedJson(storage, key, isPlainObject) as Partial<WorkoutDraftStorageRecord<unknown, unknown>> | null;
+    if (!parsed) return null;
 
     if (parsed.userKey !== userKey) {
-      storage.removeItem(key);
+      removeBrowserStorageItem(storage, key);
       return null;
     }
 
@@ -126,13 +116,13 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
 
     const workoutAttemptId = normalizeWorkoutAttemptId(parsed);
     if (workoutAttemptId === false) {
-      storage.removeItem(key);
+      removeBrowserStorageItem(storage, key);
       return null;
     }
 
     const pendingReadinessLink = normalizePendingReadinessLink(parsed, workoutAttemptId);
     if (pendingReadinessLink === false) {
-      storage.removeItem(key);
+      removeBrowserStorageItem(storage, key);
       return null;
     }
     const cycleId = normalizeOptionalString(parsed.cycleId);
@@ -140,7 +130,7 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
     const plannedDay = normalizeOptionalString(parsed.plannedDay);
     const plannedDate = normalizeOptionalString(parsed.plannedDate);
     if (cycleId === false || cycleDayId === false || plannedDay === false || plannedDate === false) {
-      storage.removeItem(key);
+      removeBrowserStorageItem(storage, key);
       return null;
     }
 
@@ -173,11 +163,7 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
 
     return draft;
   } catch {
-    try {
-      storage.removeItem(key);
-    } catch {
-      // Loading remains safe when storage cleanup is blocked.
-    }
+    removeBrowserStorageItem(storage, key);
     return null;
   }
 }
@@ -185,17 +171,12 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
 export function clearWorkoutDraft(
   mode: DataMode,
   userId?: string,
-  storage = getWorkoutDraftStorage(),
+  storage = getBrowserLocalStorage(),
 ): boolean {
   if (!storage) return false;
   const key = getWorkoutDraftKey(mode, userId);
   if (!key) return false;
-  try {
-    storage.removeItem(key);
-    return true;
-  } catch {
-    return false;
-  }
+  return removeBrowserStorageItem(storage, key);
 }
 
 
@@ -233,11 +214,6 @@ function normalizePendingReadinessLink(
     workoutAttemptId: link.workoutAttemptId,
     trainingSessionId: link.trainingSessionId,
   };
-}
-
-function getWorkoutDraftStorage(): WorkoutDraftStorageLike | null {
-  if (typeof window === "undefined") return null;
-  return window.localStorage;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

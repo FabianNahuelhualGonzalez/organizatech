@@ -93,19 +93,15 @@ import {
   type SupabaseSessionState,
 } from "@/lib/supabase/session";
 import {
-  BROWSER_STORAGE_PREFIXES,
-  PASSWORD_RECOVERY_STORAGE_KEY,
+  clearBrowserStorageScope as clearStoredBrowserStorageScope,
   clearPasswordRecoveryStorage,
   getBrowserStorageScope,
-  getScopedBrowserStorageKey,
+  hasStoredPasswordRecoveryFlow,
   loadPasswordRecoveryFlow,
   loadSeenNotificationRecords as loadStoredSeenNotificationRecords,
   migrateLegacyBrowserStorageToDemo,
-  readScopedJson,
-  removeScopedBrowserStorage,
   saveSeenNotificationRecords as saveStoredSeenNotificationRecords,
   startPasswordRecoveryFlow,
-  writeScopedJson,
   type BrowserStorageScope,
   type SeenNotificationStorageRecord,
 } from "@/lib/storage/browser-storage";
@@ -115,9 +111,13 @@ import {
   clearActiveFlow,
   clearRoutineDraft,
   loadActiveFlow,
+  loadCycleHistory,
   loadRoutineDraft,
+  loadTrainingPlan,
   saveActiveFlow,
+  saveCycleHistory,
   saveRoutineDraft,
+  saveTrainingPlan,
 } from "@/lib/storage/app-flow-storage";
 import {
   advanceSessionDataEpoch as createAdvancedSessionDataEpoch,
@@ -792,7 +792,12 @@ export function OrganizatechApp({
   useEffect(() => {
     const scope = getBrowserStorageScope(dataMode, supabaseUser?.id);
     if (!scope || activeBrowserStorageScopeRef.current !== scope) return;
-    saveTrainingPlan(trainingPlan, scope);
+    saveTrainingPlan(trainingPlan, scope, {
+      serialize: (plan) => ({
+        ...plan,
+        trainingDays: sortTrainingDaysByWeekOrder(plan.trainingDays),
+      }),
+    });
   }, [dataMode, supabaseUser?.id, trainingPlan]);
 
   useEffect(() => {
@@ -1350,9 +1355,11 @@ export function OrganizatechApp({
       activeBrowserStorageScopeRef.current = nextStorageScope;
 
       if (typeof window !== "undefined" && nextStorageScope) {
-        migrateLegacyBrowserStorageToDemo(window.localStorage);
-        setTrainingPlan(loadTrainingPlan(nextStorageScope));
-        setCycleHistory(loadCycleHistory(nextStorageScope));
+        setTrainingPlan(loadTrainingPlan(nextStorageScope, {
+          normalize: normalizeTrainingPlan,
+          createDefault: createDefaultTrainingPlan,
+        }));
+        setCycleHistory(loadCycleHistory<TrainingCycleSnapshot>(nextStorageScope));
         setSeenNotificationRecords(loadSeenNotificationRecords(nextStorageScope));
       }
     }
@@ -1427,8 +1434,7 @@ export function OrganizatechApp({
   }
 
   function clearBrowserStorageScope(scope: BrowserStorageScope | null) {
-    if (typeof window === "undefined" || !scope) return;
-    removeScopedBrowserStorage(window.localStorage, scope);
+    clearStoredBrowserStorageScope(scope);
   }
 
   function restoreActiveFlowForSession(mode: DataMode, userId?: string) {
@@ -7285,54 +7291,6 @@ function normalizeSetupByDay(value: unknown) {
   })) as Record<string, SetupDayState>;
 }
 
-function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isUnknownArray(value: unknown): value is unknown[] {
-  return Array.isArray(value);
-}
-
-function loadTrainingPlan(scope: BrowserStorageScope): TrainingPlan {
-  if (typeof window === "undefined") return createDefaultTrainingPlan();
-
-  migrateLegacyBrowserStorageToDemo(window.localStorage);
-  const parsed = readScopedJson(
-    window.localStorage,
-    getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, scope),
-    isUnknownRecord,
-  );
-  return parsed ? normalizeTrainingPlan(parsed) : createDefaultTrainingPlan();
-}
-
-function saveTrainingPlan(plan: TrainingPlan, scope: BrowserStorageScope) {
-  if (typeof window === "undefined") return;
-  writeScopedJson(window.localStorage, getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, scope), {
-    ...plan,
-    trainingDays: sortTrainingDaysByWeekOrder(plan.trainingDays),
-  });
-}
-
-function loadCycleHistory(scope: BrowserStorageScope): TrainingCycleSnapshot[] {
-  if (typeof window === "undefined") return [];
-
-  migrateLegacyBrowserStorageToDemo(window.localStorage);
-  return readScopedJson(
-    window.localStorage,
-    getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.cycleHistory, scope),
-    isUnknownArray,
-  ) as TrainingCycleSnapshot[] | null ?? [];
-}
-
-function saveCycleHistory(history: TrainingCycleSnapshot[], scope: BrowserStorageScope) {
-  if (typeof window === "undefined") return;
-  writeScopedJson(
-    window.localStorage,
-    getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.cycleHistory, scope),
-    history,
-  );
-}
-
 function saveWorkoutDraft(draft: Omit<WorkoutDraft, "userKey"> & { userKey: BrowserStorageScope | null }) {
   if (!draft.userKey) return false;
   return saveStoredWorkoutDraft({ ...draft, userKey: draft.userKey });
@@ -8151,8 +8109,8 @@ function getPasswordRecoveryRouteState(): "none" | "active" | "expired" {
   const error = searchParams.get("error") ?? hashParams.get("error");
   if (errorCode === "otp_expired" || error === "access_denied") return "expired";
 
-  const hadStoredRecovery = window.sessionStorage.getItem(PASSWORD_RECOVERY_STORAGE_KEY) !== null;
-  const storedRecovery = loadPasswordRecoveryFlow(window.sessionStorage, window.localStorage);
+  const hadStoredRecovery = hasStoredPasswordRecoveryFlow();
+  const storedRecovery = loadPasswordRecoveryFlow();
   if (hadStoredRecovery && !storedRecovery) return "expired";
 
   const hasRecoveryRoute =
@@ -8160,7 +8118,7 @@ function getPasswordRecoveryRouteState(): "none" | "active" | "expired" {
     searchParams.get("type") === "recovery" ||
     hashParams.get("type") === "recovery";
   if (hasRecoveryRoute) {
-    if (!storedRecovery) startPasswordRecoveryFlow(window.sessionStorage, window.localStorage);
+    if (!storedRecovery) startPasswordRecoveryFlow();
     return "active";
   }
 
@@ -8171,12 +8129,12 @@ function getPasswordRecoveryRouteState(): "none" | "active" | "expired" {
 
 function markPasswordRecoveryFlow() {
   if (typeof window === "undefined") return;
-  startPasswordRecoveryFlow(window.sessionStorage, window.localStorage);
+  startPasswordRecoveryFlow();
 }
 
 function clearPasswordRecoveryFlow() {
   if (typeof window === "undefined") return;
-  clearPasswordRecoveryStorage(window.sessionStorage, window.localStorage);
+  clearPasswordRecoveryStorage();
 }
 
 function clearPasswordRecoveryUrl() {

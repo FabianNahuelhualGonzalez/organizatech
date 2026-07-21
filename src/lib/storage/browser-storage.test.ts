@@ -7,9 +7,13 @@ import {
   PASSWORD_RECOVERY_STORAGE_KEY,
   PASSWORD_RECOVERY_STORAGE_VERSION,
   PASSWORD_RECOVERY_TTL_MS,
+  clearBrowserStorageScope,
   clearPasswordRecoveryStorage,
+  getBrowserLocalStorage,
+  getBrowserSessionStorage,
   getBrowserStorageScope,
   getScopedBrowserStorageKey,
+  hasStoredPasswordRecoveryFlow,
   loadPasswordRecoveryFlow,
   loadSeenNotificationRecords,
   migrateLegacyBrowserStorageToDemo,
@@ -26,12 +30,15 @@ const USER_B = "22222222-2222-4222-8222-222222222222";
 
 function createStorage(
   initial: Record<string, string> = {},
-  options: { failSetItemForKey?: string } = {},
+  options: { failGetItemForKey?: string; failSetItemForKey?: string; failRemoveItemForKey?: string } = {},
 ) {
   const values = new Map(Object.entries(initial));
   const removed: string[] = [];
   const storage: BrowserStorageLike = {
-    getItem: (key) => values.get(key) ?? null,
+    getItem: (key) => {
+      if (key === options.failGetItemForKey) throw new Error("getItem blocked");
+      return values.get(key) ?? null;
+    },
     setItem: (key, value) => {
       if (key === options.failSetItemForKey) {
         throw new DOMException("Storage quota exceeded", "QuotaExceededError");
@@ -39,6 +46,7 @@ function createStorage(
       values.set(key, value);
     },
     removeItem: (key) => {
+      if (key === options.failRemoveItemForKey) throw new Error("removeItem blocked");
       removed.push(key);
       values.delete(key);
     },
@@ -51,6 +59,9 @@ function isArray(value: unknown): value is unknown[] {
 }
 
 function run() {
+  assert.equal(getBrowserLocalStorage(), null);
+  assert.equal(getBrowserSessionStorage(), null);
+
   const scopeA = getBrowserStorageScope("supabase", USER_A);
   const scopeB = getBrowserStorageScope("supabase", USER_B);
   assert.equal(scopeA, `supabase:${USER_A}`);
@@ -80,6 +91,18 @@ function run() {
       assert.equal(values.has(getScopedBrowserStorageKey(prefix, scopeA)), false);
       assert.equal(values.get(getScopedBrowserStorageKey(prefix, scopeB)), "b");
     });
+  }
+
+  {
+    const key = getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, scopeA);
+    const { storage, values } = createStorage(
+      { [key]: "preserved" },
+      { failRemoveItemForKey: key },
+    );
+    assert.doesNotThrow(() => clearBrowserStorageScope(scopeA, storage));
+    assert.equal(values.get(key), "preserved");
+    assert.doesNotThrow(() => clearBrowserStorageScope(null, storage));
+    assert.doesNotThrow(() => clearBrowserStorageScope(scopeA, null));
   }
 
   {
@@ -196,6 +219,7 @@ function run() {
     startPasswordRecoveryFlow(sessionStorage, localStorage, startedAt);
 
     assert.equal(localValues.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
+    assert.equal(hasStoredPasswordRecoveryFlow(sessionStorage), true);
     assert.deepEqual(loadPasswordRecoveryFlow(sessionStorage, localStorage, startedAt + 1), {
       version: PASSWORD_RECOVERY_STORAGE_VERSION,
       startedAt,
@@ -208,6 +232,18 @@ function run() {
     clearPasswordRecoveryStorage(sessionStorage, localStorage);
     assert.equal(sessionValues.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
     assert.equal(localValues.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
+  }
+
+  {
+    const { storage, values } = createStorage(
+      { [PASSWORD_RECOVERY_STORAGE_KEY]: "stored" },
+      { failGetItemForKey: PASSWORD_RECOVERY_STORAGE_KEY },
+    );
+    assert.equal(hasStoredPasswordRecoveryFlow(storage), false);
+    assert.doesNotThrow(() => clearPasswordRecoveryStorage(storage, null));
+    assert.equal(values.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
+    assert.doesNotThrow(() => startPasswordRecoveryFlow(null, null));
+    assert.equal(loadPasswordRecoveryFlow(null, null), null);
   }
 
   {
