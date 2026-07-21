@@ -1,4 +1,5 @@
 import { toPersistedExerciseObservation } from "@/lib/data/repository";
+import { PublicError } from "@/lib/errors/public-error";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ExerciseEntry, TrainingDayCode, TrainingSession, TrainingSessionStatus } from "@/lib/progress/types";
 import {
@@ -189,13 +190,13 @@ export type CycleScopedTrainingRepositoryErrorCode =
   | "permission_denied"
   | "unexpected";
 
-export class CycleScopedTrainingRepositoryError extends Error {
+export class CycleScopedTrainingRepositoryError extends PublicError {
   constructor(
     public readonly code: CycleScopedTrainingRepositoryErrorCode,
     message: string,
-    public readonly cause?: unknown,
+    cause?: unknown,
   ) {
-    super(message);
+    super(code, message, cause);
     this.name = "CycleScopedTrainingRepositoryError";
   }
 }
@@ -1076,9 +1077,8 @@ function readRepsArray(value: unknown): number[] {
 
 function mapCycleScopedRepositoryError(error: unknown) {
   const code = readSupabaseErrorCode(error);
-  const message = readSupabaseErrorMessage(error).toLowerCase();
 
-  if (code === "23505" || message.includes("ya existe un ciclo activo")) {
+  if (code === "23505") {
     return new CycleScopedTrainingRepositoryError(
       "active_cycle_exists",
       "Ya existe un ciclo activo para este usuario.",
@@ -1086,7 +1086,7 @@ function mapCycleScopedRepositoryError(error: unknown) {
     );
   }
 
-  if (code === "42501" || message.includes("row-level security") || message.includes("permission denied")) {
+  if (code === "42501") {
     return new CycleScopedTrainingRepositoryError(
       "permission_denied",
       "No tienes permisos para gestionar este plan de ciclo.",
@@ -1094,17 +1094,17 @@ function mapCycleScopedRepositoryError(error: unknown) {
     );
   }
 
-  if (message.includes("requiere") || message.includes("obligatorio") || message.includes("invalido")) {
+  if (code === "P0001") {
     return new CycleScopedTrainingRepositoryError(
       "invalid_plan",
-      readSupabaseErrorMessage(error),
+      "No pudimos validar el plan de entrenamiento. Revisa los datos e intenta nuevamente.",
       error,
     );
   }
 
   return new CycleScopedTrainingRepositoryError(
     "unexpected",
-    readSupabaseErrorMessage(error) || "No pudimos completar la accion sobre el plan del ciclo.",
+    "No pudimos completar la accion sobre el plan del ciclo.",
     error,
   );
 }
@@ -1128,12 +1128,6 @@ function readTrainingDayCode(value: string): TrainingDayCode {
 function readSupabaseErrorCode(error: unknown) {
   if (!error || typeof error !== "object" || !("code" in error)) return "";
   return String(error.code);
-}
-
-function readSupabaseErrorMessage(error: unknown) {
-  if (error instanceof Error) return error.message;
-  if (!error || typeof error !== "object" || !("message" in error)) return "";
-  return String(error.message);
 }
 
 interface CycleScopedRoutineRow {
