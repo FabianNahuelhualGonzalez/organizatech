@@ -1,3 +1,8 @@
+import {
+  getPublicErrorMessage,
+  isSessionExpiredError as isPublicSessionExpiredError,
+} from "@/lib/errors/public-error";
+
 export function translateAuthError(error: unknown) {
   const message = readAuthErrorMessage(error).toLowerCase();
 
@@ -44,10 +49,11 @@ export function translatePersistenceError(error: unknown) {
   }
   if (message.includes("supabase")) return "No pudimos completar la acción. Intenta nuevamente.";
 
-  return readAuthErrorMessage(error) || "No pudimos completar la acción. Intenta nuevamente.";
+  return getPublicErrorMessage(error, "No pudimos completar la acción. Intenta nuevamente.");
 }
 
 export function isSessionExpiredError(error: unknown) {
+  if (isPublicSessionExpiredError(error)) return true;
   const message = readAuthErrorMessage(error).toLowerCase();
   return message.includes("sesión expiró") || message.includes("session expired") || message.includes("jwt expired");
 }

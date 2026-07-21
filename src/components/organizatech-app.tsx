@@ -76,6 +76,7 @@ import {
 } from "@/lib/progress/weekly-equivalent-progress";
 import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode, TrainingSession } from "@/lib/progress/types";
 import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
+import { getPublicErrorMessage } from "@/lib/errors/public-error";
 import {
   getActiveFlow,
   screenLabel,
@@ -7610,7 +7611,12 @@ function translateTrainingCycleRepositoryError(error: unknown) {
   if (error instanceof CycleScopedTrainingRepositoryError) {
     if (error.code === "session_required") return "Debes iniciar sesion para gestionar el plan del ciclo.";
     if (error.code === "session_expired") return "Tu sesion expiro. Inicia sesion nuevamente.";
-    if (error.code === "invalid_plan") return error.message;
+    if (error.code === "invalid_plan") {
+      return getPublicErrorMessage(
+        error,
+        "No pudimos validar el plan de entrenamiento. Revisa los datos e intenta nuevamente.",
+      );
+    }
     if (error.code === "active_cycle_exists") return "Ya existe un ciclo activo para tu cuenta.";
     if (error.code === "permission_denied") return "No tienes permisos para gestionar este plan de ciclo.";
     return "No pudimos completar la accion sobre el plan del ciclo.";
@@ -7634,10 +7640,15 @@ function translateTrainingCycleRepositoryError(error: unknown) {
 function translateTrainingWorkoutReadinessError(error: unknown) {
   if (error instanceof TrainingWorkoutReadinessRepositoryError) {
     if (error.code === "session_required") return "Inicia sesion para confirmar tu formulario de entrenamiento.";
-    return error.message;
+    if (error.code === "empty_response" || error.code === "multiple_rows" || error.code === "invalid_response") {
+      return "La respuesta del formulario de entrenamiento no tiene el formato esperado.";
+    }
+    return "No pudimos confirmar tu formulario de entrenamiento.";
   }
-  if (error instanceof Error) return error.message;
-  return "No pudimos confirmar tu formulario de entrenamiento. Intentalo nuevamente.";
+  return getPublicErrorMessage(
+    error,
+    "No pudimos confirmar tu formulario de entrenamiento. Intentalo nuevamente.",
+  );
 }
 
 function translateTrainingWorkoutReadinessLinkError(error: unknown) {
