@@ -18,10 +18,12 @@ export interface CycleHistoryListProps {
 }
 
 /**
- * Diseño aprobado H1-C.2: el ciclo seleccionado se muestra fijo arriba (barra + fecha
- * + PDF + métricas), y el resto de los ciclos aparece debajo como barras compactas,
- * sin repetir el seleccionado. Nunca hay más de un ciclo expandido: `resolveNextExpandedCycleId`
- * (H1-D) sigue siendo la única fuente de verdad de la regla de expansión única.
+ * Diseño aprobado H1-C.2: cada ciclo se renderiza en su posición original de la
+ * lista (orden recibido, ya provisto por H1-B: más nuevo primero). Expandir un
+ * ciclo no lo mueve de lugar — solo cambia su presentación de barra compacta a
+ * barra seleccionada + detalle, en el mismo puesto que ya ocupaba. Nunca hay más
+ * de un ciclo expandido: `resolveNextExpandedCycleId` (H1-D) sigue siendo la única
+ * fuente de verdad de la regla de expansión única.
  */
 export function CycleHistoryList({
   cycles,
@@ -32,31 +34,27 @@ export function CycleHistoryList({
   onDownloadPdf,
   isPdfActionBusy = false,
 }: CycleHistoryListProps) {
-  const selectedCycle = cycles.find((cycle) => cycle.cycleId === expandedCycleId) ?? null;
-  const otherCycles = selectedCycle ? cycles.filter((cycle) => cycle.cycleId !== selectedCycle.cycleId) : cycles;
-
   return (
-    <div className={styles.historyLayout}>
-      {selectedCycle ? (
-        <CycleHistorySelectedCycle
-          cycle={selectedCycle}
-          detailState={detailState}
-          onToggle={() => onToggleCycle(selectedCycle.cycleId)}
-          onRetry={() => onRetry(selectedCycle.cycleId)}
-          onDownloadPdf={() => onDownloadPdf(selectedCycle.cycleId)}
-          isPdfActionBusy={isPdfActionBusy}
-        />
-      ) : null}
-
-      {otherCycles.length > 0 ? (
-        <ul className={styles.compactList}>
-          {otherCycles.map((cycle) => (
-            <li key={cycle.cycleId} className={styles.compactListItem}>
+    <ul className={styles.historyLayout}>
+      {cycles.map((cycle) => {
+        const isSelected = cycle.cycleId === expandedCycleId;
+        return (
+          <li key={cycle.cycleId} className={styles.historyListItem}>
+            {isSelected ? (
+              <CycleHistorySelectedCycle
+                cycle={cycle}
+                detailState={detailState}
+                onToggle={() => onToggleCycle(cycle.cycleId)}
+                onRetry={() => onRetry(cycle.cycleId)}
+                onDownloadPdf={() => onDownloadPdf(cycle.cycleId)}
+                isPdfActionBusy={isPdfActionBusy}
+              />
+            ) : (
               <CycleHistoryCompactCycle cycle={cycle} onToggle={() => onToggleCycle(cycle.cycleId)} />
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

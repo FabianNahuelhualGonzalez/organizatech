@@ -25,7 +25,7 @@ export interface CycleHistorySelectedCycleProps {
   isPdfActionBusy?: boolean;
 }
 
-/** Barra + detalle del único ciclo seleccionado (diseño aprobado H1-C.2: fijo arriba de la lista, no inline por tarjeta). */
+// El ciclo seleccionado se expande inline y conserva su posición original en la lista.
 export function CycleHistorySelectedCycle({
   cycle,
   detailState,

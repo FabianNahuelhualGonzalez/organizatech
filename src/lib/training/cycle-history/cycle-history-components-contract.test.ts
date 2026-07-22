@@ -161,6 +161,13 @@ function testProgressMessageUsesToneHighlightMapping() {
   );
 }
 
+// El texto descriptivo del mensaje de progreso es blanco (var(--text)) y centrado; solo el valor
+// numérico destacado usa el color de tono (verde/rojo) via .progressHighlight.
+function testProgressMessageTextIsWhiteAndCentered() {
+  assert.match(cssSource, /\.progressMessage {[^}]*color: var\(--text\);[^}]*}/);
+  assert.match(cssSource, /\.progressMessage {[^}]*text-align: center;[^}]*}/);
+}
+
 // 13, 14, 15, 16, 17, 18. trainingDayCount se consume tal cual desde CycleHistoryCycleMetadata
 // (nunca desde plan/routines/sessions/breakdown/fechas/snapshot/ejercicios), respeta singular/plural,
 // omite el segmento limpiamente cuando es null y no deja separadores finales sobrantes.
@@ -207,10 +214,9 @@ function testQaFixturesCoverTrainingDayCountThreeFourAndNull() {
 
 // 19. Los callbacks siguen recibiendo el cycleId real (no normalizado) del ciclo correspondiente.
 function testCallbacksReceiveOriginalCycleId() {
-  assert.match(listSource, /onToggle={\(\) => onToggleCycle\(selectedCycle\.cycleId\)}/);
-  assert.match(listSource, /onRetry={\(\) => onRetry\(selectedCycle\.cycleId\)}/);
-  assert.match(listSource, /onDownloadPdf={\(\) => onDownloadPdf\(selectedCycle\.cycleId\)}/);
   assert.match(listSource, /onToggle={\(\) => onToggleCycle\(cycle\.cycleId\)}/);
+  assert.match(listSource, /onRetry={\(\) => onRetry\(cycle\.cycleId\)}/);
+  assert.match(listSource, /onDownloadPdf={\(\) => onDownloadPdf\(cycle\.cycleId\)}/);
 }
 
 // 20. IDs DOM saneados via los helpers de H1-C.1, para el ciclo seleccionado y los compactos.
@@ -222,9 +228,17 @@ function testDomIdsUseSanitizedHelpers() {
 }
 
 // 21. Expansión única: `CycleHistoryList` deriva el seleccionado y excluye ese mismo id de los compactos.
-function testSingleExpansionRuleWiredThroughList() {
-  assert.match(listSource, /cycles\.find\(\(cycle\) => cycle\.cycleId === expandedCycleId\)/);
-  assert.match(listSource, /cycles\.filter\(\(cycle\) => cycle\.cycleId !== selectedCycle\.cycleId\)/);
+// 21. Expansión única SIN reordenar: cada ciclo se renderiza en su posición original de la lista
+// (cycles.map en orden recibido); expandir un ciclo no lo separa a una sección "arriba" ni lo mueve
+// de lugar — solo cambia su presentación (barra compacta -> seleccionada) en el mismo puesto.
+function testExpansionDoesNotReorderCycles() {
+  assert.match(listSource, /cycles\.map\(\(cycle\) => \{/);
+  assert.match(listSource, /const isSelected = cycle\.cycleId === expandedCycleId;/);
+  assert.doesNotMatch(
+    listSource,
+    /cycles\.find\(|cycles\.filter\(/,
+    "el ciclo seleccionado no debe extraerse/filtrarse a una sección aparte: debe conservar su posición original en la lista",
+  );
   assert.match(viewModelSource, /export function resolveNextExpandedCycleId/);
 }
 
@@ -384,11 +398,12 @@ testDateAndPdfButtonShareSameRow();
 testThreeMainMetricsInOrder();
 testSummaryOnlyConsumesViewModelType();
 testProgressMessageUsesToneHighlightMapping();
+testProgressMessageTextIsWhiteAndCentered();
 testBarLabelUsesRealTrainingDayCountWithSingularPluralAndCleanOmission();
 testQaFixturesCoverTrainingDayCountThreeFourAndNull();
 testCallbacksReceiveOriginalCycleId();
 testDomIdsUseSanitizedHelpers();
-testSingleExpansionRuleWiredThroughList();
+testExpansionDoesNotReorderCycles();
 testOnlySelectedCycleReceivesRealDetailState();
 testEmptyDetailIsDistinctFromError();
 testPdfButtonUsesPureDisabledLogic();
