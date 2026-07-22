@@ -34,6 +34,7 @@ function makeCycle(
     endedAt: "2026-06-28T10:00:00.000Z",
     planSource: "cycle-scoped",
     durationWeeks: 4,
+    trainingDayCount: 3,
     ...overrides,
   };
 }
@@ -179,6 +180,44 @@ async function testDeterministicListOrderAndLegacyExclusion() {
   assert.equal(result.status, "ready");
   if (result.status !== "ready") return;
   assert.deepEqual(result.cycles.map((cycle) => cycle.cycleId), ["cycle-a", "cycle-b", "cycle-z"]);
+  assert.deepEqual(control.calls, { list: 1, cycle: 0, data: 0, personal: 0 });
+}
+
+async function testTrainingDayCountPropagatesEquallyToListAndDetail() {
+  const cycle = makeCycle(CYCLE_A, { trainingDayCount: 5 });
+  const control = createFakeSource({ cycles: [cycle], cycle });
+  const service = createService(control);
+
+  const listResult = await service.listCycles();
+  assert.equal(listResult.status, "ready");
+  if (listResult.status !== "ready") return;
+  assert.equal(listResult.cycles[0]?.trainingDayCount, 5);
+  assert.deepEqual(control.calls, { list: 1, cycle: 0, data: 0, personal: 0 });
+
+  const detailResult = await service.loadCycleDetail(CYCLE_A);
+  assert.equal(detailResult.status, "ready");
+  if (detailResult.status !== "ready") return;
+  assert.equal(detailResult.data.metadata.trainingDayCount, 5);
+  assert.equal(
+    detailResult.data.metadata.trainingDayCount,
+    listResult.cycles[0]?.trainingDayCount,
+  );
+}
+
+async function testMissingPersistedDayCountRemainsNullable() {
+  const cycle = makeCycle(CYCLE_A, { trainingDayCount: null });
+  const control = createFakeSource({ cycles: [cycle], cycle });
+  const service = createService(control);
+
+  const listResult = await service.listCycles();
+  assert.equal(listResult.status, "ready");
+  if (listResult.status !== "ready") return;
+  assert.equal(listResult.cycles[0]?.trainingDayCount, null);
+
+  const detailResult = await service.loadCycleDetail(CYCLE_A);
+  assert.equal(detailResult.status, "ready");
+  if (detailResult.status !== "ready") return;
+  assert.equal(detailResult.data.metadata.trainingDayCount, null);
 }
 
 async function testLoadsSelectedCycleAndBuildsPdfBase() {
@@ -371,6 +410,9 @@ function testProductionDataSourceHasNoLegacyQueries() {
   );
   assert.match(source, /getCycleScopedTrainingPlan/);
   assert.match(source, /getCycleScopedTrainingSessionData/);
+  assert.match(source, /getCycleScopedTrainingDayCounts/);
+  assert.match(source, /trainingDayCount,/);
+  assert.doesNotMatch(source, /readTrainingDayCount/);
   assert.doesNotMatch(source, /fetchEntries|fetchSessions|getRoutines|getExercises|loadAppData/);
   assert.doesNotMatch(source, /localStorage|sessionStorage|window\.|document\.|react/i);
 }
@@ -378,6 +420,8 @@ function testProductionDataSourceHasNoLegacyQueries() {
 async function run() {
   await testEmptyList();
   await testDeterministicListOrderAndLegacyExclusion();
+  await testTrainingDayCountPropagatesEquallyToListAndDetail();
+  await testMissingPersistedDayCountRemainsNullable();
   await testLoadsSelectedCycleAndBuildsPdfBase();
   await testAdaptsPlanSessionsAndEntries();
   await testRejectsPlanFromAnotherCycle();

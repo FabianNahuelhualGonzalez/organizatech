@@ -5,6 +5,7 @@ import type {
   CycleHistoryPersonalData,
 } from "@/lib/training/cycle-history/cycle-history-types";
 import {
+  getCycleScopedTrainingDayCounts,
   getCycleScopedTrainingPlan,
   getCycleScopedTrainingSessionData,
 } from "@/lib/training/cycle-scoped-training-repository";
@@ -26,6 +27,7 @@ export interface CycleHistorySourceCycle {
   endedAt: string | null;
   planSource: string | null;
   durationWeeks: number | null;
+  trainingDayCount: number | null;
 }
 
 export interface CycleHistorySourceExercise {
@@ -179,17 +181,45 @@ export function createRepositoryCycleHistoryDataSource(): CycleHistoryDataSource
   };
 }
 
-async function loadRepositoryCycles(): Promise<CycleHistorySourceCycle[]> {
+interface CycleHistoryCycleListDependencies {
+  getActiveCycle: typeof getActiveTrainingCycle;
+  getHistoricalCycles: typeof getTrainingCycleHistory;
+  getTrainingDayCounts: typeof getCycleScopedTrainingDayCounts;
+}
+
+const cycleHistoryCycleListDependencies: CycleHistoryCycleListDependencies = {
+  getActiveCycle: getActiveTrainingCycle,
+  getHistoricalCycles: getTrainingCycleHistory,
+  getTrainingDayCounts: getCycleScopedTrainingDayCounts,
+};
+
+export async function loadRepositoryCycles(
+  dependencies: CycleHistoryCycleListDependencies = cycleHistoryCycleListDependencies,
+): Promise<CycleHistorySourceCycle[]> {
   const [activeCycle, historicalCycles] = await Promise.all([
-    getActiveTrainingCycle(),
-    getTrainingCycleHistory(),
+    dependencies.getActiveCycle(),
+    dependencies.getHistoricalCycles(),
   ]);
   const cycles = activeCycle ? [activeCycle, ...historicalCycles] : historicalCycles;
   const uniqueCycles = new Map(cycles.map((cycle) => [cycle.id, cycle]));
-  return Array.from(uniqueCycles.values(), mapRepositoryCycle);
+  const repositoryCycles = Array.from(uniqueCycles.values());
+  const cycleScopedIds = repositoryCycles
+    .filter(isCycleScopedRepositoryCycle)
+    .map((cycle) => cycle.id);
+  const trainingDayCounts = cycleScopedIds.length > 0
+    ? await dependencies.getTrainingDayCounts(cycleScopedIds)
+    : new Map<string, number>();
+
+  return repositoryCycles.map((cycle) => mapRepositoryCycle(
+    cycle,
+    trainingDayCounts.get(cycle.id) ?? null,
+  ));
 }
 
-function mapRepositoryCycle(cycle: TrainingCycle): CycleHistorySourceCycle {
+export function mapRepositoryCycle(
+  cycle: TrainingCycle,
+  trainingDayCount: number | null,
+): CycleHistorySourceCycle {
   return {
     id: cycle.id,
     name: cycle.name,
@@ -202,7 +232,13 @@ function mapRepositoryCycle(cycle: TrainingCycle): CycleHistorySourceCycle {
     endedAt: cycle.endedAt,
     planSource: readString(cycle.planSnapshot.source),
     durationWeeks: readPositiveInteger(cycle.planSnapshot.durationWeeks),
+    trainingDayCount,
   };
+}
+
+function isCycleScopedRepositoryCycle(cycle: TrainingCycle): boolean {
+  const source = readString(cycle.planSnapshot.source);
+  return source === "cycle-scoped" || source === "cycle-scoped-qa";
 }
 
 function readString(value: unknown): string | null {

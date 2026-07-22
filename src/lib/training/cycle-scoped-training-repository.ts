@@ -14,6 +14,16 @@ import {
   resolveExerciseLineageIdForSessionEntry,
 } from "@/lib/training/training-exercise-lineage";
 
+const TRAINING_DAY_CODES = new Set<TrainingDayCode>([
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+]);
+
 export interface CycleScopedTrainingCycleInput {
   name: string;
   cycleNumber: number;
@@ -268,6 +278,69 @@ export async function createTrainingSessionWithCycleEntries(input: CycleScopedTr
 
   return data;
 }
+
+export interface CycleScopedTrainingDayCountRow {
+  cycleId: string;
+  dayCode: unknown;
+}
+
+export function countCycleScopedTrainingDays(
+  cycleIds: readonly string[],
+  rows: readonly CycleScopedTrainingDayCountRow[],
+): ReadonlyMap<string, number> {
+  const requestedCycleIds = new Set(cycleIds);
+  const dayCodesByCycle = new Map<string, Set<TrainingDayCode>>();
+
+  for (const row of rows) {
+    if (!requestedCycleIds.has(row.cycleId) || !isTrainingDayCode(row.dayCode)) {
+      continue;
+    }
+
+    const dayCodes = dayCodesByCycle.get(row.cycleId) ?? new Set<TrainingDayCode>();
+    dayCodes.add(row.dayCode);
+    dayCodesByCycle.set(row.cycleId, dayCodes);
+  }
+
+  return new Map(
+    Array.from(dayCodesByCycle, ([cycleId, dayCodes]) => [cycleId, dayCodes.size]),
+  );
+}
+
+function isTrainingDayCode(value: unknown): value is TrainingDayCode {
+  return typeof value === "string" && TRAINING_DAY_CODES.has(value as TrainingDayCode);
+}
+
+export function createCycleScopedTrainingDayCountsLoader(
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+) {
+  return async function getTrainingDayCounts(
+    cycleIds: readonly string[],
+  ): Promise<ReadonlyMap<string, number>> {
+    const uniqueCycleIds = Array.from(new Set(cycleIds.filter(Boolean)));
+    if (uniqueCycleIds.length === 0) return new Map();
+
+    const { supabase, userId } = await getAuthenticatedCycleScopedRepository(getClient);
+    const { data, error } = await supabase
+      .from("training_cycle_days")
+      .select("cycle_id,day_code")
+      .eq("user_id", userId)
+      .in("cycle_id", uniqueCycleIds)
+      .is("deleted_at", null);
+
+    if (error) throw mapCycleScopedRepositoryError(error);
+
+    return countCycleScopedTrainingDays(
+      uniqueCycleIds,
+      ((data ?? []) as Array<{ cycle_id: string; day_code: unknown }>).map((row) => ({
+        cycleId: row.cycle_id,
+        dayCode: row.day_code,
+      })),
+    );
+  };
+}
+
+export const getCycleScopedTrainingDayCounts =
+  createCycleScopedTrainingDayCountsLoader();
 
 export async function addCycleScopedTrainingDaysAndExercises(
   input: AddCycleScopedTrainingPlanInput,
@@ -764,8 +837,10 @@ function toCreateTrainingCycleWithPlanPayload(plan: CycleScopedPlanInput) {
   };
 }
 
-async function getAuthenticatedCycleScopedRepository() {
-  const supabase = getSupabaseBrowserClient();
+async function getAuthenticatedCycleScopedRepository(
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+) {
+  const supabase = getClient();
   if (!supabase) {
     throw new CycleScopedTrainingRepositoryError(
       "session_required",

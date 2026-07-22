@@ -35,6 +35,7 @@ const CYCLE_WITH_METADATA: CycleHistoryCycleMetadata = {
   startedAt: "2026-06-01T12:00:00.000Z",
   endedAt: "2026-06-28T12:00:00.000Z",
   durationWeeks: 4,
+  trainingDayCount: 3,
 };
 
 const CYCLE_WITHOUT_METADATA: CycleHistoryCycleMetadata = {
@@ -48,6 +49,7 @@ const CYCLE_WITHOUT_METADATA: CycleHistoryCycleMetadata = {
   startedAt: "2026-07-01T12:00:00.000Z",
   endedAt: null,
   durationWeeks: null,
+  trainingDayCount: null,
 };
 
 const PLAN: CycleHistoryPlan = {

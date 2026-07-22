@@ -65,6 +65,7 @@ export function adaptCycleHistoryMetadata(
     startedAt: cycle.startedAt,
     endedAt: cycle.endedAt,
     durationWeeks: cycle.durationWeeks,
+    trainingDayCount: cycle.trainingDayCount,
   };
 }
 

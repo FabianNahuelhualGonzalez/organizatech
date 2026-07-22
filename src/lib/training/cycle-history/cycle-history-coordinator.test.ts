@@ -34,6 +34,7 @@ function makeDetail(cycleId: string): CycleHistoryDetail {
     startedAt: "2026-06-01T00:00:00.000Z",
     endedAt: "2026-06-28T00:00:00.000Z",
     durationWeeks: 4,
+    trainingDayCount: 3,
   };
   const breakdown = { cycleId, routines: [], weeksWithData: [] };
   const metrics = {

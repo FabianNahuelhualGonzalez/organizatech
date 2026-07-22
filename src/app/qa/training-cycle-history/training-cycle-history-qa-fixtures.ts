@@ -43,6 +43,7 @@ const QA_CYCLE_WITH_DATA: CycleHistoryCycleMetadata = {
   startedAt: "2026-06-01T12:00:00.000Z",
   endedAt: "2026-06-28T12:00:00.000Z",
   durationWeeks: 4,
+  trainingDayCount: 3,
 };
 
 const QA_CYCLE_EMPTY: CycleHistoryCycleMetadata = {
@@ -56,6 +57,7 @@ const QA_CYCLE_EMPTY: CycleHistoryCycleMetadata = {
   startedAt: "2026-04-01T12:00:00.000Z",
   endedAt: "2026-04-10T12:00:00.000Z",
   durationWeeks: null,
+  trainingDayCount: null,
 };
 
 const QA_CYCLE_ACTIVE: CycleHistoryCycleMetadata = {
@@ -69,6 +71,7 @@ const QA_CYCLE_ACTIVE: CycleHistoryCycleMetadata = {
   startedAt: "2026-07-01T12:00:00.000Z",
   endedAt: null,
   durationWeeks: 6,
+  trainingDayCount: 4,
 };
 
 export const QA_CYCLES: CycleHistoryCycleMetadata[] = [

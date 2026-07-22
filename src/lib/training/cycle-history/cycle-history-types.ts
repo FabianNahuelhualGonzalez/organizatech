@@ -19,6 +19,12 @@ export interface CycleHistoryCycleMetadata {
    * solo refleja las semanas con al menos un registro válido.
    */
   durationWeeks: number | null;
+  /**
+   * Cantidad de días de semana distintos del plan real del ciclo, obtenida desde
+   * los day_code vigentes de training_cycle_days. No representa sesiones
+   * realizadas y puede ser null cuando no existe información confiable.
+   */
+  trainingDayCount: number | null;
 }
 
 export interface CycleHistoryPlannedExercise {
