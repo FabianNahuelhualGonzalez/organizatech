@@ -48,11 +48,11 @@ export function CycleHistoryScreen({
   return (
     <section className={styles.screen} aria-label="Historial de ciclos de entrenamiento">
       <header className={styles.screenHeader}>
-        <p className={styles.eyebrow}>Historial de ciclos</p>
         <h1 className={styles.title}>Revisa tu historial de ciclo de entrenamiento</h1>
         <p className={styles.subtitle}>
-          Selecciona un ciclo para ver su resumen, sus métricas y el detalle registrado semana a semana.
+          Podrás visualizar y descargar en PDF toda la información de tu ciclo de entrenamiento.
         </p>
+        <hr className={styles.headerDivider} />
       </header>
 
       <CycleHistoryListState

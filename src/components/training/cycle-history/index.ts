@@ -1,8 +1,14 @@
 export { CycleHistoryScreen, type CycleHistoryScreenProps } from "./CycleHistoryScreen";
 export { CycleHistoryList, type CycleHistoryListProps } from "./CycleHistoryList";
-export { CycleHistoryCard, type CycleHistoryCardProps } from "./CycleHistoryCard";
+export {
+  CycleHistorySelectedCycle,
+  type CycleHistorySelectedCycleProps,
+} from "./CycleHistorySelectedCycle";
+export {
+  CycleHistoryCompactCycle,
+  type CycleHistoryCompactCycleProps,
+} from "./CycleHistoryCompactCycle";
 export { CycleHistorySummary } from "./CycleHistorySummary";
-export { CycleHistoryRoutineBreakdown } from "./CycleHistoryRoutineBreakdown";
 export {
   CycleHistoryIdleState,
   CycleHistoryDisabledState,

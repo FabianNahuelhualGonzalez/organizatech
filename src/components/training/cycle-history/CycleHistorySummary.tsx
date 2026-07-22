@@ -14,20 +14,25 @@ const TONE_CLASS_NAME: Record<CycleHistoryToneKind, string> = {
 export function CycleHistorySummary({ detail }: { detail: CycleHistoryDetailViewModel }) {
   return (
     <section className={styles.summary} aria-label="Resumen del ciclo">
-      <div className={styles.metricGrid}>
+      <div className={styles.metricsRow}>
         {detail.metricCards.map((metric) => (
-          <div className={styles.metricCard} key={metric.label}>
-            <p className={styles.metricLabel}>{metric.label}</p>
-            <strong className={styles.metricValue}>{metric.value}</strong>
+          <div className={styles.metricColumn} key={metric.label}>
+            <div className={styles.metricBox}>
+              <p className={styles.metricLabel}>{metric.label}</p>
+              <strong className={styles.metricValue}>{metric.value}</strong>
+            </div>
             <p className={styles.metricCaption}>{metric.caption}</p>
           </div>
         ))}
       </div>
-      <p className={`${styles.progressBanner} ${TONE_CLASS_NAME[detail.volumeProgress.tone]}`}>
-        {detail.volumeProgress.text}
-      </p>
-      <p className={styles.summaryMeta}>
-        {detail.weeksWithDataLabel} · {detail.sessionCountLabel}
+      <p className={styles.progressMessage}>
+        {detail.volumeProgress.prefix}
+        {detail.volumeProgress.highlight ? (
+          <strong className={`${styles.progressHighlight} ${TONE_CLASS_NAME[detail.volumeProgress.tone]}`}>
+            {detail.volumeProgress.highlight}
+          </strong>
+        ) : null}
+        {detail.volumeProgress.suffix}
       </p>
     </section>
   );

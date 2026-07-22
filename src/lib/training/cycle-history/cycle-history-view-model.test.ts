@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 
 import { buildCycleHistoryBreakdown } from "@/lib/training/cycle-history/cycle-history-breakdown";
-import { buildCycleHistoryMetricsSummary } from "@/lib/training/cycle-history/cycle-history-metrics";
+import {
+  buildCycleHistoryMetricsSummary,
+  describeCycleHistoryVolumeProgress,
+} from "@/lib/training/cycle-history/cycle-history-metrics";
 import { buildCycleHistoryPdfModel } from "@/lib/training/cycle-history/cycle-history-pdf-model";
 import type { CycleHistoryDetail } from "@/lib/training/cycle-history/cycle-history-service";
 import type {
@@ -102,41 +105,46 @@ const PERSONAL_DATA: CycleHistoryPersonalData = {
   phoneNumber: "+56900000000",
 };
 
-function buildDetail(): CycleHistoryDetail {
+function buildDetailFrom(
+  metadata: CycleHistoryCycleMetadata,
+  plan: CycleHistoryPlan,
+  sessions: CycleHistorySessionRow[],
+  entries: CycleHistoryEntryRow[],
+): CycleHistoryDetail {
   const breakdown = buildCycleHistoryBreakdown({
-    selectedCycleId: CYCLE_WITH_METADATA.cycleId,
-    plan: PLAN,
-    sessions: SESSIONS,
-    entries: ENTRIES,
-    plannedStartDate: CYCLE_WITH_METADATA.plannedStartDate,
+    selectedCycleId: metadata.cycleId,
+    plan,
+    sessions,
+    entries,
+    plannedStartDate: metadata.plannedStartDate,
   });
   const metrics = buildCycleHistoryMetricsSummary(breakdown);
   return {
-    metadata: CYCLE_WITH_METADATA,
-    plan: PLAN,
+    metadata,
+    plan,
     breakdown,
     metrics,
     pdfModel: buildCycleHistoryPdfModel({
-      cycle: CYCLE_WITH_METADATA,
+      cycle: metadata,
       breakdown,
       personalData: PERSONAL_DATA,
       generatedAt: "2026-07-21T12:00:00.000Z",
     }),
-    sessionCount: SESSIONS.length,
-    entryCount: ENTRIES.length,
+    sessionCount: sessions.length,
+    entryCount: entries.length,
   };
 }
 
-// 1. Mapper de ciclo contraído.
+function buildDetail(): CycleHistoryDetail {
+  return buildDetailFrom(CYCLE_WITH_METADATA, PLAN, SESSIONS, ENTRIES);
+}
+
+// 1. Mapper de barra de ciclo contraído/seleccionado (diseño H1-C.2), con semanas + días reales.
 function testCardViewModelMapsRealFields() {
   const card = buildCycleHistoryCardViewModel(CYCLE_WITH_METADATA);
   assert.equal(card.cycleId, "cycle-3");
-  assert.equal(card.title, "Mesociclo");
-  assert.equal(card.eyebrowLabel, "Ciclo 3");
-  assert.equal(card.cycleTypeLabel, "Hipertrofia");
-  assert.equal(card.statusLabel, "Completado");
-  assert.equal(card.dateRangeLabel, "01-06-2026 — 28-06-2026");
-  assert.equal(card.durationLabel, "4 semanas");
+  assert.equal(card.barLabel, "Ciclo de entrenamiento 3: Mesociclo | 4 semanas | 3 días de entrenamiento");
+  assert.equal(card.dateRowLabel, "01-06-2026 | 28-06-2026");
 }
 
 function testListViewModelsPreserveOrderAndDoNotMutateInput() {
@@ -148,23 +156,17 @@ function testListViewModelsPreserveOrderAndDoNotMutateInput() {
   assert.deepEqual(cycles, snapshot, "el array/objetos de entrada no deben mutarse");
 }
 
-// 2. Mapper de detalle.
-function testDetailViewModelMapsRealMetricsAndBreakdown() {
+// 2. Mapper de detalle: exactamente las 3 métricas reales del diseño aprobado.
+function testDetailViewModelMapsRealMetrics() {
   const detail = buildDetail();
   const viewModel = buildCycleHistoryDetailViewModel(detail);
 
   assert.equal(viewModel.cycleId, "cycle-3");
-  assert.equal(viewModel.metricCards.length, 2);
-  assert.equal(viewModel.metricCards[0]?.label, "Volumen total registrado");
-  assert.equal(viewModel.metricCards[1]?.label, "Ejercicios registrados");
-  assert.equal(viewModel.metricCards[1]?.value, String(detail.metrics.registeredExerciseCount));
-  assert.equal(viewModel.routines.length, 1);
-  assert.equal(viewModel.routines[0]?.name, "Torso Fuerza");
-  assert.equal(viewModel.routines[0]?.exercises[0]?.name, "Press militar");
-  assert.deepEqual(
-    viewModel.routines[0]?.exercises[0]?.weeks.map((week) => week.week),
-    [1, 2],
-  );
+  assert.equal(viewModel.metricCards.length, 3);
+  assert.equal(viewModel.metricCards[0]?.label, "Volumen registrado");
+  assert.equal(viewModel.metricCards[1]?.label, "Total volumen progreso");
+  assert.equal(viewModel.metricCards[2]?.label, "Ejercicios registrados");
+  assert.equal(viewModel.metricCards[2]?.value, String(detail.metrics.registeredExerciseCount));
 }
 
 // 3. No mutación de entradas H1-B.
@@ -180,14 +182,14 @@ function testErrorViewModelExposesOnlySanitizedFields() {
   assert.deepEqual(viewModel, { message: "No pudimos cargar el detalle de este ciclo.", code: "unexpected" });
 }
 
-// 11 y 12. Expansión controlada: un único expandedCycleId, y contracción del ciclo actual.
+// 21. Expansión controlada: un único expandedCycleId, y contracción del ciclo actual.
 function testExpansionRuleTogglesSingleCycle() {
   assert.equal(resolveNextExpandedCycleId(null, "cycle-1"), "cycle-1");
   assert.equal(resolveNextExpandedCycleId("cycle-1", "cycle-2"), "cycle-2", "expandir otro ciclo reemplaza al unico expandido");
   assert.equal(resolveNextExpandedCycleId("cycle-1", "cycle-1"), null, "pulsar el mismo ciclo expandido lo contrae");
 }
 
-// 15. Botón PDF deshabilitado durante loading o sin detalle.
+// Botón PDF deshabilitado durante loading o sin detalle.
 function testPdfActionDisabledLogic() {
   assert.equal(isCycleHistoryPdfActionDisabled("idle"), true);
   assert.equal(isCycleHistoryPdfActionDisabled("disabled"), true);
@@ -198,61 +200,139 @@ function testPdfActionDisabledLogic() {
   assert.equal(isCycleHistoryPdfActionDisabled("ready", true), true, "una descarga en curso deshabilita el boton aunque el detalle este listo");
 }
 
-// 16. Métricas sin valores inventados: el valor mostrado proviene exactamente de metrics.totalVolumeKg/registeredExerciseCount.
+// 17. Métricas sin valores inventados: los valores mostrados provienen exactamente de metrics.*.
 function testMetricsAreNotInvented() {
   const detail = buildDetail();
   const viewModel = buildCycleHistoryDetailViewModel(detail);
   const expectedVolumeLabel = `${Math.round(detail.metrics.totalVolumeKg).toLocaleString("es-CL")} kg`;
+  const expectedProgressSign = (detail.metrics.volumeProgress.differenceKg ?? 0) >= 0 ? "+" : "-";
+  const expectedProgressValue = `${expectedProgressSign}${Math.round(Math.abs(detail.metrics.volumeProgress.differenceKg ?? 0)).toLocaleString("es-CL")} kg`;
 
   assert.equal(viewModel.metricCards[0]?.value, expectedVolumeLabel);
-  assert.equal(viewModel.metricCards[1]?.value, String(detail.metrics.registeredExerciseCount));
-  assert.equal(viewModel.volumeProgress.text.length > 0, true);
+  assert.equal(viewModel.metricCards[1]?.value, expectedProgressValue);
+  assert.equal(viewModel.metricCards[2]?.value, String(detail.metrics.registeredExerciseCount));
 }
 
-// 17. Ausencia neutral de metadata faltante (fechas y duración nulas).
+// La métrica de progreso usa ausencia neutral real (no inventada) cuando faltan datos suficientes.
+function testProgressMetricUsesNeutralAbsenceWithInsufficientData() {
+  const detail = buildDetailFrom(
+    CYCLE_WITH_METADATA,
+    PLAN,
+    [SESSIONS[0]!],
+    [{ id: "entry-1", sessionId: "session-1", exerciseLineageId: "lineage-1", trainingCycleExerciseId: "cycle-exercise-1", exerciseName: "Press militar", weight: 100, reps: [10] }],
+  );
+  const viewModel = buildCycleHistoryDetailViewModel(detail);
+  assert.equal(viewModel.metricCards[1]?.value, NEUTRAL_MISSING_VALUE_LABEL);
+  assert.equal(viewModel.volumeProgress.highlight, null, "sin datos suficientes no hay valor numerico que destacar");
+}
+
+// 10, 11, 12 (mensaje de progreso positivo/negativo/neutro) — el valor numérico real se separa
+// para destacarlo, sin alterar el texto exacto aprobado de describeCycleHistoryVolumeProgress (H1-A).
+function testProgressMessageHighlightsRealValueByTone() {
+  const increaseDetail = buildDetail();
+  const increaseViewModel = buildCycleHistoryDetailViewModel(increaseDetail);
+  const expectedIncreaseText = describeCycleHistoryVolumeProgress(increaseDetail.metrics.volumeProgress);
+  assert.equal(increaseViewModel.volumeProgress.tone, "positive");
+  assert.match(increaseViewModel.volumeProgress.highlight ?? "", /kg/);
+  assert.equal(
+    `${increaseViewModel.volumeProgress.prefix}${increaseViewModel.volumeProgress.highlight}${increaseViewModel.volumeProgress.suffix}`,
+    expectedIncreaseText,
+    "la segmentación prefix/highlight/suffix debe reconstruir exactamente el texto aprobado de H1-A, sin alterarlo",
+  );
+
+  const decreaseDetail = buildDetailFrom(
+    CYCLE_WITH_METADATA,
+    PLAN,
+    SESSIONS,
+    [
+      { id: "entry-1", sessionId: "session-1", exerciseLineageId: "lineage-1", trainingCycleExerciseId: "cycle-exercise-1", exerciseName: "Press militar", weight: 100, reps: [10, 10, 10, 10] },
+      { id: "entry-2", sessionId: "session-2", exerciseLineageId: "lineage-1", trainingCycleExerciseId: "cycle-exercise-1", exerciseName: "Press militar", weight: 50, reps: [10, 10, 10, 10] },
+    ],
+  );
+  const decreaseViewModel = buildCycleHistoryDetailViewModel(decreaseDetail);
+  assert.equal(decreaseViewModel.volumeProgress.tone, "negative");
+  assert.match(decreaseViewModel.volumeProgress.prefix, /^Disminuiste/);
+
+  const unchangedDetail = buildDetailFrom(
+    CYCLE_WITH_METADATA,
+    PLAN,
+    SESSIONS,
+    [
+      { id: "entry-1", sessionId: "session-1", exerciseLineageId: "lineage-1", trainingCycleExerciseId: "cycle-exercise-1", exerciseName: "Press militar", weight: 100, reps: [10, 10, 10, 10] },
+      { id: "entry-2", sessionId: "session-2", exerciseLineageId: "lineage-1", trainingCycleExerciseId: "cycle-exercise-1", exerciseName: "Press militar", weight: 100, reps: [10, 10, 10, 10] },
+    ],
+  );
+  const unchangedViewModel = buildCycleHistoryDetailViewModel(unchangedDetail);
+  assert.equal(unchangedViewModel.volumeProgress.tone, "neutral");
+  assert.equal(unchangedViewModel.volumeProgress.highlight, null, "el estado 'unchanged' no tiene un numero que destacar");
+}
+
+// 15. trainingDayCount null omite el segmento por completo (y también semanas si falta durationWeeks) —
+// nunca "Sin información días de entrenamiento" ni "0 días" ni "null días".
+function testBarLabelOmitsBothSegmentsWhenBothAbsent() {
+  const card = buildCycleHistoryCardViewModel(CYCLE_WITHOUT_METADATA);
+  assert.equal(card.barLabel, "Ciclo de entrenamiento 4: Macrociclo");
+  assert.doesNotMatch(card.barLabel, /\|/, "16. sin separadores finales sobrantes cuando ambos segmentos faltan");
+  assert.doesNotMatch(card.barLabel, /Sin información|null|0 días/);
+}
+
+// 16. Solo semanas (trainingDayCount null): sin separador final sobrante.
+function testBarLabelShowsOnlyWeeksWhenTrainingDayCountIsNull() {
+  const card = buildCycleHistoryCardViewModel({ ...CYCLE_WITHOUT_METADATA, durationWeeks: 6 });
+  assert.equal(card.barLabel, "Ciclo de entrenamiento 4: Macrociclo | 6 semanas");
+  assert.doesNotMatch(card.barLabel, /días/);
+}
+
+// 15. Solo días (durationWeeks null): el segmento de semanas se omite, no se reemplaza por texto neutro.
+function testBarLabelShowsOnlyTrainingDaysWhenDurationWeeksIsNull() {
+  const card = buildCycleHistoryCardViewModel({ ...CYCLE_WITHOUT_METADATA, trainingDayCount: 4 });
+  assert.equal(card.barLabel, "Ciclo de entrenamiento 4: Macrociclo | 4 días de entrenamiento");
+  assert.doesNotMatch(card.barLabel, /semanas/);
+}
+
+// 13. trainingDayCount 1 usa singular ("1 día de entrenamiento").
+function testBarLabelUsesSingularForOneTrainingDay() {
+  const card = buildCycleHistoryCardViewModel({ ...CYCLE_WITH_METADATA, trainingDayCount: 1 });
+  assert.match(card.barLabel, /\| 1 día de entrenamiento$/);
+}
+
+// 14. trainingDayCount 2 a 7 usa plural ("N días de entrenamiento").
+function testBarLabelUsesPluralForTwoToSevenTrainingDays() {
+  for (const trainingDayCount of [2, 3, 4, 5, 6, 7]) {
+    const card = buildCycleHistoryCardViewModel({ ...CYCLE_WITH_METADATA, trainingDayCount });
+    assert.match(card.barLabel, new RegExp(`\\| ${trainingDayCount} días de entrenamiento$`));
+  }
+}
+
+// 18. trainingDayCount se consume tal cual desde metadata, nunca se recalcula desde plan/breakdown/sessions.
+function testBarLabelDoesNotRecalculateTrainingDayCountFromOtherSources() {
+  const card = buildCycleHistoryCardViewModel(CYCLE_WITH_METADATA);
+  assert.match(card.barLabel, /3 días de entrenamiento/, "usa cycle.trainingDayCount tal cual (3), no un conteo derivado del plan/breakdown");
+}
+
+// 17. Ausencia neutral de fecha faltante (fila "Fecha: ..."), sin repetir el rótulo neutro dos veces.
 function testMissingMetadataUsesNeutralLabel() {
   const card = buildCycleHistoryCardViewModel(CYCLE_WITHOUT_METADATA);
-  assert.equal(card.dateRangeLabel, NEUTRAL_MISSING_VALUE_LABEL);
-  assert.equal(card.durationLabel, NEUTRAL_MISSING_VALUE_LABEL);
-  assert.equal(card.cycleTypeLabel, null, "cycleType ausente se mantiene null, no se inventa texto");
+  assert.equal(card.dateRowLabel, NEUTRAL_MISSING_VALUE_LABEL);
 }
 
-// Ausencia neutral parcial: un solo lado del rango presente.
-function testPartialDateRangeShowsRealValueAndNeutralForMissingSide() {
-  const card = buildCycleHistoryCardViewModel({
+// Ausencia neutral parcial: cuando falta solo un extremo de la fecha, usa "desde"/"hasta" en vez de
+// repetir "Sin información" dos veces.
+function testPartialDateRangeUsesCleanVariantInsteadOfRepeatingNeutralLabel() {
+  const startOnly = buildCycleHistoryCardViewModel({
     ...CYCLE_WITHOUT_METADATA,
     plannedStartDate: "2026-07-01",
     plannedEndDate: null,
   });
-  assert.equal(card.dateRangeLabel, `01-07-2026 — ${NEUTRAL_MISSING_VALUE_LABEL}`);
-}
+  assert.equal(startOnly.dateRowLabel, "desde 01-07-2026");
+  assert.doesNotMatch(startOnly.dateRowLabel, new RegExp(NEUTRAL_MISSING_VALUE_LABEL));
 
-// Ejercicio sin pauta disponible: planLabel debe ser null (la UI decide mostrar "Sin información"), no inventado.
-function testExercisePlanLabelIsNullWithoutPlan() {
-  const breakdown = buildCycleHistoryBreakdown({
-    selectedCycleId: "cycle-3",
-    plan: { cycleId: "cycle-3", routines: [] },
-    sessions: SESSIONS,
-    entries: [
-      { id: "entry-orphan", sessionId: "session-1", exerciseLineageId: null, trainingCycleExerciseId: null, exerciseName: "Ejercicio retirado", weight: 50, reps: [10] },
-    ],
-    plannedStartDate: "2026-06-01",
+  const endOnly = buildCycleHistoryCardViewModel({
+    ...CYCLE_WITHOUT_METADATA,
+    plannedStartDate: null,
+    plannedEndDate: "2026-07-28",
   });
-  const metrics = buildCycleHistoryMetricsSummary(breakdown);
-  const detail: CycleHistoryDetail = {
-    metadata: CYCLE_WITH_METADATA,
-    plan: { cycleId: "cycle-3", routines: [] },
-    breakdown,
-    metrics,
-    pdfModel: buildCycleHistoryPdfModel({ cycle: CYCLE_WITH_METADATA, breakdown, personalData: PERSONAL_DATA, generatedAt: "2026-07-21T12:00:00.000Z" }),
-    sessionCount: SESSIONS.length,
-    entryCount: 1,
-  };
-
-  const viewModel = buildCycleHistoryDetailViewModel(detail);
-  const orphanExercise = viewModel.routines.flatMap((routine) => routine.exercises).find((exercise) => exercise.name === "Ejercicio retirado");
-  assert.ok(orphanExercise);
-  assert.equal(orphanExercise?.planLabel, null);
+  assert.equal(endOnly.dateRowLabel, "hasta 28-07-2026");
 }
 
 // H1-C.1 — sanitizeCycleHistoryDomId: determinismo y estabilidad para el mismo valor.
@@ -264,7 +344,7 @@ function testSanitizeDomIdIsDeterministicAndStable() {
   assert.equal(sanitizeCycleHistoryDomId("cycle-3"), sanitizeCycleHistoryDomId("cycle-3"));
 }
 
-// H1-C.1 — sin espacios ni caracteres problemáticos para selectores/atributos.
+// 20. sin espacios ni caracteres problemáticos para selectores/atributos.
 function testSanitizeDomIdRemovesUnsafeCharacters() {
   const withSpaces = sanitizeCycleHistoryDomId("cycle with spaces");
   const withSymbols = sanitizeCycleHistoryDomId('a/b?c#d:e"fñé');
@@ -296,7 +376,7 @@ function testSanitizeDomIdHandlesEmptyOrFullyRemovableInput() {
   assert.notEqual(empty, onlySymbols, "entradas distintas (aunque ambas queden vacías tras sanitizar) no deben colisionar");
 }
 
-// H1-C.1 — los helpers de id de detalle/encabezado usan el mismo fragmento sanitizado, por lo que
+// 20. Los helpers de id de detalle/encabezado usan el mismo fragmento sanitizado, por lo que
 // aria-controls (detailId) y aria-labelledby (headingId) referencian ids generados consistentemente
 // para el mismo cycleId, y ambos difieren entre cycleIds distintos.
 function testDetailAndHeadingDomIdsAreConsistentPerCycle() {
@@ -313,7 +393,7 @@ function testDetailAndHeadingDomIdsAreConsistentPerCycle() {
   assert.notEqual(buildCycleHistoryHeadingDomId(cycleId), buildCycleHistoryHeadingDomId(otherCycleId));
 }
 
-// H1-C.1 — el cycleId real de dominio nunca se altera: solo el id DOM se normaliza.
+// 19. El cycleId real de dominio nunca se altera: solo el id DOM se normaliza.
 function testSanitizingDomIdNeverMutatesTheRealCycleId() {
   const cycleId = "cycle/with spaces?and#symbols";
   const cardViewModel = buildCycleHistoryCardViewModel({ ...CYCLE_WITH_METADATA, cycleId });
@@ -322,15 +402,22 @@ function testSanitizingDomIdNeverMutatesTheRealCycleId() {
 
 testCardViewModelMapsRealFields();
 testListViewModelsPreserveOrderAndDoNotMutateInput();
-testDetailViewModelMapsRealMetricsAndBreakdown();
+testDetailViewModelMapsRealMetrics();
 testDetailViewModelDoesNotMutateInput();
 testErrorViewModelExposesOnlySanitizedFields();
 testExpansionRuleTogglesSingleCycle();
 testPdfActionDisabledLogic();
 testMetricsAreNotInvented();
+testProgressMetricUsesNeutralAbsenceWithInsufficientData();
+testProgressMessageHighlightsRealValueByTone();
+testBarLabelOmitsBothSegmentsWhenBothAbsent();
+testBarLabelShowsOnlyWeeksWhenTrainingDayCountIsNull();
+testBarLabelShowsOnlyTrainingDaysWhenDurationWeeksIsNull();
+testBarLabelUsesSingularForOneTrainingDay();
+testBarLabelUsesPluralForTwoToSevenTrainingDays();
+testBarLabelDoesNotRecalculateTrainingDayCountFromOtherSources();
 testMissingMetadataUsesNeutralLabel();
-testPartialDateRangeShowsRealValueAndNeutralForMissingSide();
-testExercisePlanLabelIsNullWithoutPlan();
+testPartialDateRangeUsesCleanVariantInsteadOfRepeatingNeutralLabel();
 testSanitizeDomIdIsDeterministicAndStable();
 testSanitizeDomIdRemovesUnsafeCharacters();
 testSanitizeDomIdAvoidsTrivialCollisions();
