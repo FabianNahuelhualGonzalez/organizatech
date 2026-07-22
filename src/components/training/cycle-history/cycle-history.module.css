@@ -1,0 +1,488 @@
+.screen {
+  display: grid;
+  gap: clamp(14px, 3.5vw, 20px);
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: clamp(14px, 3.8vw, 20px);
+}
+
+.screenHeader {
+  display: grid;
+  gap: 6px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--blue-soft);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(18px, 4.4vw, 24px);
+  font-weight: 900;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.listItem {
+  min-width: 0;
+}
+
+.card {
+  display: grid;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(60, 122, 255, 0.1), transparent 42%),
+    linear-gradient(180deg, rgba(18, 32, 50, 0.96), rgba(8, 19, 34, 0.96));
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.cardExpanded {
+  border-color: rgba(60, 122, 255, 0.55);
+}
+
+.cardTrigger {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  color: var(--text);
+  background: transparent;
+  padding: clamp(12px, 3.4vw, 16px);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cardTrigger:focus-visible {
+  outline: 2px solid rgba(60, 122, 255, 0.8);
+  outline-offset: -2px;
+}
+
+.cardTriggerMain {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.cardEyebrow {
+  color: var(--blue-soft);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cardTitle {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardChip {
+  justify-self: start;
+  margin-top: 2px;
+  border: 1px solid rgba(220, 231, 255, 0.18);
+  border-radius: 999px;
+  color: var(--blue-soft);
+  background: rgba(7, 16, 26, 0.42);
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.cardMeta {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  text-align: right;
+}
+
+.cardStatus {
+  border: 1px solid rgba(220, 231, 255, 0.18);
+  border-radius: 999px;
+  color: var(--blue-soft);
+  padding: 3px 9px;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.cardDate,
+.cardDuration {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.cardChevron {
+  flex: 0 0 auto;
+  color: var(--blue-soft);
+  transition: transform 160ms ease;
+}
+
+.cardChevronOpen {
+  transform: rotate(180deg);
+}
+
+.cardDetail {
+  display: grid;
+  gap: clamp(12px, 3.4vw, 16px);
+  border-top: 1px solid var(--line);
+  padding: clamp(12px, 3.4vw, 16px);
+}
+
+.cardActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pdfButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(60, 122, 255, 0.55);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--primary);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 160ms ease, opacity 160ms ease;
+}
+
+.pdfButton:hover:not(:disabled) {
+  background: var(--primary-strong);
+}
+
+.pdfButton:focus-visible {
+  outline: 2px solid rgba(60, 122, 255, 0.8);
+  outline-offset: 2px;
+}
+
+.pdfButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.summary {
+  display: grid;
+  gap: 10px;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metricCard {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(2, 8, 23, 0.34);
+  padding: 12px;
+}
+
+.metricLabel {
+  margin: 0 0 4px;
+  color: var(--blue-soft);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metricValue {
+  display: block;
+  color: var(--text);
+  font-size: clamp(16px, 4vw, 20px);
+  font-weight: 900;
+}
+
+.metricCaption {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.progressBanner {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tonePositive {
+  border-color: rgba(116, 223, 113, 0.5);
+  color: var(--green);
+  background: rgba(116, 223, 113, 0.1);
+}
+
+.toneNegative {
+  border-color: rgba(255, 93, 105, 0.5);
+  color: var(--red);
+  background: rgba(255, 93, 105, 0.1);
+}
+
+.toneNeutral {
+  color: var(--muted);
+  background: rgba(220, 231, 255, 0.05);
+}
+
+.summaryMeta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.breakdown {
+  display: grid;
+  gap: 14px;
+}
+
+.breakdownEmpty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.routineBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.routineName {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.exerciseList {
+  display: grid;
+  gap: 10px;
+}
+
+.exerciseBlock {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.exerciseHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.exerciseName {
+  margin: 0;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.exercisePlan {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.weekTableWrapper {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.weekTable {
+  width: 100%;
+  min-width: 420px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.weekTable th,
+.weekTable td {
+  border-bottom: 1px solid var(--line);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.weekTable thead th {
+  color: var(--blue-soft);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.weekTable tbody th {
+  color: var(--text);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.weekTable tbody td {
+  color: var(--muted);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.stateNeutral {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(220, 231, 255, 0.04);
+  padding: 16px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.stateLoading {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.skeletonLine {
+  display: block;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(220, 231, 255, 0.08), rgba(220, 231, 255, 0.2), rgba(220, 231, 255, 0.08));
+  background-size: 200% 100%;
+  animation: cycleHistoryShimmer 1.25s ease-in-out infinite;
+}
+
+.stateLoadingLabel {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@keyframes cycleHistoryShimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.stateError {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  border: 1px solid rgba(255, 93, 105, 0.5);
+  border-radius: 8px;
+  color: var(--red);
+  background: rgba(255, 93, 105, 0.08);
+  padding: 14px;
+}
+
+.stateErrorMessage {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.retryButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 93, 105, 0.55);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(255, 93, 105, 0.16);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.retryButton:focus-visible {
+  outline: 2px solid rgba(255, 93, 105, 0.8);
+  outline-offset: 2px;
+}
+
+@media (max-width: 520px) {
+  .cardTrigger {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "main chevron"
+      "meta chevron";
+  }
+
+  .cardTriggerMain {
+    grid-area: main;
+  }
+
+  .cardMeta {
+    grid-area: meta;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .cardChevron {
+    grid-area: chevron;
+  }
+
+  .metricGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .exerciseHeading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

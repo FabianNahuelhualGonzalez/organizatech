@@ -1,0 +1,72 @@
+.shell {
+  min-height: 100vh;
+  padding: clamp(14px, 3.8vw, 24px);
+  background: var(--background);
+}
+
+.controls {
+  max-width: 960px;
+  margin: 0 auto 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 16px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--blue-soft);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.heading {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.button[aria-pressed="true"] {
+  border-color: rgba(60, 122, 255, 0.85);
+  background: rgba(60, 122, 255, 0.18);
+}
+
+.button:focus-visible {
+  outline: 2px solid rgba(60, 122, 255, 0.8);
+  outline-offset: 2px;
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.log {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
