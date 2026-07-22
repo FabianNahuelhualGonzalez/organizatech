@@ -35,6 +35,7 @@ export interface CycleHistoryScreenProps {
   onRetry: (cycleId: string) => void;
   onDownloadPdf: (cycleId: string) => void;
   isPdfActionBusy?: boolean;
+  pdfActionError?: string | null;
 }
 
 export function CycleHistoryScreen({
@@ -46,6 +47,7 @@ export function CycleHistoryScreen({
   onRetry,
   onDownloadPdf,
   isPdfActionBusy = false,
+  pdfActionError = null,
 }: CycleHistoryScreenProps) {
   return (
     <section className={styles.screen} aria-label="Historial de ciclos de entrenamiento">
@@ -66,6 +68,7 @@ export function CycleHistoryScreen({
         onRetry={onRetry}
         onDownloadPdf={onDownloadPdf}
         isPdfActionBusy={isPdfActionBusy}
+        pdfActionError={pdfActionError}
       />
     </section>
   );
@@ -80,6 +83,7 @@ function CycleHistoryListState({
   onRetry,
   onDownloadPdf,
   isPdfActionBusy,
+  pdfActionError,
 }: {
   listState: CycleHistoryListPresentationState;
   expandedCycleId: string | null;
@@ -89,6 +93,7 @@ function CycleHistoryListState({
   onRetry: (cycleId: string) => void;
   onDownloadPdf: (cycleId: string) => void;
   isPdfActionBusy: boolean;
+  pdfActionError: string | null;
 }) {
   switch (listState.status) {
     case "idle":
@@ -115,6 +120,7 @@ function CycleHistoryListState({
           onRetry={onRetry}
           onDownloadPdf={onDownloadPdf}
           isPdfActionBusy={isPdfActionBusy}
+          pdfActionError={pdfActionError}
         />
       );
     }

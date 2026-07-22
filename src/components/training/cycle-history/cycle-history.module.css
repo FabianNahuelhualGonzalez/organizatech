@@ -102,6 +102,13 @@
   font-weight: 800;
 }
 
+.pdfActionGroup {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  min-width: 0;
+}
+
 .pdfButton {
   display: inline-flex;
   align-items: center;
@@ -130,6 +137,15 @@
 .pdfButton:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.pdfActionError {
+  max-width: 320px;
+  margin: 0;
+  color: var(--red);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: right;
 }
 
 .summary {
@@ -325,5 +341,15 @@
 
   .pdfButton {
     justify-content: center;
+  }
+
+  .pdfActionGroup {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  .pdfActionError {
+    max-width: none;
+    text-align: left;
   }
 }

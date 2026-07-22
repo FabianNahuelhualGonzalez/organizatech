@@ -15,6 +15,7 @@ export interface CycleHistoryListProps {
   onRetry: (cycleId: string) => void;
   onDownloadPdf: (cycleId: string) => void;
   isPdfActionBusy?: boolean;
+  pdfActionError?: string | null;
 }
 
 /**
@@ -33,6 +34,7 @@ export function CycleHistoryList({
   onRetry,
   onDownloadPdf,
   isPdfActionBusy = false,
+  pdfActionError = null,
 }: CycleHistoryListProps) {
   return (
     <ul className={styles.historyLayout}>
@@ -48,6 +50,7 @@ export function CycleHistoryList({
                 onRetry={() => onRetry(cycle.cycleId)}
                 onDownloadPdf={() => onDownloadPdf(cycle.cycleId)}
                 isPdfActionBusy={isPdfActionBusy}
+                pdfActionError={pdfActionError}
               />
             ) : (
               <CycleHistoryCompactCycle cycle={cycle} onToggle={() => onToggleCycle(cycle.cycleId)} />

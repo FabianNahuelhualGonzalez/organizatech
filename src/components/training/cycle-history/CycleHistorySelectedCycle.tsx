@@ -23,6 +23,7 @@ export interface CycleHistorySelectedCycleProps {
   onRetry: () => void;
   onDownloadPdf: () => void;
   isPdfActionBusy?: boolean;
+  pdfActionError?: string | null;
 }
 
 // El ciclo seleccionado se expande inline y conserva su posición original en la lista.
@@ -33,6 +34,7 @@ export function CycleHistorySelectedCycle({
   onRetry,
   onDownloadPdf,
   isPdfActionBusy = false,
+  pdfActionError = null,
 }: CycleHistorySelectedCycleProps) {
   const detailId = buildCycleHistoryDetailDomId(cycle.cycleId);
   const headingId = buildCycleHistoryHeadingDomId(cycle.cycleId);
@@ -53,15 +55,23 @@ export function CycleHistorySelectedCycle({
       <div id={detailId} role="region" aria-labelledby={headingId} className={styles.selectedDetail}>
         <div className={styles.dateAndPdfRow}>
           <p className={styles.dateLabel}>Fecha: {cycle.dateRowLabel}</p>
-          <button
-            type="button"
-            className={styles.pdfButton}
-            onClick={onDownloadPdf}
-            disabled={isCycleHistoryPdfActionDisabled(detailState.status, isPdfActionBusy)}
-          >
-            <Download size={16} aria-hidden="true" />
-            {isPdfActionBusy ? "Generando PDF…" : "Descargar PDF"}
-          </button>
+          <div className={styles.pdfActionGroup}>
+            <button
+              type="button"
+              className={styles.pdfButton}
+              onClick={onDownloadPdf}
+              disabled={isCycleHistoryPdfActionDisabled(detailState.status, isPdfActionBusy)}
+              aria-busy={isPdfActionBusy}
+            >
+              <Download size={16} aria-hidden="true" />
+              {isPdfActionBusy ? "Generando PDF…" : "Descargar PDF"}
+            </button>
+            {pdfActionError ? (
+              <p className={styles.pdfActionError} role="alert">
+                {pdfActionError}
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <CycleHistorySelectedCycleBody detailState={detailState} onRetry={onRetry} />

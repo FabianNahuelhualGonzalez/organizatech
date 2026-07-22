@@ -189,14 +189,15 @@ function testExpansionRuleTogglesSingleCycle() {
   assert.equal(resolveNextExpandedCycleId("cycle-1", "cycle-1"), null, "pulsar el mismo ciclo expandido lo contrae");
 }
 
-// Botón PDF deshabilitado durante loading o sin detalle.
+// Botón PDF deshabilitado durante loading o sin modelo; empty conserva un modelo válido.
 function testPdfActionDisabledLogic() {
   assert.equal(isCycleHistoryPdfActionDisabled("idle"), true);
   assert.equal(isCycleHistoryPdfActionDisabled("disabled"), true);
   assert.equal(isCycleHistoryPdfActionDisabled("loading"), true);
-  assert.equal(isCycleHistoryPdfActionDisabled("empty"), true);
+  assert.equal(isCycleHistoryPdfActionDisabled("empty"), false);
   assert.equal(isCycleHistoryPdfActionDisabled("error"), true);
   assert.equal(isCycleHistoryPdfActionDisabled("ready"), false);
+  assert.equal(isCycleHistoryPdfActionDisabled("empty", true), true, "empty también se bloquea durante una generación");
   assert.equal(isCycleHistoryPdfActionDisabled("ready", true), true, "una descarga en curso deshabilita el boton aunque el detalle este listo");
 }
 

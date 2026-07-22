@@ -137,13 +137,13 @@ export function resolveNextExpandedCycleId(
 
 /**
  * El botón de descarga de PDF solo debe estar habilitado cuando existe un detalle
- * listo (`status === "ready"`) para el ciclo expandido y no hay una descarga en curso.
+ * con modelo (`ready` o `empty`) para el ciclo expandido y no hay una descarga en curso.
  */
 export function isCycleHistoryPdfActionDisabled(
   detailStatus: "idle" | "disabled" | "loading" | "empty" | "ready" | "error",
   isPdfActionBusy = false,
 ): boolean {
-  return detailStatus !== "ready" || isPdfActionBusy;
+  return (detailStatus !== "ready" && detailStatus !== "empty") || isPdfActionBusy;
 }
 
 const DOM_ID_UNSAFE_CHARACTER_RUN = /[^a-zA-Z0-9_-]+/g;
