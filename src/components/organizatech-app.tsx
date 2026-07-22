@@ -6,7 +6,6 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
-  BarChart3,
   Bell,
   CalendarDays,
   ChevronDown,
@@ -17,13 +16,10 @@ import {
   Lock,
   LogOut,
   Mail,
-  Minus,
   Pencil,
   Save,
-  Smile,
   Sparkles,
   Trash2,
-  TrendingUp,
   UserPlus,
 } from "lucide-react";
 import {
@@ -47,6 +43,7 @@ import {
 } from "@/lib/data/repository";
 import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
 import { ProfileScreen } from "@/components/profile/ProfileScreen";
+import { CycleHistoryProductiveContainer } from "@/components/training/cycle-history";
 import { buildProfileViewModel } from "@/lib/profile/profile-view-model";
 import { formatNotificationDate } from "@/lib/notifications/notification-date";
 import {
@@ -3965,9 +3962,11 @@ export function OrganizatechApp({
         )
       )}
       {screen === "historial-ciclos" && (
-        isTrainingCyclesRepositoryActive
-          ? <PersistedCycleHistoryScreen history={persistedCycleHistory} />
-          : <CycleHistoryScreen history={cycleHistory} />
+        <CycleHistoryProductiveContainer
+          key={`${supabaseUser?.id ?? "anonymous"}:${isTrainingCyclesRepositoryActive ? "enabled" : "disabled"}`}
+          enabled={isTrainingCyclesRepositoryActive}
+          identityKey={supabaseUser?.id ?? null}
+        />
       )}
       {screen === "perfil" && (
         <ProfileScreen
@@ -5615,229 +5614,6 @@ function RoutineSuccessModal({ onConfirm }: { onConfirm: () => void }) {
         </button>
       </div>
     </div>
-  );
-}
-
-function CycleHistoryScreen({ history }: { history: TrainingCycleSnapshot[] }) {
-  const [expandedCycleId, setExpandedCycleId] = useState<string | null>(history.at(-1)?.id ?? null);
-
-  return (
-    <section className="screen">
-      <div className="card wide cycle-history-hero">
-        <div>
-          <p className="eyebrow">Historial ciclo de entrenamiento</p>
-          <h2>Ciclos finalizados</h2>
-          <p>Revisa el resultado de cada ciclo cerrado: progreso, estado de ánimo y puntos a mejorar para el siguiente bloque.</p>
-        </div>
-        <span>{history.length}</span>
-      </div>
-      {history.length === 0 ? (
-        <div className="card wide empty-cycle-history">
-          <h3>Aún no hay ciclos finalizados</h3>
-          <p>Cuando cierres tu ciclo activo, aparecerá aquí como Ciclo 1, Ciclo 2, Ciclo 3 y así sucesivamente.</p>
-        </div>
-      ) : (
-        history.map((cycle) => {
-          const isExpanded = expandedCycleId === cycle.id;
-          const metrics = calculateWeeklyComparison(cycle.entries);
-          const summary = calculateWeeklySummary(metrics, Math.max(1, ...cycle.entries.map((entry) => entry.week)));
-          const progress = summarizeCycleProgress(cycle);
-          const moodSummary = summarizeCycleMood(cycle.entries);
-          const suggestions = createCycleSuggestions(progress, moodSummary);
-          return (
-            <div className={`card wide cycle-history-card ${isExpanded ? "open" : ""}`} key={cycle.id}>
-              <button
-                className="cycle-history-toggle"
-                type="button"
-                aria-expanded={isExpanded}
-                onClick={() => setExpandedCycleId((current) => current === cycle.id ? null : cycle.id)}
-              >
-                <div>
-                  <h3>Resumen {cycle.name} · {getCycleTitle(cycle.plan)}</h3>
-                  <span>{formatDate(cycle.createdAt)} - {formatDate(cycle.endedAt)}</span>
-                </div>
-                <ChevronDown className="cycle-history-chevron" size={22} />
-              </button>
-              {isExpanded ? (
-                <div className="cycle-history-details">
-                  <div className="cycle-history-metrics dashboard-metric-grid">
-                    <div className="metric">
-                      <div className="metric-title-row">
-                        <span>Días con rutina</span>
-                        <CalendarDays size={18} />
-                      </div>
-                      <strong>{getRoutineDays(cycle.exercises).length}</strong>
-                    </div>
-                    <div className="metric">
-                      <div className="metric-title-row">
-                        <span>Ejercicios</span>
-                        <Dumbbell size={18} />
-                      </div>
-                      <strong>{cycle.exercises.length}</strong>
-                    </div>
-                    <div className="metric">
-                      <div className="metric-title-row">
-                        <span>Volumen registrado</span>
-                        <BarChart3 size={18} />
-                      </div>
-                      <strong>{formatKg(summary.volumeTotal)}</strong>
-                    </div>
-                  </div>
-                  <div className="cycle-result-grid">
-                    <div className="cycle-result-card success">
-                      <div className="cycle-result-title">
-                        <span><TrendingUp size={20} /></span>
-                        <h3>Subieron reps o peso</h3>
-                      </div>
-                      <p>{progress.improved.length > 0 ? progress.improved.join(", ") : "Aún no hay ejercicios con mejora clara."}</p>
-                    </div>
-                    <div className="cycle-result-card warning">
-                      <div className="cycle-result-title">
-                        <span><Minus size={20} /></span>
-                        <h3>Estancados</h3>
-                      </div>
-                      <p>{progress.stagnant.length > 0 ? progress.stagnant.join(", ") : "No detectamos estancamientos relevantes."}</p>
-                    </div>
-                    <div className="cycle-result-card info">
-                      <div className="cycle-result-title">
-                        <span><Smile size={20} /></span>
-                        <h3>Estado de ánimo</h3>
-                      </div>
-                      <p>{moodSummary.message}</p>
-                    </div>
-                    <div className="cycle-result-card suggestion">
-                      <div className="cycle-result-title">
-                        <span><Sparkles size={20} /></span>
-                        <h3>Sugerencias</h3>
-                      </div>
-                      <ul>
-                        {suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          );
-        })
-      )}
-    </section>
-  );
-}
-
-function PersistedCycleHistoryScreen({ history }: { history: PersistedTrainingCycle[] }) {
-  const [expandedCycleId, setExpandedCycleId] = useState<string | null>(history[0]?.id ?? null);
-
-  return (
-    <section className="screen">
-      <div className="card wide cycle-history-hero">
-        <div>
-          <p className="eyebrow">Historial ciclo de entrenamiento</p>
-          <h2>Ciclos finalizados</h2>
-          <p>Revisa los ciclos cerrados guardados desde tu cuenta conectada.</p>
-        </div>
-        <span>{history.length}</span>
-      </div>
-      {history.length === 0 ? (
-        <div className="card wide empty-cycle-history">
-          <h3>Aún no hay ciclos finalizados</h3>
-          <p>Cuando cierres tu ciclo activo, aparecerá aquí como historial persistido.</p>
-        </div>
-      ) : (
-        history.map((cycle) => {
-          const isExpanded = expandedCycleId === cycle.id;
-          const summary = cycle.summarySnapshot ?? {};
-          const improvedExercises = readSnapshotStringList(summary, "improvedExercises", 4);
-          const stagnantExercises = readSnapshotStringList(summary, "stagnantExercises", 4);
-          const moodSummary = readSnapshotMoodSummary(summary);
-          const suggestions = readSnapshotStringList(summary, "suggestions", 3);
-          return (
-            <div className={`card wide cycle-history-card ${isExpanded ? "open" : ""}`} key={cycle.id}>
-              <button
-                className="cycle-history-toggle"
-                type="button"
-                aria-expanded={isExpanded}
-                onClick={() => setExpandedCycleId((current) => current === cycle.id ? null : cycle.id)}
-              >
-                <div>
-                  <h3>{cycle.name} · {cycle.status === "completed" ? "Completado" : "Cancelado"}</h3>
-                  <span>{formatDate(cycle.startedAt)} - {cycle.endedAt ? formatDate(cycle.endedAt) : "Sin cierre"}</span>
-                </div>
-                <ChevronDown className="cycle-history-chevron" size={22} />
-              </button>
-              {isExpanded ? (
-                <div className="cycle-history-details">
-                  <div className="cycle-history-metrics dashboard-metric-grid">
-                    <div className="metric">
-                      <div className="metric-title-row">
-                        <span>Días con rutina</span>
-                        <CalendarDays size={18} />
-                      </div>
-                      <strong>{readSnapshotNumber(summary, "dayCount")}</strong>
-                    </div>
-                    <div className="metric">
-                      <div className="metric-title-row">
-                        <span>Ejercicios</span>
-                        <Dumbbell size={18} />
-                      </div>
-                      <strong>{readSnapshotNumber(summary, "exerciseCount")}</strong>
-                    </div>
-                    <div className="metric">
-                      <div className="metric-title-row">
-                        <span>Volumen registrado</span>
-                        <BarChart3 size={18} />
-                      </div>
-                      <strong>{formatKg(readSnapshotNumber(summary, "volumeTotal"))}</strong>
-                    </div>
-                    <div className="metric">
-                      <div className="metric-title-row">
-                        <span>Reps registradas</span>
-                        <TrendingUp size={18} />
-                      </div>
-                      <strong>{readSnapshotNumber(summary, "totalReps")}</strong>
-                    </div>
-                  </div>
-                  <div className="cycle-result-grid">
-                    <div className="cycle-result-card success">
-                      <div className="cycle-result-title">
-                        <span><TrendingUp size={20} /></span>
-                        <h3>Subieron reps o peso</h3>
-                      </div>
-                      <p>{formatSnapshotList(improvedExercises, "Aún no hay ejercicios con mejora clara.")}</p>
-                    </div>
-                    <div className="cycle-result-card warning">
-                      <div className="cycle-result-title">
-                        <span><Minus size={20} /></span>
-                        <h3>Estancados</h3>
-                      </div>
-                      <p>{formatSnapshotList(stagnantExercises, "No detectamos estancamientos relevantes.")}</p>
-                    </div>
-                    <div className="cycle-result-card info">
-                      <div className="cycle-result-title">
-                        <span><Smile size={20} /></span>
-                        <h3>Estado de ánimo</h3>
-                      </div>
-                      <p>{moodSummary.message}</p>
-                    </div>
-                    <div className="cycle-result-card suggestion">
-                      <div className="cycle-result-title">
-                        <span><Sparkles size={20} /></span>
-                        <h3>Sugerencias</h3>
-                      </div>
-                      <ul>
-                        {suggestions.length > 0
-                          ? suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)
-                          : <li>Mantén el registro del ciclo para recibir sugerencias más precisas.</li>}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          );
-        })
-      )}
-    </section>
   );
 }
 
@@ -7541,28 +7317,6 @@ function readSnapshotStringList(snapshot: PersistedTrainingCycleSnapshot, key: s
   return value
     .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     .slice(0, limit);
-}
-
-function readSnapshotMoodSummary(snapshot: PersistedTrainingCycleSnapshot) {
-  const fallback = {
-    score: null as number | null,
-    message: "No hay suficientes formularios de motivación para resumir el estado de ánimo.",
-  };
-  const value = snapshot.moodSummary;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
-
-  const score = "score" in value && typeof value.score === "number" && Number.isFinite(value.score)
-    ? value.score
-    : null;
-  const message = "message" in value && typeof value.message === "string" && value.message.trim().length > 0
-    ? value.message
-    : fallback.message;
-
-  return { score, message };
-}
-
-function formatSnapshotList(items: string[], fallback: string) {
-  return items.length > 0 ? items.join(", ") : fallback;
 }
 
 function translateTrainingCycleRepositoryError(error: unknown) {

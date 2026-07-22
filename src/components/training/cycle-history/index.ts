@@ -1,4 +1,8 @@
 export { CycleHistoryScreen, type CycleHistoryScreenProps } from "./CycleHistoryScreen";
+export {
+  CycleHistoryProductiveContainer,
+  type CycleHistoryProductiveContainerProps,
+} from "./CycleHistoryProductiveContainer";
 export { CycleHistoryList, type CycleHistoryListProps } from "./CycleHistoryList";
 export {
   CycleHistorySelectedCycle,

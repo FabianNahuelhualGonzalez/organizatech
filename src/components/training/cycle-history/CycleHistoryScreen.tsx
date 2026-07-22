@@ -30,6 +30,7 @@ export interface CycleHistoryScreenProps {
   listState: CycleHistoryListPresentationState;
   expandedCycleId: string | null;
   detailState: CycleHistoryLoadState;
+  onRetryList: () => void;
   onToggleCycle: (cycleId: string) => void;
   onRetry: (cycleId: string) => void;
   onDownloadPdf: (cycleId: string) => void;
@@ -40,6 +41,7 @@ export function CycleHistoryScreen({
   listState,
   expandedCycleId,
   detailState,
+  onRetryList,
   onToggleCycle,
   onRetry,
   onDownloadPdf,
@@ -59,6 +61,7 @@ export function CycleHistoryScreen({
         listState={listState}
         expandedCycleId={expandedCycleId}
         detailState={detailState}
+        onRetryList={onRetryList}
         onToggleCycle={onToggleCycle}
         onRetry={onRetry}
         onDownloadPdf={onDownloadPdf}
@@ -72,6 +75,7 @@ function CycleHistoryListState({
   listState,
   expandedCycleId,
   detailState,
+  onRetryList,
   onToggleCycle,
   onRetry,
   onDownloadPdf,
@@ -80,6 +84,7 @@ function CycleHistoryListState({
   listState: CycleHistoryListPresentationState;
   expandedCycleId: string | null;
   detailState: CycleHistoryLoadState;
+  onRetryList: () => void;
   onToggleCycle: (cycleId: string) => void;
   onRetry: (cycleId: string) => void;
   onDownloadPdf: (cycleId: string) => void;
@@ -93,7 +98,7 @@ function CycleHistoryListState({
     case "loading":
       return <CycleHistoryLoadingState label="Cargando historial de ciclos…" />;
     case "error":
-      return <CycleHistoryErrorState message={listState.error.message} />;
+      return <CycleHistoryErrorState message={listState.error.message} onRetry={onRetryList} />;
     case "empty":
       return <CycleHistoryEmptyState message={EMPTY_CYCLES_MESSAGE} />;
     case "ready": {

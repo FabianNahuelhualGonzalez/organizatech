@@ -56,7 +56,10 @@ function testScreenHandlesEmptyState() {
 
 // 8. Estado error con mensaje sanitizado (nunca detalles tecnicos crudos).
 function testScreenHandlesErrorStateWithSanitizedMessage() {
-  assert.match(screenSource, /case "error":\s*\n\s*return <CycleHistoryErrorState message={listState\.error\.message} \/>;/);
+  assert.match(
+    screenSource,
+    /case "error":\s*\n\s*return <CycleHistoryErrorState message={listState\.error\.message} onRetry={onRetryList} \/>;/,
+  );
   assert.match(statesSource, /<div className={styles\.stateError} role="alert">/);
   assert.doesNotMatch(statesSource, /stack|Supabase|postgres|PGRST|23505/i);
 }
@@ -374,6 +377,10 @@ function testTimerCallbacksStillReceiveOriginalCycleId() {
   assert.match(qaClientSource, /setLastPdfCallback\(cycleId\);/);
 }
 
+function testQaClientKeepsListRetryCallbackConnected() {
+  assert.match(qaClientSource, /onRetryList={\(\) => setListScenario\("ready"\)}/);
+}
+
 // 25. La ruta QA reutiliza la politica QA existente, igual que las demas herramientas QA.
 function testQaRouteReusesExistingAccessPolicy() {
   assert.match(qaPageSource, /isQaToolsAccessAllowed/);
@@ -416,6 +423,7 @@ testNoGradientsOnCycleBars();
 testQaFixturesHaveNoRealQueriesOrPii();
 testQaClientCleansUpTimersOnUnmount();
 testTimerCallbacksStillReceiveOriginalCycleId();
+testQaClientKeepsListRetryCallbackConnected();
 testQaRouteReusesExistingAccessPolicy();
 
 console.log("cycle-history-components-contract tests passed");

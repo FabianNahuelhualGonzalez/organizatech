@@ -182,6 +182,7 @@ export function TrainingCycleHistoryQaClient() {
         listState={buildListState(listScenario)}
         expandedCycleId={expandedCycleId}
         detailState={detailState}
+        onRetryList={() => setListScenario("ready")}
         onToggleCycle={handleToggleCycle}
         onRetry={handleRetry}
         onDownloadPdf={handleDownloadPdf}
