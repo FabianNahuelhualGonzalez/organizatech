@@ -45,7 +45,31 @@ import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
 import { ProfileScreen } from "@/components/profile/ProfileScreen";
 import { CycleHistoryProductiveContainer } from "@/components/training/cycle-history";
 import { buildProfileViewModel } from "@/lib/profile/profile-view-model";
-import { formatNotificationDate } from "@/lib/notifications/notification-date";
+import {
+  buildAppNotifications,
+  resolveNotificationIconKey,
+} from "@/lib/notifications/notification-model";
+import {
+  NOTIFICATION_EMPTY_MESSAGE,
+  buildNotificationBadgeAriaLabel,
+  buildNotificationBadgeText,
+  buildNotificationItemStateLabel,
+  buildNotificationPanelSubtitleText,
+  resolveNotificationItemReferenceDate,
+  selectNotificationView,
+} from "@/lib/notifications/notification-selector";
+import {
+  SEEN_NOTIFICATIONS_MAX_RECORDS,
+  markNotificationsSeen as transitionNotificationsSeen,
+  resolveNotificationOpenIntent,
+} from "@/lib/notifications/notification-state";
+import type {
+  AppNotification,
+  AppNotificationSection,
+  NotificationIconKey,
+  SeenNotificationRecord,
+  TrainingNotificationContext,
+} from "@/lib/notifications/notification-types";
 import {
   getProfilePersonalData,
   updateProfilePersonalData,
@@ -104,7 +128,6 @@ import {
   saveSeenNotificationRecords as saveStoredSeenNotificationRecords,
   startPasswordRecoveryFlow,
   type BrowserStorageScope,
-  type SeenNotificationStorageRecord,
 } from "@/lib/storage/browser-storage";
 import {
   ACTIVE_FLOW_VERSION,
@@ -281,8 +304,6 @@ const WORKOUT_DRAFT_VERSION = 1;
 const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
 const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
-const SEEN_NOTIFICATIONS_MAX_RECORDS = 60;
-const VISIBLE_NEW_NOTIFICATIONS_LIMIT = 5;
 const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
 const trainingCycles = [
   {
@@ -398,41 +419,6 @@ interface AnalyticsSnapshot {
   score: number;
   factors: Array<[string, number]>;
 }
-
-type AppNotificationTarget = Extract<Screen, "dashboard" | "perfil" | "comparacion">;
-type AppNotificationSection =
-  | "profile-avatar"
-  | "personal-data"
-  | "today-training"
-  | "training-carousel"
-  | "weekly-progress"
-  | "coach"
-  | "weekly-comparison";
-
-interface AppNotification {
-  id: string;
-  title: string;
-  summary: string;
-  category: "Perfil" | "Entrenamiento" | "Progreso" | "Comparación" | "Coach" | "Novedades" | "Sistema";
-  tone: "info" | "success" | "warning" | "progress";
-  priority: "high" | "medium" | "low";
-  dedupeKey: string;
-  target: AppNotificationTarget;
-  section?: AppNotificationSection;
-  day?: string;
-  kind: "feature" | "profile" | "week" | "progress" | "coach";
-  createdAt: string;
-  expiresAt?: string;
-  reason?: string;
-}
-
-interface TrainingNotificationContext {
-  day: string;
-  routine: string;
-  status: "completed" | "pending";
-}
-
-type SeenNotificationRecord = SeenNotificationStorageRecord;
 
 interface TrainingCycleSnapshot {
   id: string;
@@ -1130,15 +1116,28 @@ export function OrganizatechApp({
     todayTrainingNotificationContext,
     weeklyEquivalentProgress,
   ]);
-  const seenNotificationIds = useMemo(() => new Set(seenNotificationRecords.map((record) => record.id)), [seenNotificationRecords]);
-  const seenNotificationRecordsById = useMemo(() => new Map(seenNotificationRecords.map((record) => [record.id, record])), [seenNotificationRecords]);
-  const newNotifications = appNotifications
-    .filter((notification) => !seenNotificationIds.has(notification.id))
-    .slice(0, VISIBLE_NEW_NOTIFICATIONS_LIMIT);
-  const historyNotifications = appNotifications
-    .filter((notification) => seenNotificationIds.has(notification.id))
-    .sort((a, b) => (seenNotificationRecordsById.get(b.id)?.seenAt ?? 0) - (seenNotificationRecordsById.get(a.id)?.seenAt ?? 0));
-  const unseenNotificationCount = newNotifications.length;
+  const notificationView = useMemo(
+    () => selectNotificationView(appNotifications, seenNotificationRecords),
+    [appNotifications, seenNotificationRecords],
+  );
+  const {
+    newNotifications,
+    historyNotifications,
+    unseenCount: unseenNotificationCount,
+    seenRecordsById: seenNotificationRecordsById,
+  } = notificationView;
+  const notificationPanelSubtitle = useMemo(
+    () => buildNotificationPanelSubtitleText(unseenNotificationCount, appNotifications.length),
+    [appNotifications.length, unseenNotificationCount],
+  );
+  const notificationBadgeText = useMemo(
+    () => buildNotificationBadgeText(unseenNotificationCount),
+    [unseenNotificationCount],
+  );
+  const notificationBadgeAriaLabel = useMemo(
+    () => buildNotificationBadgeAriaLabel(unseenNotificationCount),
+    [unseenNotificationCount],
+  );
 
   useEffect(() => {
     const requestToken = captureSessionDataRequestToken();
@@ -3596,16 +3595,7 @@ export function OrganizatechApp({
   function markNotificationsSeen(ids: string[]) {
     if (ids.length === 0) return;
     setSeenNotificationRecords((current) => {
-      const now = Date.now();
-      const recordsById = new Map(current.map((record) => [record.id, record]));
-      ids.forEach((id) => {
-        if (!recordsById.has(id)) {
-          recordsById.set(id, { id, seenAt: now });
-        }
-      });
-      const next = Array.from(recordsById.values())
-        .sort((a, b) => a.seenAt - b.seenAt)
-        .slice(-SEEN_NOTIFICATIONS_MAX_RECORDS);
+      const next = [...transitionNotificationsSeen(current, ids)];
       const scope = activeBrowserStorageScopeRef.current;
       if (scope) saveSeenNotificationRecords(next, scope);
       return next;
@@ -3618,17 +3608,18 @@ export function OrganizatechApp({
   }
 
   function openNotificationTarget(notification: AppNotification) {
-    markNotificationsSeen([notification.id]);
+    const intent = resolveNotificationOpenIntent(notification);
+    markNotificationsSeen([intent.notificationId]);
     setIsNotificationPanelOpen(false);
     setTrainingCompletionSummary(null);
-    if (notification.day && notification.target === "dashboard") {
-      setDashboardDayOverride(notification.day);
+    if (intent.dashboardDayOverride) {
+      setDashboardDayOverride(intent.dashboardDayOverride);
     }
-    if (notification.day && notification.target === "comparacion") {
-      setComparisonDay(notification.day);
+    if (intent.comparisonDayOverride) {
+      setComparisonDay(intent.comparisonDayOverride);
     }
-    navigateTo(notification.target);
-    scrollToNotificationSection(notification.section);
+    navigateTo(intent.target);
+    scrollToNotificationSection(intent.section ?? undefined);
   }
 
   function scrollToNotificationSection(section?: AppNotificationSection) {
@@ -3699,9 +3690,9 @@ export function OrganizatechApp({
             onClick={toggleNotifications}
           >
             <Bell size={18} />
-            {unseenNotificationCount > 0 ? (
-              <span className="notification-badge" aria-label={`${unseenNotificationCount} notificaciones nuevas`}>
-                {unseenNotificationCount > 9 ? "+9" : unseenNotificationCount}
+            {notificationBadgeText ? (
+              <span className="notification-badge" aria-label={notificationBadgeAriaLabel ?? undefined}>
+                {notificationBadgeText}
               </span>
             ) : null}
           </button>
@@ -3718,7 +3709,7 @@ export function OrganizatechApp({
           <div className="notification-panel" role="dialog" aria-label="Notificaciones">
             <div className="notification-panel-header">
               <strong>Notificaciones</strong>
-              <span>{unseenNotificationCount > 0 ? `${unseenNotificationCount} ${unseenNotificationCount === 1 ? "nueva noticia" : "nuevas noticias"}` : appNotifications.length > 0 ? "Historial" : "Sin pendientes"}</span>
+              <span>{notificationPanelSubtitle}</span>
             </div>
             {appNotifications.length > 0 ? (
               <div className="notification-list">
@@ -3740,7 +3731,7 @@ export function OrganizatechApp({
                 ) : null}
               </div>
             ) : (
-              <p className="notification-empty">No tienes notificaciones por ahora.</p>
+              <p className="notification-empty">{NOTIFICATION_EMPTY_MESSAGE}</p>
             )}
           </div>
         </>
@@ -5004,11 +4995,12 @@ function NotificationGroup({
     <section className="notification-group" aria-label={title}>
       {title !== "Nuevas" ? <p className="notification-group-title">{title}</p> : null}
       {notifications.map((notification) => {
-        const visual = getNotificationVisual(notification);
+        const iconKey = resolveNotificationIconKey(notification.category);
         const seenRecord = seenNotificationRecordsById.get(notification.id);
         const isSeen = Boolean(seenRecord);
-        const notificationDate = formatNotificationDate(
-          seenRecord?.seenAt ? new Date(seenRecord.seenAt).toISOString() : notification.createdAt,
+        const notificationStateLabel = buildNotificationItemStateLabel(
+          isSeen,
+          resolveNotificationItemReferenceDate(notification, seenRecord),
         );
         return (
           <button
@@ -5017,11 +5009,11 @@ function NotificationGroup({
             key={notification.id}
             onClick={() => onOpen(notification)}
           >
-            <span className="notification-icon" aria-hidden="true">{visual.icon}</span>
+            <span className="notification-icon" aria-hidden="true">{renderNotificationIcon(iconKey)}</span>
             <span className="notification-copy">
               <span className="notification-item-topline">
                 <span className="notification-category">{notification.category}</span>
-                <span className="notification-state">{isSeen ? "Visto" : "Nuevo"} · {notificationDate}</span>
+                <span className="notification-state">{notificationStateLabel}</span>
               </span>
               <strong>{notification.title}</strong>
               <span>{notification.summary}</span>
@@ -5033,21 +5025,20 @@ function NotificationGroup({
   );
 }
 
-function getNotificationVisual(notification: AppNotification) {
-  switch (notification.category) {
-    case "Novedades":
-      return { icon: <NotificationBackhoeIcon /> };
-    case "Progreso":
-      return { icon: <NotificationHeartShareIcon /> };
-    case "Coach":
-      return { icon: <NotificationCoachIcon /> };
-    case "Comparación":
-      return { icon: <NotificationTrendingIcon /> };
-    case "Perfil":
-      return { icon: <UserPlus size={24} /> };
-    case "Entrenamiento":
-    case "Sistema":
-      return { icon: <CalendarDays size={24} /> };
+function renderNotificationIcon(iconKey: NotificationIconKey) {
+  switch (iconKey) {
+    case "backhoe":
+      return <NotificationBackhoeIcon />;
+    case "heart-share":
+      return <NotificationHeartShareIcon />;
+    case "coach":
+      return <NotificationCoachIcon />;
+    case "trending":
+      return <NotificationTrendingIcon />;
+    case "user-plus":
+      return <UserPlus size={24} />;
+    case "calendar-days":
+      return <CalendarDays size={24} />;
   }
 }
 
@@ -5104,320 +5095,6 @@ function loadSeenNotificationRecords(scope: BrowserStorageScope) {
 function saveSeenNotificationRecords(records: SeenNotificationRecord[], scope: BrowserStorageScope) {
   if (typeof window === "undefined") return;
   saveStoredSeenNotificationRecords(window.localStorage, scope, records, SEEN_NOTIFICATIONS_MAX_RECORDS);
-}
-
-function buildAppNotifications({
-  profile,
-  personalData,
-  currentWeek,
-  completedDays,
-  plannedDays,
-  hasTrainingEntries,
-  hasRoutinePlan,
-  weeklyEquivalentProgress,
-  summary,
-  currentMetrics,
-  todayTraining,
-}: {
-  profile: ReturnType<typeof buildProfileViewModel>;
-  personalData: ProfilePersonalData | null;
-  currentWeek: number;
-  completedDays: number;
-  plannedDays: number;
-  hasTrainingEntries: boolean;
-  hasRoutinePlan: boolean;
-  weeklyEquivalentProgress: WeeklyEquivalentProgressResult;
-  summary: ReturnType<typeof calculateWeeklySummary>;
-  currentMetrics: ExerciseMetrics[];
-  todayTraining: TrainingNotificationContext | null;
-}): AppNotification[] {
-  const createdAt = new Date().toISOString();
-  const notifications: AppNotification[] = [];
-  const hasWeeklyComparisonNotification = hasTrainingEntries && currentMetrics.length > 0;
-
-  notifications.push(createAppNotification({
-    id: "feature-notification-center-v1",
-    title: "Notificaciones mejoradas",
-    summary: "Ahora puedes revisar novedades, historial y avances desde la campanita.",
-    category: "Novedades",
-    tone: "info",
-    priority: "low",
-    dedupeKey: "feature-notification-center",
-    target: "dashboard",
-    kind: "feature",
-    createdAt,
-  }));
-
-  if (!hasWeeklyComparisonNotification) {
-    notifications.push(createAppNotification({
-      id: "feature-weekly-comparison-v1",
-      title: "Comparación semanal lista",
-      summary: "Ahora puedes ver tu avance frente a la semana anterior de forma más clara.",
-      category: "Novedades",
-      tone: "success",
-      priority: hasTrainingEntries ? "medium" : "low",
-      dedupeKey: "feature-weekly-comparison",
-      target: "comparacion",
-      section: "weekly-comparison",
-      kind: "feature",
-      createdAt,
-    }));
-  }
-
-  if (!profile.avatarUrl) {
-    notifications.push(createAppNotification({
-      id: "complete-profile-v1",
-      title: "Completa tu perfil",
-      summary: "Agrega una foto para personalizar tu cuenta.",
-      category: "Perfil",
-      tone: "info",
-      priority: "medium",
-      dedupeKey: "profile-avatar",
-      target: "perfil",
-      section: "profile-avatar",
-      kind: "profile",
-      createdAt,
-    }));
-  } else {
-    notifications.push(createAppNotification({
-      id: "feature-avatar-editor-v1",
-      title: "Foto de perfil mejorada",
-      summary: "Ahora puedes subir, ajustar y recortar tu foto de perfil.",
-      category: "Novedades",
-      tone: "success",
-      priority: "low",
-      dedupeKey: "profile-avatar",
-      target: "perfil",
-      section: "profile-avatar",
-      kind: "feature",
-      createdAt,
-    }));
-  }
-
-  const personalDataMissing = isProfilePersonalDataIncomplete(personalData);
-  if (personalDataMissing) {
-    notifications.push(createAppNotification({
-      id: "complete-personal-data-v1",
-      title: "Completa tus datos",
-      summary: "Agrega tus datos para personalizar mejor tu experiencia.",
-      category: "Perfil",
-      tone: "info",
-      priority: "medium",
-      dedupeKey: "profile-personal-data",
-      target: "perfil",
-      section: "personal-data",
-      kind: "profile",
-      createdAt,
-    }));
-  } else {
-    notifications.push(createAppNotification({
-      id: "feature-profile-phone-v1",
-      title: "Nueva mejora disponible",
-      summary: "Ahora puedes agregar tu número de celular en tu perfil.",
-      category: "Novedades",
-      tone: "info",
-      priority: "low",
-      dedupeKey: "profile-personal-data",
-      target: "perfil",
-      section: "personal-data",
-      kind: "feature",
-      createdAt,
-    }));
-  }
-
-  if (hasRoutinePlan && plannedDays > 0 && todayTraining) {
-    const isTodayCompleted = todayTraining.status === "completed";
-    notifications.push(createAppNotification({
-      id: `training-status-v2-w${currentWeek}-${todayTraining.day}-${todayTraining.status}`,
-      title: isTodayCompleted ? "Entrenamiento registrado" : "Hoy te toca entrenar",
-      summary: isTodayCompleted
-        ? "Tu rutina ya fue registrada con éxito. Puedes ver el detalle en Comparación semanal."
-        : `Hoy ${todayTraining.day} te toca entrenar ${todayTraining.routine}.`,
-      category: "Entrenamiento",
-      tone: isTodayCompleted ? "success" : "progress",
-      priority: isTodayCompleted ? "medium" : "high",
-      dedupeKey: "training-status",
-      target: isTodayCompleted ? "comparacion" : "dashboard",
-      section: isTodayCompleted ? "weekly-comparison" : "training-carousel",
-      day: todayTraining.day,
-      kind: "week",
-      createdAt,
-    }));
-  } else if (!hasTrainingEntries) {
-    notifications.push(createAppNotification({
-      id: `training-return-v1-w${currentWeek}`,
-      title: "Retoma tu ritmo",
-      summary: "Registra tu próxima sesión para mantener tu progreso.",
-      category: "Entrenamiento",
-      tone: "progress",
-      priority: "medium",
-      dedupeKey: "training-status",
-      target: "dashboard",
-      section: "training-carousel",
-      kind: "week",
-      createdAt,
-    }));
-  }
-
-  if (hasWeeklyComparisonNotification) {
-    notifications.push(createAppNotification({
-      id: `weekly-comparison-v1-w${currentWeek}`,
-      title: "Comparación semanal disponible",
-      summary: "Revisa cómo avanzaste frente a tu semana anterior.",
-      category: "Comparación",
-      tone: "progress",
-      priority: "high",
-      dedupeKey: "weekly-comparison",
-      target: "comparacion",
-      section: "weekly-comparison",
-      kind: "progress",
-      createdAt,
-    }));
-  }
-
-  if (hasTrainingEntries && weeklyEquivalentProgress.currentEquivalentValue > 0) {
-    const progressIsReady = weeklyEquivalentProgress.status === "ready";
-    const progressIsPositive = weeklyEquivalentProgress.differenceValue > 0;
-    const isAlmostDone = plannedDays > 0 && completedDays > 0 && completedDays >= plannedDays - 1 && completedDays < plannedDays;
-    notifications.push(createAppNotification({
-      id: `weekly-progress-v1-w${currentWeek}-${Math.round(weeklyEquivalentProgress.currentEquivalentValue)}-${weeklyEquivalentProgress.tone}`,
-      title: isAlmostDone
-        ? "Te falta poco"
-        : progressIsReady
-          ? progressIsPositive
-            ? "Subiste tu volumen"
-            : weeklyEquivalentProgress.differenceValue < 0
-              ? "Semana más baja"
-              : "Buen avance semanal"
-          : "Buen avance semanal",
-      summary: isAlmostDone
-        ? `Llevas ${completedDays} de ${plannedDays} días. Una sesión más puede cerrar muy bien la semana.`
-        : progressIsReady
-          ? progressIsPositive
-            ? `Tu volumen actual supera a la semana anterior por ${weeklyEquivalentProgress.primaryLabel}.`
-            : weeklyEquivalentProgress.differenceValue < 0
-              ? `Tu volumen está ${weeklyEquivalentProgress.primaryLabel} bajo la referencia. Revísalo sin castigarte.`
-              : "Tu volumen se mantiene estable frente a la semana anterior."
-          : `Tu volumen actual es ${weeklyEquivalentProgress.currentVolumeLabel} esta semana.`,
-      category: "Progreso",
-      tone: weeklyEquivalentProgress.tone === "danger" ? "warning" : weeklyEquivalentProgress.tone === "positive" ? "success" : "progress",
-      priority: progressIsReady ? "medium" : "low",
-      dedupeKey: "weekly-progress",
-      target: "dashboard",
-      section: "weekly-progress",
-      kind: "progress",
-      createdAt,
-    }));
-  }
-
-  const mainAlert = currentMetrics.find((metric) => metric.repsDifference <= -4 && metric.kgDifference <= 0);
-  const loadAdjustment = currentMetrics.find((metric) => metric.repsDifference < 0 && metric.kgDifference > 0);
-  const loadIncrease = currentMetrics.find((metric) => metric.kgDifference > 0 && metric.repsDifference >= 0);
-  if (mainAlert) {
-    notifications.push(createAppNotification({
-      id: `smart-analysis-v1-w${currentWeek}-attention`,
-      title: "Revisa tu recuperación",
-      summary: `${mainAlert.exerciseName} bajó repeticiones. Revisa descanso, técnica o fatiga acumulada.`,
-      category: "Coach",
-      tone: "warning",
-      priority: "high",
-      dedupeKey: "coach",
-      target: "dashboard",
-      section: "coach",
-      kind: "coach",
-      createdAt,
-    }));
-  } else if (loadAdjustment) {
-    notifications.push(createAppNotification({
-      id: `smart-analysis-v1-w${currentWeek}-load-adjustment`,
-      title: "Carga en consolidación",
-      summary: `${loadAdjustment.exerciseName} subió peso, pero bajó reps. Consolida antes de volver a subir.`,
-      category: "Coach",
-      tone: "progress",
-      priority: "medium",
-      dedupeKey: "coach",
-      target: "dashboard",
-      section: "coach",
-      kind: "coach",
-      createdAt,
-    }));
-  } else if (loadIncrease) {
-    notifications.push(createAppNotification({
-      id: `smart-analysis-v1-w${currentWeek}-load-up`,
-      title: "Progresión de carga detectada",
-      summary: `${loadIncrease.exerciseName} subió carga manteniendo rendimiento.`,
-      category: "Coach",
-      tone: "success",
-      priority: "medium",
-      dedupeKey: "coach",
-      target: "dashboard",
-      section: "coach",
-      kind: "coach",
-      createdAt,
-    }));
-  } else if (summary.volumeDifference !== 0) {
-    notifications.push(createAppNotification({
-      id: `smart-analysis-v1-w${currentWeek}-progress`,
-      title: "Análisis inteligente",
-      summary: summary.volumeDifference > 0
-        ? "Tu Coach detectó una mejora de volumen esta semana."
-        : "Tu Coach detectó una baja de volumen y puede ayudarte a ajustar el ritmo.",
-      category: "Coach",
-      tone: summary.volumeDifference > 0 ? "success" : "warning",
-      priority: "medium",
-      dedupeKey: "coach",
-      target: "dashboard",
-      section: "coach",
-      kind: "coach",
-      createdAt,
-    }));
-  }
-
-  return sortNotificationsByPriority(dedupeNotifications(notifications));
-}
-
-function createAppNotification(notification: AppNotification): AppNotification {
-  return notification;
-}
-
-function isProfilePersonalDataIncomplete(personalData: ProfilePersonalData | null) {
-  if (!personalData) return false;
-  return !personalData.firstName ||
-    !personalData.birthDate ||
-    personalData.gender === "not_specified" ||
-    !personalData.phoneNumber;
-}
-
-function dedupeNotifications(notifications: AppNotification[]) {
-  const byKey = new Map<string, AppNotification>();
-  notifications.forEach((notification) => {
-    const current = byKey.get(notification.dedupeKey);
-    if (!current || compareNotifications(notification, current) < 0) {
-      byKey.set(notification.dedupeKey, notification);
-    }
-  });
-  return [...byKey.values()];
-}
-
-function sortNotificationsByPriority(notifications: AppNotification[]) {
-  return [...notifications].sort(compareNotifications);
-}
-
-function compareNotifications(a: AppNotification, b: AppNotification) {
-  const priorityDifference = getNotificationPriorityRank(a.priority) - getNotificationPriorityRank(b.priority);
-  if (priorityDifference !== 0) return priorityDifference;
-  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-}
-
-function getNotificationPriorityRank(priority: AppNotification["priority"]) {
-  switch (priority) {
-    case "high":
-      return 0;
-    case "medium":
-      return 1;
-    case "low":
-      return 2;
-  }
 }
 
 function EmptyDashboard({ startRegistration }: { startRegistration: () => void }) {
