@@ -9,11 +9,31 @@ export interface CycleHistoryPdfField {
   value: string;
 }
 
+/** Una línea del cuerpo de una celda de semana: valor a la izquierda y, opcionalmente, un valor pareado a la derecha. */
+export interface CycleHistoryPdfWeekCellRow {
+  left: string;
+  right: string | null;
+}
+
+/**
+ * Presentación de una semana registrada dentro de una celda de la tabla PDF. Se dibuja con un
+ * renderer propio (no como texto plano de autoTable): una fila por línea con valor izquierdo/derecho
+ * pareados, y una línea final centrada con el volumen total de la semana.
+ */
+export interface CycleHistoryPdfWeekRegistrationCell {
+  kind: "registration";
+  rows: CycleHistoryPdfWeekCellRow[];
+  totalLine: string;
+}
+
+/** Celda de una semana sin registro se mantiene como texto plano ("Sin registro"). */
+export type CycleHistoryPdfCellValue = string | CycleHistoryPdfWeekRegistrationCell;
+
 export interface CycleHistoryPdfTablePresentation {
   routineName: string;
   weeks: number[];
   head: string[];
-  rows: string[][];
+  rows: CycleHistoryPdfCellValue[][];
 }
 
 export interface CycleHistoryPdfRoutinePresentation {
@@ -161,20 +181,34 @@ function formatExercisePlan(plan: CycleHistoryExercisePlan | null): string {
   ].join(" · ");
 }
 
-function formatWeekRegistration(registration: CycleHistoryWeekRegistration | undefined): string {
+/**
+ * Por cada registro (serie) de la semana se emiten dos líneas pareadas: "Series
+ * registradas"/"Peso" y "Repeticiones"/"Total reps" — este último valor es el total de
+ * repeticiones de TODA la semana (no del registro individual), y se muestra una sola vez,
+ * junto al último registro. Debajo, una línea centrada con el volumen total real de la semana.
+ * No se inventa ni se recalcula ningún valor: todo proviene de `registration`/`series` tal cual.
+ */
+function formatWeekRegistration(registration: CycleHistoryWeekRegistration | undefined): CycleHistoryPdfCellValue {
   if (!registration) return "Sin registro";
 
-  const entries = registration.series.map((series, index) => [
-    `Registro ${index + 1} · Peso: ${formatKg(series.weight)}`,
-    `Series registradas: ${series.reps.length} · Repeticiones: ${series.reps.map(formatNumber).join("/")}`,
-    `Volumen: ${formatKg(series.volume)}`,
-  ].join("\n"));
+  const rows: CycleHistoryPdfWeekCellRow[] = [];
+  registration.series.forEach((series, index) => {
+    const isLastEntry = index === registration.series.length - 1;
+    rows.push({
+      left: `Series registradas: ${formatNumber(series.reps.length)}`,
+      right: `Peso: ${formatKg(series.weight)}`,
+    });
+    rows.push({
+      left: `Repeticiones: ${series.reps.map(formatNumber).join("/")}`,
+      right: isLastEntry ? `Total reps: ${formatNumber(registration.totalReps)}` : null,
+    });
+  });
 
-  return [
-    ...entries,
-    `Total reps: ${formatNumber(registration.totalReps)}`,
-    `Volumen total: ${formatKg(registration.volume)}`,
-  ].join("\n");
+  return {
+    kind: "registration",
+    rows,
+    totalLine: `Volumen total: ${formatKg(registration.volume)}`,
+  };
 }
 
 function appendTextField(fields: CycleHistoryPdfField[], label: string, value: string | null) {

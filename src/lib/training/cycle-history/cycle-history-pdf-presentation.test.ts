@@ -97,13 +97,37 @@ function testExercisePlanRegistrationsAndMissingWeeksAreExplicit() {
 
   assert.equal(plannedRow?.[0], "Sentadilla búlgara");
   assert.equal(plannedRow?.[1], "3 series · 10 reps · 40 kg");
-  assert.match(plannedRow?.[2] ?? "", /Registro 1 · Peso: 40 kg/);
-  assert.match(plannedRow?.[2] ?? "", /Series registradas: 3 · Repeticiones: 10\/10\/9/);
-  assert.match(plannedRow?.[2] ?? "", /Registro 2 · Peso: 42,5 kg/);
-  assert.match(plannedRow?.[2] ?? "", /Total reps: 57/);
-  assert.match(plannedRow?.[2] ?? "", /Volumen total: 2\.350 kg/);
+
+  const weekCell = plannedRow?.[2];
+  assert.ok(weekCell && typeof weekCell === "object", "la celda de una semana con registros debe ser un objeto estructurado, no texto plano");
+  assert.equal(weekCell.kind, "registration");
+  // Dos registros (series) esa semana: cada uno aporta un par de filas "Series registradas/Peso" y
+  // "Repeticiones/Total reps" — el total de repeticiones de la semana solo se muestra en el último registro.
+  assert.deepEqual(weekCell.rows, [
+    { left: "Series registradas: 3", right: "Peso: 40 kg" },
+    { left: "Repeticiones: 10/10/9", right: null },
+    { left: "Series registradas: 3", right: "Peso: 42,5 kg" },
+    { left: "Repeticiones: 10/9/9", right: "Total reps: 57" },
+  ]);
+  assert.equal(weekCell.totalLine, "Volumen total: 2.350 kg");
+
   assert.equal(unplannedRow?.[1], "Sin objetivo registrado");
   assert.equal(unplannedRow?.[2], "Sin registro");
+}
+
+// Semana con un único registro: el par "Repeticiones/Total reps" comparte la misma fila,
+// reproduciendo exactamente el diseño aprobado (sin "Registro N ·" ni una línea de volumen por registro).
+function testSingleEntryWeekPairsRepsWithTotalOnTheSameRow() {
+  const table = buildCycleHistoryPdfPresentation(buildCycleHistoryPdfTestModel()).routines[0]?.tables[1];
+  assert.ok(table);
+  const weekCell = table.rows[0]?.[2];
+  assert.ok(weekCell && typeof weekCell === "object");
+  assert.deepEqual(weekCell.rows, [
+    { left: "Series registradas: 3", right: "Peso: 47,5 kg" },
+    { left: "Repeticiones: 10/10/9", right: "Total reps: 29" },
+  ]);
+  assert.equal(weekCell.totalLine, "Volumen total: 1.377,5 kg");
+  assert.doesNotMatch(JSON.stringify(weekCell), /Registro \d|Volumen: /, "no debe quedar rastro del formato anterior (Registro N / Volumen por registro)");
 }
 
 function testInvalidWeekBlockFailsClosed() {
@@ -121,6 +145,7 @@ testDatesStatusesMetricsAndFilenameUseTheModel();
 testEmptyModelGeneratesSummaryWithoutTables();
 testWeekBlocksPreserveRoutineAndWeekOrder();
 testExercisePlanRegistrationsAndMissingWeeksAreExplicit();
+testSingleEntryWeekPairsRepsWithTotalOnTheSameRow();
 testInvalidWeekBlockFailsClosed();
 
 console.log("cycle-history-pdf-presentation tests passed");
