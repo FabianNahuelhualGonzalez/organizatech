@@ -37,6 +37,19 @@ export class CycleHistoryBreakdownError extends Error {
   }
 }
 
+interface PlannedExerciseMetadata {
+  routineId: string;
+  exerciseId: string;
+  identity: CycleHistoryExerciseIdentity;
+  name: string;
+  targetSets: number;
+  targetReps: number;
+  baseWeight: number;
+  daySortOrder: number;
+  exerciseSortOrder: number;
+  createdAtTimestamp: number | null;
+}
+
 export function resolveExerciseIdentity(entry: CycleHistoryEntryRow): CycleHistoryExerciseIdentity {
   if (entry.exerciseLineageId) return { kind: "lineage", key: entry.exerciseLineageId };
   if (entry.trainingCycleExerciseId) return { kind: "trainingCycleExercise", key: entry.trainingCycleExerciseId };
@@ -50,6 +63,50 @@ function resolvePlannedExerciseIdentity(exerciseLineageId: string | null, exerci
 
 function identityKey(identity: CycleHistoryExerciseIdentity): string {
   return `${identity.kind}:${identity.key}`;
+}
+
+function routineExerciseKey(routineId: string, identity: CycleHistoryExerciseIdentity): string {
+  return `${routineId}\u0000${identityKey(identity)}`;
+}
+
+function comparePersistedKey(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function comparePlannedExercisePosition(
+  left: PlannedExerciseMetadata,
+  right: PlannedExerciseMetadata,
+): number {
+  const leftHasPosition = Number.isFinite(left.daySortOrder) &&
+    Number.isFinite(left.exerciseSortOrder);
+  const rightHasPosition = Number.isFinite(right.daySortOrder) &&
+    Number.isFinite(right.exerciseSortOrder);
+
+  if (leftHasPosition !== rightHasPosition) return leftHasPosition ? -1 : 1;
+
+  if (leftHasPosition && rightHasPosition) {
+    const positionDifference = left.daySortOrder - right.daySortOrder ||
+      left.exerciseSortOrder - right.exerciseSortOrder;
+    if (positionDifference !== 0) return positionDifference;
+  }
+
+  const leftHasCreatedAt = left.createdAtTimestamp !== null;
+  const rightHasCreatedAt = right.createdAtTimestamp !== null;
+  if (leftHasCreatedAt !== rightHasCreatedAt) return leftHasCreatedAt ? -1 : 1;
+  if (left.createdAtTimestamp !== null && right.createdAtTimestamp !== null) {
+    const timestampDifference = left.createdAtTimestamp - right.createdAtTimestamp;
+    if (timestampDifference !== 0) return timestampDifference;
+  }
+
+  return comparePersistedKey(identityKey(left.identity), identityKey(right.identity)) ||
+    comparePersistedKey(left.exerciseId, right.exerciseId);
+}
+
+function toPersistedTimestamp(value: unknown): number | null {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function toNonNegativeFiniteWeight(value: unknown): number {
@@ -144,10 +201,8 @@ export function buildCycleHistoryBreakdown(input: {
 
   const routineOrder: string[] = [];
   const routineMetaById = new Map<string, { name: string; sortOrder: number }>();
-  const plannedExerciseByIdentityKey = new Map<
-    string,
-    { routineId: string; identity: CycleHistoryExerciseIdentity; name: string; targetSets: number; targetReps: number; baseWeight: number; sortOrder: number }
-  >();
+  const plannedExerciseByRoutineIdentityKey = new Map<string, PlannedExerciseMetadata>();
+  const plannedExercisesByIdentityKey = new Map<string, PlannedExerciseMetadata[]>();
 
   for (const routine of input.plan.routines) {
     if (!routineMetaById.has(routine.id)) {
@@ -158,18 +213,28 @@ export function buildCycleHistoryBreakdown(input: {
     for (const day of routine.days) {
       for (const exercise of day.exercises) {
         const identity = resolvePlannedExerciseIdentity(exercise.exerciseLineageId, exercise.id);
-        const key = identityKey(identity);
-        if (!plannedExerciseByIdentityKey.has(key)) {
-          plannedExerciseByIdentityKey.set(key, {
-            routineId: routine.id,
-            identity,
-            name: exercise.name,
-            targetSets: exercise.targetSets,
-            targetReps: exercise.targetReps,
-            baseWeight: exercise.baseWeight,
-            sortOrder: exercise.sortOrder,
-          });
+        const metadata: PlannedExerciseMetadata = {
+          routineId: routine.id,
+          exerciseId: exercise.id,
+          identity,
+          name: exercise.name,
+          targetSets: exercise.targetSets,
+          targetReps: exercise.targetReps,
+          baseWeight: exercise.baseWeight,
+          daySortOrder: day.sortOrder,
+          exerciseSortOrder: exercise.sortOrder,
+          createdAtTimestamp: toPersistedTimestamp(exercise.createdAt),
+        };
+
+        const scopedKey = routineExerciseKey(routine.id, identity);
+        const current = plannedExerciseByRoutineIdentityKey.get(scopedKey);
+        if (!current || comparePlannedExercisePosition(metadata, current) < 0) {
+          plannedExerciseByRoutineIdentityKey.set(scopedKey, metadata);
         }
+
+        const identityMatches = plannedExercisesByIdentityKey.get(identityKey(identity)) ?? [];
+        identityMatches.push(metadata);
+        plannedExercisesByIdentityKey.set(identityKey(identity), identityMatches);
       }
     }
   }
@@ -214,7 +279,7 @@ export function buildCycleHistoryBreakdown(input: {
     return exercise;
   }
 
-  for (const planned of plannedExerciseByIdentityKey.values()) {
+  for (const planned of plannedExerciseByRoutineIdentityKey.values()) {
     const routineMeta = routineMetaById.get(planned.routineId);
     getOrCreateExerciseBreakdown(
       planned.routineId,
@@ -226,7 +291,13 @@ export function buildCycleHistoryBreakdown(input: {
   }
 
   for (const joined of joinedEntries) {
-    const plannedMatch = plannedExerciseByIdentityKey.get(identityKey(joined.identity));
+    const exactPlannedMatch = joined.sessionRoutineId
+      ? plannedExerciseByRoutineIdentityKey.get(
+          routineExerciseKey(joined.sessionRoutineId, joined.identity),
+        )
+      : undefined;
+    const identityMatches = plannedExercisesByIdentityKey.get(identityKey(joined.identity)) ?? [];
+    const plannedMatch = exactPlannedMatch ?? (identityMatches.length === 1 ? identityMatches[0] : undefined);
 
     let routineId: string;
     let routineName: string;
@@ -283,7 +354,25 @@ export function buildCycleHistoryBreakdown(input: {
     const meta = routineMetaById.get(routineId);
     const bucket = exerciseBucketsByRoutine.get(routineId);
     const exercises = bucket ? Array.from(bucket.values()) : [];
-    exercises.sort((a, b) => identityKey(a.identity).localeCompare(identityKey(b.identity)));
+    exercises.sort((left, right) => {
+      const leftPosition = plannedExerciseByRoutineIdentityKey.get(
+        routineExerciseKey(routineId, left.identity),
+      );
+      const rightPosition = plannedExerciseByRoutineIdentityKey.get(
+        routineExerciseKey(routineId, right.identity),
+      );
+
+      if (leftPosition && rightPosition) {
+        return comparePlannedExercisePosition(leftPosition, rightPosition);
+      }
+      if (leftPosition) return -1;
+      if (rightPosition) return 1;
+
+      // El repositorio cycle-scoped exige trainingCycleExerciseId, por lo que esta
+      // rama solo conserva datos defensivos sin posicion resoluble. Quedan al final
+      // y usan su identidad persistida para no depender del orden de llegada.
+      return comparePersistedKey(identityKey(left.identity), identityKey(right.identity));
+    });
 
     return {
       routineId,

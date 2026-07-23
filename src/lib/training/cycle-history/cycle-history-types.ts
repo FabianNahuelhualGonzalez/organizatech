@@ -34,6 +34,8 @@ export interface CycleHistoryPlannedExercise {
   targetReps: number;
   baseWeight: number;
   sortOrder: number;
+  /** Timestamp persistido de incorporacion al plan, si la integracion lo conoce. */
+  createdAt?: string | null;
   exerciseLineageId: string | null;
 }
 

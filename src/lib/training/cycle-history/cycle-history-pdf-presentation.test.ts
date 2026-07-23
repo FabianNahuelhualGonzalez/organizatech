@@ -130,6 +130,42 @@ function testSingleEntryWeekPairsRepsWithTotalOnTheSameRow() {
   assert.doesNotMatch(JSON.stringify(weekCell), /Registro \d|Volumen: /, "no debe quedar rastro del formato anterior (Registro N / Volumen por registro)");
 }
 
+function testEveryWeekBlockPreservesTheDomainExerciseOrder() {
+  const model = buildCycleHistoryPdfTestModel();
+  const routine = model.routines[0]!;
+  const sourceExercise = routine.exercises[0]!;
+  routine.exercises = [
+    {
+      ...sourceExercise,
+      identity: { kind: "lineage", key: "lineage-zeta" },
+      name: "Zeta Press",
+    },
+    {
+      ...sourceExercise,
+      identity: { kind: "lineage", key: "lineage-alfa" },
+      name: "Alfa Aperturas",
+    },
+    {
+      ...sourceExercise,
+      identity: { kind: "lineage", key: "lineage-medio" },
+      name: "Medio Inclinado",
+    },
+  ];
+  routine.weekBlocks = [[1, 2], [3, 4], [5, 6], [7, 8]];
+
+  const presentation = buildCycleHistoryPdfPresentation(model);
+  const expectedOrder = ["Zeta Press", "Alfa Aperturas", "Medio Inclinado"];
+  assert.deepEqual(presentation.routines[0]?.tables.map((table) => table.weeks), [
+    [1, 2],
+    [3, 4],
+    [5, 6],
+    [7, 8],
+  ]);
+  for (const table of presentation.routines[0]?.tables ?? []) {
+    assert.deepEqual(table.rows.map((row) => row[0]), expectedOrder);
+  }
+}
+
 function testInvalidWeekBlockFailsClosed() {
   const model = buildCycleHistoryPdfTestModel();
   model.routines[0]!.weekBlocks = [[1, 2, 3]];
@@ -146,6 +182,7 @@ testEmptyModelGeneratesSummaryWithoutTables();
 testWeekBlocksPreserveRoutineAndWeekOrder();
 testExercisePlanRegistrationsAndMissingWeeksAreExplicit();
 testSingleEntryWeekPairsRepsWithTotalOnTheSameRow();
+testEveryWeekBlockPreservesTheDomainExerciseOrder();
 testInvalidWeekBlockFailsClosed();
 
 console.log("cycle-history-pdf-presentation tests passed");

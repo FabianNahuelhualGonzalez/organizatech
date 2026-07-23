@@ -150,6 +150,9 @@ export function adaptCycleHistoryPlan(
                 targetReps: exercise.targetReps,
                 baseWeight: exercise.baseWeight,
                 sortOrder: exercise.sortOrder,
+                ...(exercise.createdAt === undefined
+                  ? {}
+                  : { createdAt: exercise.createdAt }),
                 exerciseLineageId: exercise.exerciseLineageId,
               };
             }),

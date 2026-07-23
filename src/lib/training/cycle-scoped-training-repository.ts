@@ -187,6 +187,8 @@ export interface CycleScopedExercise {
   baseWeight: number;
   sideWeight: number | null;
   sortOrder: number;
+  /** Timestamp persistido de incorporacion al plan cycle-scoped. */
+  createdAt?: string | null;
   notes: string | null;
   sourceLegacyExerciseId: string | null;
   exerciseLineageId: string | null;
@@ -732,7 +734,7 @@ export async function getCycleScopedTrainingPlan(cycleId: string): Promise<Cycle
 
   const { data: exercises, error: exercisesError } = await supabase
     .from("training_cycle_exercises")
-    .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,notes,source_legacy_exercise_id,exercise_lineage_id")
+    .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,created_at,notes,source_legacy_exercise_id,exercise_lineage_id")
     .eq("user_id", userId)
     .eq("cycle_id", cycleId)
     .is("deleted_at", null)
@@ -789,7 +791,7 @@ export async function getCycleScopedTrainingSessionData(
   if (historicalExerciseIds.length > 0) {
     const { data: historicalExercises, error: historicalError } = await supabase
       .from("training_cycle_exercises")
-      .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,notes,source_legacy_exercise_id,exercise_lineage_id")
+      .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,created_at,notes,source_legacy_exercise_id,exercise_lineage_id")
       .eq("user_id", userId)
       .eq("cycle_id", cycleId)
       .in("id", historicalExerciseIds);
@@ -1021,6 +1023,7 @@ function mapCycleScopedExerciseRow(exercise: CycleScopedExerciseRow): CycleScope
     baseWeight: Number(exercise.base_weight),
     sideWeight: exercise.side_weight === null ? null : Number(exercise.side_weight),
     sortOrder: exercise.sort_order,
+    createdAt: exercise.created_at,
     notes: getCycleScopedExerciseDisplayNotes(exercise.notes),
     sourceLegacyExerciseId: exercise.source_legacy_exercise_id,
     exerciseLineageId: exercise.exercise_lineage_id,
@@ -1233,6 +1236,7 @@ interface CycleScopedExerciseRow {
   base_weight: number | string;
   side_weight: number | string | null;
   sort_order: number;
+  created_at: string;
   notes: string | null;
   source_legacy_exercise_id: string | null;
   exercise_lineage_id: string | null;

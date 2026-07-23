@@ -39,6 +39,7 @@ export interface CycleHistorySourceExercise {
   targetReps: number;
   baseWeight: number;
   sortOrder: number;
+  createdAt?: string | null;
   exerciseLineageId: string | null;
 }
 
@@ -140,6 +141,9 @@ export function createRepositoryCycleHistoryDataSource(): CycleHistoryDataSource
                 targetReps: exercise.targetReps,
                 baseWeight: exercise.baseWeight,
                 sortOrder: exercise.sortOrder,
+                ...(exercise.createdAt === undefined
+                  ? {}
+                  : { createdAt: exercise.createdAt }),
                 exerciseLineageId: exercise.exerciseLineageId,
               })),
             })),

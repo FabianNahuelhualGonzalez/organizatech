@@ -335,6 +335,86 @@ async function testExerciseIdentityFallsBackToTrainingCycleExerciseAndEntry() {
   assert.ok(identities.includes("unmatched:entry:unmatched-entry"));
 }
 
+async function testServiceSharesHistoricalExerciseOrderWithPdfModel() {
+  const data = makeCycleData(CYCLE_A);
+  const routine = data.plan.routines[0]!;
+  const day = routine.days[0]!;
+  day.exercises = [
+    {
+      id: "exercise-zeta",
+      cycleId: CYCLE_A,
+      dayId: day.id,
+      name: "Zeta Press",
+      targetSets: 3,
+      targetReps: 10,
+      baseWeight: 100,
+      sortOrder: 0,
+      exerciseLineageId: "lineage-zeta",
+    },
+    {
+      id: "exercise-alfa",
+      cycleId: CYCLE_A,
+      dayId: day.id,
+      name: "Alfa Aperturas",
+      targetSets: 3,
+      targetReps: 10,
+      baseWeight: 80,
+      sortOrder: 1,
+      exerciseLineageId: "lineage-alfa",
+    },
+    {
+      id: "exercise-medio",
+      cycleId: CYCLE_A,
+      dayId: day.id,
+      name: "Medio Inclinado",
+      targetSets: 3,
+      targetReps: 10,
+      baseWeight: 90,
+      sortOrder: 2,
+      exerciseLineageId: "lineage-medio",
+    },
+  ];
+  const sourceEntry = data.entries[0]!;
+  data.entries = [
+    {
+      ...sourceEntry,
+      id: "entry-alfa",
+      exerciseLineageId: "lineage-alfa",
+      trainingCycleExerciseId: "exercise-alfa",
+      exerciseName: "Alfa Aperturas",
+    },
+    {
+      ...sourceEntry,
+      id: "entry-medio",
+      exerciseLineageId: "lineage-medio",
+      trainingCycleExerciseId: "exercise-medio",
+      exerciseName: "Medio Inclinado",
+    },
+    {
+      ...sourceEntry,
+      id: "entry-zeta",
+      exerciseLineageId: "lineage-zeta",
+      trainingCycleExerciseId: "exercise-zeta",
+      exerciseName: "Zeta Press",
+    },
+  ];
+
+  const result = await createService(createFakeSource({ data })).loadCycleDetail(CYCLE_A);
+  assert.equal(result.status, "ready");
+  if (result.status !== "ready") return;
+
+  const detailExercises = result.data.breakdown.routines[0]?.exercises;
+  const pdfExercises = result.data.pdfModel.routines[0]?.exercises;
+  const expectedOrder = ["Zeta Press", "Alfa Aperturas", "Medio Inclinado"];
+  assert.deepEqual(detailExercises?.map((exercise) => exercise.name), expectedOrder);
+  assert.deepEqual(pdfExercises?.map((exercise) => exercise.name), expectedOrder);
+  assert.equal(
+    pdfExercises,
+    detailExercises,
+    "CycleHistoryDetail y CycleHistoryPdfModel deben compartir el arreglo ya ordenado",
+  );
+}
+
 async function testDisabledFlagMakesNoRepositoryCalls() {
   const control = createFakeSource();
   const service = createService(control, false);
@@ -431,6 +511,7 @@ async function run() {
   await testMixedCyclesCannotContaminateResult();
   await testIdentityPriorityAndRoutineComeFromSession();
   await testExerciseIdentityFallsBackToTrainingCycleExerciseAndEntry();
+  await testServiceSharesHistoricalExerciseOrderWithPdfModel();
   await testDisabledFlagMakesNoRepositoryCalls();
   await testRepositoryErrorIsSanitized();
   await testUnknownCycleReturnsTypedErrorWithoutLoadingData();
