@@ -76,8 +76,12 @@ import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
 import { getPublicErrorMessage } from "@/lib/errors/public-error";
 import {
   getActiveFlow,
+  resetContextualNavigation,
+  resolveActiveFlowRestoration,
+  resolveContextualBackNavigation,
+  resolveContextualNavigation,
   screenLabel,
-  type ActiveFlow,
+  type ContextualNavigationState,
   type Screen,
 } from "@/lib/navigation/app-navigation";
 import { isSessionExpiredError, translateAuthError, translatePersistenceError } from "@/lib/supabase/auth-errors";
@@ -1424,48 +1428,40 @@ export function OrganizatechApp({
     setLatestExercisePerformanceLoading(latestPerformanceIdle.loading);
     setLatestExercisePerformanceError(latestPerformanceIdle.error);
     setHasStartedTraining(false);
-    setScreenHistory([]);
+    applyContextualNavigation(resetContextualNavigation("login"));
     setIsMenuOpen(false);
     setStatusMessage(message);
-    setScreen("login");
   }
 
   function clearBrowserStorageScope(scope: BrowserStorageScope | null) {
     clearStoredBrowserStorageScope(scope);
   }
 
+  function applyContextualNavigation(navigation: ContextualNavigationState) {
+    setScreenHistory([...navigation.history]);
+    setScreen(navigation.screen);
+  }
+
   function restoreActiveFlowForSession(mode: DataMode, userId?: string) {
     const activeFlow = loadActiveFlow(mode, userId);
     if (!activeFlow) return false;
+    const restoration = resolveActiveFlowRestoration(activeFlow.flow);
 
-    if (activeFlow.flow === "routine_setup" || activeFlow.flow === "routine_edit") {
+    if (restoration.kind === "routine-draft") {
       return restoreRoutineDraftForSession(mode, userId);
     }
 
-    if (activeFlow.flow === "motivation_form" || activeFlow.flow === "active_workout") {
+    if (restoration.kind === "workout-draft") {
       return restoreWorkoutDraftForSession(mode, userId);
     }
 
-    if (activeFlow.flow === "training_start") {
+    if (restoration.kind !== "screen") return false;
+    if (restoration.resetTrainingStart) {
       setHasStartedTraining(false);
       setReadiness(null);
-      setScreenHistory([]);
-      setIsMenuOpen(false);
-      setScreen("entrenamiento");
-      return true;
     }
-
-    const screenByFlow: Partial<Record<ActiveFlow, Screen>> = {
-      dashboard: "dashboard",
-      comparison: "comparacion",
-      cycle_history: "historial-ciclos",
-      profile: "perfil",
-    };
-    const restoredScreen = screenByFlow[activeFlow.flow];
-    if (!restoredScreen) return false;
-    setScreenHistory([]);
+    applyContextualNavigation(resetContextualNavigation(restoration.screen));
     setIsMenuOpen(false);
-    setScreen(restoredScreen);
     return true;
   }
 
@@ -1484,10 +1480,9 @@ export function OrganizatechApp({
     setIsEditingRoutinePlan(draft.isEditingRoutinePlan);
     setRoutineEditorReturnScreen(draft.routineEditorReturnScreen);
     setActiveRoutineDay(draft.activeRoutineDay);
-    setScreenHistory([]);
+    applyContextualNavigation(resetContextualNavigation("registro-entrenamiento"));
     setIsMenuOpen(false);
     setStatusMessage("Recuperamos tu avance pendiente.");
-    setScreen("registro-entrenamiento");
     return true;
   }
 
@@ -1516,10 +1511,9 @@ export function OrganizatechApp({
     setReadiness(draft.readiness);
     setExerciseDrafts(draft.exerciseDrafts);
     setIsEditingRoutinePlan(false);
-    setScreenHistory([]);
+    applyContextualNavigation(resetContextualNavigation("entrenamiento"));
     setIsMenuOpen(false);
     setStatusMessage("Recuperamos tu entrenamiento pendiente.");
-    setScreen("entrenamiento");
     return true;
   }
 
@@ -1537,9 +1531,8 @@ export function OrganizatechApp({
     const decision = resolveActiveWorkoutReentryDecision(memoryState, Boolean(draft));
 
     if (decision === "resume-memory" && canResumeActiveWorkoutFromMemory(memoryState)) {
-      setScreenHistory([]);
+      applyContextualNavigation(resetContextualNavigation("entrenamiento"));
       setIsMenuOpen(false);
-      setScreen("entrenamiento");
       return true;
     }
 
@@ -2038,80 +2031,64 @@ export function OrganizatechApp({
   }
 
   function navigateTo(nextScreen: Screen) {
-    if (nextScreen === screen) {
-      setIsMenuOpen(false);
+    const decision = resolveContextualNavigation({
+      current: { screen, history: screenHistory },
+      nextScreen,
+      hasRoutinePlan,
+    });
+
+    if (decision.kind === "same-screen") {
+      if (decision.closeMenu) setIsMenuOpen(false);
       return;
     }
 
-    if (nextScreen === "dashboard") {
+    if (decision.clearTrainingCompletionSummary) {
       setTrainingCompletionSummary(null);
     }
 
-    if (nextScreen === "registro-entrenamiento") {
+    if (decision.prepareRoutineEditor) {
       setSetupByDay(createSetupByDayFromExercises(exercises));
       setSetupDay(getVisibleTrainingDay(exercises, activeRoutineDay));
-      setIsEditingRoutinePlan(!hasRoutinePlan);
-    } else if (nextScreen === "entrenamiento") {
+    } else if (decision.tryRestoreActiveWorkout) {
       if (restoreActiveWorkoutForNavigation()) return;
-      setHasStartedTraining(false);
-      setReadiness(null);
-    } else {
-      setIsEditingRoutinePlan(false);
+      if (decision.resetTrainingStart) {
+        setHasStartedTraining(false);
+        setReadiness(null);
+      }
     }
-    if (screen !== "login" && screen !== "registro") {
-      setScreenHistory((current) => [...current, screen]);
+    if (decision.routineEditorEditingState !== null) {
+      setIsEditingRoutinePlan(decision.routineEditorEditingState);
     }
-    setScreen(nextScreen);
-    setIsMenuOpen(false);
+    applyContextualNavigation(decision.navigation);
+    if (decision.closeMenu) setIsMenuOpen(false);
   }
 
   function goBack() {
-    if (screen === "entrenamiento") {
-      if (readiness) {
-        setScreen("dashboard");
-        setScreenHistory([]);
-        return;
-      }
+    const decision = resolveContextualBackNavigation({
+      current: { screen, history: screenHistory },
+      hasStartedTraining,
+      hasReadiness: Boolean(readiness),
+      isEditingRoutinePlan,
+      hasRoutinePlan,
+      routineEditorReturnScreen,
+    });
 
-      if (hasStartedTraining) {
-        setHasStartedTraining(false);
-        return;
-      }
+    if (decision.stopTraining) {
+      setHasStartedTraining(false);
     }
-
-    if (screen === "registro-entrenamiento" && isEditingRoutinePlan && hasRoutinePlan) {
-      const target = routineEditorReturnScreen;
+    if (decision.clearReadiness) {
+      setReadiness(null);
+    }
+    if (decision.closeRoutineEditor) {
       setIsEditingRoutinePlan(false);
+    }
+    if (decision.clearRoutineEditorReturnScreen) {
       setRoutineEditorReturnScreen(null);
-
-      if (target === "entrenamiento") {
-        setHasStartedTraining(false);
-        setReadiness(null);
-        setScreen("entrenamiento");
-        return;
-      }
-
-      if (target && target !== "registro-entrenamiento") {
-        setScreen(target);
-        return;
-      }
-
-      return;
     }
-
-    const previous = screenHistory.at(-1);
-    if (previous) {
-      setScreenHistory((current) => current.slice(0, -1));
-      if (previous !== "registro-entrenamiento") {
-        setIsEditingRoutinePlan(false);
-      }
-      setScreen(previous);
-      return;
+    if (decision.navigationChanged) {
+      applyContextualNavigation(decision.navigation);
     }
-
-    setScreen("dashboard");
-    setScreenHistory([]);
-    setIsMenuOpen(false);
+    if (decision.closeMenu) setIsMenuOpen(false);
   }
 
   function updateSetupRow(id: string, field: keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId" | "exerciseLineageId">, value: string) {

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import {
+  resolveContextualBackNavigation,
+  resolveContextualNavigation,
+} from "@/lib/navigation/app-navigation";
 import type { DataMode } from "@/lib/supabase/session";
 import {
   clearWorkoutDraft,
@@ -625,7 +629,7 @@ async function run() {
     assert.match(restoreNavigationBlock, /workoutAttemptId: activeWorkoutAttemptIdRef\.current \?\? activeWorkoutAttemptId/, "reentrada valida attempt v2 desde ref fresca");
     assert.match(restoreNavigationBlock, /cycleId: activeWorkoutReadinessContextRef\.current\?\.cycleId \?\? null/, "reentrada exige cycleId para memoria v2");
     assert.match(restoreNavigationBlock, /cycleDayId: activeWorkoutReadinessContextRef\.current\?\.cycleDayId \?\? null/, "reentrada exige cycleDayId para memoria v2");
-    assert.match(restoreNavigationBlock, /decision === "resume-memory"[\s\S]*setScreen\("entrenamiento"\)/, "reentrada con estado activo en memoria vuelve directo a rutina");
+    assert.match(restoreNavigationBlock, /decision === "resume-memory"[\s\S]*applyContextualNavigation\(resetContextualNavigation\("entrenamiento"\)\)/, "reentrada con estado activo en memoria vuelve directo a rutina");
     assert.match(restoreNavigationBlock, /const draft = loadWorkoutDraft\(dataMode, supabaseUser\?\.id\)/, "reentrada carga el draft una sola vez");
     assert.match(restoreNavigationBlock, /decision === "restore-draft"[\s\S]*restoreWorkoutDraftRecord\(draft\)/, "reentrada sin memoria completa aplica el draft ya cargado");
     assert.equal((restoreNavigationBlock.match(/loadWorkoutDraft/g) ?? []).length, 1, "reentrada evita doble lectura del draft");
@@ -633,13 +637,31 @@ async function run() {
     const navigateStart = appSource.indexOf("function navigateTo(nextScreen: Screen)");
     const navigateEnd = appSource.indexOf("  function goBack()", navigateStart);
     const navigateBlock = navigateStart >= 0 && navigateEnd > navigateStart ? appSource.slice(navigateStart, navigateEnd) : "";
-    assert.match(navigateBlock, /nextScreen === "entrenamiento"[\s\S]*if \(restoreActiveWorkoutForNavigation\(\)\) return;[\s\S]*setHasStartedTraining\(false\);[\s\S]*setReadiness\(null\)/, "navigateTo restaura entrenamiento activo antes de abrir readiness normal");
+    assert.match(navigateBlock, /resolveContextualNavigation/, "navigateTo delega la decision contextual");
+    assert.match(navigateBlock, /decision\.tryRestoreActiveWorkout[\s\S]*if \(restoreActiveWorkoutForNavigation\(\)\) return;[\s\S]*decision\.resetTrainingStart[\s\S]*setHasStartedTraining\(false\);[\s\S]*setReadiness\(null\)/, "navigateTo restaura entrenamiento activo antes de abrir readiness normal");
+    const trainingNavigationDecision = resolveContextualNavigation({
+      current: { screen: "dashboard", history: [] },
+      nextScreen: "entrenamiento",
+      hasRoutinePlan: true,
+    });
+    assert.equal(trainingNavigationDecision.tryRestoreActiveWorkout, true, "la capa pura solicita reentrada antes del reset");
+    assert.equal(trainingNavigationDecision.resetTrainingStart, true, "la capa pura conserva el reset normal cuando no hay reentrada");
     const goBackStart = appSource.indexOf("function goBack()");
     const goBackEnd = appSource.indexOf("  function updateSetupRow", goBackStart);
     const goBackBlock = goBackStart >= 0 && goBackEnd > goBackStart ? appSource.slice(goBackStart, goBackEnd) : "";
-    const activeBackBranch = goBackBlock.match(/if \(readiness\) \{[\s\S]*?return;\s*\}/)?.[0] ?? "";
-    assert.match(activeBackBranch, /setScreen\("dashboard"\)/, "volver desde rutina activa pausa en dashboard");
-    assert.doesNotMatch(activeBackBranch, /setReadiness\(null\)|setHasStartedTraining\(false\)|clearWorkoutDraft|resetWorkoutAttemptState/, "volver al dashboard no cancela el entrenamiento activo");
+    assert.match(goBackBlock, /resolveContextualBackNavigation/, "goBack delega la decision contextual");
+    const activeBackDecision = resolveContextualBackNavigation({
+      current: { screen: "entrenamiento", history: ["dashboard"] },
+      hasStartedTraining: true,
+      hasReadiness: true,
+      isEditingRoutinePlan: false,
+      hasRoutinePlan: true,
+      routineEditorReturnScreen: null,
+    });
+    assert.equal(activeBackDecision.navigation.screen, "dashboard", "volver desde rutina activa pausa en dashboard");
+    assert.equal(activeBackDecision.stopTraining, false, "volver al dashboard no cancela el entrenamiento activo");
+    assert.equal(activeBackDecision.clearReadiness, false, "volver al dashboard conserva readiness");
+    assert.doesNotMatch(goBackBlock, /clearWorkoutDraft|resetWorkoutAttemptState/, "el adaptador de volver no elimina el intento activo");
     const openRoutineStart = appSource.indexOf("function openRoutineDay(day: string, keepTrainingStarted = false)");
     const openRoutineEnd = appSource.indexOf("  async function startNewTrainingCycle", openRoutineStart);
     const openRoutineBlock = openRoutineStart >= 0 && openRoutineEnd > openRoutineStart ? appSource.slice(openRoutineStart, openRoutineEnd) : "";
