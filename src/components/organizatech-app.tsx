@@ -86,7 +86,6 @@ import {
   selectNotificationView,
 } from "@/lib/notifications/notification-selector";
 import {
-  SEEN_NOTIFICATIONS_MAX_RECORDS,
   markNotificationsSeen as transitionNotificationsSeen,
   resolveNotificationOpenIntent,
 } from "@/lib/notifications/notification-state";
@@ -157,9 +156,8 @@ import {
   getBrowserStorageScope,
   hasStoredPasswordRecoveryFlow,
   loadPasswordRecoveryFlow,
-  loadSeenNotificationRecords as loadStoredSeenNotificationRecords,
-  migrateLegacyBrowserStorageToDemo,
-  saveSeenNotificationRecords as saveStoredSeenNotificationRecords,
+  loadSeenNotificationRecordsFromBrowser as loadSeenNotificationRecords,
+  saveSeenNotificationRecordsFromBrowser as saveSeenNotificationRecords,
   startPasswordRecoveryFlow,
   type BrowserStorageScope,
 } from "@/lib/storage/browser-storage";
@@ -4985,17 +4983,6 @@ function NotificationTrendingIcon() {
       <path d="M14 7l7 0l0 7" />
     </svg>
   );
-}
-
-function loadSeenNotificationRecords(scope: BrowserStorageScope) {
-  if (typeof window === "undefined") return [];
-  migrateLegacyBrowserStorageToDemo(window.localStorage);
-  return loadStoredSeenNotificationRecords(window.localStorage, scope, SEEN_NOTIFICATIONS_MAX_RECORDS);
-}
-
-function saveSeenNotificationRecords(records: SeenNotificationRecord[], scope: BrowserStorageScope) {
-  if (typeof window === "undefined") return;
-  saveStoredSeenNotificationRecords(window.localStorage, scope, records, SEEN_NOTIFICATIONS_MAX_RECORDS);
 }
 
 function EmptyDashboard({ startRegistration }: { startRegistration: () => void }) {

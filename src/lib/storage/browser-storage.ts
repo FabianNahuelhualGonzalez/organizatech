@@ -1,4 +1,5 @@
 import type { DataMode } from "@/lib/supabase/session";
+import { SEEN_NOTIFICATIONS_MAX_RECORDS } from "@/lib/notifications/notification-state";
 
 export type BrowserStorageScope = "demo" | `supabase:${string}`;
 
@@ -205,6 +206,26 @@ export function saveSeenNotificationRecords(
     getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.seenNotifications, scope),
     sanitized,
   );
+}
+
+export function loadSeenNotificationRecordsFromBrowser(
+  scope: BrowserStorageScope,
+): SeenNotificationStorageRecord[] {
+  const storage = getBrowserLocalStorage();
+  if (!storage) return [];
+
+  migrateLegacyBrowserStorageToDemo(storage);
+  return loadSeenNotificationRecords(storage, scope, SEEN_NOTIFICATIONS_MAX_RECORDS);
+}
+
+export function saveSeenNotificationRecordsFromBrowser(
+  records: SeenNotificationStorageRecord[],
+  scope: BrowserStorageScope,
+): void {
+  const storage = getBrowserLocalStorage();
+  if (!storage) return;
+
+  saveSeenNotificationRecords(storage, scope, records, SEEN_NOTIFICATIONS_MAX_RECORDS);
 }
 
 export function startPasswordRecoveryFlow(
