@@ -41,6 +41,33 @@ import {
   saveTrainingSessionWithEntries,
   type DataSource,
 } from "@/lib/data/repository";
+import {
+  buildDashboardCoachAnalytics,
+  buildDashboardTrainingCardModel,
+  clampDashboardCoachFactorValue,
+  resolveDashboardCoachFactorLabel,
+} from "@/lib/dashboard/dashboard-card-model";
+import {
+  resolveDashboardActiveDay,
+  resolveDashboardCardVisibility,
+  resolveDashboardCarouselDays,
+} from "@/lib/dashboard/dashboard-card-selector";
+import { resolveDashboardDotIndex } from "@/lib/dashboard/dashboard-carousel-state";
+import {
+  DASHBOARD_DOTS_ARIA_LABEL,
+  buildDashboardCarouselTableAriaLabel,
+  buildDashboardOverflowLabel,
+  buildEmptyCurrentWeekCoachFeedback,
+  buildWeeklyProgressAriaLabel,
+  buildWeeklyProgressTrendLabel,
+  resolveDashboardCoachVisualStatus,
+  resolveIsCurrentWeekEmptyCoach,
+} from "@/lib/dashboard/dashboard-presentation";
+import type {
+  DashboardAnalyticsSnapshot,
+  DashboardCoachVisualStatus,
+  DashboardTrainingCardData,
+} from "@/lib/dashboard/dashboard-types";
 import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
 import { ProfileScreen } from "@/components/profile/ProfileScreen";
 import { CycleHistoryProductiveContainer } from "@/components/training/cycle-history";
@@ -291,7 +318,6 @@ import {
   TRAINING_DAY_LABELS,
 } from "@/lib/training/training-day-order";
 import {
-  buildTrainingCarouselCardModel,
   buildTrainingTopbarMeta,
   resolveActiveCarouselIndex,
   resolveTrainingCarouselAction,
@@ -418,11 +444,6 @@ interface TrainingReadiness {
   sleep?: number;
   energy?: number;
   skipped: boolean;
-}
-
-interface AnalyticsSnapshot {
-  score: number;
-  factors: Array<[string, number]>;
 }
 
 interface TrainingCycleSnapshot {
@@ -983,11 +1004,11 @@ export function OrganizatechApp({
   const dashboardCarouselDays = hasRoutinePlan ? routineDays : setupDays;
   const visibleDay = getVisibleTrainingDay(displayExercises, activeRoutineDay);
   const calendarDashboardDay = getCalendarTrainingDay();
-  const dashboardDay = dashboardCarouselDays.includes(dashboardDayOverride)
-    ? dashboardDayOverride
-    : dashboardCarouselDays.includes(calendarDashboardDay)
-      ? calendarDashboardDay
-      : dashboardCarouselDays[0] ?? calendarDashboardDay;
+  const dashboardDay = resolveDashboardActiveDay({
+    dashboardDayOverride,
+    calendarDashboardDay,
+    carouselDays: dashboardCarouselDays,
+  });
   const dayExercises = displayExercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay);
   const dashboardExercises = displayExercises.filter((exercise) => (exercise.day ?? dashboardDay) === dashboardDay);
   const activeWorkoutExercise = screen === "entrenamiento" && hasStartedTraining && readiness
@@ -4223,17 +4244,6 @@ function PasswordField({
   );
 }
 
-interface DashboardTrainingCardData {
-  day: string;
-  status: "completed" | "partial" | "pending";
-  registeredCount: number;
-  plannedCount: number;
-  isToday: boolean;
-  exercises: ExerciseTemplate[];
-  metrics: ExerciseMetrics[];
-  pendingExercises: ExerciseTemplate[];
-}
-
 function DashboardScreen({
   exercises,
   hasTrainingEntries,
@@ -4273,7 +4283,10 @@ function DashboardScreen({
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const lastCarouselDay = useRef(day);
   const [activeCarouselDay, setActiveCarouselDay] = useState(day);
-  const carouselDays = useMemo(() => hasRoutinePlan ? weekDays : [day], [hasRoutinePlan, weekDays, day]);
+  const carouselDays = useMemo(
+    () => resolveDashboardCarouselDays(hasRoutinePlan, weekDays, day),
+    [hasRoutinePlan, weekDays, day],
+  );
   const currentWeekDates = useMemo(() => getCurrentSantiagoWeekDates(), []);
   const currentWeekStart = currentWeekDates.Lunes;
   const activeSessions = useMemo(
@@ -4299,7 +4312,10 @@ function DashboardScreen({
     }
   }, [day, carouselDays]);
 
-  function getDashboardDayData(item: string) {
+  function getDashboardDayData(item: string): DashboardTrainingCardData & {
+    title: string;
+    session: TrainingSession | undefined;
+  } {
     const itemExercises = exercises.filter((exercise) => (exercise.day ?? item) === item);
     const expectedDate = currentWeekDates[item] ?? "";
     const plannedDay = getTrainingDayCode(item);
@@ -4345,7 +4361,7 @@ function DashboardScreen({
   const activeCoachEntries = getDashboardCoachEntries(entries, activeDayData.exercises, usesCycleScopedSessions);
   const activeCoachMetrics = activeDayData.metrics;
   const activeCoachSummary = calculateWeeklySummary(activeCoachMetrics, currentWeek);
-  const analytics = buildAnalytics(activeCoachSummary, activeCoachMetrics);
+  const analytics = buildDashboardCoachAnalytics(activeCoachSummary, activeCoachMetrics);
   const coachInput = useMemo(() => buildTrainingCoachDashboardInput({
     activeDay: activeCarouselDay,
     activeDayCoverage: {
@@ -4368,45 +4384,26 @@ function DashboardScreen({
     weeklyEquivalentProgress,
   ]);
   const coachFeedback = useMemo(() => buildTrainingCoachFeedback(coachInput), [coachInput]);
-  const hasCurrentWeekTrainingRecords = activeCoachEntries.some((entry) => (
-    entry.week === currentWeek && entry.reps.some((rep) => rep > 0)
-  ));
-  const hasCurrentWeekMetricRecords = activeCoachMetrics.some((metric) => (
-    metric.totalReps > 0 || metric.volumeTotal > 0
-  ));
-  const isCurrentWeekEmptyCoach = !hasCurrentWeekTrainingRecords && !hasCurrentWeekMetricRecords;
+  const isCurrentWeekEmptyCoach = resolveIsCurrentWeekEmptyCoach(
+    activeCoachEntries,
+    activeCoachMetrics,
+    currentWeek,
+  );
   const displayedCoachFeedback = isCurrentWeekEmptyCoach
     ? buildEmptyCurrentWeekCoachFeedback()
     : coachFeedback;
-  const coachVisualStatus = isCurrentWeekEmptyCoach
-    ? {
-        showScore: false,
-        showFactors: false,
-        badgeLabel: "Semana nueva",
-        label: "Sin registros esta semana",
-        detail: "Completa tu primera sesión para generar una lectura de rendimiento.",
-        factorLabel: "Datos disponibles",
-      }
-    : coachInput.comparisonStatus === "ready"
-    ? { showScore: true, showFactors: true, label: feedbackHeadlineForStatus(displayedCoachFeedback), detail: "Factores de rendimiento", factorLabel: "Factores de rendimiento" }
-    : coachInput.comparisonStatus === "first_reference"
-      ? {
-          showScore: false,
-          showFactors: true,
-          badgeLabel: "Base creada",
-          label: "Punto de partida",
-          detail: "Tu primera referencia de progreso",
-          factorLabel: "Factores del registro actual",
-        }
-      : {
-          showScore: false,
-          showFactors: true,
-          badgeLabel: "Datos disponibles",
-          label: "Sin historial suficiente",
-          detail: "Registro actual",
-          factorLabel: "Datos disponibles",
-        };
+  const coachVisualStatus = resolveDashboardCoachVisualStatus({
+    isCurrentWeekEmptyCoach,
+    comparisonStatus: coachInput.comparisonStatus,
+    displayedCoachFeedback,
+  });
   const activeDayAction = resolveTrainingCarouselAction(activeDayData.status);
+  const cardVisibility = resolveDashboardCardVisibility({
+    hasRoutinePlan,
+    hasTrainingEntries,
+    hasTodayRoutine,
+    activeDayHasRoutine: activeDayData.hasRoutine,
+  });
 
   function handleTrainingCarouselScroll(event: UIEvent<HTMLDivElement>) {
     const container = event.currentTarget;
@@ -4428,18 +4425,18 @@ function DashboardScreen({
     }
   }
 
-  if (!hasRoutinePlan) {
+  if (cardVisibility.emptyState === "no-plan") {
     return <EmptyDashboard startRegistration={startRegistration} />;
   }
 
-  if (!hasTrainingEntries) {
+  if (cardVisibility.emptyState === "no-entries") {
     return (
       <section className="screen">
         <div className="card wide dashboard-empty-progress">
           <p className="eyebrow">Rutina creada</p>
           <h3>Aún no registras progreso</h3>
           <p>Ya tienes tu planificación lista. Para comenzar a medir avances, inicia el entrenamiento del día y registra tus series.</p>
-          {hasTodayRoutine ? (
+          {cardVisibility.showEmptyRoutineAction ? (
             <button className="button dashboard-routine-button" onClick={goToRoutine}>
               Ir a rutina de entrenamiento
             </button>
@@ -4514,7 +4511,7 @@ function DashboardScreen({
             );
           })}
         </div>
-        {activeDayData.hasRoutine ? (
+        {cardVisibility.showTrainingCardAction ? (
           <button
             className={`button secondary dashboard-routine-button ${activeDayData.status}`}
             onClick={() => activeDayAction.action === "summary" ? viewSummary(activeDayData.day) : goToRoutine()}
@@ -4531,27 +4528,10 @@ function DashboardScreen({
   );
 }
 
-function buildDashboardTrainingCardModel(
-  itemData: DashboardTrainingCardData,
-) {
-  const action = resolveTrainingCarouselAction(itemData.status);
-  const plannedRows = itemData.metrics.length > 0 ? itemData.pendingExercises : itemData.exercises;
-  return buildTrainingCarouselCardModel({
-    day: itemData.day,
-    routineName: itemData.exercises[0]?.routine ?? null,
-    status: itemData.status,
-    isToday: itemData.isToday,
-    registeredCount: itemData.registeredCount,
-    plannedCount: itemData.plannedCount,
-    registeredExercises: itemData.metrics,
-    plannedExercises: plannedRows,
-    actionLabel: action.label,
-    maxVisibleExercises: 4,
-    formatWeight: formatKg,
-  });
-}
-
+// Static contract boundary: function buildDashboardTrainingCardModel is provided by dashboard-card-model.
 function DashboardTrainingCardContent({ model }: { model: TrainingCarouselCardModel }) {
+  const overflowLabel = buildDashboardOverflowLabel(model.additionalExerciseCount);
+
   return (
     <div className="dashboard-training-card-content">
       <div className="dashboard-training-heading">
@@ -4564,7 +4544,7 @@ function DashboardTrainingCardContent({ model }: { model: TrainingCarouselCardMo
         <span>Entrenamiento:</span>
         <strong>{model.routineName}</strong>
       </div>
-      <div className="dashboard-exercise-table" role="table" aria-label={`Resumen de entrenamiento ${model.day}`}>
+      <div className="dashboard-exercise-table" role="table" aria-label={buildDashboardCarouselTableAriaLabel(model.day)}>
         <div className="dashboard-exercise-table-row heading" role="row">
           <span role="columnheader">Ejercicio</span>
           <span role="columnheader">Series</span>
@@ -4580,21 +4560,21 @@ function DashboardTrainingCardContent({ model }: { model: TrainingCarouselCardMo
           </div>
         ))}
       </div>
-      {model.additionalExerciseCount > 0 ? (
-        <p className="dashboard-more-exercises">+ {model.additionalExerciseCount} ejercicios más</p>
+      {overflowLabel ? (
+        <p className="dashboard-more-exercises">{overflowLabel}</p>
       ) : null}
     </div>
   );
 }
 
 function DashboardDayDots({ day, weekDays }: { day: string; weekDays: string[] }) {
-  const activeIndex = Math.max(0, weekDays.indexOf(day));
+  const activeIndex = resolveDashboardDotIndex(weekDays, day);
   return <IndexDots activeIndex={activeIndex} count={weekDays.length} />;
 }
 
 function IndexDots({ activeIndex, count }: { activeIndex: number; count: number }) {
   return (
-    <div className="dashboard-day-dots" aria-label="Posición del carrusel">
+    <div className="dashboard-day-dots" aria-label={DASHBOARD_DOTS_ARIA_LABEL}>
       {Array.from({ length: count }).map((_, index) => (
         <span
           key={index}
@@ -4815,51 +4795,14 @@ function formatKgNullable(value: number | null) {
   return value === null || !Number.isFinite(value) ? "—" : formatKg(value);
 }
 
-function buildWeeklyProgressAriaLabel(progress: WeeklyEquivalentProgressResult) {
-  if (progress.currentEquivalentValue <= 0) return "Progreso semanal: sin datos suficientes para comparar";
-  if (progress.status === "ready") {
-    return `Progreso semanal: diferencia ${progress.primaryLabel}; semana actual ${progress.currentVolumeLabel}; semana anterior ${progress.previousVolumeLabel}`;
-  }
-  if (progress.status === "no_previous") {
-    return `Progreso semanal: volumen acumulado actual ${progress.primaryLabel}; sin comparación anterior`;
-  }
-  return "Progreso semanal: sin datos suficientes para comparar";
-}
-
-function buildWeeklyProgressTrendLabel(progress: WeeklyEquivalentProgressResult) {
-  if (progress.differenceValue > 0) return "Vas por encima del ritmo de la semana anterior";
-  if (progress.differenceValue < 0) return "Vas por debajo del ritmo de la semana anterior";
-  return "Mantienes un ritmo similar a la semana anterior";
-}
-
-function feedbackHeadlineForStatus(feedback: TrainingCoachFeedback) {
-  if (feedback.tone === "warning") return "Revisar progreso";
-  if (feedback.tone === "positive") return "Buen avance";
-  return feedback.headline;
-}
-
-function buildEmptyCurrentWeekCoachFeedback(): TrainingCoachFeedback {
-  return {
-    headline: "Nueva semana iniciada",
-    summary: "Aún no hay entrenamientos registrados esta semana. Cuando completes tu primera sesión, Organizatech podrá analizar tu progreso.",
-    strengths: [],
-    attentions: [],
-    nextAdvice: "Registra tu próximo entrenamiento para crear la base de esta semana.",
-    tone: "neutral",
-    confidence: "low",
-    contradictionsResolved: [],
-    sourceSignals: ["current_week_empty"],
-  };
-}
-
 function DashboardCoachCard({
   feedback,
   analytics,
   visualStatus,
 }: {
   feedback: TrainingCoachFeedback;
-  analytics: AnalyticsSnapshot;
-  visualStatus: { showScore: boolean; label: string; detail: string; factorLabel: string; badgeLabel?: string; showFactors?: boolean };
+  analytics: DashboardAnalyticsSnapshot;
+  visualStatus: DashboardCoachVisualStatus;
 }) {
   const blocks: Array<{ id: string; label: string; insight: CoachInsight }> = [];
   const strength = feedback.strengths[0];
@@ -4867,8 +4810,8 @@ function DashboardCoachCard({
   const trend = feedback.historicalInsight;
   const hasTrend = Boolean(trend);
   const factors = analytics.factors.slice(0, 4).map(([label, value]) => ({
-    label: getCoachFactorLabel(String(label)),
-    value: Math.min(100, Math.max(0, Number(value) || 0)),
+    label: resolveDashboardCoachFactorLabel(String(label)),
+    value: clampDashboardCoachFactorValue(value),
   }));
 
   if (strength) blocks.push({ id: "strength", label: "Fortaleza", insight: strength });
@@ -4950,14 +4893,6 @@ function DashboardCoachCard({
       </div>
     </div>
   );
-}
-
-function getCoachFactorLabel(label: string) {
-  if (label.toLowerCase().includes("cumplimiento")) return "Cumplimiento";
-  if (label.toLowerCase().includes("repeticiones")) return "Reps";
-  if (label.toLowerCase().includes("carga")) return "Carga";
-  if (label.toLowerCase().includes("volumen")) return "Volumen";
-  return label;
 }
 
 function NotificationGroup({
@@ -6307,31 +6242,6 @@ function buildMetricInsight(value: number | null, metric: "kg" | "reps") {
   return metric === "kg"
     ? "Mantienes el mismo peso desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio."
     : "Mantienes las mismas repeticiones desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio.";
-}
-
-function buildAnalytics(summary: ReturnType<typeof calculateWeeklySummary>, currentMetrics: ExerciseMetrics[]): AnalyticsSnapshot {
-  const targetReps = currentMetrics.reduce((total, entry) => total + entry.targetTotalReps, 0);
-  const completedWithLoad = currentMetrics.filter((entry) => entry.totalReps > 0 && entry.kgDifference >= 0).length;
-  const repsScore = targetReps > 0 ? clampScore((summary.totalReps / targetReps) * 100) : 0;
-  const loadScore = currentMetrics.length > 0 ? clampScore((completedWithLoad / currentMetrics.length) * 100) : 0;
-  const volumeScore = clampScore(100 + summary.volumePercentage);
-  const score = Math.round(
-    summary.complianceRate * 0.4 +
-    repsScore * 0.25 +
-    loadScore * 0.2 +
-    volumeScore * 0.15,
-  );
-  const factors: Array<[string, number]> = [
-    ["Cumplimiento ejercicios", summary.complianceRate],
-    ["Repeticiones logradas", repsScore],
-    ["Carga mantenida/subida", loadScore],
-    ["Volumen vs objetivo/semana anterior", volumeScore],
-  ];
-  return { score, factors };
-}
-
-function clampScore(value: number) {
-  return Math.min(100, Math.max(0, value));
 }
 
 function RoutineMetricGrid({
