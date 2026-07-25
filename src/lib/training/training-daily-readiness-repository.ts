@@ -1,3 +1,4 @@
+import { translatePersistenceError } from "@/lib/supabase/auth-errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export interface TrainingDailyReadinessPayload {
@@ -32,6 +33,18 @@ export class TrainingDailyReadinessRepositoryError extends Error {
     super(message);
     this.name = "TrainingDailyReadinessRepositoryError";
   }
+}
+
+export function translateDailyReadinessError(error: unknown) {
+  if (error instanceof TrainingDailyReadinessRepositoryError) {
+    if (error.code === "session_required") return "Debes iniciar sesion para registrar tu formulario diario.";
+    if (error.code === "session_expired") return "Tu sesion expiro. Inicia sesion nuevamente.";
+    if (error.code === "invalid_payload") return error.message;
+    if (error.code === "permission_denied") return "No tienes permisos para registrar este formulario.";
+    return "No pudimos confirmar tu formulario diario. Intentalo nuevamente.";
+  }
+
+  return translatePersistenceError(error);
 }
 
 interface TrainingDailyReadinessRow {

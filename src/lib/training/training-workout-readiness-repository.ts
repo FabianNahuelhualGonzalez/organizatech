@@ -1,3 +1,4 @@
+import { getPublicErrorMessage } from "@/lib/errors/public-error";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 export type TrainingWorkoutReadinessPayload =
   | { skipped: true }
@@ -64,6 +65,20 @@ export class TrainingWorkoutReadinessRepositoryError extends Error {
     super(message);
     this.name = "TrainingWorkoutReadinessRepositoryError";
   }
+}
+
+export function translateTrainingWorkoutReadinessError(error: unknown) {
+  if (error instanceof TrainingWorkoutReadinessRepositoryError) {
+    if (error.code === "session_required") return "Inicia sesion para confirmar tu formulario de entrenamiento.";
+    if (error.code === "empty_response" || error.code === "multiple_rows" || error.code === "invalid_response") {
+      return "La respuesta del formulario de entrenamiento no tiene el formato esperado.";
+    }
+    return "No pudimos confirmar tu formulario de entrenamiento.";
+  }
+  return getPublicErrorMessage(
+    error,
+    "No pudimos confirmar tu formulario de entrenamiento. Intentalo nuevamente.",
+  );
 }
 
 export interface TrainingWorkoutReadinessRpcClient {
