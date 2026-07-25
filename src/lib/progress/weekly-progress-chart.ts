@@ -30,6 +30,18 @@ export interface WeeklyProgressChart {
   axisLabels: string[];
 }
 
+export function buildSvgPath(points: ReadonlyArray<{ x: number; y: number | null }>) {
+  const segments = points.filter((point) => point.y !== null);
+  return segments.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+}
+
+export function buildAreaPath(points: ReadonlyArray<{ x: number; y: number | null }>) {
+  const segments = points.filter((point) => point.y !== null);
+  if (segments.length < 2) return "";
+  const path = segments.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  return `${path} L ${segments.at(-1)!.x} 132 L ${segments[0].x} 132 Z`;
+}
+
 export function buildWeeklyProgressChart(input: {
   weekDays: readonly string[];
   value: number;

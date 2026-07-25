@@ -1,6 +1,45 @@
 import assert from "node:assert/strict";
 
-import { buildWeeklyProgressChart } from "@/lib/progress/weekly-progress-chart";
+import {
+  buildAreaPath,
+  buildSvgPath,
+  buildWeeklyProgressChart,
+} from "@/lib/progress/weekly-progress-chart";
+
+assert.equal(buildSvgPath([]), "", "cero puntos no genera path de linea");
+assert.equal(buildAreaPath([]), "", "cero puntos no genera path de area");
+
+{
+  const points = [{ x: 240, y: 65 }];
+
+  assert.equal(buildSvgPath(points), "M 240 65", "un punto conserva el formato productivo");
+  assert.equal(buildAreaPath(points), "", "un punto no puede cerrar un area");
+}
+
+{
+  const points = [
+    { x: 12, y: 112 },
+    { x: 240, y: 65 },
+    { x: 468, y: 18 },
+  ];
+
+  assert.equal(buildSvgPath(points), "M 12 112 L 240 65 L 468 18");
+  assert.equal(
+    buildAreaPath(points),
+    "M 12 112 L 240 65 L 468 18 L 468 132 L 12 132 Z",
+    "el area conserva el baseline productivo en y=132",
+  );
+}
+
+{
+  const points = [
+    { x: 12, y: 112 },
+    { x: 240, y: null },
+    { x: 468, y: 18 },
+  ];
+
+  assert.equal(buildSvgPath(points), "M 12 112 L 468 18", "los puntos null se omiten como antes");
+}
 
 {
   const chart = buildWeeklyProgressChart({

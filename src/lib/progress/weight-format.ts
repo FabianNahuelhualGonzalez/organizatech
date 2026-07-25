@@ -34,6 +34,10 @@ export function formatKg(value: number) {
   return `${formatDecimalEs(value)} kg`;
 }
 
+export function formatKgNullable(value: number | null | undefined) {
+  return value === null || value === undefined || !Number.isFinite(value) ? "—" : formatKg(value);
+}
+
 export function formatSignedDecimal(value: number) {
   const rounded = roundDecimal(value);
   return `${rounded > 0 ? "+" : ""}${formatDecimalEs(rounded)}`;
