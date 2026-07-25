@@ -150,20 +150,23 @@ function extractBetween(source: string, startMarker: string, endMarker: string):
 }
 
 {
-  const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
-  const cycleTranslator = extractBetween(
-    appSource,
-    "function translateTrainingCycleRepositoryError",
-    "function translateTrainingWorkoutReadinessError",
-  );
-  const readinessTranslator = extractBetween(
-    appSource,
-    "function translateTrainingWorkoutReadinessError",
-    "function translateTrainingWorkoutReadinessLinkError",
-  );
+  // P2-H.2B: los cuatro traductores se prepararon en sus propios modulos de dominio,
+  // reproduciendo exactamente el codigo hoy local a organizatech-app.tsx (que todavia no
+  // se modifica en esta fase — la integracion React ocurre en una rama posterior comun).
+  // Esta seccion inspecciona los nuevos modulos directamente.
+  const cycleErrorSource = readFileSync("src/lib/training/training-cycle-error.ts", "utf8");
+  const cycleTranslatorStart = cycleErrorSource.indexOf("export function translateTrainingCycleRepositoryError");
+  assert.notEqual(cycleTranslatorStart, -1, "No se encontro translateTrainingCycleRepositoryError en training-cycle-error.ts");
+  const cycleTranslatorSource = cycleErrorSource.slice(cycleTranslatorStart);
+  assert.match(cycleTranslatorSource, /getPublicErrorMessage\(/);
+  assert.doesNotMatch(cycleTranslatorSource, /return\s+error\.message/);
 
-  assert.match(cycleTranslator, /getPublicErrorMessage\(/);
-  assert.doesNotMatch(cycleTranslator, /return\s+error\.message/);
+  const readinessRepositorySource = readFileSync("src/lib/training/training-workout-readiness-repository.ts", "utf8");
+  const readinessTranslator = extractBetween(
+    readinessRepositorySource,
+    "export function translateTrainingWorkoutReadinessError",
+    "export interface TrainingWorkoutReadinessRpcClient",
+  );
   assert.match(readinessTranslator, /getPublicErrorMessage\(/);
   assert.doesNotMatch(readinessTranslator, /return\s+error\.message/);
   assert.doesNotMatch(readinessTranslator, /String\(error\)/);

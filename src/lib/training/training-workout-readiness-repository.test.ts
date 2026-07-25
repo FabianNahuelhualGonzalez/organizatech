@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { createPublicRepositoryError } from "@/lib/errors/public-error";
 import {
   linkTrainingWorkoutReadinessSession,
   saveTrainingWorkoutReadiness,
+  translateTrainingWorkoutReadinessError,
   TrainingWorkoutReadinessRepositoryError,
   type TrainingWorkoutReadinessPayload,
   type TrainingWorkoutReadinessRepositoryErrorCode,
@@ -216,6 +218,33 @@ async function run() {
   assert.match(appSource, /linkTrainingWorkoutReadinessSession/, "organizatech-app integra link readiness v2 desde el repositorio");
   assert.doesNotMatch(appSource, /save_training_workout_readiness_v2|link_training_workout_readiness_session_v2/, "organizatech-app no usa nombres RPC v2 directos");
   assert.equal(testPathOccurrences.length, 1, "package.json incluye el test nuevo exactamente una vez");
+
+  // P2-H.2B: translateTrainingWorkoutReadinessError se movio aqui desde organizatech-app.tsx.
+  // Paridad literal por cada codigo, textos y puntuacion exactos.
+  assert.equal(
+    translateTrainingWorkoutReadinessError(new TrainingWorkoutReadinessRepositoryError("session_required", "x")),
+    "Inicia sesion para confirmar tu formulario de entrenamiento.",
+  );
+  for (const code of ["empty_response", "multiple_rows", "invalid_response"] as const) {
+    assert.equal(
+      translateTrainingWorkoutReadinessError(new TrainingWorkoutReadinessRepositoryError(code, "x")),
+      "La respuesta del formulario de entrenamiento no tiene el formato esperado.",
+    );
+  }
+  assert.equal(
+    translateTrainingWorkoutReadinessError(new TrainingWorkoutReadinessRepositoryError("unexpected", "x")),
+    "No pudimos confirmar tu formulario de entrenamiento.",
+  );
+  assert.equal(
+    translateTrainingWorkoutReadinessError(createPublicRepositoryError("invalid_input", "Mensaje publico especifico.")),
+    "Mensaje publico especifico.",
+    "errores publicos ajenos a la clase de readiness usan su propio mensaje via getPublicErrorMessage",
+  );
+  assert.equal(
+    translateTrainingWorkoutReadinessError(new Error("relation training_workout_readiness does not exist")),
+    "No pudimos confirmar tu formulario de entrenamiento. Intentalo nuevamente.",
+    "errores tecnicos no publicos caen al fallback generico",
+  );
 
   console.log("training-workout-readiness repository tests passed");
 }

@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import { releaseWorkoutStartLock, tryAcquireWorkoutStartLock } from "@/lib/training/training-workout-attempt-lifecycle";
 import {
   createWorkoutReadinessPendingLink,
+  translateTrainingWorkoutReadinessLinkError,
   TrainingWorkoutReadinessLinkFlowError,
 } from "@/lib/training/training-workout-readiness-link-flow";
+import { TrainingWorkoutReadinessRepositoryError } from "@/lib/training/training-workout-readiness-repository";
 import type { PendingWorkoutReadinessLink } from "@/lib/training/workout-draft-storage";
 
 interface SimulatedCompletionOptions {
@@ -350,6 +352,29 @@ async function run() {
     assert.equal(await first, "linked");
     assert.deepEqual(events, ["save-session", "persist:session-1", "link:session-1", "cleanup"]);
   }
+
+  // P2-H.2B: translateTrainingWorkoutReadinessLinkError se movio aqui desde organizatech-app.tsx.
+  // Paridad literal por cada rama, textos y puntuacion exactos.
+  assert.equal(
+    translateTrainingWorkoutReadinessLinkError(new TrainingWorkoutReadinessLinkFlowError("session mismatch")),
+    "session mismatch",
+    "las instancias de TrainingWorkoutReadinessLinkFlowError retornan su propio mensaje",
+  );
+  assert.equal(
+    translateTrainingWorkoutReadinessLinkError(new TrainingWorkoutReadinessRepositoryError("session_required", "x")),
+    "Inicia sesion para completar la vinculacion del entrenamiento.",
+  );
+  for (const code of ["empty_response", "multiple_rows", "invalid_response", "unexpected"] as const) {
+    assert.equal(
+      translateTrainingWorkoutReadinessLinkError(new TrainingWorkoutReadinessRepositoryError(code, "x")),
+      "El entrenamiento quedo guardado, pero falta completar su vinculacion. Vuelve a intentar finalizar.",
+    );
+  }
+  assert.equal(
+    translateTrainingWorkoutReadinessLinkError(new Error("network")),
+    "El entrenamiento quedo guardado, pero falta completar su vinculacion. Vuelve a intentar finalizar.",
+    "cualquier otro error cae en el mismo fallback, sin distincion de tipo",
+  );
 
   console.log("training-workout-readiness link flow tests passed");
 }
