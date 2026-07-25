@@ -116,8 +116,10 @@ import {
   calculateWeeklySummary,
   formatSigned,
 } from "@/lib/progress/calculations";
-import { formatDecimalEs, formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
-import { buildWeeklyProgressChart } from "@/lib/progress/weekly-progress-chart";
+import { buildMetricInsight, formatMetricDifference } from "@/lib/progress/metric-insight";
+import { parseDateKeyAsLocalNoon } from "@/lib/progress/week-day";
+import { formatDecimalEs, formatKg, formatKgNullable, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
+import { buildAreaPath, buildSvgPath, buildWeeklyProgressChart } from "@/lib/progress/weekly-progress-chart";
 import {
   buildWeeklyExerciseComparisonModel,
   type WeeklyExerciseComparisonModel,
@@ -4779,22 +4781,6 @@ function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressRes
   );
 }
 
-function buildSvgPath(points: Array<{ x: number; y: number | null }>) {
-  const segments = points.filter((point) => point.y !== null);
-  return segments.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
-}
-
-function buildAreaPath(points: Array<{ x: number; y: number | null }>) {
-  const segments = points.filter((point) => point.y !== null);
-  if (segments.length < 2) return "";
-  const path = segments.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
-  return `${path} L ${segments.at(-1)!.x} 132 L ${segments[0].x} 132 Z`;
-}
-
-function formatKgNullable(value: number | null) {
-  return value === null || !Number.isFinite(value) ? "—" : formatKg(value);
-}
-
 function DashboardCoachCard({
   feedback,
   analytics,
@@ -6227,23 +6213,6 @@ function WeeklyMetricSummaryView({
   );
 }
 
-function formatMetricDifference(value: number | null, metric: "kg" | "reps") {
-  if (value === null) return "—";
-  const suffix = metric === "kg" ? "kg" : "repes";
-  return `${formatSigned(value, metric === "kg" ? 2 : 0)} ${suffix}`;
-}
-
-function buildMetricInsight(value: number | null, metric: "kg" | "reps") {
-  if (value === null) return "Aún no hay información suficiente para comparar este ejercicio.";
-  const absolute = Math.abs(value);
-  const label = metric === "kg" ? `${formatDecimalEs(absolute)}kg` : `${formatDecimalEs(absolute)} repes`;
-  if (value > 0) return `Aumentaste +${label} desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio.`;
-  if (value < 0) return `Bajaste -${label} desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio.`;
-  return metric === "kg"
-    ? "Mantienes el mismo peso desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio."
-    : "Mantienes las mismas repeticiones desde tu inicio hasta tu última fecha de entrenamiento en este ejercicio.";
-}
-
 function RoutineMetricGrid({
   targetSummary,
   exerciseLabel = "Ejercicios total",
@@ -7293,11 +7262,6 @@ function getTrainingDayFromDate(value: string) {
     timeZone: "America/Santiago",
   }).format(date);
   return setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(weekday.toLowerCase())) ?? "";
-}
-
-function parseDateKeyAsLocalNoon(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day, 12);
 }
 
 function getLocalDateKey(value: Date) {

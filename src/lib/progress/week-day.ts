@@ -11,7 +11,7 @@ const weekdayIndexBySpanishName = new Map([
 ]);
 
 export function getWeeklyProgressDayIndex(dateKey: string, timeZone = "America/Santiago") {
-  const date = parseDateKeyAsNoon(dateKey);
+  const date = parseDateKeyAsNoonWithFallback(dateKey);
   if (Number.isNaN(date.getTime())) return 0;
 
   const weekday = new Intl.DateTimeFormat("es-CL", {
@@ -25,7 +25,13 @@ export function getWeeklyProgressDayLabel(dateKey: string, timeZone = "America/S
   return weeklyProgressLabels[getWeeklyProgressDayIndex(dateKey, timeZone)];
 }
 
-function parseDateKeyAsNoon(value: string) {
+export function parseDateKeyAsLocalNoon(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
+// Historical week-day consumers intentionally default a missing month or day.
+function parseDateKeyAsNoonWithFallback(value: string) {
   const [year, month, day] = value.split("-").map(Number);
   return new Date(year, (month || 1) - 1, day || 1, 12, 0, 0, 0);
 }
