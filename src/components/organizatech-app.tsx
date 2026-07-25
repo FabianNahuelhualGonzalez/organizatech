@@ -44,7 +44,7 @@ import {
 import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
 import { ProfileScreen } from "@/components/profile/ProfileScreen";
 import { CycleHistoryProductiveContainer } from "@/components/training/cycle-history";
-import { buildProfileViewModel } from "@/lib/profile/profile-view-model";
+import { buildProfileViewModelFromSources } from "@/lib/profile/profile-view-model";
 import {
   buildAppNotifications,
   resolveNotificationIconKey,
@@ -77,7 +77,12 @@ import {
 } from "@/lib/profile/profile-repository";
 import type { ProfilePersonalDataInput } from "@/lib/profile/profile-form";
 import { getCurrentProfileAvatar, uploadProfileAvatar } from "@/lib/profile/profile-avatar-repository";
-import type { ProfileAvatarState } from "@/lib/profile/profile-avatar";
+import {
+  createEmptyProfileAvatarState,
+  mergeProfileAvatarMetadata,
+  selectProfileAvatarPath,
+  type ProfileAvatarState,
+} from "@/lib/profile/profile-avatar";
 import {
   calculateExerciseMetrics,
   calculateWeeklyComparison,
@@ -466,11 +471,7 @@ export function OrganizatechApp({
   const [profilePersonalData, setProfilePersonalData] = useState<ProfilePersonalData | null>(null);
   const [profilePersonalDataLoading, setProfilePersonalDataLoading] = useState(false);
   const [profilePersonalDataError, setProfilePersonalDataError] = useState("");
-  const [profileAvatar, setProfileAvatar] = useState<ProfileAvatarState>({
-    avatarPath: null,
-    avatarUrl: null,
-    avatarUpdatedAt: null,
-  });
+  const [profileAvatar, setProfileAvatar] = useState<ProfileAvatarState>(() => createEmptyProfileAvatarState());
   const [profileAvatarResetKey, setProfileAvatarResetKey] = useState(0);
   const [profileAvatarLoading, setProfileAvatarLoading] = useState(false);
   const [profileAvatarError, setProfileAvatarError] = useState("");
@@ -1010,13 +1011,14 @@ export function OrganizatechApp({
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
     : cycleHistory.length + 1;
   const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
-  const profileViewModel = useMemo(() => buildProfileViewModel({
-    displayName: profilePersonalData?.displayName ?? sessionName,
-    email: profilePersonalData?.email ?? supabaseUser?.email ?? null,
-    dataSource: canEditProfilePersonalData ? "supabase" : dataSource,
-    avatarUrl: profileAvatar.avatarUrl,
-    avatarPath: profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null,
-  }), [canEditProfilePersonalData, dataSource, profileAvatar.avatarPath, profileAvatar.avatarUrl, profilePersonalData?.avatarPath, profilePersonalData?.displayName, profilePersonalData?.email, sessionName, supabaseUser?.email]);
+  const profileViewModel = useMemo(() => buildProfileViewModelFromSources({
+    personalData: profilePersonalData,
+    sessionDisplayName: sessionName,
+    sessionEmail: supabaseUser?.email ?? null,
+    dataSource,
+    canEditPersonalData: canEditProfilePersonalData,
+    avatar: profileAvatar,
+  }), [canEditProfilePersonalData, dataSource, profileAvatar, profilePersonalData, sessionName, supabaseUser?.email]);
   const refreshProfileAvatar = useCallback(async (options?: { force?: boolean; avatarPath?: string | null; allowProfileLookup?: boolean }) => {
     const requestToken = captureSessionDataRequestToken();
     if (!isSessionDataRequestCurrent(requestToken) || !requestToken.userId || !requestToken.scope) return null;
@@ -1031,7 +1033,11 @@ export function OrganizatechApp({
     lastProfileAvatarRefreshAtRef.current = now;
     profileAvatarRefreshInFlightRef.current = true;
     try {
-      let avatarPath = options?.avatarPath ?? profileAvatar.avatarPath ?? profilePersonalData?.avatarPath ?? null;
+      let avatarPath = selectProfileAvatarPath(
+        options?.avatarPath,
+        profileAvatar.avatarPath,
+        profilePersonalData?.avatarPath,
+      );
       if (!avatarPath && options?.allowProfileLookup) {
         const profile = await getProfilePersonalData();
         if (!isSessionDataRequestCurrent(requestToken)) return null;
@@ -1039,11 +1045,7 @@ export function OrganizatechApp({
         setSessionName(profile.displayName);
         avatarPath = profile.avatarPath;
         if (!avatarPath) {
-          setProfileAvatar({
-            avatarPath: null,
-            avatarUrl: null,
-            avatarUpdatedAt: null,
-          });
+          setProfileAvatar(createEmptyProfileAvatarState());
           setProfileAvatarResetKey((current) => current + 1);
           setProfileAvatarError("");
           return null;
@@ -1263,11 +1265,7 @@ export function OrganizatechApp({
         setProfilePersonalData(null);
         setProfilePersonalDataLoading(false);
         setProfilePersonalDataError("");
-        setProfileAvatar({
-          avatarPath: null,
-          avatarUrl: null,
-          avatarUpdatedAt: null,
-        });
+        setProfileAvatar(createEmptyProfileAvatarState());
         setProfileAvatarLoading(false);
         setProfileAvatarError("");
       }
@@ -1373,11 +1371,7 @@ export function OrganizatechApp({
     setSupabaseUser(authState.user);
     setProfilePersonalData(null);
     setProfilePersonalDataError("");
-    setProfileAvatar({
-      avatarPath: null,
-      avatarUrl: null,
-      avatarUpdatedAt: null,
-    });
+    setProfileAvatar(createEmptyProfileAvatarState());
     setProfileAvatarResetKey((current) => current + 1);
     setProfileAvatarError("");
     if (authState.user) setSessionName(getSessionDisplayName(authState.user));
@@ -1395,11 +1389,7 @@ export function OrganizatechApp({
     setProfilePersonalData(null);
     setProfilePersonalDataLoading(false);
     setProfilePersonalDataError("");
-    setProfileAvatar({
-      avatarPath: null,
-      avatarUrl: null,
-      avatarUpdatedAt: null,
-    });
+    setProfileAvatar(createEmptyProfileAvatarState());
     setProfileAvatarResetKey((current) => current + 1);
     setProfileAvatarLoading(false);
     setProfileAvatarError("");
@@ -1583,11 +1573,7 @@ export function OrganizatechApp({
       setProfilePersonalData(null);
       setProfilePersonalDataLoading(false);
       setProfilePersonalDataError("");
-      setProfileAvatar({
-        avatarPath: null,
-        avatarUrl: null,
-        avatarUpdatedAt: null,
-      });
+      setProfileAvatar(createEmptyProfileAvatarState());
       setProfileAvatarResetKey((current) => current + 1);
       setProfileAvatarLoading(false);
       setProfileAvatarError("");
@@ -1632,13 +1618,7 @@ export function OrganizatechApp({
     lastProfileAvatarRefreshAtRef.current = Date.now();
     setProfileAvatar(avatar);
     setProfileAvatarResetKey((current) => current + 1);
-    setProfilePersonalData((current) => current
-      ? {
-        ...current,
-        avatarPath: avatar.avatarPath,
-        avatarUpdatedAt: avatar.avatarUpdatedAt,
-      }
-      : current);
+    setProfilePersonalData((current) => mergeProfileAvatarMetadata(current, avatar));
   }
 
   async function refreshPersistedTrainingCycles() {

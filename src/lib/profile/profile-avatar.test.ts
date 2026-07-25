@@ -10,9 +10,12 @@ import {
   buildProfileAvatarDeletePayload,
   buildProfileAvatarPath,
   buildProfileAvatarUpdatePayload,
+  createEmptyProfileAvatarState,
   isOwnProfileAvatarPath,
   mapProfileAvatarState,
+  mergeProfileAvatarMetadata,
   normalizeProfileAvatarPath,
+  selectProfileAvatarPath,
   validateProfileAvatarFile,
 } from "./profile-avatar";
 import { createProfileAvatarRepository } from "./profile-avatar-repository";
@@ -23,6 +26,83 @@ const otherUserId = "223e4567-e89b-12d3-a456-426614174000";
 function file(type: string, size = 1024) {
   return { type, size, name: "avatar" };
 }
+
+function testEmptyAvatarStateIsFreshAndDeterministic() {
+  const first = createEmptyProfileAvatarState();
+  const second = createEmptyProfileAvatarState();
+  const expected = {
+    avatarPath: null,
+    avatarUrl: null,
+    avatarUpdatedAt: null,
+  };
+
+  assert.deepEqual(first, expected);
+  assert.deepEqual(second, expected);
+  assert.notEqual(first, second);
+
+  Object.assign(first, { avatarPath: `${userId}/avatar` });
+  assert.deepEqual(second, expected);
+  assert.deepEqual(createEmptyProfileAvatarState(), expected);
+}
+
+function testAvatarPathSelectionPreservesNullishPrecedence() {
+  const candidates = [undefined, null, `${userId}/avatar`] as const;
+
+  assert.equal(selectProfileAvatarPath(...candidates), `${userId}/avatar`);
+  assert.equal(selectProfileAvatarPath(...candidates), `${userId}/avatar`);
+  assert.equal(selectProfileAvatarPath(`${otherUserId}/avatar`, `${userId}/avatar`), `${otherUserId}/avatar`);
+  assert.equal(selectProfileAvatarPath("", `${userId}/avatar`), "");
+  assert.equal(selectProfileAvatarPath(undefined, null), null);
+  assert.deepEqual(candidates, [undefined, null, `${userId}/avatar`]);
+}
+
+function testAvatarMetadataMergeIsImmutableAndIdentityIsolated() {
+  const profileA = {
+    id: "profile-a",
+    displayName: "Usuario A",
+    avatarPath: `${otherUserId}/avatar`,
+    avatarUpdatedAt: "2026-07-01T12:00:00.000Z",
+  };
+  const avatarA = {
+    avatarPath: `${userId}/avatar`,
+    avatarUpdatedAt: "2026-07-07T12:00:00.000Z",
+  };
+  const profileABefore = { ...profileA };
+  const avatarABefore = { ...avatarA };
+  const firstMergeA = mergeProfileAvatarMetadata(profileA, avatarA);
+  const secondMergeA = mergeProfileAvatarMetadata(profileA, avatarA);
+
+  assert.deepEqual(firstMergeA, {
+    ...profileA,
+    ...avatarA,
+  });
+  assert.deepEqual(firstMergeA, secondMergeA);
+  assert.notEqual(firstMergeA, secondMergeA);
+  assert.notEqual(firstMergeA, profileA);
+  assert.deepEqual(profileA, profileABefore);
+  assert.deepEqual(avatarA, avatarABefore);
+
+  const profileB = {
+    id: "profile-b",
+    displayName: "Usuario B",
+    avatarPath: null,
+    avatarUpdatedAt: null,
+  };
+  const mergedB = mergeProfileAvatarMetadata(profileB, {
+    avatarPath: `${otherUserId}/avatar`,
+    avatarUpdatedAt: "2026-07-08T12:00:00.000Z",
+  });
+
+  assert.equal(firstMergeA?.id, "profile-a");
+  assert.equal(firstMergeA?.avatarPath, `${userId}/avatar`);
+  assert.equal(mergedB?.id, "profile-b");
+  assert.equal(mergedB?.avatarPath, `${otherUserId}/avatar`);
+  assert.equal(mergeProfileAvatarMetadata(null, createEmptyProfileAvatarState()), null);
+}
+
+testEmptyAvatarStateIsFreshAndDeterministic();
+testAvatarPathSelectionPreservesNullishPrecedence();
+testAvatarMetadataMergeIsImmutableAndIdentityIsolated();
 
 assert.deepEqual(validateProfileAvatarFile(file("image/jpeg")), { ok: true });
 assert.deepEqual(validateProfileAvatarFile(file("image/png")), { ok: true });

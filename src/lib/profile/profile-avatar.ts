@@ -28,8 +28,43 @@ export interface ProfileAvatarState {
   avatarUpdatedAt: string | null;
 }
 
+export interface ProfileAvatarMetadata {
+  avatarPath: string | null;
+  avatarUpdatedAt: string | null;
+}
+
 const profileAvatarAllowedMimeTypeSet = new Set<string>(PROFILE_AVATAR_ALLOWED_MIME_TYPES);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function createEmptyProfileAvatarState(): ProfileAvatarState {
+  return {
+    avatarPath: null,
+    avatarUrl: null,
+    avatarUpdatedAt: null,
+  };
+}
+
+export function selectProfileAvatarPath(
+  ...candidates: ReadonlyArray<string | null | undefined>
+): string | null {
+  for (const candidate of candidates) {
+    if (candidate !== null && candidate !== undefined) return candidate;
+  }
+  return null;
+}
+
+export function mergeProfileAvatarMetadata<T extends ProfileAvatarMetadata>(
+  profile: T | null,
+  avatar: Pick<ProfileAvatarState, "avatarPath" | "avatarUpdatedAt">,
+): T | null {
+  if (!profile) return null;
+
+  return {
+    ...profile,
+    avatarPath: avatar.avatarPath,
+    avatarUpdatedAt: avatar.avatarUpdatedAt,
+  };
+}
 
 export function validateProfileAvatarFile(file: ProfileAvatarFileLike): ProfileAvatarValidationResult {
   if (!file) return { ok: false, error: "Selecciona una imagen para subir." };

@@ -1,3 +1,5 @@
+import { selectProfileAvatarPath, type ProfileAvatarState } from "@/lib/profile/profile-avatar";
+
 export type ProfileAccountSource = "local" | "supabase";
 
 export interface ProfileViewModelInput {
@@ -19,6 +21,19 @@ export interface ProfileViewModel {
   isConnectedAccount: boolean;
 }
 
+export interface ProfileViewModelSourcesInput {
+  personalData?: {
+    displayName?: string | null;
+    email?: string | null;
+    avatarPath?: string | null;
+  } | null;
+  sessionDisplayName?: string | null;
+  sessionEmail?: string | null;
+  dataSource: ProfileAccountSource;
+  canEditPersonalData: boolean;
+  avatar: Pick<ProfileAvatarState, "avatarPath" | "avatarUrl">;
+}
+
 const fallbackDisplayName = "Usuario Organizatech";
 
 export function buildProfileViewModel(input: ProfileViewModelInput): ProfileViewModel {
@@ -38,6 +53,16 @@ export function buildProfileViewModel(input: ProfileViewModelInput): ProfileView
     avatarPath: normalizeText(input.avatarPath) || null,
     isConnectedAccount: input.dataSource === "supabase",
   };
+}
+
+export function buildProfileViewModelFromSources(input: ProfileViewModelSourcesInput): ProfileViewModel {
+  return buildProfileViewModel({
+    displayName: input.personalData?.displayName ?? input.sessionDisplayName,
+    email: input.personalData?.email ?? input.sessionEmail,
+    dataSource: input.canEditPersonalData ? "supabase" : input.dataSource,
+    avatarUrl: input.avatar.avatarUrl,
+    avatarPath: selectProfileAvatarPath(input.avatar.avatarPath, input.personalData?.avatarPath),
+  });
 }
 
 function normalizeText(value: string | null | undefined) {
