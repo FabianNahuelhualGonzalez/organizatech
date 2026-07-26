@@ -1,47 +1,8 @@
-import { Activity, CalendarDays, Dumbbell, Pencil } from "lucide-react";
+import { Pencil } from "lucide-react";
 
 import { formatKg } from "@/lib/progress/weight-format";
 import type { ExerciseTemplate } from "@/lib/progress/types";
-
-/**
- * Copia local privada de `RoutineMetricGrid` (organizatech-app.tsx:6164), pendiente de
- * consolidación en `src/components/ui/`. Se duplica aquí para no importar desde
- * organizatech-app.tsx ni introducir una carpeta shared/common en esta fase — también es usada
- * por `GuidedTrainingScreen`, que no se prepara todavía.
- */
-function RoutineMetricGrid({
-  targetSummary,
-  exerciseLabel = "Ejercicios total",
-}: {
-  targetSummary: { totalWeight: number; volume: number; reps: number; exerciseCount: number };
-  exerciseLabel?: string;
-}) {
-  return (
-    <div className="metric-grid wide dashboard-metric-grid routine-metric-grid">
-      <div className="metric">
-        <div className="metric-title-row">
-          <span>KG totales de la rutina</span>
-          <Dumbbell size={18} />
-        </div>
-        <strong>{formatKg(targetSummary.totalWeight)}</strong>
-      </div>
-      <div className="metric">
-        <div className="metric-title-row">
-          <span>Total reps</span>
-          <Activity size={18} />
-        </div>
-        <strong>{targetSummary.reps}</strong>
-      </div>
-      <div className="metric">
-        <div className="metric-title-row">
-          <span>{exerciseLabel}</span>
-          <CalendarDays size={18} />
-        </div>
-        <strong>{targetSummary.exerciseCount}</strong>
-      </div>
-    </div>
-  );
-}
+import { RoutineMetricGrid } from "@/ui/data-display/metric-grid";
 
 export interface TrainingStartScreenProps {
   day: string;

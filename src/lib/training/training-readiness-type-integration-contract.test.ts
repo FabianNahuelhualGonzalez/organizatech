@@ -16,6 +16,10 @@ const readinessDraftStaticSource = readFileSync(
   "src/lib/training/training-readiness-draft.ts",
   "utf8",
 );
+const readinessScreenStaticSource = readFileSync(
+  "src/features/active-workout/components/TrainingReadinessScreen.tsx",
+  "utf8",
+);
 const packageStaticSource = readFileSync("package.json", "utf8");
 
 assert.match(
@@ -46,7 +50,7 @@ assert.match(
   "el estado React debe conservar TrainingReadiness",
 );
 assert.match(
-  appStaticSource,
+  readinessScreenStaticSource,
   /onSubmit: \(value: Omit<TrainingReadiness, "skipped">\) => void \| Promise<void>;/,
   "las props del formulario deben conservar TrainingReadiness",
 );

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+const notificationGroupSource = readFileSync("src/features/notifications/components/NotificationGroup.tsx", "utf8");
 const packageSource = readFileSync("package.json", "utf8");
 const modelTestSource = readFileSync("src/lib/notifications/notification-model.test.ts", "utf8");
 
@@ -24,16 +25,17 @@ function assertInOrder(source: string, markers: string[]) {
 }
 
 // CASO 1: la aplicacion delega la construccion completa al modelo puro.
-assert.match(appSource, /import \{[\s\S]*?buildAppNotifications,[\s\S]*?resolveNotificationIconKey,[\s\S]*?\} from "@\/lib\/notifications\/notification-model";/);
+assert.match(appSource, /import \{ buildAppNotifications \} from "@\/lib\/notifications\/notification-model";/);
 assert.match(appSource, /const appNotifications = useMemo\(\(\) => buildAppNotifications\(\{/);
+assert.match(notificationGroupSource, /resolveNotificationIconKey\(notification\.category\)/);
 
 // CASO 2: seleccion y textos derivados salen del selector puro.
 assert.match(appSource, /selectNotificationView\(appNotifications, seenNotificationRecords\)/);
 assert.match(appSource, /buildNotificationPanelSubtitleText\(unseenNotificationCount, appNotifications\.length\)/);
 assert.match(appSource, /buildNotificationBadgeText\(unseenNotificationCount\)/);
 assert.match(appSource, /buildNotificationBadgeAriaLabel\(unseenNotificationCount\)/);
-assert.match(appSource, /buildNotificationItemStateLabel\(/);
-assert.match(appSource, /resolveNotificationItemReferenceDate\(notification, seenRecord\)/);
+assert.match(notificationGroupSource, /buildNotificationItemStateLabel\(/);
+assert.match(notificationGroupSource, /resolveNotificationItemReferenceDate\(notification, seenRecord\)/);
 assert.match(appSource, /\{NOTIFICATION_EMPTY_MESSAGE\}/);
 
 // CASO 3: React conserva estado/persistencia, pero la transicion inmutable es la pura.
@@ -80,7 +82,8 @@ assert.match(scrollSource, /scrollIntoView/);
 });
 assert.doesNotMatch(appSource, /const VISIBLE_NEW_NOTIFICATIONS_LIMIT\b/);
 assert.doesNotMatch(appSource, /const SEEN_NOTIFICATIONS_MAX_RECORDS\b/);
-assert.match(appSource, /resolveNotificationIconKey\(notification\.category\)/);
+assert.match(appSource, /import \{ NotificationGroup \} from "@\/features\/notifications\/components\/NotificationGroup";/);
+assert.doesNotMatch(appSource, /^\s*function NotificationGroup\b/m);
 
 // CASO 8: la suite normal mantiene las pruebas conductuales del modelo que cubren sus ramas.
 assert.match(packageSource, /tsx src\/lib\/notifications\/notification-model\.test\.ts/);

@@ -16,6 +16,16 @@ import {
   resolveDashboardCarouselDays,
 } from "@/lib/dashboard/dashboard-card-selector";
 import {
+  getCurrentSantiagoWeekDates,
+  getTrainingDayCode,
+} from "@/lib/dashboard/dashboard-santiago-calendar";
+import {
+  findDashboardEntries,
+  findDashboardSessionForDay,
+  getDashboardEntryExerciseIdentity,
+  getDashboardExerciseIdentity,
+} from "@/lib/dashboard/dashboard-session-selection";
+import {
   buildEmptyCurrentWeekCoachFeedback,
   buildWeeklyProgressTrendLabel,
   resolveDashboardCoachVisualStatus,
@@ -26,26 +36,22 @@ import {
   calculateWeeklyComparison,
   calculateWeeklySummary,
 } from "@/lib/progress/calculations";
-import { parseDateKeyAsLocalNoon } from "@/lib/progress/week-day";
 import type {
   ExerciseEntry,
   ExerciseTemplate,
-  TrainingDayCode,
   TrainingSession,
 } from "@/lib/progress/types";
 import type { WeeklyEquivalentProgressResult } from "@/lib/progress/weekly-equivalent-progress";
 import { getSessionEffectiveCalendarWeekStart } from "@/lib/training/cycle-calendar-week";
 import { getCycleScopedDayCoverage } from "@/lib/training/cycle-scoped-plan-edit";
+import { getSantiagoDateKey } from "@/lib/training/santiago-training-date";
 import { buildTrainingCoachDashboardInput } from "@/lib/training/training-coach-dashboard-mapper";
 import { buildTrainingCoachFeedback } from "@/lib/training/training-coach-feedback";
-import { TRAINING_DAY_LABELS } from "@/lib/training/training-day-order";
 import {
   resolveActiveCarouselIndex,
   resolveTrainingCarouselAction,
 } from "@/lib/training/training-carousel-card-presentation";
 import { MetricGrid } from "@/ui/data-display/metric-grid";
-
-const setupDays: string[] = [...TRAINING_DAY_LABELS];
 
 export interface DashboardScreenProps {
   exercises: ExerciseTemplate[];
@@ -53,7 +59,7 @@ export interface DashboardScreenProps {
   hasRoutinePlan: boolean;
   usesCycleScopedSessions: boolean;
   day: string;
-  weekDays: string[];
+  weekDays: readonly string[];
   dayExercises: ExerciseTemplate[];
   summary: ReturnType<typeof calculateWeeklySummary>;
   weeklyEquivalentProgress: WeeklyEquivalentProgressResult;
@@ -333,49 +339,6 @@ export function DashboardScreen({
   );
 }
 
-function findDashboardSessionForDay(
-  sessions: TrainingSession[],
-  dayExercises: ExerciseTemplate[],
-  expectedDate: string,
-  plannedDay: TrainingDayCode,
-  usesCycleScopedSessions: boolean,
-) {
-  return sessions.find((candidate) => {
-    if (!usesCycleScopedSessions) {
-      return candidate.plannedDate === expectedDate || candidate.plannedDay === plannedDay;
-    }
-
-    const candidateEntries = findDashboardEntries(candidate.entries, dayExercises, expectedDate, true);
-    if (candidateEntries.length > 0) return true;
-
-    const cycleDayIds = new Set(dayExercises.map((exercise) => exercise.cycleDayId).filter(Boolean));
-    return Boolean(candidate.cycleDayId && cycleDayIds.has(candidate.cycleDayId)) || candidate.plannedDay === plannedDay;
-  });
-}
-
-function findDashboardEntries(
-  entries: ExerciseEntry[],
-  dayExercises: ExerciseTemplate[],
-  expectedDate: string,
-  usesCycleScopedSessions: boolean,
-) {
-  if (!expectedDate || dayExercises.length === 0) return [];
-  const dayExerciseIds = new Set(dayExercises.map((exercise) => getDashboardExerciseIdentity(exercise, usesCycleScopedSessions)));
-  const shouldMatchEntryDate = !usesCycleScopedSessions;
-  return entries.filter((entry) => (
-    (!shouldMatchEntryDate || normalizeEntryDateKey(entry.date) === expectedDate) &&
-    dayExerciseIds.has(getDashboardEntryExerciseIdentity(entry, usesCycleScopedSessions))
-  ));
-}
-
-function getDashboardExerciseIdentity(exercise: ExerciseTemplate, usesCycleScopedSessions: boolean) {
-  return usesCycleScopedSessions ? exercise.trainingCycleExerciseId ?? exercise.id : exercise.id;
-}
-
-function getDashboardEntryExerciseIdentity(entry: ExerciseEntry, usesCycleScopedSessions: boolean) {
-  return usesCycleScopedSessions ? entry.trainingCycleExerciseId ?? entry.exerciseId : entry.exerciseId;
-}
-
 function getDashboardCoachEntries(
   entries: ExerciseEntry[],
   dayExercises: ExerciseTemplate[],
@@ -396,70 +359,4 @@ function getDashboardCoachEntries(
 
     return legacyIds.has(entry.exerciseId);
   });
-}
-
-function normalizeEntryDateKey(value: string) {
-  return value.slice(0, 10);
-}
-
-function getCurrentSantiagoWeekDates(reference = new Date()) {
-  const todayKey = getSantiagoDateKey(reference);
-  const todayDate = parseDateKeyAsLocalNoon(todayKey);
-  const todayName = getTrainingDayFromDate(todayKey);
-  const todayIndex = Math.max(0, setupDays.indexOf(todayName));
-  const mondayDate = new Date(todayDate);
-  mondayDate.setDate(todayDate.getDate() - todayIndex);
-
-  return Object.fromEntries(setupDays.map((day, index) => {
-    const date = new Date(mondayDate);
-    date.setDate(mondayDate.getDate() + index);
-    return [day, getLocalDateKey(date)];
-  }));
-}
-
-function getSantiagoDateKey(value: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Santiago",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(value);
-  const year = parts.find((part) => part.type === "year")?.value ?? "1970";
-  const month = parts.find((part) => part.type === "month")?.value ?? "01";
-  const day = parts.find((part) => part.type === "day")?.value ?? "01";
-  return `${year}-${month}-${day}`;
-}
-
-function getTrainingDayFromDate(value: string) {
-  const date = parseDateKeyAsLocalNoon(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const weekday = new Intl.DateTimeFormat("es-CL", {
-    weekday: "long",
-    timeZone: "America/Santiago",
-  }).format(date);
-  return setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(weekday.toLowerCase())) ?? "";
-}
-
-function getLocalDateKey(value: Date) {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function getTrainingDayCode(day: string): TrainingDayCode {
-  const mapping: Record<string, TrainingDayCode> = {
-    Lunes: "monday",
-    Martes: "tuesday",
-    Miércoles: "wednesday",
-    Jueves: "thursday",
-    Viernes: "friday",
-    Sábado: "saturday",
-    Domingo: "sunday",
-  };
-  return mapping[day] ?? "monday";
-}
-
-function removeAccents(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }

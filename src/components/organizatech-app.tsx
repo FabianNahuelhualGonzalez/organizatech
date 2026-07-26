@@ -1,14 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity,
-  ArrowDown,
-  ArrowRight,
-  ArrowUp,
   Bell,
-  CalendarDays,
-  ChevronDown,
   ChevronLeft,
   Dumbbell,
   Eye,
@@ -18,19 +12,9 @@ import {
   Mail,
   Pencil,
   Save,
-  Sparkles,
   Trash2,
   UserPlus,
 } from "lucide-react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart as ReLineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import {
   deactivateActiveCycle,
   deleteExercise,
@@ -41,48 +25,44 @@ import {
   saveTrainingSessionWithEntries,
   type DataSource,
 } from "@/lib/data/repository";
+import { resolveDashboardActiveDay } from "@/lib/dashboard/dashboard-card-selector";
 import {
-  buildDashboardCoachAnalytics,
-  buildDashboardTrainingCardModel,
-  clampDashboardCoachFactorValue,
-  resolveDashboardCoachFactorLabel,
-} from "@/lib/dashboard/dashboard-card-model";
+  getCurrentSantiagoWeekDates,
+  getLocalDateKey,
+  getTrainingDayCode,
+} from "@/lib/dashboard/dashboard-santiago-calendar";
 import {
-  resolveDashboardActiveDay,
-  resolveDashboardCardVisibility,
-  resolveDashboardCarouselDays,
-} from "@/lib/dashboard/dashboard-card-selector";
-import { resolveDashboardDotIndex } from "@/lib/dashboard/dashboard-carousel-state";
-import {
-  DASHBOARD_DOTS_ARIA_LABEL,
-  buildDashboardCarouselTableAriaLabel,
-  buildDashboardOverflowLabel,
-  buildEmptyCurrentWeekCoachFeedback,
-  buildWeeklyProgressAriaLabel,
-  buildWeeklyProgressTrendLabel,
-  resolveDashboardCoachVisualStatus,
-  resolveIsCurrentWeekEmptyCoach,
-} from "@/lib/dashboard/dashboard-presentation";
-import type {
-  DashboardAnalyticsSnapshot,
-  DashboardCoachVisualStatus,
-  DashboardTrainingCardData,
-} from "@/lib/dashboard/dashboard-types";
+  findDashboardEntries,
+  findDashboardSessionForDay,
+} from "@/lib/dashboard/dashboard-session-selection";
+import { removeAccents } from "@/lib/training/exercise-name-normalization";
+import { getSantiagoDateKey } from "@/lib/training/santiago-training-date";
 import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
 import { ProfileScreen } from "@/components/profile/ProfileScreen";
 import { CycleHistoryProductiveContainer } from "@/components/training/cycle-history";
+import { ExerciseLastPerformancePanel } from "@/features/active-workout/components/ExerciseLastPerformancePanel";
+import { SeriesResult } from "@/features/active-workout/components/SeriesResult";
+import { TrainingCompletionSummaryScreen } from "@/features/active-workout/components/TrainingCompletionSummaryScreen";
+import { TrainingReadinessScreen } from "@/features/active-workout/components/TrainingReadinessScreen";
+import { TrainingStartScreen } from "@/features/active-workout/components/TrainingStartScreen";
+import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
+import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
+import { NotificationGroup } from "@/features/notifications/components/NotificationGroup";
+import { ComparisonScreenV2 } from "@/features/progress/components/comparison-screen-v2";
+import { ConfirmRoutineUpdateModal } from "@/features/routine-builder/components/ConfirmRoutineUpdateModal";
+import { RoutineSuccessModal } from "@/features/routine-builder/components/RoutineSuccessModal";
+import { ConfirmDeleteCycleModal } from "@/features/training-plan/components/ConfirmDeleteCycleModal";
+import { ConfirmNewCycleModal } from "@/features/training-plan/components/ConfirmNewCycleModal";
+import { CycleManagementScreen } from "@/features/training-plan/components/CycleManagementScreen";
+import { CycleScopedPlanBlocker } from "@/features/training-plan/components/CycleScopedPlanBlocker";
+import { TRAINING_CYCLE_PRESENTATIONS as trainingCycles } from "@/features/training-plan/model/training-cycle-presentation";
 import { buildProfileViewModelFromSources } from "@/lib/profile/profile-view-model";
-import {
-  buildAppNotifications,
-  resolveNotificationIconKey,
-} from "@/lib/notifications/notification-model";
+import { buildAppNotifications } from "@/lib/notifications/notification-model";
 import {
   NOTIFICATION_EMPTY_MESSAGE,
   buildNotificationBadgeAriaLabel,
   buildNotificationBadgeText,
-  buildNotificationItemStateLabel,
   buildNotificationPanelSubtitleText,
-  resolveNotificationItemReferenceDate,
   selectNotificationView,
 } from "@/lib/notifications/notification-selector";
 import {
@@ -92,7 +72,6 @@ import {
 import type {
   AppNotification,
   AppNotificationSection,
-  NotificationIconKey,
   SeenNotificationRecord,
   TrainingNotificationContext,
 } from "@/lib/notifications/notification-types";
@@ -113,21 +92,10 @@ import {
   calculateExerciseMetrics,
   calculateWeeklyComparison,
   calculateWeeklySummary,
-  formatSigned,
 } from "@/lib/progress/calculations";
-import { buildMetricInsight, formatMetricDifference } from "@/lib/progress/metric-insight";
 import { parseDateKeyAsLocalNoon } from "@/lib/progress/week-day";
-import { formatDecimalEs, formatKg, formatKgNullable, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
-import { buildAreaPath, buildSvgPath, buildWeeklyProgressChart } from "@/lib/progress/weekly-progress-chart";
-import {
-  buildWeeklyExerciseComparisonModel,
-  type WeeklyExerciseComparisonModel,
-  type WeeklyExerciseMetricSummary,
-} from "@/lib/progress/weekly-exercise-comparison";
-import {
-  calculateEquivalentWeeklyProgress,
-  type WeeklyEquivalentProgressResult,
-} from "@/lib/progress/weekly-equivalent-progress";
+import { formatDecimalEs, formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
+import { calculateEquivalentWeeklyProgress } from "@/lib/progress/weekly-equivalent-progress";
 import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode, TrainingSession } from "@/lib/progress/types";
 import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
 import {
@@ -215,12 +183,6 @@ import {
   type LatestExercisePerformance,
 } from "@/lib/training/exercise-last-performance-repository";
 import {
-  buildTrainingCoachFeedback,
-  type CoachInsight,
-  type TrainingCoachFeedback,
-} from "@/lib/training/training-coach-feedback";
-import { buildTrainingCoachDashboardInput } from "@/lib/training/training-coach-dashboard-mapper";
-import {
   createStableWorkoutStartedAt,
   createLatestExercisePerformanceRequest,
   getLatestExercisePerformanceIdleState,
@@ -229,7 +191,6 @@ import {
 } from "@/lib/training/exercise-last-performance-loader";
 import {
   buildExerciseLastPerformancePresentation,
-  type ExerciseLastPerformancePresentation,
 } from "@/lib/training/exercise-last-performance-presentation";
 import {
   getLatestExerciseObservationByLineage,
@@ -243,9 +204,7 @@ import {
 } from "@/lib/training/exercise-last-observation-loader";
 import {
   buildExerciseLastObservationPresentation,
-  type ExerciseLastObservationPresentation,
 } from "@/lib/training/exercise-last-observation-presentation";
-import { buildExerciseCurrentResultPresentation } from "@/lib/training/exercise-current-result-presentation";
 import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
 import {
   acquireWorkoutSaveLock,
@@ -320,6 +279,13 @@ import {
   sortTrainingDaysByWeekOrder,
   TRAINING_DAY_LABELS,
 } from "@/lib/training/training-day-order";
+import {
+  calculateTargetSummary,
+  getActiveRoutineDays,
+  getCycleDurationValue,
+  getCycleObjectiveValue,
+  getRoutineDays,
+} from "@/lib/training/training-plan-calculations";
 import { isTrainingCycleId } from "@/lib/training/training-cycle-id";
 import type { TrainingCycleId } from "@/lib/training/training-cycle-id";
 import type { TrainingPlan } from "@/lib/training/training-plan-model";
@@ -329,58 +295,20 @@ import type {
 } from "@/lib/training/training-routine-draft";
 import {
   buildTrainingTopbarMeta,
-  resolveActiveCarouselIndex,
-  resolveTrainingCarouselAction,
-  type TrainingCarouselCardModel,
 } from "@/lib/training/training-carousel-card-presentation";
 import {
   buildTrainingCompletionSummary,
   type TrainingCompletionHistoricalInput,
   type TrainingCompletionSummary,
 } from "@/lib/training/training-completion-summary";
+import { RoutineMetricGrid } from "@/ui/data-display/metric-grid";
 
 const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
-const setupDays: string[] = [...TRAINING_DAY_LABELS];
 const WORKOUT_DRAFT_VERSION = 1;
 const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
 const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
 const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
-const trainingCycles = [
-  {
-    id: "macro",
-    title: "Macrociclo",
-    summary: "Plan grande del objetivo principal.",
-    detail:
-      "Es la estructura más grande de planificación. Generalmente abarca entre 6 y 11 meses y se enfoca en el objetivo deportivo principal o la forma física deseada.",
-  },
-  {
-    id: "meso",
-    title: "Mesociclo",
-    summary: "Bloques de 3 a 6 semanas.",
-    detail:
-      "Son bloques intermedios de entrenamiento. Cada mesociclo trabaja un objetivo específico como fuerza, hipertrofia, potencia, resistencia, descarga o definición.",
-  },
-  {
-    id: "micro",
-    title: "Microciclo",
-    summary: "Organización semanal del entrenamiento.",
-    detail:
-      "Representa la planificación semanal. Ordena la distribución de cargas, descansos y tipos de entrenamiento durante la semana.",
-  },
-  {
-    id: "session",
-    title: "Sesión de entrenamiento",
-    summary: "El entrenamiento de un día específico.",
-    detail:
-      "Es la unidad más pequeña del sistema. Contiene ejercicios, series, repeticiones, pesos, intensidad y métricas asociadas a ese día.",
-  },
-] as const satisfies ReadonlyArray<{
-  id: TrainingCycleId;
-  title: string;
-  summary: string;
-  detail: string;
-}>;
 const macroObjectives = ["Fuerza", "Hipertrofia", "Recomposición", "Definición", "Rendimiento", "Salud"];
 const mesoObjectives = ["Fuerza", "Hipertrofia", "Potencia", "Resistencia", "Descarga", "Definición"];
 const microFocusOptions = ["Progresión", "Mantenimiento", "Descarga", "Técnica"];
@@ -962,7 +890,7 @@ export function OrganizatechApp({
     : calendarNormalizedTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
   const hasRoutinePlan = displayExercises.length > 0;
   const routineDays = getActiveRoutineDays(displayExercises, displayTrainingPlan);
-  const dashboardCarouselDays = hasRoutinePlan ? routineDays : setupDays;
+  const dashboardCarouselDays = hasRoutinePlan ? routineDays : TRAINING_DAY_LABELS;
   const visibleDay = getVisibleTrainingDay(displayExercises, activeRoutineDay);
   const calendarDashboardDay = getCalendarTrainingDay();
   const dashboardDay = resolveDashboardActiveDay({
@@ -1438,7 +1366,7 @@ export function OrganizatechApp({
 
   function restoreRoutineDraftForSession(mode: DataMode, userId?: string) {
     const draft = loadRoutineDraft(mode, userId, {
-      setupDays,
+      setupDays: TRAINING_DAY_LABELS,
       normalizeSetupByDay,
       normalizeTrainingPlan,
       hasSetupDraftContent,
@@ -2309,7 +2237,7 @@ export function OrganizatechApp({
               routineId: existingRecord?.routine.id ?? fallbackRoutine.id,
               weekIndex: existingRecord?.cycleDay.weekIndex ?? 1,
               dayCode,
-              sortOrder: setupDays.indexOf(day),
+              sortOrder: TRAINING_DAY_LABELS.findIndex((label) => label === day),
               notes: existingRecord?.cycleDay.notes ?? createCycleScopedDayNotes(routineName),
               exercises: analysis.additions.map((exercise, index) => ({
                 name: exercise.name,
@@ -4205,921 +4133,6 @@ function PasswordField({
   );
 }
 
-function DashboardScreen({
-  exercises,
-  hasTrainingEntries,
-  hasRoutinePlan,
-  usesCycleScopedSessions,
-  day,
-  weekDays,
-  dayExercises,
-  summary,
-  weeklyEquivalentProgress,
-  currentWeek,
-  entries,
-  sessions,
-  startRegistration,
-  goToRoutine,
-  viewSummary,
-  switchDay,
-}: {
-  exercises: ExerciseTemplate[];
-  hasTrainingEntries: boolean;
-  hasRoutinePlan: boolean;
-  usesCycleScopedSessions: boolean;
-  day: string;
-  weekDays: string[];
-  dayExercises: ExerciseTemplate[];
-  summary: ReturnType<typeof calculateWeeklySummary>;
-  weeklyEquivalentProgress: WeeklyEquivalentProgressResult;
-  currentWeek: number;
-  entries: ExerciseEntry[];
-  sessions: TrainingSession[];
-  startRegistration: () => void;
-  goToRoutine: () => void;
-  viewSummary: (day: string) => void;
-  switchDay: (day: string) => void;
-}) {
-  const hasTodayRoutine = dayExercises.length > 0;
-  const carouselRef = useRef<HTMLDivElement | null>(null);
-  const lastCarouselDay = useRef(day);
-  const [activeCarouselDay, setActiveCarouselDay] = useState(day);
-  const carouselDays = useMemo(
-    () => resolveDashboardCarouselDays(hasRoutinePlan, weekDays, day),
-    [hasRoutinePlan, weekDays, day],
-  );
-  const currentWeekDates = useMemo(() => getCurrentSantiagoWeekDates(), []);
-  const currentWeekStart = currentWeekDates.Lunes;
-  const activeSessions = useMemo(
-    () => sessions.filter((session) => (
-      session.status === "completed" &&
-      !session.deletedAt &&
-      (usesCycleScopedSessions
-        ? getSessionEffectiveCalendarWeekStart(session) === currentWeekStart
-        : session.calendarWeekStart === currentWeekStart)
-    )),
-    [sessions, currentWeekStart, usesCycleScopedSessions],
-  );
-
-  useEffect(() => {
-    setActiveCarouselDay(day);
-    lastCarouselDay.current = day;
-    const index = carouselDays.indexOf(day);
-    const container = carouselRef.current;
-    const slide = index >= 0 ? container?.children.item(index) as HTMLElement | null : null;
-    const firstSlide = container?.children.item(0) as HTMLElement | null;
-    if (container && slide && firstSlide) {
-      container.scrollTo({ left: slide.offsetLeft - firstSlide.offsetLeft, behavior: "smooth" });
-    }
-  }, [day, carouselDays]);
-
-  function getDashboardDayData(item: string): DashboardTrainingCardData & {
-    title: string;
-    session: TrainingSession | undefined;
-  } {
-    const itemExercises = exercises.filter((exercise) => (exercise.day ?? item) === item);
-    const expectedDate = currentWeekDates[item] ?? "";
-    const plannedDay = getTrainingDayCode(item);
-    const session = findDashboardSessionForDay(activeSessions, itemExercises, expectedDate, plannedDay, usesCycleScopedSessions);
-    const sessionEntries = session ? findDashboardEntries(session.entries, itemExercises, expectedDate, usesCycleScopedSessions) : [];
-    const allMatchingEntries = usesCycleScopedSessions ? [] : findDashboardEntries(entries, itemExercises, expectedDate, false);
-    const fallbackEntries = sessionEntries.length > 0 ? [] : allMatchingEntries;
-    const itemEntries = usesCycleScopedSessions
-      ? sessionEntries
-      : sessionEntries.length > 0
-        ? sessionEntries
-        : fallbackEntries;
-    const itemMetrics = itemEntries.length > 0 ? calculateWeeklyComparison(itemEntries) : [];
-    const coverage = usesCycleScopedSessions
-      ? getCycleScopedDayCoverage(itemExercises, itemEntries)
-      : null;
-    const status = coverage?.status ?? (Boolean(session) || fallbackEntries.length > 0 ? "completed" : "pending");
-    const isCompleted = status === "completed";
-    const pendingExercises = coverage
-      ? itemExercises.filter((exercise) =>
-        !coverage.registeredIds.has(exercise.trainingCycleExerciseId ?? exercise.id))
-      : isCompleted
-        ? []
-        : itemExercises;
-
-    return {
-      day: item,
-      title: itemExercises.length > 0 ? `Entrenamiento · ${item}` : `Entrenamiento · ${item}: no registra entrenamientos`,
-      exercises: itemExercises,
-      metrics: itemMetrics,
-      session,
-      status,
-      registeredCount: coverage?.registeredCount ?? itemMetrics.length,
-      plannedCount: coverage?.plannedCount ?? itemExercises.length,
-      pendingExercises,
-      isToday: expectedDate === getSantiagoDateKey(new Date()),
-      hasRoutine: itemExercises.length > 0 || isCompleted,
-      isCompleted,
-    };
-  }
-
-  const activeDayData = getDashboardDayData(activeCarouselDay);
-  const activeCoachEntries = getDashboardCoachEntries(entries, activeDayData.exercises, usesCycleScopedSessions);
-  const activeCoachMetrics = activeDayData.metrics;
-  const activeCoachSummary = calculateWeeklySummary(activeCoachMetrics, currentWeek);
-  const analytics = buildDashboardCoachAnalytics(activeCoachSummary, activeCoachMetrics);
-  const coachInput = useMemo(() => buildTrainingCoachDashboardInput({
-    activeDay: activeCarouselDay,
-    activeDayCoverage: {
-      registeredExercises: activeDayData.registeredCount,
-      plannedExercises: activeDayData.plannedCount,
-    },
-    summary: activeCoachSummary,
-    currentMetrics: activeCoachMetrics,
-    entries: activeCoachEntries,
-    currentWeek,
-    weeklyEquivalentProgress,
-  }), [
-    activeCarouselDay,
-    activeCoachEntries,
-    activeCoachMetrics,
-    activeCoachSummary,
-    activeDayData.plannedCount,
-    activeDayData.registeredCount,
-    currentWeek,
-    weeklyEquivalentProgress,
-  ]);
-  const coachFeedback = useMemo(() => buildTrainingCoachFeedback(coachInput), [coachInput]);
-  const isCurrentWeekEmptyCoach = resolveIsCurrentWeekEmptyCoach(
-    activeCoachEntries,
-    activeCoachMetrics,
-    currentWeek,
-  );
-  const displayedCoachFeedback = isCurrentWeekEmptyCoach
-    ? buildEmptyCurrentWeekCoachFeedback()
-    : coachFeedback;
-  const coachVisualStatus = resolveDashboardCoachVisualStatus({
-    isCurrentWeekEmptyCoach,
-    comparisonStatus: coachInput.comparisonStatus,
-    displayedCoachFeedback,
-  });
-  const activeDayAction = resolveTrainingCarouselAction(activeDayData.status);
-  const cardVisibility = resolveDashboardCardVisibility({
-    hasRoutinePlan,
-    hasTrainingEntries,
-    hasTodayRoutine,
-    activeDayHasRoutine: activeDayData.hasRoutine,
-  });
-
-  function handleTrainingCarouselScroll(event: UIEvent<HTMLDivElement>) {
-    const container = event.currentTarget;
-    const children = Array.from(container.children) as HTMLElement[];
-    const nearestIndex = resolveActiveCarouselIndex({
-      scrollLeft: container.scrollLeft,
-      viewportWidth: container.clientWidth,
-      slides: children.map((child) => ({
-        offsetLeft: child.offsetLeft,
-        offsetWidth: child.offsetWidth,
-      })),
-    });
-
-    const nextDay = carouselDays[nearestIndex] ?? activeCarouselDay;
-    if (nextDay !== lastCarouselDay.current) {
-      lastCarouselDay.current = nextDay;
-      setActiveCarouselDay(nextDay);
-      switchDay(nextDay);
-    }
-  }
-
-  if (cardVisibility.emptyState === "no-plan") {
-    return <EmptyDashboard startRegistration={startRegistration} />;
-  }
-
-  if (cardVisibility.emptyState === "no-entries") {
-    return (
-      <section className="screen">
-        <div className="card wide dashboard-empty-progress">
-          <p className="eyebrow">Rutina creada</p>
-          <h3>Aún no registras progreso</h3>
-          <p>Ya tienes tu planificación lista. Para comenzar a medir avances, inicia el entrenamiento del día y registra tus series.</p>
-          {cardVisibility.showEmptyRoutineAction ? (
-            <button className="button dashboard-routine-button" onClick={goToRoutine}>
-              Ir a rutina de entrenamiento
-            </button>
-          ) : null}
-        </div>
-        <div className="card wide dashboard-training-card" data-section="training-carousel">
-          <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
-            {carouselDays.map((item) => {
-              const itemData = getDashboardDayData(item);
-              const itemModel = buildDashboardTrainingCardModel(itemData);
-
-              return (
-                <article className="dashboard-training-slide" key={item}>
-                  {itemData.hasRoutine ? (
-                    <DashboardTrainingCardContent model={itemModel} />
-                  ) : (
-                    <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-          <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="screen">
-      <MetricGrid summary={summary} />
-      <div className="card wide dashboard-progress-card" data-section="weekly-progress">
-        <div className="weekly-progress-summary">
-          <div className="weekly-progress-value-block">
-            <p className="small-label">Progreso semanal</p>
-            {weeklyEquivalentProgress.status === "ready" ? (
-              <div className="weekly-progress-comparison-list">
-                <span>Volumen semana anterior: <strong>{weeklyEquivalentProgress.previousVolumeLabel}</strong></span>
-                <span>Volumen actual: <strong>{weeklyEquivalentProgress.currentVolumeLabel}</strong></span>
-                <span className={`weekly-progress-difference ${weeklyEquivalentProgress.tone}`}>
-                  Diferencia de volumen: <strong>{weeklyEquivalentProgress.primaryLabel}</strong>
-                </span>
-                <small className={`weekly-progress-trend-pill ${weeklyEquivalentProgress.tone}`}>{buildWeeklyProgressTrendLabel(weeklyEquivalentProgress)}</small>
-              </div>
-            ) : (
-              <strong className={weeklyEquivalentProgress.tone}>{weeklyEquivalentProgress.primaryLabel}</strong>
-            )}
-          </div>
-          {weeklyEquivalentProgress.status !== "ready" ? (
-            <div className="weekly-progress-empty-copy">
-              <span>{weeklyEquivalentProgress.detailLabel}</span>
-              <small>Completa esta semana para crear tu primera referencia</small>
-            </div>
-          ) : null}
-        </div>
-        <WeeklyProgressSvg progress={weeklyEquivalentProgress} />
-      </div>
-      <div className={`card wide dashboard-training-card ${activeDayData.status}`} data-section="training-carousel">
-        <div className="dashboard-training-carousel" ref={carouselRef} onScroll={handleTrainingCarouselScroll}>
-          {carouselDays.map((item) => {
-            const itemData = getDashboardDayData(item);
-            const itemModel = buildDashboardTrainingCardModel(itemData);
-
-            return (
-              <article className="dashboard-training-slide" key={item}>
-                {itemData.hasRoutine ? (
-                  <DashboardTrainingCardContent model={itemModel} />
-                ) : (
-                  <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
-                )}
-              </article>
-            );
-          })}
-        </div>
-        {cardVisibility.showTrainingCardAction ? (
-          <button
-            className={`button secondary dashboard-routine-button ${activeDayData.status}`}
-            onClick={() => activeDayAction.action === "summary" ? viewSummary(activeDayData.day) : goToRoutine()}
-          >
-            {activeDayAction.label}
-          </button>
-        ) : null}
-        <DashboardDayDots day={activeCarouselDay} weekDays={carouselDays} />
-      </div>
-      <div data-section="coach">
-        <DashboardCoachCard feedback={displayedCoachFeedback} analytics={analytics} visualStatus={coachVisualStatus} />
-      </div>
-    </section>
-  );
-}
-
-// Static contract boundary: function buildDashboardTrainingCardModel is provided by dashboard-card-model.
-function DashboardTrainingCardContent({ model }: { model: TrainingCarouselCardModel }) {
-  const overflowLabel = buildDashboardOverflowLabel(model.additionalExerciseCount);
-
-  return (
-    <div className="dashboard-training-card-content">
-      <div className="dashboard-training-heading">
-        <span className="dashboard-day-pill">{model.day}</span>
-        <span className={`dashboard-status-badge ${model.status}`}>
-          {model.statusLabel}
-        </span>
-      </div>
-      <div className={`dashboard-routine-name ${model.status}`}>
-        <span>Entrenamiento:</span>
-        <strong>{model.routineName}</strong>
-      </div>
-      <div className="dashboard-exercise-table" role="table" aria-label={buildDashboardCarouselTableAriaLabel(model.day)}>
-        <div className="dashboard-exercise-table-row heading" role="row">
-          <span role="columnheader">Ejercicio</span>
-          <span role="columnheader">Series</span>
-          <span role="columnheader">Reps</span>
-          <span role="columnheader">kg</span>
-        </div>
-        {model.rows.map((row) => (
-          <div className="dashboard-exercise-table-row" role="row" key={`${row.source}-${row.id}`}>
-            <strong role="cell" title={row.name}>{row.name}</strong>
-            <span role="cell">{row.sets}</span>
-            <span role="cell">{row.reps}</span>
-            <span role="cell">{row.kg}</span>
-          </div>
-        ))}
-      </div>
-      {overflowLabel ? (
-        <p className="dashboard-more-exercises">{overflowLabel}</p>
-      ) : null}
-    </div>
-  );
-}
-
-function DashboardDayDots({ day, weekDays }: { day: string; weekDays: string[] }) {
-  const activeIndex = resolveDashboardDotIndex(weekDays, day);
-  return <IndexDots activeIndex={activeIndex} count={weekDays.length} />;
-}
-
-function IndexDots({ activeIndex, count }: { activeIndex: number; count: number }) {
-  return (
-    <div className="dashboard-day-dots" aria-label={DASHBOARD_DOTS_ARIA_LABEL}>
-      {Array.from({ length: count }).map((_, index) => (
-        <span
-          key={index}
-          className={`dashboard-day-dot ${index === activeIndex ? "active" : ""}`}
-          aria-hidden="true"
-        />
-      ))}
-    </div>
-  );
-}
-
-function TrainingCompletionSummaryScreen({
-  summary,
-  onDashboard,
-}: {
-  summary: TrainingCompletionSummary;
-  onDashboard: () => void;
-}) {
-  const previousDateLabel = summary.exercises.find((exercise) => exercise.comparisonStatus === "ready" && exercise.previousDateLabel)?.previousDateLabel ?? "";
-  const currentDateLabel = summary.exercises[0]?.currentDateLabel ?? "";
-
-  return (
-    <section className="training-completion-screen">
-      <div className="training-completion-title">
-        <h2>Resumen de tu entrenamiento</h2>
-        <p>Estos fueron tus resultados</p>
-      </div>
-
-      <article className="training-completion-card">
-        <header className="training-completion-card-header">
-          <span className="training-completion-day">{summary.dayLabel}</span>
-          <span className="training-completion-status">{summary.statusLabel}</span>
-        </header>
-
-        <div className="training-completion-meta">
-          <h3><span>Entrenamiento:</span> {summary.workoutName}</h3>
-          <p><strong>Fase:</strong> {summary.cycleLabel} | {summary.weekLabel} | {summary.progressLabel}</p>
-          <p><strong>Duración:</strong> {summary.durationLabel}</p>
-        </div>
-
-        <div className="training-completion-table" role="table" aria-label="Comparación de ejercicios del entrenamiento completado">
-          <div role="rowgroup">
-            <div className="training-completion-row heading" role="row">
-              <span role="columnheader">Ejercicio y Series</span>
-              <span role="columnheader">Anterior{previousDateLabel && <small>{previousDateLabel}</small>}</span>
-              <span role="columnheader">Actual{currentDateLabel && <small>{currentDateLabel}</small>}</span>
-              <span role="columnheader">Resultado</span>
-            </div>
-          </div>
-          <div role="rowgroup">
-            {summary.exercises.map((exercise) => (
-              <div className="training-completion-row" role="row" key={exercise.exerciseId}>
-                <div role="cell" className="exercise-cell">
-                  <strong>{exercise.exerciseName}</strong>
-                  <span>{exercise.currentSeriesCount} {exercise.currentSeriesCount === 1 ? "serie" : "series"}</span>
-                </div>
-                <div role="cell">
-                  {exercise.comparisonStatus === "ready" ? (
-                    <>
-                      <span>{exercise.previousTotalReps ?? "—"} reps</span>
-                      <span>{exercise.previousWeightLabel}</span>
-                    </>
-                  ) : (
-                    <span className="muted-result">{exercise.comparisonStatus === "first_reference" ? "—" : "No disponible"}</span>
-                  )}
-                </div>
-                <div role="cell">
-                  <span>{exercise.currentTotalReps} reps</span>
-                  <span>{exercise.currentWeightLabel}</span>
-                </div>
-                <div role="cell" className="result-cell">
-                  {exercise.resultLines.map((line, index) => (
-                    <span className={line.tone} key={`${exercise.exerciseId}-${line.label}-${index}`}>{line.label}</span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <button className="button training-completion-button" type="button" onClick={onDashboard}>
-          Ir al panel principal
-        </button>
-      </article>
-    </section>
-  );
-}
-
-function WeeklyProgressSvg({ progress }: { progress: WeeklyEquivalentProgressResult }) {
-  const hasPreviousReference = progress.status === "ready";
-  const chart = useMemo(() => buildWeeklyProgressChart({
-    currentSeries: progress.points.map((point) => ({
-      label: point.label,
-      value: point.currentVolume,
-      comparable: point.currentVolume !== null,
-      volume: point.currentVolume,
-    })),
-    previousSeries: progress.points.map((point) => ({
-      label: point.label,
-      value: hasPreviousReference ? point.previousVolume : null,
-      comparable: hasPreviousReference && point.previousVolume !== null,
-      volume: hasPreviousReference ? point.previousVolume : null,
-    })),
-    unit: "kg",
-  }), [hasPreviousReference, progress.points]);
-  const [activeIndex, setActiveIndex] = useState(chart.activeIndex);
-  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
-  const labels = chart.labels;
-  const currentPoints = chart.currentPoints;
-  const previousPoints = chart.previousPoints;
-  const chartViewBoxHeight = 144;
-  useEffect(() => {
-    setActiveIndex(chart.activeIndex);
-    setIsTooltipVisible(false);
-  }, [chart.activeIndex, labels.length]);
-  const activeCurrentPoint = currentPoints[activeIndex] ?? currentPoints.find((point) => point.value !== null) ?? currentPoints[0];
-  const activePreviousPoint = previousPoints[activeIndex] ?? previousPoints[0];
-  const currentPath = buildSvgPath(currentPoints);
-  const previousPath = buildSvgPath(previousPoints);
-  const currentAreaPath = buildAreaPath(currentPoints);
-  const tooltipAnchorX = activeCurrentPoint?.x ?? activePreviousPoint?.x ?? 240;
-  const tooltipLeft = `clamp(68px, ${(tooltipAnchorX / 480) * 100}%, calc(100% - 136px))`;
-  const tooltipTop = `clamp(18px, ${((activeCurrentPoint?.y ?? activePreviousPoint?.y ?? 65) / chartViewBoxHeight) * 100}%, calc(100% - 62px))`;
-  const tooltipDay = progress.points[activeIndex]?.day ?? activeCurrentPoint?.label ?? "";
-  const progressAriaLabel = buildWeeklyProgressAriaLabel(progress);
-
-  return (
-    <div
-      className="weekly-progress-visual"
-      aria-label={progressAriaLabel}
-    >
-      <div className="weekly-progress-legend" aria-hidden="true">
-        <span><i className="current" /> Semana actual</span>
-        {hasPreviousReference ? <span><i className="previous" /> Semana anterior</span> : null}
-      </div>
-      <div className="weekly-chart-stage">
-        {isTooltipVisible ? (
-          <div className="weekly-tooltip" style={{ left: tooltipLeft, top: tooltipTop }}>
-            <strong>{tooltipDay}</strong>
-            <span>Semana actual: {formatKgNullable(activeCurrentPoint?.value ?? null)}</span>
-            <span>Semana anterior: {formatKgNullable(hasPreviousReference ? activePreviousPoint?.value ?? null : null)}</span>
-          </div>
-        ) : null}
-        <div className="weekly-axis-values" aria-hidden="true">
-          {chart.axisLabels.map((label) => <span key={label}>{label}</span>)}
-        </div>
-        <svg viewBox={`0 0 480 ${chartViewBoxHeight}`} role="img">
-          <defs>
-            <linearGradient id="weeklyLine" x1="0" x2="1" y1="0" y2="0">
-              <stop offset="0%" stopColor="#63A2FF" />
-              <stop offset="100%" stopColor="#1D5CFF" />
-            </linearGradient>
-            <filter id="weeklyGlow" x="-20%" y="-80%" width="140%" height="260%">
-              <feGaussianBlur stdDeviation="5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          {[18, 42, 65, 89, 112].map((y) => <line className="weekly-grid-line" key={y} x1="6" x2="474" y1={y} y2={y} />)}
-          <line className="weekly-zero-line" x1="6" x2="474" y1="112" y2="112" />
-          {currentAreaPath ? <path className="weekly-area" d={currentAreaPath} /> : null}
-          {hasPreviousReference && previousPath ? <path className="weekly-line previous" d={previousPath} /> : null}
-          {currentPath ? <path className="weekly-line current" d={currentPath} stroke="url(#weeklyLine)" filter="url(#weeklyGlow)" /> : null}
-          {hasPreviousReference ? previousPoints.map((point, index) => point.y === null ? null : (
-            <circle className="weekly-point previous" key={`previous-${point.label}-${index}`} cx={point.x} cy={point.y} r="3" />
-          )) : null}
-          {currentPoints.map((point, index) => point.y === null ? null : (
-            <g
-              key={`current-${point.label}-${index}`}
-              className="weekly-point-hit"
-              role="button"
-              tabIndex={0}
-              aria-label={`${progress.points[index]?.day ?? point.label}: semana actual ${formatKgNullable(point.value)}, semana anterior ${formatKgNullable(previousPoints[index]?.value ?? null)}`}
-              onClick={() => {
-                setIsTooltipVisible((current) => index !== activeIndex || !current);
-                setActiveIndex(index);
-              }}
-              onMouseEnter={() => setActiveIndex(index)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  setIsTooltipVisible((current) => index !== activeIndex || !current);
-                  setActiveIndex(index);
-                }
-                if (event.key === "Escape") {
-                  setIsTooltipVisible(false);
-                }
-              }}
-            >
-              <circle className={index === activeIndex ? "weekly-point-glow active" : "weekly-point-glow"} cx={point.x} cy={point.y} r={index === activeIndex ? 14 : 8} />
-              <circle className={index === activeIndex ? "weekly-point current active" : "weekly-point current"} cx={point.x} cy={point.y} r={index === activeIndex ? 5 : 3} />
-            </g>
-          ))}
-        </svg>
-      </div>
-      <div className="weekly-day-labels" aria-hidden="true">
-        {labels.map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}
-      </div>
-    </div>
-  );
-}
-
-function DashboardCoachCard({
-  feedback,
-  analytics,
-  visualStatus,
-}: {
-  feedback: TrainingCoachFeedback;
-  analytics: DashboardAnalyticsSnapshot;
-  visualStatus: DashboardCoachVisualStatus;
-}) {
-  const blocks: Array<{ id: string; label: string; insight: CoachInsight }> = [];
-  const strength = feedback.strengths[0];
-  const attention = feedback.attentions[0];
-  const trend = feedback.historicalInsight;
-  const hasTrend = Boolean(trend);
-  const factors = analytics.factors.slice(0, 4).map(([label, value]) => ({
-    label: resolveDashboardCoachFactorLabel(String(label)),
-    value: clampDashboardCoachFactorValue(value),
-  }));
-
-  if (strength) blocks.push({ id: "strength", label: "Fortaleza", insight: strength });
-  if (attention) blocks.push({ id: "attention", label: "Atención", insight: attention });
-  if (feedback.readinessInsight) blocks.push({ id: "readiness", label: "Estado del cuerpo", insight: feedback.readinessInsight });
-  blocks.push({
-    id: "next",
-    label: feedback.nextTarget ? "Próximo objetivo" : "Consejo",
-    insight: {
-      title: feedback.nextTarget ?? "Siguiente paso",
-      body: feedback.nextAdvice,
-      tone: feedback.tone === "warning" ? "warning" : "info",
-      priority: 0,
-    },
-  });
-
-  return (
-    <div className={`card wide dashboard-coach-card ${feedback.tone}`}>
-      <div className="smart-card-header dashboard-coach-header">
-        <div>
-          <p className="eyebrow">Coach Organizatech</p>
-          <h3>{feedback.headline}</h3>
-        </div>
-        <Sparkles size={19} />
-      </div>
-      <div className="coach-status-band">
-        {visualStatus.showScore ? (
-          <div className={`coach-score ${feedback.tone}`}>
-            <strong>{analytics.score}</strong>
-            <span>/100</span>
-          </div>
-        ) : (
-          <div className={`coach-status-pill ${feedback.tone}`}>
-            <span>{visualStatus.badgeLabel ?? visualStatus.label}</span>
-          </div>
-        )}
-        <div className="coach-status-copy">
-          <strong>{visualStatus.label}</strong>
-          <span>{visualStatus.detail}</span>
-        </div>
-      </div>
-      {visualStatus.showFactors !== false ? (
-        <div className="coach-factor-list" aria-label={visualStatus.factorLabel}>
-          <span className="coach-factor-heading">{visualStatus.factorLabel}</span>
-          {factors.map((factor) => (
-            <div className="coach-factor-row" key={factor.label}>
-              <div>
-                <span>{factor.label}</span>
-                <small>{Math.round(factor.value)}/100</small>
-              </div>
-              <div className="coach-factor-track" aria-hidden="true">
-                <span style={{ width: `${factor.value}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {trend ? (
-        <div className={`coach-trend-block ${trend.tone}`}>
-          <span>Tendencia</span>
-          <strong>{trend.title}</strong>
-          <p>{trend.body}</p>
-          {trend.action ? <small>{trend.action}</small> : null}
-        </div>
-      ) : null}
-      <div className="coach-summary-block">
-        <span>Lectura rápida</span>
-        <p>{feedback.summary}</p>
-      </div>
-      <div className="coach-insight-grid">
-        {blocks.slice(0, hasTrend ? 3 : 4).map((block) => (
-          <div className={`coach-insight-block ${block.insight.tone}`} key={block.id}>
-            <span>{block.label}</span>
-            <strong>{block.insight.title}</strong>
-            <p>{block.insight.body}</p>
-            {block.insight.action ? <small>{block.insight.action}</small> : null}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function NotificationGroup({
-  title,
-  notifications,
-  seenNotificationRecordsById,
-  onOpen,
-}: {
-  title: string;
-  notifications: AppNotification[];
-  seenNotificationRecordsById: Map<string, SeenNotificationRecord>;
-  onOpen: (notification: AppNotification) => void;
-}) {
-  return (
-    <section className="notification-group" aria-label={title}>
-      {title !== "Nuevas" ? <p className="notification-group-title">{title}</p> : null}
-      {notifications.map((notification) => {
-        const iconKey = resolveNotificationIconKey(notification.category);
-        const seenRecord = seenNotificationRecordsById.get(notification.id);
-        const isSeen = Boolean(seenRecord);
-        const notificationStateLabel = buildNotificationItemStateLabel(
-          isSeen,
-          resolveNotificationItemReferenceDate(notification, seenRecord),
-        );
-        return (
-          <button
-            type="button"
-            className={`notification-item notification-${notification.kind} ${isSeen ? "seen" : "new"}`}
-            key={notification.id}
-            onClick={() => onOpen(notification)}
-          >
-            <span className="notification-icon" aria-hidden="true">{renderNotificationIcon(iconKey)}</span>
-            <span className="notification-copy">
-              <span className="notification-item-topline">
-                <span className="notification-category">{notification.category}</span>
-                <span className="notification-state">{notificationStateLabel}</span>
-              </span>
-              <strong>{notification.title}</strong>
-              <span>{notification.summary}</span>
-            </span>
-          </button>
-        );
-      })}
-    </section>
-  );
-}
-
-function renderNotificationIcon(iconKey: NotificationIconKey) {
-  switch (iconKey) {
-    case "backhoe":
-      return <NotificationBackhoeIcon />;
-    case "heart-share":
-      return <NotificationHeartShareIcon />;
-    case "coach":
-      return <NotificationCoachIcon />;
-    case "trending":
-      return <NotificationTrendingIcon />;
-    case "user-plus":
-      return <UserPlus size={24} />;
-    case "calendar-days":
-      return <CalendarDays size={24} />;
-  }
-}
-
-function NotificationBackhoeIcon() {
-  return (
-    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M2 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
-      <path d="M11 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
-      <path d="M13 19l-9 0" />
-      <path d="M4 15l9 0" />
-      <path d="M8 12v-5h2a3 3 0 0 1 3 3v5" />
-      <path d="M5 15v-2a1 1 0 0 1 1 -1h7" />
-      <path d="M21.12 9.88l-3.12 -4.88l-5 5" />
-      <path d="M21.12 9.88a3 3 0 0 1 -2.12 5.12a3 3 0 0 1 -2.12 -.88l4.24 -4.24" />
-    </svg>
-  );
-}
-
-function NotificationHeartShareIcon() {
-  return (
-    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M19.5 12.572l-.468 .464m-6.077 6.019l-.955 .945l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572" />
-      <path d="M16 22l5 -5" />
-      <path d="M21 21.5v-4.5h-4.5" />
-    </svg>
-  );
-}
-
-function NotificationCoachIcon() {
-  return (
-    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M8 19h-3a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v11a1 1 0 0 1 -1 1" />
-      <path d="M12 14a2 2 0 1 0 4.001 -.001a2 2 0 0 0 -4.001 .001" />
-      <path d="M17 19a2 2 0 0 0 -2 -2h-2a2 2 0 0 0 -2 2" />
-    </svg>
-  );
-}
-
-function NotificationTrendingIcon() {
-  return (
-    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 17l6 -6l4 4l8 -8" />
-      <path d="M14 7l7 0l0 7" />
-    </svg>
-  );
-}
-
-function EmptyDashboard({ startRegistration }: { startRegistration: () => void }) {
-  return (
-    <section className="empty-dashboard">
-      <div className="empty-hero">
-        <div className="brand-mark empty-logo">
-          <Dumbbell size={30} />
-        </div>
-        <h2>Organizatech</h2>
-        <p>Da tu esfuerzo, nosotros analizamos tu progreso</p>
-      </div>
-      <button className="start-button" onClick={startRegistration}>
-        Empecemos a registrar
-      </button>
-    </section>
-  );
-}
-
-function CycleScopedPlanBlocker({ message }: { message: string }) {
-  return (
-    <section className="screen">
-      <div className="card wide cycle-management-card">
-        <p className="eyebrow">Plan cycle-scoped</p>
-        <h2>Plan operativo no disponible</h2>
-        <p>{message}</p>
-      </div>
-    </section>
-  );
-}
-
-function CycleManagementScreen({
-  trainingPlan,
-  exercises,
-  entries,
-  cycleNumber,
-  activeCycleName,
-  editCurrentCycle,
-  requestNewCycle,
-  requestDeleteCycle,
-}: {
-  trainingPlan: TrainingPlan;
-  exercises: ExerciseTemplate[];
-  entries: ExerciseEntry[];
-  cycleNumber: number;
-  activeCycleName?: string;
-  editCurrentCycle: () => void;
-  requestNewCycle: () => void;
-  requestDeleteCycle: () => void;
-}) {
-  const activeDays = getActiveRoutineDays(exercises, trainingPlan);
-  const activeExercises = exercises.filter((exercise) => activeDays.includes(exercise.day ?? "Lunes"));
-  const targetSummary = calculateTargetSummary(activeExercises);
-  const metrics = calculateWeeklyComparison(entries);
-  const summary = calculateWeeklySummary(metrics, Math.max(1, ...entries.map((entry) => entry.week)));
-  const cycleTitle = getCycleTitle(trainingPlan);
-  const weeksRegistered = Math.max(1, ...entries.map((entry) => entry.week));
-
-  return (
-    <section className="screen">
-      <div className="card wide cycle-management-card">
-        <p className="eyebrow">Ciclo activo</p>
-        <h2>{activeCycleName ?? `Ciclo ${cycleNumber}`} - {cycleTitle}</h2>
-        <p className="eyebrow">{getCycleDurationLabel(trainingPlan)} - {activeDays.length} dias - {targetSummary.exerciseCount} ejercicios</p>
-        <div className="cycle-summary-line">
-          <div><span>Volumen registrado</span><strong>{formatKg(summary.volumeTotal)}</strong></div>
-          <div><span>Reps registradas</span><strong>{summary.totalReps}</strong></div>
-          <div><span>Semanas</span><strong>{weeksRegistered}</strong></div>
-        </div>
-        <div className="cycle-management-actions">
-          <button className="button secondary" type="button" onClick={editCurrentCycle}>
-            <Pencil size={16} />
-            Modificar ciclo actual
-          </button>
-          <button className="button danger-solid" type="button" onClick={requestDeleteCycle}>
-            <Trash2 size={16} />
-            Eliminar ciclo
-          </button>
-        </div>
-      </div>
-
-      <div className="card wide new-cycle-card">
-        <p className="eyebrow">Crear nuevo ciclo de entrenamiento</p>
-        <h3>Finalizaremos tu ciclo actual y guardaremos su resumen en Historial ciclo de entrenamiento para que puedas revisarlo cuando quieras.</h3>
-        <button className="start-button compact" type="button" onClick={requestNewCycle}>
-          Crear nuevo ciclo de entrenamiento
-        </button>
-      </div>
-
-    </section>
-  );
-}
-
-function ConfirmDeleteCycleModal({
-  isBusy,
-  onCancel,
-  onConfirm,
-}: {
-  isBusy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Eliminar ciclo actual">
-      <div className="card confirm-modal">
-        <h2>¿Eliminar ciclo actual?</h2>
-        <p>Este ciclo dejará de estar visible en tu cuenta. Los datos asociados no se mostrarán en tu progreso actual.</p>
-        <p>Esta acción no se puede deshacer desde la aplicación.</p>
-        <div className="modal-actions">
-          <button className="button secondary" type="button" onClick={onCancel} disabled={isBusy}>Cancelar</button>
-          <button className="button danger-solid" type="button" onClick={onConfirm} disabled={isBusy}>
-            {isBusy ? "Eliminando..." : "Sí, eliminar ciclo"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ConfirmNewCycleModal({
-  isBusy,
-  onCancel,
-  onConfirm,
-}: {
-  isBusy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirmar nuevo ciclo">
-      <div className="card confirm-modal">
-        <h2>¿Estas seguro?</h2>
-        <p>Si decides crear un nuevo ciclo de entrenamiento, finalizaremos el ciclo actual que tienes registrado.</p>
-        <div className="modal-actions">
-          <button className="button danger-solid" type="button" onClick={onCancel} disabled={isBusy}>No</button>
-          <button className="button success-solid" type="button" onClick={onConfirm} disabled={isBusy}>
-            {isBusy ? "Finalizando..." : "Si"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ConfirmRoutineUpdateModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirmar modificacion de rutina">
-      <div className="card confirm-modal">
-        <h2>Actualizar rutina</h2>
-        <p>Si modificas esta rutina, se actualizará tu ciclo de entrenamiento actual. Los días eliminados dejarán de aparecer en el ciclo. ¿Quieres continuar?</p>
-        <div className="modal-actions">
-          <button className="button secondary" type="button" onClick={onCancel}>Cancelar</button>
-          <button className="button success-solid" type="button" onClick={onConfirm}>Sí, actualizar rutina</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RoutineSuccessModal({ onConfirm }: { onConfirm: () => void }) {
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Registro exitoso">
-      <div className="card confirm-modal success-modal">
-        <div className="success-icon">
-          <Save size={22} />
-        </div>
-        <h3>Registro exitoso</h3>
-        <p>Tu rutina quedó guardada correctamente. Ahora puedes revisar el panel principal y comenzar a seguir tu progreso.</p>
-        <button className="button success-solid" type="button" onClick={onConfirm}>
-          OK
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function InitialTrainingScreen({
   day,
   setDay,
@@ -5241,7 +4254,7 @@ function InitialTrainingScreen({
           <div className="cycle-select-field">
             <span>Selecciona días de entrenamiento</span>
             <div className="cycle-chip-grid days">
-              {setupDays.map((item) => (
+              {TRAINING_DAY_LABELS.map((item) => (
                 <button
                   className={`cycle-chip ${plannedDays.includes(item) ? "active" : ""} ${day === item ? "current" : ""} ${configuredDays.includes(item) ? "configured" : ""}`}
                   key={item}
@@ -5327,158 +4340,6 @@ function InitialTrainingScreen({
           </button>
         </div>
         {visibleMessage ? <p className="setup-message">{visibleMessage}</p> : null}
-      </div>
-    </section>
-  );
-}
-
-function TrainingReadinessScreen({
-  onSubmit,
-  onSkip,
-  isSaving,
-  error,
-}: {
-  onSubmit: (value: Omit<TrainingReadiness, "skipped">) => void | Promise<void>;
-  onSkip: () => void | Promise<void>;
-  isSaving: boolean;
-  error: string;
-}) {
-  const [values, setValues] = useState({
-    motivation: 4,
-    hydration: 4,
-    sleep: 4,
-    energy: 4,
-  });
-  const questions = [
-    { key: "motivation", label: "Motivación", detail: "Qué tantas ganas tienes de entrenar hoy." },
-    { key: "hydration", label: "Hidratación", detail: "Qué tan bien hidratado sientes tu cuerpo." },
-    { key: "sleep", label: "Sueño", detail: "Qué tan reparador fue tu descanso." },
-    { key: "energy", label: "Energía física", detail: "Qué tan preparado te sientes para rendir." },
-  ] as const;
-
-  return (
-    <section className="screen">
-      <div className="card wide readiness-card">
-        <div className="setup-section-heading">
-          <p className="eyebrow">Antes de empezar</p>
-          <h3>¿Cómo llegas hoy?</h3>
-        </div>
-        <div className="readiness-list">
-          {questions.map((question) => (
-            <div className="readiness-row" key={question.key}>
-              <div>
-                <div className="readiness-title-row">
-                  <strong>{question.label}</strong>
-                  <span>{values[question.key]}/7</span>
-                </div>
-                <p>{question.detail}</p>
-              </div>
-              <div className="readiness-slider-wrap">
-                <input
-                  aria-label={question.label}
-                  className="readiness-slider"
-                  disabled={isSaving}
-                  max={7}
-                  min={1}
-                  type="range"
-                  value={values[question.key]}
-                  onChange={(event) => setValues((current) => ({ ...current, [question.key]: Number(event.target.value) }))}
-                />
-                <div className="readiness-slider-scale" aria-hidden="true">
-                  {[1, 2, 3, 4, 5, 6, 7].map((score) => (
-                    <span key={score}>{score}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="two-cols">
-          <button className="button secondary" type="button" onClick={onSkip} disabled={isSaving}>
-            {isSaving ? "Guardando..." : "Omitir por hoy"}
-          </button>
-          <button className="button" type="button" onClick={() => onSubmit(values)} disabled={isSaving}>
-            {isSaving ? "Guardando..." : "Empezar entrenamiento"}
-          </button>
-        </div>
-        {error ? <p className="setup-message">{error}</p> : null}
-      </div>
-    </section>
-  );
-}
-
-function TrainingStartScreen({
-  day,
-  routine,
-  exercises,
-  targetSummary,
-  routineDays,
-  switchDay,
-  editRoutine,
-  startTraining,
-  isStartingTraining,
-  notice,
-}: {
-  day: string;
-  routine: string;
-  exercises: ExerciseTemplate[];
-  targetSummary: { totalWeight: number; volume: number; reps: number; exerciseCount: number };
-  routineDays: string[];
-  switchDay: (day: string) => void;
-  editRoutine: () => void;
-  startTraining: () => void;
-  isStartingTraining: boolean;
-  notice: string;
-}) {
-  return (
-    <section className="screen">
-      <div className="card wide day-switcher-card">
-        <div className="section-heading">
-          <div>
-            <h3>Selecciona rutina o día</h3>
-            <p className="eyebrow">Cambia entre tus días registrados para iniciar el entrenamiento.</p>
-          </div>
-        </div>
-        <div className="routine-day-pills">
-          {routineDays.map((item) => (
-            <button
-              key={item}
-              className={`routine-day-pill configured ${item === day ? "active" : ""}`}
-              type="button"
-              onClick={() => switchDay(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="card wide training-start-card">
-        <div className="training-start-header">
-          <div>
-            <p className="eyebrow">Entrenamiento del día {day}</p>
-            <h2>{routine}</h2>
-          </div>
-          <button className="icon-button" type="button" aria-label="Editar rutina semanal" onClick={editRoutine}>
-            <Pencil size={17} />
-          </button>
-        </div>
-        <p>Cuando estés listo, inicia el entrenamiento. Primero haremos un formulario de motivación rápido y luego verás tus ejercicios.</p>
-        <RoutineMetricGrid targetSummary={targetSummary} />
-        <div className="training-start-preview">
-          {exercises.slice(0, 3).map((exercise) => (
-            <div key={exercise.id}>
-              <strong>{exercise.name}</strong>
-              <span>{exercise.targetSets} series · {exercise.targetReps} reps · {formatKg(exercise.baseWeight)}</span>
-            </div>
-          ))}
-        </div>
-        <div className="training-start-actions">
-          <button className="start-button" type="button" onClick={startTraining} disabled={isStartingTraining}>
-            {isStartingTraining ? "Verificando..." : "Iniciar entrenamiento"}
-          </button>
-        </div>
-        {notice ? <p className="setup-message">{notice}</p> : null}
       </div>
     </section>
   );
@@ -5715,530 +4576,6 @@ function GuidedTrainingScreen({
   );
 }
 
-function ExerciseLastPerformancePanel({
-  presentation,
-  exerciseId,
-  observationPresentation,
-  observationValue,
-  onObservationChange,
-}: {
-  presentation: ExerciseLastPerformancePresentation;
-  exerciseId: string;
-  observationPresentation: ExerciseLastObservationPresentation;
-  observationValue: string;
-  onObservationChange: (value: string) => void;
-}) {
-  const observationFieldId = `exercise-observation-${exerciseId}`;
-  const hasCurrentObservation = observationValue.trim().length > 0;
-  return (
-    <div className="exercise-reference-card" key={exerciseId}>
-      <div className="exercise-reference-header">
-        <span>Referencia de hoy</span>
-      </div>
-
-      <div className="exercise-reference-block objective">
-        <p className="exercise-reference-label">Objetivo</p>
-        <strong className="exercise-reference-value">{presentation.objectiveText}</strong>
-      </div>
-
-      <div className={`exercise-reference-block detail ${presentation.status}`}>
-        {presentation.seriesRows.length > 0 ? (
-          <details className="exercise-series-details" key={`series-${exerciseId}`}>
-            <summary>
-              <span>{presentation.seriesDetailTitle}</span>
-              <ChevronDown size={16} aria-hidden="true" />
-            </summary>
-            <div className="exercise-series-detail-list">
-              {presentation.seriesRows.map((row) => (
-                <div className="exercise-series-detail-row" key={`${row.label}-${row.value}`}>
-                  <span>{row.label}</span>
-                  <strong>{row.value}</strong>
-                </div>
-              ))}
-            </div>
-          </details>
-        ) : (
-          <>
-            <p className="exercise-reference-label">{presentation.lastHeaderText}</p>
-            {presentation.status === "loading" ? (
-              <div className="exercise-performance-skeleton" aria-label="Cargando historial del ejercicio" />
-            ) : (
-              <strong className="exercise-reference-value muted">{presentation.lastSummaryText}</strong>
-            )}
-          </>
-        )}
-      </div>
-
-      <div className="exercise-reference-block goal">
-        <p className="exercise-reference-label">Meta de hoy</p>
-        <strong className="exercise-reference-value">{presentation.todayGoalText}</strong>
-      </div>
-
-      <details className="exercise-reference-block observation" key={`observation-${exerciseId}`}>
-        <summary>
-          <span>{hasCurrentObservation ? "Observación registrada" : "Añadir nuevo comentario"}</span>
-          <ChevronDown size={16} aria-hidden="true" />
-        </summary>
-        <div className="exercise-observation-content">
-          <p className="exercise-reference-label">Observación del ejercicio</p>
-
-          <div className="exercise-observation-history">
-            <p className="exercise-observation-history-label">{observationPresentation.historyLabel}</p>
-            {observationPresentation.status === "loading" ? (
-              <div className="exercise-performance-skeleton" aria-label="Cargando observación anterior" />
-            ) : (
-              <p className="exercise-observation-history-text">{observationPresentation.historyText}</p>
-            )}
-          </div>
-
-          <label className="exercise-observation-field" htmlFor={observationFieldId}>
-            <span className="exercise-observation-field-label">Añadir nuevo comentario</span>
-            <textarea
-              id={observationFieldId}
-              className="exercise-observation-textarea"
-              rows={3}
-              value={observationValue}
-              onChange={(event) => onObservationChange(event.target.value)}
-            />
-            <span className="exercise-observation-hint">
-              Registra sensaciones, técnica o algún detalle para tu próxima sesión.
-            </span>
-          </label>
-        </div>
-      </details>
-    </div>
-  );
-}
-
-function SeriesResult({ entry }: { entry: ExerciseMetrics }) {
-  const result = buildExerciseCurrentResultPresentation({
-    totalReps: entry.totalReps,
-    targetTotalReps: entry.targetTotalReps,
-    completedSets: entry.completedSets,
-    targetSets: entry.targetSets,
-    actualWeight: entry.weight,
-    targetWeight: entry.previousWeight,
-  });
-
-  return (
-    <div className={`series-result session-summary ${result.tone}`}>
-      <p className="series-result-label">Resumen de tu sesión</p>
-      <div className="session-summary-hero">
-        <strong>{result.headline}</strong>
-        <span>{result.message}</span>
-      </div>
-      <div className="session-summary-grid">
-        {result.items.map((item) => (
-          <div className={`session-summary-item ${item.tone}`} key={item.label}>
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-            <em>{item.detail}</em>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-function ComparisonScreenV2({
-  exercises,
-  metrics,
-  currentWeek,
-  routineDays,
-  selectedDay,
-  setSelectedDay,
-}: {
-  exercises: ExerciseTemplate[];
-  metrics: ExerciseMetrics[];
-  currentWeek: number;
-  routineDays: string[];
-  selectedDay: string;
-  setSelectedDay: (day: string) => void;
-}) {
-  const [selectedExerciseId, setSelectedExerciseId] = useState("");
-  const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
-  const activeDay = routineDays.includes(selectedDay) ? selectedDay : routineDays[0] ?? selectedDay;
-  const comparisonModel = useMemo(() => buildWeeklyExerciseComparisonModel({
-    plannedExercises: exercises,
-    entries: metrics,
-    selectedDay: activeDay,
-    selectedExerciseId,
-    selectedWeek,
-    currentWeek,
-  }), [activeDay, currentWeek, exercises, metrics, selectedExerciseId, selectedWeek]);
-
-  useEffect(() => {
-    if (comparisonModel.selectedExerciseId && comparisonModel.selectedExerciseId !== selectedExerciseId) {
-      setSelectedExerciseId(comparisonModel.selectedExerciseId);
-    }
-  }, [comparisonModel.selectedExerciseId, selectedExerciseId]);
-
-  useEffect(() => {
-    if (comparisonModel.selectedWeek !== selectedWeek) {
-      setSelectedWeek(comparisonModel.selectedWeek);
-    }
-  }, [comparisonModel.selectedWeek, selectedWeek]);
-
-  return (
-    <section className="screen weekly-comparison-screen" data-section="weekly-comparison">
-      <div className="weekly-comparison-shell">
-        <div className="weekly-comparison-section select-day-section">
-          <div>
-            <h3>Selecciona el día</h3>
-            <p>Cambia entre tus días registrados para revisar tu progreso.</p>
-          </div>
-          <label className="weekly-comparison-select" aria-label="Seleccionar día de entrenamiento">
-            <select
-              value={activeDay}
-              onChange={(event) => {
-                setSelectedDay(event.target.value);
-                setSelectedExerciseId("");
-                setSelectedWeek(null);
-              }}
-            >
-              {routineDays.map((day) => (
-                <option key={day} value={day}>{day}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <section className="weekly-comparison-section">
-          <h3>Rutina registrada {comparisonModel.selectedDay}</h3>
-          <p className="weekly-routine-name">{comparisonModel.plannedRoutine ?? "Sin rutina registrada"}</p>
-        </section>
-
-        <section className="weekly-comparison-section">
-          <h3>Rutina de entrenamiento registrada</h3>
-          <p>Selecciona dentro de la tabla el ejercicio para obtener más detalles.</p>
-          <div className="weekly-plan-table" role="table" aria-label="Rutina planificada del día">
-            <div role="rowgroup">
-              <div className="weekly-plan-row heading" role="row">
-                <span role="columnheader">Ejercicios</span>
-                <span role="columnheader">Series</span>
-                <span role="columnheader">Reps</span>
-                <span role="columnheader">KG</span>
-              </div>
-            </div>
-            <div role="rowgroup">
-              {comparisonModel.plannedExercises.length > 0 ? comparisonModel.plannedExercises.map((exercise) => (
-                <div
-                  className={`weekly-plan-row ${exercise.isSelected ? "active" : ""}`}
-                  role="row"
-                  key={exercise.exerciseId}
-                  onClick={() => {
-                    setSelectedExerciseId(exercise.exerciseId);
-                    setSelectedWeek(null);
-                  }}
-                >
-                  <span role="cell">
-                    <button
-                      className="weekly-plan-row-button"
-                      type="button"
-                      aria-pressed={exercise.isSelected}
-                      onClick={() => {
-                        setSelectedExerciseId(exercise.exerciseId);
-                        setSelectedWeek(null);
-                      }}
-                    >
-                      {exercise.name}
-                    </button>
-                  </span>
-                  <span role="cell">{exercise.targetSets}</span>
-                  <span role="cell">{exercise.targetReps}</span>
-                  <span role="cell">{formatDecimalEs(exercise.baseWeight)}</span>
-                </div>
-              )) : (
-                <div className="weekly-comparison-empty">No hay ejercicios configurados para este día.</div>
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section className="weekly-comparison-section">
-          <div className="weekly-results-heading">
-            <h3>Tus resultados</h3>
-            {comparisonModel.availableWeeks.length > 0 ? (
-              <label className="weekly-comparison-select week-select" aria-label="Seleccionar semana para comparar">
-                <select
-                  value={comparisonModel.selectedWeek ?? ""}
-                  onChange={(event) => setSelectedWeek(Number(event.target.value))}
-                >
-                  {comparisonModel.availableWeeks.map((week) => (
-                    <option key={week} value={week}>Semana {week}</option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-          </div>
-          <WeeklyResultsPanel model={comparisonModel} />
-        </section>
-
-        <WeeklyMetricProgressCard
-          title="Compara los KG de tus ejercicios"
-          helper="Selecciona un ejercicio para saber cómo vas evolucionando semana a semana."
-          model={comparisonModel}
-          metric="kg"
-        />
-
-        <WeeklyMetricProgressCard
-          title="Compara las repeticiones de tus ejercicios"
-          helper="Selecciona un ejercicio para saber cómo vas evolucionando semana a semana."
-          model={comparisonModel}
-          metric="reps"
-        />
-      </div>
-    </section>
-  );
-}
-
-function WeeklyResultsPanel({ model }: { model: WeeklyExerciseComparisonModel }) {
-  const baseline = model.resultComparison.baseline;
-  const effective = model.resultComparison.effective;
-
-  if (!model.selectedExercise) {
-    return <div className="weekly-comparison-empty">Selecciona un día con ejercicios para revisar resultados.</div>;
-  }
-
-  if (!baseline) {
-    return (
-      <div className="weekly-results-card">
-        <p className="weekly-results-kicker">Este es tu ejercicio registrado</p>
-        <strong>{model.selectedExercise.name} <span>{model.selectedExercise.targetSets} x {model.selectedExercise.targetReps} · {formatKg(model.selectedExercise.baseWeight)}</span></strong>
-        <div className="weekly-comparison-empty">Aún no hay registros reales para este ejercicio. Cuando completes una semana, podremos mostrar tu evolución.</div>
-      </div>
-    );
-  }
-
-  const isFirstReferenceOnly = model.emptyState === "insufficient_chart_data";
-  const firstReferenceCopy = model.availableWeeks.length <= 1
-    ? "Esta es tu primera referencia registrada. Cuando completes otra semana, podremos comparar tu evolución."
-    : "Esta es tu primera semana registrada para este ejercicio. Selecciona una semana posterior para comparar tu evolución.";
-
-  return (
-    <div className="weekly-results-card">
-      <p className="weekly-results-kicker">Este es tu ejercicio registrado</p>
-      <strong>{model.selectedExercise.name} <span>{model.selectedExercise.targetSets} x {model.selectedExercise.targetReps} · {formatKg(model.selectedExercise.baseWeight)}</span></strong>
-      {model.isUsingFallbackBaseline ? (
-        <p className="weekly-results-note">Usaremos tu primera semana registrada como punto de partida.</p>
-      ) : null}
-      {isFirstReferenceOnly ? (
-        <div className="weekly-comparison-empty">{firstReferenceCopy}</div>
-      ) : (
-        <div className="weekly-results-grid">
-          <WeeklySeriesColumn title={`Semana ${baseline.week}`} record={baseline} />
-          <WeeklySeriesColumn title={`Semana ${effective?.week ?? "—"}`} record={effective} />
-        </div>
-      )}
-      <p className="weekly-results-note">Primer registro vs semana elegida</p>
-    </div>
-  );
-}
-
-function WeeklySeriesColumn({ title, record }: { title: string; record: WeeklyExerciseComparisonModel["resultComparison"]["baseline"] }) {
-  if (!record) {
-    return (
-      <div className="weekly-series-column">
-        <span>{title}</span>
-        <div className="weekly-comparison-empty compact">Sin registro real.</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="weekly-series-column">
-      <span>{title}</span>
-      <small>{formatDate(record.date)}</small>
-      {record.reps.map((reps, index) => (
-        <div className="weekly-series-pill" key={`${record.entryId}-${index}`}>
-          <span>S{index + 1}:</span>
-          <strong>{formatKg(record.weight)} · {reps} reps</strong>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function WeeklyMetricProgressCard({
-  title,
-  helper,
-  model,
-  metric,
-}: {
-  title: string;
-  helper: string;
-  model: WeeklyExerciseComparisonModel;
-  metric: "kg" | "reps";
-}) {
-  const summary = metric === "kg" ? model.kgSummary : model.repsSummary;
-  const series = metric === "kg" ? model.kgChartSeries : model.repsChartSeries;
-  const chartData = series.map((point) => ({ label: point.label, value: point.value, date: point.date }));
-  const hasEnoughChartData = series.length > 1;
-  const unit = metric === "kg" ? "kg" : "reps";
-
-  return (
-    <section className="weekly-comparison-section weekly-metric-card">
-      <h3>{title}</h3>
-      <p>{helper}</p>
-      <div className="weekly-selected-exercise">{model.selectedExercise?.name ?? "Sin ejercicio seleccionado"}</div>
-
-      {hasEnoughChartData ? (
-        <div className="weekly-chart-box">
-          <ResponsiveContainer width="100%" height={210}>
-            <ReLineChart data={chartData} margin={{ top: 18, right: 18, bottom: 8, left: 0 }}>
-              <CartesianGrid stroke="rgba(220,231,255,.12)" />
-              <XAxis dataKey="label" stroke="#9CA8B8" />
-              <YAxis stroke="#9CA8B8" width={38} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(value) => [`${value} ${unit}`, metric === "kg" ? "Peso" : "Reps"]} labelFormatter={(label) => `${label}`} />
-              <Line type="monotone" dataKey="value" stroke="#3C7AFF" strokeWidth={3} dot={{ r: 5, strokeWidth: 2 }} activeDot={{ r: 7 }} />
-            </ReLineChart>
-          </ResponsiveContainer>
-        </div>
-      ) : (
-        <div className="weekly-comparison-empty">Aún no hay datos suficientes para graficar este ejercicio.</div>
-      )}
-
-      <p className="weekly-chart-copy">
-        {metric === "kg"
-          ? "El gráfico muestra cómo cambia la carga registrada para este ejercicio durante el ciclo de entrenamiento."
-          : "El gráfico muestra cómo cambian las repeticiones registradas para este ejercicio durante el ciclo de entrenamiento."}
-      </p>
-
-      <WeeklyMetricSummaryView summary={summary} model={model} metric={metric} />
-    </section>
-  );
-}
-
-function WeeklyMetricSummaryView({
-  summary,
-  model,
-  metric,
-}: {
-  summary: WeeklyExerciseMetricSummary;
-  model: WeeklyExerciseComparisonModel;
-  metric: "kg" | "reps";
-}) {
-  const baseline = model.resultComparison.baseline;
-  const effective = model.resultComparison.effective;
-  const differenceLabel = formatMetricDifference(summary.difference, metric);
-  const toneClass = summary.tone === "positive" ? "positive" : summary.tone === "negative" ? "danger" : "neutral";
-
-  if (summary.status === "unavailable" || !baseline || !effective) {
-    return <div className="weekly-comparison-empty">Sin historial suficiente para este ejercicio.</div>;
-  }
-
-  if (model.emptyState === "insufficient_chart_data") {
-    return (
-      <div className="weekly-comparison-empty">
-        {model.availableWeeks.length <= 1
-          ? "Esta es tu primera referencia registrada para este ejercicio. Cuando registres otra semana, podremos mostrar tu evolución."
-          : "Esta es tu primera semana registrada para este ejercicio. Selecciona una semana posterior para ver la evolución."}
-      </div>
-    );
-  }
-
-  return (
-    <div className={`weekly-metric-summary ${metric === "reps" ? "reps-summary" : "kg-summary"}`}>
-      <div>
-        <h4>Cómo iniciaste</h4>
-        <strong>{metric === "kg" ? formatKg(baseline.weight) : baseline.repsLabel}</strong>
-        <span>Fecha inicio</span>
-        <small>{formatDate(baseline.date)}</small>
-      </div>
-      <div className="weekly-metric-divider" aria-hidden="true" />
-      <div>
-        <h4>Actualmente</h4>
-        <strong>{metric === "kg" ? formatKg(effective.weight) : effective.repsLabel}</strong>
-        <span>Fecha actual</span>
-        <small>{formatDate(effective.date)}</small>
-      </div>
-      <p className={`weekly-metric-difference ${toneClass}`}>{differenceLabel}</p>
-      {metric === "kg" && summary.difference === 0 ? (
-        <p className="weekly-metric-insight">Aún no hay diferencias en peso. Apenas registres una variación, la mostraremos aquí.</p>
-      ) : (
-        <p className="weekly-metric-insight">{buildMetricInsight(summary.difference, metric)}</p>
-      )}
-    </div>
-  );
-}
-
-function RoutineMetricGrid({
-  targetSummary,
-  exerciseLabel = "Ejercicios total",
-}: {
-  targetSummary: { totalWeight: number; volume: number; reps: number; exerciseCount: number };
-  exerciseLabel?: string;
-}) {
-  return (
-    <div className="metric-grid wide dashboard-metric-grid routine-metric-grid">
-      <div className="metric">
-        <div className="metric-title-row">
-          <span>KG totales de la rutina</span>
-          <Dumbbell size={18} />
-        </div>
-        <strong>{formatKg(targetSummary.totalWeight)}</strong>
-      </div>
-      <div className="metric">
-        <div className="metric-title-row">
-          <span>Total reps</span>
-          <Activity size={18} />
-        </div>
-        <strong>{targetSummary.reps}</strong>
-      </div>
-      <div className="metric">
-        <div className="metric-title-row">
-          <span>{exerciseLabel}</span>
-          <CalendarDays size={18} />
-        </div>
-        <strong>{targetSummary.exerciseCount}</strong>
-      </div>
-    </div>
-  );
-}
-
-function MetricGrid({ summary }: { summary: ReturnType<typeof calculateWeeklySummary> }) {
-  return (
-    <div className="metric-grid wide dashboard-metric-grid">
-      <div className="metric">
-        <div className="metric-title-row">
-          <span>Volumen de trabajo</span>
-          <Dumbbell size={18} />
-        </div>
-        <strong>{formatKg(summary.volumeTotal)}</strong>
-        <TrendValue value={summary.volumePercentage} suffix="%" />
-      </div>
-      <div className="metric">
-        <div className="metric-title-row">
-          <span>Total reps</span>
-          <Activity size={18} />
-        </div>
-        <strong>{summary.totalReps}</strong>
-        <TrendValue value={summary.repsDifference} />
-      </div>
-      <div className="metric">
-        <div className="metric-title-row">
-          <span>Ejercicios</span>
-          <CalendarDays size={18} />
-        </div>
-        <strong>{summary.exerciseCount}</strong>
-        <TrendValue value={summary.exerciseDifference} />
-      </div>
-    </div>
-  );
-}
-
-function TrendValue({ value, suffix = "" }: { value: number; suffix?: string }) {
-  const tone = value > 0 ? "positive" : value < 0 ? "danger" : "neutral";
-  const Icon = value > 0 ? ArrowUp : value < 0 ? ArrowDown : ArrowRight;
-
-  return (
-    <span className={`trend ${tone}`}>
-      <Icon size={12} strokeWidth={3} />
-      {formatSigned(value)}
-      {suffix}
-    </span>
-  );
-}
-
 function TextField({
   name,
   label,
@@ -6294,15 +4631,15 @@ function createSetupDayState(): SetupDayState {
 }
 
 function createSetupByDay(): Record<string, SetupDayState> {
-  return Object.fromEntries(setupDays.map((day) => [day, createSetupDayState()]));
+  return Object.fromEntries(TRAINING_DAY_LABELS.map((day) => [day, createSetupDayState()]));
 }
 
-function getConfiguredSetupDays(setupByDay: Record<string, SetupDayState>) {
-  return setupDays.filter((day) => setupByDay[day]?.rows.some((row) => row.name.trim()));
+function getConfiguredSetupDays(setupByDay: Record<string, SetupDayState>): string[] {
+  return TRAINING_DAY_LABELS.filter((day) => setupByDay[day]?.rows.some((row) => row.name.trim()));
 }
 
 function hasSetupDraftContent(setupByDay: Record<string, SetupDayState>) {
-  return setupDays.some((day) => {
+  return TRAINING_DAY_LABELS.some((day) => {
     const state = setupByDay[day];
     return Boolean(state?.routineName.trim() || state?.rows.some((row) => row.name.trim() || row.sets || row.reps || row.weight));
   });
@@ -6344,9 +4681,9 @@ function createTrainingPlanFromPersistedCycle(cycle: PersistedTrainingCycle, fal
       : fallback.cycleType;
   const goal = readNonEmptyString(cycle.goal) ?? readSnapshotString(snapshot, "goal") ?? getCycleObjectiveValue(fallback);
   const duration = readSnapshotNumber(snapshot, "duration") || readSnapshotNumber(snapshot, "durationWeeks");
-  const trainingDays = readSnapshotStringList(snapshot, "trainingDays", setupDays.length).length > 0
-    ? readSnapshotStringList(snapshot, "trainingDays", setupDays.length)
-    : readSnapshotStringList(nestedPlan, "trainingDays", setupDays.length);
+  const trainingDays = readSnapshotStringList(snapshot, "trainingDays", TRAINING_DAY_LABELS.length).length > 0
+    ? readSnapshotStringList(snapshot, "trainingDays", TRAINING_DAY_LABELS.length)
+    : readSnapshotStringList(nestedPlan, "trainingDays", TRAINING_DAY_LABELS.length);
   const next: TrainingPlan = {
     ...fallback,
     cycleType,
@@ -6379,7 +4716,7 @@ function createCycleScopedPlanInput(
 ): CycleScopedPlanInput | null {
   const plannedDays = sortTrainingDaysByWeekOrder(
     (plan.trainingDays.length > 0 ? plan.trainingDays : ["Lunes"])
-      .filter((day) => setupDays.includes(day)),
+      .filter((day) => TRAINING_DAY_LABELS.some((label) => label === day)),
   );
   const routines = plannedDays.flatMap((day, dayIndex) => {
     const state = setupByDay[day] ?? createSetupDayState();
@@ -6483,7 +4820,7 @@ function normalizeTrainingPlan(value: unknown): TrainingPlan {
 
   const parsed = value as Partial<TrainingPlan>;
   const trainingDays = Array.isArray(parsed.trainingDays)
-    ? parsed.trainingDays.filter((day) => setupDays.includes(day))
+    ? parsed.trainingDays.filter((day) => TRAINING_DAY_LABELS.some((label) => label === day))
     : fallback.trainingDays;
 
   return {
@@ -6507,7 +4844,7 @@ function normalizeSetupByDay(value: unknown) {
   if (!value || typeof value !== "object") return fallback;
 
   const parsed = value as Record<string, Partial<SetupDayState> | undefined>;
-  return Object.fromEntries(setupDays.map((day) => {
+  return Object.fromEntries(TRAINING_DAY_LABELS.map((day) => {
     const state = parsed[day];
     const rows = Array.isArray(state?.rows)
       ? state.rows.map((row) => ({
@@ -6539,7 +4876,7 @@ function loadWorkoutDraft(mode: DataMode, userId?: string) {
     userId,
     version: WORKOUT_DRAFT_VERSION,
     maxAgeMs: WORKOUT_DRAFT_MAX_AGE_MS,
-    setupDays,
+    setupDays: TRAINING_DAY_LABELS,
     normalizeReadiness: normalizeTrainingReadiness,
     normalizeExerciseDrafts,
   });
@@ -6616,7 +4953,7 @@ function mergeTrainingPlanWithExercises(plan: TrainingPlan, exercises: ExerciseT
   return {
     ...plan,
     trainingDays: sortTrainingDaysByWeekOrder(
-      plan.trainingDays.filter((day) => setupDays.includes(day)),
+      plan.trainingDays.filter((day) => TRAINING_DAY_LABELS.some((label) => label === day)),
     ),
   };
 }
@@ -6635,33 +4972,9 @@ function getCycleDurationOptions(cycleType: TrainingCycleId) {
   return [{ value: 1, label: "1 día" }];
 }
 
-function getCycleObjectiveValue(plan: TrainingPlan) {
-  if (plan.cycleType === "macro") return plan.macroObjective;
-  if (plan.cycleType === "meso") return plan.mesoObjective;
-  if (plan.cycleType === "micro") return plan.microFocus;
-  return plan.sessionFocus;
-}
-
-function getCycleDurationValue(plan: TrainingPlan) {
-  if (plan.cycleType === "macro") return plan.macroDurationMonths;
-  if (plan.cycleType === "meso") return plan.mesoDurationWeeks;
-  if (plan.cycleType === "micro") return plan.microDurationWeeks;
-  return plan.sessionDurationDays;
-}
-
-function getCycleTitle(plan: TrainingPlan) {
-  const cycle = trainingCycles.find((item) => item.id === plan.cycleType);
-  return `${cycle?.title ?? "Ciclo"} · ${getCycleObjectiveValue(plan)}`;
-}
-
 function getCycleTypeTitle(plan: TrainingPlan) {
   const cycle = trainingCycles.find((item) => item.id === plan.cycleType);
   return cycle?.title ?? "Ciclo";
-}
-
-function getCycleDurationLabel(plan: TrainingPlan) {
-  const unit = plan.cycleType === "macro" ? "meses" : plan.cycleType === "session" ? "dia" : "semanas";
-  return `${getCycleDurationValue(plan)} ${unit}`;
 }
 
 function summarizeCycleProgress(cycle: TrainingCycleSnapshot) {
@@ -6744,10 +5057,6 @@ function createCycleSuggestions(progress: ReturnType<typeof summarizeCycleProgre
   return suggestions;
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value));
-}
-
 function readSnapshotNumber(snapshot: PersistedTrainingCycleSnapshot, key: string) {
   const value = snapshot[key];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -6780,7 +5089,7 @@ function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<st
   const byDay = createSetupByDay();
 
   for (const exercise of dedupeExercisesByDayAndRoutine(exercises)) {
-    const day = exercise.day && setupDays.includes(exercise.day) ? exercise.day : "Lunes";
+    const day = exercise.day && TRAINING_DAY_LABELS.some((label) => label === exercise.day) ? exercise.day : "Lunes";
     const current = byDay[day];
     const isEmpty = current.rows.every((row) => !row.name.trim());
 
@@ -6887,21 +5196,6 @@ function normalizeReadinessScore(value: unknown) {
   return Number.isInteger(score) && score >= 1 && score <= 7 ? score : undefined;
 }
 
-function calculateTargetSummary(exercises: ExerciseTemplate[]) {
-  return exercises.reduce(
-    (summary, exercise) => {
-      const reps = exercise.targetSets * exercise.targetReps;
-      return {
-        totalWeight: summary.totalWeight + exercise.baseWeight,
-        volume: summary.volume + reps * exercise.baseWeight,
-        reps: summary.reps + reps,
-        exerciseCount: summary.exerciseCount + 1,
-      };
-    },
-    { totalWeight: 0, volume: 0, reps: 0, exerciseCount: 0 },
-  );
-}
-
 function calculateWeeklyCompletedTrainingDays({
   plannedDays,
   exercises,
@@ -6909,7 +5203,7 @@ function calculateWeeklyCompletedTrainingDays({
   sessions,
   usesCycleScopedSessions,
 }: {
-  plannedDays: string[];
+  plannedDays: readonly string[];
   exercises: ExerciseTemplate[];
   entries: ExerciseEntry[];
   sessions: TrainingSession[];
@@ -6954,7 +5248,7 @@ function getTodayTrainingNotificationContext({
   sessions,
   usesCycleScopedSessions,
 }: {
-  plannedDays: string[];
+  plannedDays: readonly string[];
   exercises: ExerciseTemplate[];
   entries: ExerciseEntry[];
   sessions: TrainingSession[];
@@ -7021,80 +5315,11 @@ function normalizeCycleScopedEntriesByCalendarWeek(entries: ExerciseEntry[], pla
   }));
 }
 
-function findDashboardSessionForDay(
-  sessions: TrainingSession[],
-  dayExercises: ExerciseTemplate[],
-  expectedDate: string,
-  plannedDay: TrainingDayCode,
-  usesCycleScopedSessions: boolean,
-) {
-  return sessions.find((candidate) => {
-    if (!usesCycleScopedSessions) {
-      return candidate.plannedDate === expectedDate || candidate.plannedDay === plannedDay;
-    }
-
-    const candidateEntries = findDashboardEntries(candidate.entries, dayExercises, expectedDate, true);
-    if (candidateEntries.length > 0) return true;
-
-    const cycleDayIds = new Set(dayExercises.map((exercise) => exercise.cycleDayId).filter(Boolean));
-    return Boolean(candidate.cycleDayId && cycleDayIds.has(candidate.cycleDayId)) || candidate.plannedDay === plannedDay;
-  });
-}
-
-function findDashboardEntries(
-  entries: ExerciseEntry[],
-  dayExercises: ExerciseTemplate[],
-  expectedDate: string,
-  usesCycleScopedSessions: boolean,
-) {
-  if (!expectedDate || dayExercises.length === 0) return [];
-  const dayExerciseIds = new Set(dayExercises.map((exercise) => getDashboardExerciseIdentity(exercise, usesCycleScopedSessions)));
-  const shouldMatchEntryDate = !usesCycleScopedSessions;
-  return entries.filter((entry) => (
-    (!shouldMatchEntryDate || normalizeEntryDateKey(entry.date) === expectedDate) &&
-    dayExerciseIds.has(getDashboardEntryExerciseIdentity(entry, usesCycleScopedSessions))
-  ));
-}
-
-function getDashboardExerciseIdentity(exercise: ExerciseTemplate, usesCycleScopedSessions: boolean) {
-  return usesCycleScopedSessions ? exercise.trainingCycleExerciseId ?? exercise.id : exercise.id;
-}
-
-function getDashboardEntryExerciseIdentity(entry: ExerciseEntry, usesCycleScopedSessions: boolean) {
-  return usesCycleScopedSessions ? entry.trainingCycleExerciseId ?? entry.exerciseId : entry.exerciseId;
-}
-
-function getDashboardCoachEntries(
-  entries: ExerciseEntry[],
-  dayExercises: ExerciseTemplate[],
-  usesCycleScopedSessions: boolean,
-) {
-  if (dayExercises.length === 0) return [];
-
-  const exerciseIds = new Set(dayExercises.map((exercise) => getDashboardExerciseIdentity(exercise, usesCycleScopedSessions)));
-  const lineageIds = new Set(dayExercises.map((exercise) => exercise.exerciseLineageId?.trim()).filter(Boolean));
-  const legacyIds = new Set(dayExercises.map((exercise) => exercise.sourceLegacyExerciseId?.trim()).filter(Boolean));
-
-  return entries.filter((entry) => {
-    const identity = getDashboardEntryExerciseIdentity(entry, usesCycleScopedSessions);
-    if (exerciseIds.has(identity)) return true;
-
-    const lineageId = entry.exerciseLineageId?.trim();
-    if (lineageId && lineageIds.has(lineageId)) return true;
-
-    return legacyIds.has(entry.exerciseId);
-  });
-}
-
-function normalizeEntryDateKey(value: string) {
-  return value.slice(0, 10);
-}
-
 function getVisibleTrainingDay(exercises: ExerciseTemplate[], current: string) {
   if (exercises.some((exercise) => exercise.day === current)) return current;
 
   const today = new Intl.DateTimeFormat("es-CL", { weekday: "long" }).format(new Date());
-  const normalizedToday = setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(today.toLowerCase()));
+  const normalizedToday = TRAINING_DAY_LABELS.find((day) => removeAccents(day.toLowerCase()) === removeAccents(today.toLowerCase()));
   if (normalizedToday && exercises.some((exercise) => exercise.day === normalizedToday)) return normalizedToday;
 
   return exercises.find((exercise) => exercise.day)?.day ?? current;
@@ -7102,77 +5327,19 @@ function getVisibleTrainingDay(exercises: ExerciseTemplate[], current: string) {
 
 function getCalendarTrainingDay() {
   const today = new Intl.DateTimeFormat("es-CL", { weekday: "long" }).format(new Date());
-  const normalizedToday = setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(today.toLowerCase()));
+  const normalizedToday = TRAINING_DAY_LABELS.find((day) => removeAccents(day.toLowerCase()) === removeAccents(today.toLowerCase()));
   return normalizedToday ?? "Lunes";
-}
-
-function getCurrentSantiagoWeekDates(reference = new Date()) {
-  const todayKey = getSantiagoDateKey(reference);
-  const todayDate = parseDateKeyAsLocalNoon(todayKey);
-  const todayName = getTrainingDayFromDate(todayKey);
-  const todayIndex = Math.max(0, setupDays.indexOf(todayName));
-  const mondayDate = new Date(todayDate);
-  mondayDate.setDate(todayDate.getDate() - todayIndex);
-
-  return Object.fromEntries(setupDays.map((day, index) => {
-    const date = new Date(mondayDate);
-    date.setDate(mondayDate.getDate() + index);
-    return [day, getLocalDateKey(date)];
-  }));
-}
-
-function getSantiagoDateKey(value: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Santiago",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(value);
-  const year = parts.find((part) => part.type === "year")?.value ?? "1970";
-  const month = parts.find((part) => part.type === "month")?.value ?? "01";
-  const day = parts.find((part) => part.type === "day")?.value ?? "01";
-  return `${year}-${month}-${day}`;
-}
-
-function getTrainingDayFromDate(value: string) {
-  const date = parseDateKeyAsLocalNoon(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const weekday = new Intl.DateTimeFormat("es-CL", {
-    weekday: "long",
-    timeZone: "America/Santiago",
-  }).format(date);
-  return setupDays.find((day) => removeAccents(day.toLowerCase()) === removeAccents(weekday.toLowerCase())) ?? "";
-}
-
-function getLocalDateKey(value: Date) {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function getTrainingDayCode(day: string): TrainingDayCode {
-  const mapping: Record<string, TrainingDayCode> = {
-    Lunes: "monday",
-    Martes: "tuesday",
-    Miércoles: "wednesday",
-    Jueves: "thursday",
-    Viernes: "friday",
-    Sábado: "saturday",
-    Domingo: "sunday",
-  };
-  return mapping[day] ?? "monday";
 }
 
 function getSetupDayFromTrainingDayCode(dayCode: TrainingDayCode) {
   const mapping: Record<TrainingDayCode, string> = {
-    monday: setupDays[0],
-    tuesday: setupDays[1],
-    wednesday: setupDays[2],
-    thursday: setupDays[3],
-    friday: setupDays[4],
-    saturday: setupDays[5],
-    sunday: setupDays[6],
+    monday: TRAINING_DAY_LABELS[0],
+    tuesday: TRAINING_DAY_LABELS[1],
+    wednesday: TRAINING_DAY_LABELS[2],
+    thursday: TRAINING_DAY_LABELS[3],
+    friday: TRAINING_DAY_LABELS[4],
+    saturday: TRAINING_DAY_LABELS[5],
+    sunday: TRAINING_DAY_LABELS[6],
   };
   return mapping[dayCode];
 }
@@ -7196,34 +5363,11 @@ function getLegacyWeekNumberForTrainingDate(sessions: TrainingSession[], entries
   return previousWeeks.length > 0 ? Math.max(...previousWeeks) + 1 : 1;
 }
 
-function getRoutineDays(exercises: ExerciseTemplate[]) {
-  const days = setupDays.filter((day) => exercises.some((exercise) => (exercise.day ?? "Lunes") === day));
-  return days.length > 0 ? days : ["Lunes"];
-}
-
-function getActiveRoutineDays(exercises: ExerciseTemplate[], plan: TrainingPlan) {
-  const routineDays = getRoutineDays(exercises);
-  const plannedDays = sortTrainingDaysByWeekOrder(
-    plan.trainingDays.filter((day) => setupDays.includes(day)),
-  );
-  if (plannedDays.length === 0) return routineDays;
-
-  const activeDays = plannedDays.filter((day) => exercises.some((exercise) => (exercise.day ?? "Lunes") === day));
-  const persistedRoutineDays = routineDays.filter((day) => !activeDays.includes(day));
-  return sortTrainingDaysByWeekOrder(
-    activeDays.length > 0 ? [...activeDays, ...persistedRoutineDays] : routineDays,
-  );
-}
-
 function sameDayList(left: string[], right: string[]) {
-  const normalizedLeft = sortTrainingDaysByWeekOrder(left.filter((day) => setupDays.includes(day)));
-  const normalizedRight = sortTrainingDaysByWeekOrder(right.filter((day) => setupDays.includes(day)));
+  const normalizedLeft = sortTrainingDaysByWeekOrder(left.filter((day) => TRAINING_DAY_LABELS.some((label) => label === day)));
+  const normalizedRight = sortTrainingDaysByWeekOrder(right.filter((day) => TRAINING_DAY_LABELS.some((label) => label === day)));
   if (normalizedLeft.length !== normalizedRight.length) return false;
   return normalizedLeft.every((day, index) => day === normalizedRight[index]);
-}
-
-function removeAccents(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 function getPasswordRecoveryRedirectUrl() {
@@ -7318,10 +5462,3 @@ function formatReadinessNote(value: TrainingReadiness | null) {
   if (value.skipped) return "Formulario de motivación omitido: usuario no quiso registrar.";
   return `Formulario de motivación: motivacion ${value.motivation}/7, hidratacion ${value.hydration}/7, sueño ${value.sleep}/7, energia ${value.energy}/7.`;
 }
-
-const tooltipStyle = {
-  background: "#101B27",
-  border: "1px solid rgba(220,231,255,.14)",
-  borderRadius: 8,
-  color: "#FFFFFF",
-};

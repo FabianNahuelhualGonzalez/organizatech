@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
 const cycleIdStaticSource = readFileSync("src/lib/training/training-cycle-id.ts", "utf8");
 const planModelStaticSource = readFileSync("src/lib/training/training-plan-model.ts", "utf8");
+const presentationStaticSource = readFileSync("src/features/training-plan/model/training-cycle-presentation.ts", "utf8");
 const packageStaticSource = readFileSync("package.json", "utf8");
 
 assert.match(cycleIdStaticSource, /export const TRAINING_CYCLE_IDS = \[/);
@@ -38,10 +39,13 @@ assert.doesNotMatch(appStaticSource, /^\s*type TrainingCycleId\s*=/m);
 assert.doesNotMatch(appStaticSource, /^\s*interface TrainingPlan\s*\{/m);
 assert.doesNotMatch(appStaticSource, /^\s*function isTrainingCycleId\s*\(/m);
 
-const catalogStart = appStaticSource.indexOf("const trainingCycles = [");
-const catalogEnd = appStaticSource.indexOf("const macroObjectives", catalogStart);
-assert.ok(catalogStart >= 0 && catalogEnd > catalogStart, "el catalogo visual debe permanecer en React");
-const catalogSource = appStaticSource.slice(catalogStart, catalogEnd);
+assert.match(
+  appStaticSource,
+  /import \{ TRAINING_CYCLE_PRESENTATIONS as trainingCycles \} from "@\/features\/training-plan\/model\/training-cycle-presentation";/,
+  "React consume la fuente única de presentación de ciclos",
+);
+assert.doesNotMatch(appStaticSource, /^\s*const trainingCycles\s*=\s*\[/m);
+const catalogSource = presentationStaticSource;
 
 const catalogIds = [...catalogSource.matchAll(/\bid: "(macro|meso|micro|session)"/g)]
   .map((match) => match[1]);
