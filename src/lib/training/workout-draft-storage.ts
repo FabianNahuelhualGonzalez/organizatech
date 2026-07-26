@@ -21,6 +21,15 @@ export interface PendingWorkoutReadinessLink {
   trainingSessionId: string;
 }
 
+export type ActiveWorkoutReadinessContext = {
+  workoutAttemptId: string;
+  cycleId: string;
+  cycleDayId: string;
+  workoutStartedAt: string;
+  plannedDay: string | null;
+  plannedDate: string | null;
+};
+
 export interface WorkoutDraftStorageRecord<TReadiness, TExerciseDrafts> {
   version: number;
   updatedAt: number;
