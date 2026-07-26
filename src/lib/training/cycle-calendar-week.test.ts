@@ -111,7 +111,7 @@ async function run() {
   assert.doesNotMatch(appSource, /usesCycleScopedSessions \|\| session\.calendarWeekStart === currentWeekStart/, "dashboard scoped no permite todas las sesiones historicas");
   assert.doesNotMatch(appSource, /usesCycleScopedSessions \|\| normalizeEntryDateKey\(entry\.date\) === expectedDate/, "dashboard scoped no mezcla entries historicas globales");
   assert.match(appSource, /usesCycleScopedSessions\s*\?\s*sessionEntries/, "dashboard scoped usa entries de la sesion semanal seleccionada");
-  assert.match(appSource, /const dashboardCarouselDays = hasRoutinePlan \? routineDays : setupDays;/, "carrusel usa dias configurados por el usuario cuando hay plan");
+  assert.match(appSource, /const dashboardCarouselDays = hasRoutinePlan \? routineDays : TRAINING_DAY_LABELS;/, "carrusel usa dias configurados por el usuario cuando hay plan y la constante canonica como fallback");
 }
 
 run().catch((error) => {

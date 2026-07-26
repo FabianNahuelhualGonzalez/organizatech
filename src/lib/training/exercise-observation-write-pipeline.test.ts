@@ -7,6 +7,7 @@ import {
 } from "@/lib/data/repository";
 
 const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+const exercisePanelSource = readFileSync("src/features/active-workout/components/ExerciseLastPerformancePanel.tsx", "utf8");
 const repositorySource = readFileSync("src/lib/data/repository.ts", "utf8");
 const cycleScopedRepositorySource = readFileSync(
   "src/lib/training/cycle-scoped-training-repository.ts",
@@ -139,7 +140,7 @@ function testDemoLocalPreservesObservation() {
 // 15. [OBS-2B2] La casilla visual de observacion ya existe y esta conectada a draft.observation.
 function testVisualObservationInputExistsAndIsConnectedToDraft() {
   assert.match(
-    appSource,
+    exercisePanelSource,
     /<textarea\s*\n\s*id=\{observationFieldId\}/,
     "debe existir un <textarea> identificado por observationFieldId dentro del panel de referencia",
   );
@@ -149,7 +150,7 @@ function testVisualObservationInputExistsAndIsConnectedToDraft() {
     "el valor pasado al panel debe provenir de draft.observation",
   );
   assert.match(
-    appSource,
+    exercisePanelSource,
     /value=\{observationValue\}/,
     "el textarea debe estar controlado por observationValue (que a su vez viene de draft.observation)",
   );
@@ -204,7 +205,7 @@ function testHistoryNeverAutofillsDraft() {
 
 // [OBS-2B2 / PASO 7 caso 17] El historico no se usa como placeholder del textarea.
 function testHistoryIsNotUsedAsPlaceholder() {
-  const textareaBlock = appSource.match(/<textarea[\s\S]*?\/>/);
+  const textareaBlock = exercisePanelSource.match(/<textarea[\s\S]*?\/>/);
   assert.ok(textareaBlock, "no se encontro el bloque JSX del textarea de observacion");
   assert.doesNotMatch(
     textareaBlock![0],
@@ -215,7 +216,7 @@ function testHistoryIsNotUsedAsPlaceholder() {
 
 // [OBS-2B2 / PASO 7 caso 18] El bloque de observacion no reutiliza notes.
 function testObservationBlockDoesNotUseNotes() {
-  const observationBlock = appSource.match(
+  const observationBlock = exercisePanelSource.match(
     /<details className="exercise-reference-block observation"[\s\S]*?<\/details>/,
   );
   assert.ok(observationBlock, "no se encontro el bloque JSX de la observacion del ejercicio");
@@ -229,7 +230,7 @@ function testObservationBlockDoesNotUseNotes() {
 // [OBS-2B2 / PASO 7 caso 20] El texto se renderiza como texto plano, sin HTML/Markdown interpretado.
 function testObservationTextRendersAsPlainText() {
   assert.doesNotMatch(
-    appSource,
+    `${appSource}\n${exercisePanelSource}`,
     /dangerouslySetInnerHTML/,
     "la funcionalidad de observacion no debe introducir dangerouslySetInnerHTML en ningun punto",
   );
@@ -245,7 +246,7 @@ function testObservationInputIsNotInsideSeriesMap() {
     "el textarea de observacion no debe estar dentro del grid/map de series",
   );
   assert.match(
-    appSource,
+    exercisePanelSource,
     /function ExerciseLastPerformancePanel\(\{[\s\S]*?<textarea/,
     "el textarea de observacion debe vivir dentro de ExerciseLastPerformancePanel, a nivel ejercicio",
   );

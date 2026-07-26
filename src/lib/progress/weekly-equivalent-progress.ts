@@ -1,8 +1,12 @@
 import type { ExerciseEntry, TrainingSession } from "@/lib/progress/types";
 import { formatKg, roundDecimal } from "@/lib/progress/weight-format";
+import { removeAccents } from "@/lib/training/exercise-name-normalization";
+import {
+  getSantiagoDateKey,
+  normalizeEntryDateKey,
+} from "@/lib/training/santiago-training-date";
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
-const santiagoTimeZone = "America/Santiago";
 const weekDayLabels = ["L", "M", "X", "J", "V", "S", "D"] as const;
 const plannedDayOrder = ["Lunes", "Martes", "Miercoles", "Miércoles", "Jueves", "Viernes", "Sabado", "Sábado", "Domingo"];
 
@@ -240,23 +244,6 @@ function addDays(dateKey: string, days: number) {
   return formatEpochDayAsDateKey(parseDateKeyToEpochDay(dateKey) + days);
 }
 
-function normalizeEntryDateKey(value: string) {
-  return value.slice(0, 10);
-}
-
-function getSantiagoDateKey(value: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: santiagoTimeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(value);
-  const year = parts.find((part) => part.type === "year")?.value ?? "1970";
-  const month = parts.find((part) => part.type === "month")?.value ?? "01";
-  const day = parts.find((part) => part.type === "day")?.value ?? "01";
-  return `${year}-${month}-${day}`;
-}
-
 function parseDateKeyToEpochDay(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) throw new Error(`Fecha invalida: ${value}`);
@@ -298,8 +285,4 @@ function getDayNameFromOffset(offset: number) {
 
 function getShortDayLabel(day: string) {
   return weekDayLabels[getDayOffset(day)] ?? day.slice(0, 1).toUpperCase();
-}
-
-function removeAccents(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }

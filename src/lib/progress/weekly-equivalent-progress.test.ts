@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import type { ExerciseEntry, TrainingSession } from "@/lib/progress/types";
 import {
@@ -299,6 +300,25 @@ assert.equal(formatProgressPercentage(125.5), "+125,5%");
 assert.equal(formatProgressPercentage(-0), "0%");
 assert.equal(formatProgressPercentage(Number.NaN), "—");
 assert.equal(formatProgressPercentage(Number.POSITIVE_INFINITY), "—");
+
+const weeklyEquivalentProgressSource = readFileSync("src/lib/progress/weekly-equivalent-progress.ts", "utf8");
+assert.match(
+  weeklyEquivalentProgressSource,
+  /from "@\/lib\/training\/santiago-training-date";/,
+  "weekly equivalent progress consume la fecha canonica neutral",
+);
+assert.match(
+  weeklyEquivalentProgressSource,
+  /from "@\/lib\/training\/exercise-name-normalization";/,
+  "weekly equivalent progress consume la normalizacion canonica neutral",
+);
+for (const helperName of ["normalizeEntryDateKey", "getSantiagoDateKey", "removeAccents"]) {
+  assert.doesNotMatch(
+    weeklyEquivalentProgressSource,
+    new RegExp(`^\\s*function ${helperName}\\b`, "m"),
+    `${helperName} no conserva una implementacion privada en Progress`,
+  );
+}
 
 console.log("weekly-equivalent-progress tests passed");
 

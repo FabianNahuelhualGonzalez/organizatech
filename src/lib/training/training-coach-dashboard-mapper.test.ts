@@ -442,18 +442,18 @@ import {
 }
 
 {
-  const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
-  const scopedEntriesDeclaration = appSource.indexOf(
+  const dashboardSource = readFileSync("src/features/dashboard/components/dashboard-screen.tsx", "utf8");
+  const scopedEntriesDeclaration = dashboardSource.indexOf(
     "const activeCoachEntries = getDashboardCoachEntries(entries, activeDayData.exercises, usesCycleScopedSessions);",
   );
-  const coachInputStart = appSource.indexOf("const coachInput = useMemo(() => buildTrainingCoachDashboardInput({");
-  const coachFeedbackStart = appSource.indexOf("const coachFeedback = useMemo", coachInputStart);
+  const coachInputStart = dashboardSource.indexOf("const coachInput = useMemo(() => buildTrainingCoachDashboardInput({");
+  const coachFeedbackStart = dashboardSource.indexOf("const coachFeedback = useMemo", coachInputStart);
 
   assert.ok(scopedEntriesDeclaration >= 0, "el historial del Coach se filtra con los ejercicios del día activo");
   assert.ok(coachInputStart > scopedEntriesDeclaration, "el día activo se resuelve antes de construir el input");
   assert.ok(coachFeedbackStart > coachInputStart, "el input puro se construye antes del feedback");
 
-  const coachInputSource = appSource.slice(coachInputStart, coachFeedbackStart);
+  const coachInputSource = dashboardSource.slice(coachInputStart, coachFeedbackStart);
   assert.match(coachInputSource, /activeDay: activeCarouselDay/);
   assert.match(coachInputSource, /registeredExercises: activeDayData\.registeredCount/);
   assert.match(coachInputSource, /plannedExercises: activeDayData\.plannedCount/);
