@@ -203,6 +203,7 @@ import {
   translateDailyReadinessError,
   type TrainingDailyReadinessRecord,
 } from "@/lib/training/training-daily-readiness-repository";
+import type { TrainingReadiness } from "@/lib/training/training-readiness-draft";
 import {
   linkTrainingWorkoutReadinessSession,
   saveTrainingWorkoutReadiness,
@@ -421,14 +422,6 @@ interface TrainingPlan {
   trainingDays: string[];
   microFocus: string;
   sessionFocus: string;
-}
-
-interface TrainingReadiness {
-  motivation?: number;
-  hydration?: number;
-  sleep?: number;
-  energy?: number;
-  skipped: boolean;
 }
 
 interface TrainingCycleSnapshot {
