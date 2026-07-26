@@ -320,6 +320,13 @@ import {
   sortTrainingDaysByWeekOrder,
   TRAINING_DAY_LABELS,
 } from "@/lib/training/training-day-order";
+import { isTrainingCycleId } from "@/lib/training/training-cycle-id";
+import type { TrainingCycleId } from "@/lib/training/training-cycle-id";
+import type { TrainingPlan } from "@/lib/training/training-plan-model";
+import type {
+  SetupDayState,
+  SetupExerciseRow,
+} from "@/lib/training/training-routine-draft";
 import {
   buildTrainingTopbarMeta,
   resolveActiveCarouselIndex,
@@ -368,8 +375,12 @@ const trainingCycles = [
     detail:
       "Es la unidad más pequeña del sistema. Contiene ejercicios, series, repeticiones, pesos, intensidad y métricas asociadas a ese día.",
   },
-] as const;
-type TrainingCycleId = (typeof trainingCycles)[number]["id"];
+] as const satisfies ReadonlyArray<{
+  id: TrainingCycleId;
+  title: string;
+  summary: string;
+  detail: string;
+}>;
 const macroObjectives = ["Fuerza", "Hipertrofia", "Recomposición", "Definición", "Rendimiento", "Salud"];
 const mesoObjectives = ["Fuerza", "Hipertrofia", "Potencia", "Resistencia", "Descarga", "Definición"];
 const microFocusOptions = ["Progresión", "Mantenimiento", "Descarga", "Técnica"];
@@ -394,35 +405,7 @@ const objectiveDescriptions: Record<string, string> = {
 const macroDurations = [6, 7, 8, 9, 10, 11];
 const mesoDurations = [3, 4, 5, 6];
 
-interface SetupExerciseRow {
-  id: string;
-  sourceExerciseId?: string;
-  exerciseLineageId?: string | null;
-  name: string;
-  sets: number;
-  reps: number;
-  weight: string;
-}
-
-interface SetupDayState {
-  routineName: string;
-  rows: SetupExerciseRow[];
-}
-
 type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>>;
-
-interface TrainingPlan {
-  cycleType: TrainingCycleId;
-  macroObjective: string;
-  macroDurationMonths: number;
-  mesoObjective: string;
-  mesoDurationWeeks: number;
-  microDurationWeeks: number;
-  sessionDurationDays: number;
-  trainingDays: string[];
-  microFocus: string;
-  sessionFocus: string;
-}
 
 interface TrainingCycleSnapshot {
   id: string;
@@ -6636,10 +6619,6 @@ function mergeTrainingPlanWithExercises(plan: TrainingPlan, exercises: ExerciseT
       plan.trainingDays.filter((day) => setupDays.includes(day)),
     ),
   };
-}
-
-function isTrainingCycleId(value: unknown): value is TrainingCycleId {
-  return typeof value === "string" && trainingCycles.some((cycle) => cycle.id === value);
 }
 
 function getCycleObjectiveOptions(cycleType: TrainingCycleId) {
