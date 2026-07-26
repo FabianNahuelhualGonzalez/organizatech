@@ -245,6 +245,7 @@ import {
   type ExerciseLastObservationPresentation,
 } from "@/lib/training/exercise-last-observation-presentation";
 import { buildExerciseCurrentResultPresentation } from "@/lib/training/exercise-current-result-presentation";
+import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
 import {
   acquireWorkoutSaveLock,
   buildCurrentWorkoutSavePlan,
@@ -257,6 +258,7 @@ import {
   getDraftUserKey,
   saveWorkoutDraft as saveStoredWorkoutDraft,
   loadWorkoutDraft as loadStoredWorkoutDraft,
+  type ActiveWorkoutReadinessContext,
   type PendingWorkoutReadinessLink,
   type WorkoutDraftStorageRecord,
 } from "@/lib/training/workout-draft-storage";
@@ -408,15 +410,6 @@ interface SetupDayState {
 
 type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>>;
 
-type ActiveWorkoutReadinessContext = {
-  workoutAttemptId: string;
-  cycleId: string;
-  cycleDayId: string;
-  workoutStartedAt: string;
-  plannedDay: string | null;
-  plannedDate: string | null;
-};
-
 interface TrainingPlan {
   cycleType: TrainingCycleId;
   macroObjective: string;
@@ -428,14 +421,6 @@ interface TrainingPlan {
   trainingDays: string[];
   microFocus: string;
   sessionFocus: string;
-}
-
-interface ExerciseDraft {
-  weight: string;
-  rir: string;
-  reps: Array<number | "">;
-  registered: boolean;
-  observation: string;
 }
 
 interface TrainingReadiness {

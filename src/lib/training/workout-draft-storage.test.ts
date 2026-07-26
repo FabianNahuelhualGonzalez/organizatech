@@ -12,6 +12,7 @@ import {
   getWorkoutDraftKey as getStoredWorkoutDraftKey,
   loadWorkoutDraft,
   saveWorkoutDraft,
+  type ActiveWorkoutReadinessContext,
   type PendingWorkoutReadinessLink,
   type WorkoutDraftStorageLike,
   type WorkoutDraftStorageRecord,
@@ -132,6 +133,33 @@ function load(storage: WorkoutDraftStorageLike, createStartedAt = () => SECOND_S
 }
 
 async function run() {
+  {
+    const activeContext = {
+      workoutAttemptId: "attempt-1",
+      cycleId: "cycle-1",
+      cycleDayId: "cycle-day-1",
+      workoutStartedAt: FIRST_STARTED_AT,
+      plannedDay: "wednesday",
+      plannedDate: "2026-06-18",
+    } satisfies ActiveWorkoutReadinessContext;
+    const contextWithoutPlan = {
+      ...activeContext,
+      plannedDay: null,
+      plannedDate: null,
+    } satisfies ActiveWorkoutReadinessContext;
+
+    assert.deepEqual(activeContext, {
+      workoutAttemptId: "attempt-1",
+      cycleId: "cycle-1",
+      cycleDayId: "cycle-day-1",
+      workoutStartedAt: FIRST_STARTED_AT,
+      plannedDay: "wednesday",
+      plannedDate: "2026-06-18",
+    });
+    assert.equal(contextWithoutPlan.plannedDay, null);
+    assert.equal(contextWithoutPlan.plannedDate, null);
+  }
+
   {
     const { storage } = createStorage();
     assert.equal(load(storage), null);
