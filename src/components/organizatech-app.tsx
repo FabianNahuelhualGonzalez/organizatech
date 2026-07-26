@@ -86,7 +86,6 @@ import {
   selectNotificationView,
 } from "@/lib/notifications/notification-selector";
 import {
-  SEEN_NOTIFICATIONS_MAX_RECORDS,
   markNotificationsSeen as transitionNotificationsSeen,
   resolveNotificationOpenIntent,
 } from "@/lib/notifications/notification-state";
@@ -131,7 +130,6 @@ import {
 } from "@/lib/progress/weekly-equivalent-progress";
 import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode, TrainingSession } from "@/lib/progress/types";
 import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
-import { getPublicErrorMessage } from "@/lib/errors/public-error";
 import {
   getActiveFlow,
   resetContextualNavigation,
@@ -157,9 +155,8 @@ import {
   getBrowserStorageScope,
   hasStoredPasswordRecoveryFlow,
   loadPasswordRecoveryFlow,
-  loadSeenNotificationRecords as loadStoredSeenNotificationRecords,
-  migrateLegacyBrowserStorageToDemo,
-  saveSeenNotificationRecords as saveStoredSeenNotificationRecords,
+  loadSeenNotificationRecordsFromBrowser as loadSeenNotificationRecords,
+  saveSeenNotificationRecordsFromBrowser as saveSeenNotificationRecords,
   startPasswordRecoveryFlow,
   type BrowserStorageScope,
 } from "@/lib/storage/browser-storage";
@@ -185,6 +182,7 @@ import {
   type SessionDataIdentity,
   type SessionDataRequestToken,
 } from "@/lib/session/session-data-epoch";
+import { translateTrainingCycleRepositoryError } from "@/lib/training/training-cycle-error";
 import {
   cancelTrainingCycle,
   completeTrainingCycle,
@@ -202,13 +200,13 @@ import {
 import {
   getDailyTrainingReadiness,
   saveDailyTrainingReadiness,
-  TrainingDailyReadinessRepositoryError,
+  translateDailyReadinessError,
   type TrainingDailyReadinessRecord,
 } from "@/lib/training/training-daily-readiness-repository";
 import {
   linkTrainingWorkoutReadinessSession,
   saveTrainingWorkoutReadiness,
-  TrainingWorkoutReadinessRepositoryError,
+  translateTrainingWorkoutReadinessError,
   type TrainingWorkoutReadinessPayload,
 } from "@/lib/training/training-workout-readiness-repository";
 import {
@@ -283,6 +281,7 @@ import {
 import {
   createWorkoutReadinessPendingLink,
   TrainingWorkoutReadinessLinkFlowError,
+  translateTrainingWorkoutReadinessLinkError,
 } from "@/lib/training/training-workout-readiness-link-flow";
 import {
   addCycleScopedTrainingDaysAndExercises,
@@ -290,7 +289,6 @@ import {
   createTrainingSessionWithCycleEntries,
   getCycleScopedTrainingSessionData,
   getCycleScopedTrainingPlan,
-  CycleScopedTrainingRepositoryError,
   type CycleScopedDay,
   type CycleScopedPlanInput,
   type CycleScopedTrainingSessionEntryInput,
@@ -4987,17 +4985,6 @@ function NotificationTrendingIcon() {
   );
 }
 
-function loadSeenNotificationRecords(scope: BrowserStorageScope) {
-  if (typeof window === "undefined") return [];
-  migrateLegacyBrowserStorageToDemo(window.localStorage);
-  return loadStoredSeenNotificationRecords(window.localStorage, scope, SEEN_NOTIFICATIONS_MAX_RECORDS);
-}
-
-function saveSeenNotificationRecords(records: SeenNotificationRecord[], scope: BrowserStorageScope) {
-  if (typeof window === "undefined") return;
-  saveStoredSeenNotificationRecords(window.localStorage, scope, records, SEEN_NOTIFICATIONS_MAX_RECORDS);
-}
-
 function EmptyDashboard({ startRegistration }: { startRegistration: () => void }) {
   return (
     <section className="empty-dashboard">
@@ -6830,70 +6817,6 @@ function readSnapshotStringList(snapshot: PersistedTrainingCycleSnapshot, key: s
   return value
     .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     .slice(0, limit);
-}
-
-function translateTrainingCycleRepositoryError(error: unknown) {
-  if (error instanceof CycleScopedTrainingRepositoryError) {
-    if (error.code === "session_required") return "Debes iniciar sesion para gestionar el plan del ciclo.";
-    if (error.code === "session_expired") return "Tu sesion expiro. Inicia sesion nuevamente.";
-    if (error.code === "invalid_plan") {
-      return getPublicErrorMessage(
-        error,
-        "No pudimos validar el plan de entrenamiento. Revisa los datos e intenta nuevamente.",
-      );
-    }
-    if (error.code === "active_cycle_exists") return "Ya existe un ciclo activo para tu cuenta.";
-    if (error.code === "permission_denied") return "No tienes permisos para gestionar este plan de ciclo.";
-    return "No pudimos completar la accion sobre el plan del ciclo.";
-  }
-
-  if (error instanceof TrainingCycleRepositoryError) {
-    if (error.code === "session_required") return "Debes iniciar sesión para gestionar ciclos.";
-    if (error.code === "session_expired") return "Tu sesión expiró. Inicia sesión nuevamente.";
-    if (error.code === "active_cycle_exists") return "Ya existe un ciclo activo para tu cuenta.";
-    if (error.code === "active_cycle_missing") return "No existe un ciclo activo para finalizar.";
-    if (error.code === "protected_cycle") return PROTECTED_ACTIVE_CYCLE_MESSAGE;
-    if (error.code === "permission_denied") return "No tienes permisos para acceder a este ciclo.";
-    return "No pudimos completar la acción sobre ciclos.";
-  }
-
-  return translatePersistenceError(error);
-}
-
-
-
-function translateTrainingWorkoutReadinessError(error: unknown) {
-  if (error instanceof TrainingWorkoutReadinessRepositoryError) {
-    if (error.code === "session_required") return "Inicia sesion para confirmar tu formulario de entrenamiento.";
-    if (error.code === "empty_response" || error.code === "multiple_rows" || error.code === "invalid_response") {
-      return "La respuesta del formulario de entrenamiento no tiene el formato esperado.";
-    }
-    return "No pudimos confirmar tu formulario de entrenamiento.";
-  }
-  return getPublicErrorMessage(
-    error,
-    "No pudimos confirmar tu formulario de entrenamiento. Intentalo nuevamente.",
-  );
-}
-
-function translateTrainingWorkoutReadinessLinkError(error: unknown) {
-  if (error instanceof TrainingWorkoutReadinessLinkFlowError) return error.message;
-  if (error instanceof TrainingWorkoutReadinessRepositoryError) {
-    if (error.code === "session_required") return "Inicia sesion para completar la vinculacion del entrenamiento.";
-    return "El entrenamiento quedo guardado, pero falta completar su vinculacion. Vuelve a intentar finalizar.";
-  }
-  return "El entrenamiento quedo guardado, pero falta completar su vinculacion. Vuelve a intentar finalizar.";
-}
-function translateDailyReadinessError(error: unknown) {
-  if (error instanceof TrainingDailyReadinessRepositoryError) {
-    if (error.code === "session_required") return "Debes iniciar sesion para registrar tu formulario diario.";
-    if (error.code === "session_expired") return "Tu sesion expiro. Inicia sesion nuevamente.";
-    if (error.code === "invalid_payload") return error.message;
-    if (error.code === "permission_denied") return "No tienes permisos para registrar este formulario.";
-    return "No pudimos confirmar tu formulario diario. Intentalo nuevamente.";
-  }
-
-  return translatePersistenceError(error);
 }
 
 function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<string, SetupDayState> {

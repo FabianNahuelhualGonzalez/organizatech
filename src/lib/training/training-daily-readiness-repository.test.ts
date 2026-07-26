@@ -5,6 +5,8 @@ import {
   getCalendarDateInTimeZone,
   normalizeDailyReadinessPayload,
   shouldShowDailyReadinessForm,
+  translateDailyReadinessError,
+  TrainingDailyReadinessRepositoryError,
   type TrainingDailyReadinessPayload,
   type TrainingDailyReadinessRecord,
 } from "./training-daily-readiness-repository";
@@ -172,6 +174,40 @@ assert.equal(
   getCalendarDateInTimeZone(new Date("2026-06-17T02:30:00.000Z"), "America/Santiago"),
   "2026-06-16",
   "UTC ya es miercoles mientras Santiago aun es martes",
+);
+
+// P2-H.2B: translateDailyReadinessError se movio aqui desde organizatech-app.tsx.
+// Paridad literal por cada codigo, textos y puntuacion exactos.
+assert.equal(
+  translateDailyReadinessError(new TrainingDailyReadinessRepositoryError("session_required", "x")),
+  "Debes iniciar sesion para registrar tu formulario diario.",
+);
+assert.equal(
+  translateDailyReadinessError(new TrainingDailyReadinessRepositoryError("session_expired", "x")),
+  "Tu sesion expiro. Inicia sesion nuevamente.",
+);
+assert.equal(
+  translateDailyReadinessError(new TrainingDailyReadinessRepositoryError("invalid_payload", "Formulario de motivacion invalido.")),
+  "Formulario de motivacion invalido.",
+  "invalid_payload retorna error.message tal cual, no un literal fijo",
+);
+assert.equal(
+  translateDailyReadinessError(new TrainingDailyReadinessRepositoryError("permission_denied", "x")),
+  "No tienes permisos para registrar este formulario.",
+);
+assert.equal(
+  translateDailyReadinessError(new TrainingDailyReadinessRepositoryError("unexpected", "x")),
+  "No pudimos confirmar tu formulario diario. Intentalo nuevamente.",
+);
+assert.equal(
+  translateDailyReadinessError(new Error("relation training_daily_readiness does not exist")),
+  "No pudimos completar la acción. Intenta nuevamente.",
+  "errores tecnicos no reconocidos delegan en translatePersistenceError",
+);
+assert.equal(
+  translateDailyReadinessError(new Error("JWT expired")),
+  "Tu sesión expiró. Inicia sesión nuevamente.",
+  "translatePersistenceError sigue reconociendo sesiones expiradas de Supabase",
 );
 
 console.log("Pruebas de readiness diario OK");

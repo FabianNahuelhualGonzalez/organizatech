@@ -1,3 +1,4 @@
+import { TrainingWorkoutReadinessRepositoryError } from "@/lib/training/training-workout-readiness-repository";
 import type { PendingWorkoutReadinessLink } from "@/lib/training/workout-draft-storage";
 
 export interface CreateWorkoutReadinessPendingLinkInput {
@@ -31,4 +32,13 @@ export function createWorkoutReadinessPendingLink(
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+export function translateTrainingWorkoutReadinessLinkError(error: unknown) {
+  if (error instanceof TrainingWorkoutReadinessLinkFlowError) return error.message;
+  if (error instanceof TrainingWorkoutReadinessRepositoryError) {
+    if (error.code === "session_required") return "Inicia sesion para completar la vinculacion del entrenamiento.";
+    return "El entrenamiento quedo guardado, pero falta completar su vinculacion. Vuelve a intentar finalizar.";
+  }
+  return "El entrenamiento quedo guardado, pero falta completar su vinculacion. Vuelve a intentar finalizar.";
 }
