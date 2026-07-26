@@ -323,6 +323,10 @@ import {
 import { isTrainingCycleId } from "@/lib/training/training-cycle-id";
 import type { TrainingCycleId } from "@/lib/training/training-cycle-id";
 import type { TrainingPlan } from "@/lib/training/training-plan-model";
+import type {
+  SetupDayState,
+  SetupExerciseRow,
+} from "@/lib/training/training-routine-draft";
 import {
   buildTrainingTopbarMeta,
   resolveActiveCarouselIndex,
@@ -400,21 +404,6 @@ const objectiveDescriptions: Record<string, string> = {
 };
 const macroDurations = [6, 7, 8, 9, 10, 11];
 const mesoDurations = [3, 4, 5, 6];
-
-interface SetupExerciseRow {
-  id: string;
-  sourceExerciseId?: string;
-  exerciseLineageId?: string | null;
-  name: string;
-  sets: number;
-  reps: number;
-  weight: string;
-}
-
-interface SetupDayState {
-  routineName: string;
-  rows: SetupExerciseRow[];
-}
 
 type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>>;
 
