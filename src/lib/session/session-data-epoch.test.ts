@@ -433,7 +433,12 @@ async function run() {
     refreshIndex,
   );
   const clearFormsIndex = handleAuthSource.indexOf("clearAuthForms();", staleGuardIndex);
-  const dashboardIndex = handleAuthSource.indexOf('setScreen("dashboard");', clearFormsIndex);
+  // P3-07B: la navegación final del login pasa por el controlador canónico (transición
+  // autoritativa con reset de historial), ya no por un setter directo de pantalla.
+  const dashboardIndex = handleAuthSource.indexOf(
+    'applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));',
+    clearFormsIndex,
+  );
   const orderedLoginSteps = [
     sessionResultIndex,
     applyIdentityIndex,
