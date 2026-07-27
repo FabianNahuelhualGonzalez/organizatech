@@ -9,7 +9,6 @@ import {
   Mail,
   Pencil,
   Save,
-  Trash2,
   UserPlus,
 } from "lucide-react";
 import {
@@ -47,6 +46,9 @@ import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard"
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
 import { ComparisonScreenV2 } from "@/features/progress/components/comparison-screen-v2";
 import { ConfirmRoutineUpdateModal } from "@/features/routine-builder/components/ConfirmRoutineUpdateModal";
+import { RoutineBuilderDayCard } from "@/features/routine-builder/components/RoutineBuilderDayCard";
+import { RoutineBuilderNameCard } from "@/features/routine-builder/components/RoutineBuilderNameCard";
+import { RoutineExerciseBuilderCard } from "@/features/routine-builder/components/RoutineExerciseBuilderCard";
 import { RoutineSuccessModal } from "@/features/routine-builder/components/RoutineSuccessModal";
 import { ConfirmDeleteCycleModal } from "@/features/training-plan/components/ConfirmDeleteCycleModal";
 import { ConfirmNewCycleModal } from "@/features/training-plan/components/ConfirmNewCycleModal";
@@ -4131,8 +4133,6 @@ function InitialTrainingScreen({
   const plannedDays = sortTrainingDaysByWeekOrder(
     trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [day],
   );
-  const completedPlannedDays = plannedDays.filter((item) => configuredDays.includes(item));
-  const currentStep = Math.max(1, plannedDays.indexOf(day) + 1);
   const remainingDays = plannedDays.filter((item) => item !== day && !configuredDays.includes(item));
   const isLastPendingDay = remainingDays.length === 0;
   const objectiveOptions = getCycleObjectiveOptions(trainingPlan.cycleType);
@@ -4193,78 +4193,30 @@ function InitialTrainingScreen({
         onToggleTrainingDay={toggleTrainingDay}
       />
 
-      <div className="setup-card routine-day-builder-card">
-        <div className="setup-section-heading">
-          <p className="eyebrow">Configura tus rutinas por día</p>
-          <h3>Rutina {currentStep} de {plannedDays.length} · {day}</h3>
-        </div>
-        <div className="routine-build-progress">
-          <span>{completedPlannedDays.length} de {plannedDays.length} días completados</span>
-          <div className="mini-progress-track">
-            <div className="mini-progress-fill" style={{ width: `${Math.round((completedPlannedDays.length / plannedDays.length) * 100)}%` }} />
-          </div>
-        </div>
-        <div className="routine-build-days">
-          {plannedDays.map((item) => (
-            <button
-              className={`routine-build-day ${item === day ? "current" : ""} ${configuredDays.includes(item) ? "done" : ""}`}
-              key={item}
-              type="button"
-              onClick={() => setDay(item)}
-            >
-              <strong>{item}</strong>
-              <span>{configuredDays.includes(item) ? "Listo" : item === day ? "Actual" : "Pendiente"}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <RoutineBuilderDayCard
+        plannedDays={plannedDays}
+        activeDay={day}
+        configuredDays={configuredDays}
+        onSelectDay={setDay}
+      />
 
-      <div className="setup-card routine-name-card">
-        <div className="setup-section-heading">
-          <p className="eyebrow">Rutina del día {day}</p>
-          <h3>Nombre de la rutina</h3>
-        </div>
-        <input
-          className="setup-name-input"
-          placeholder="Ej: Empuje, Jalón, Piernas"
-          value={routineName}
-          onChange={(event) => setRoutineName(event.target.value)}
-        />
-      </div>
+      <RoutineBuilderNameCard
+        day={day}
+        routineName={routineName}
+        onRoutineNameChange={setRoutineName}
+      />
 
-      <div className="setup-card exercise-builder-card">
-        <div className="setup-section-heading">
-          <p className="eyebrow">Rutina del día {day}</p>
-          <h3>Ejercicios a programar</h3>
-        </div>
-        <div className="setup-table">
-          <div className="setup-table-head">
-            <span>Nombre ejercicio</span>
-            <span>Series</span>
-            <span>Repeticiones</span>
-            <span>Kg</span>
-            <span />
-          </div>
-          {rows.map((row, index) => (
-            <div className="setup-row" key={row.id}>
-              <input placeholder={`Ejercicio ${index + 1}`} value={row.name} onChange={(event) => updateRow(row.id, "name", event.target.value)} />
-              <input type="number" min={1} placeholder="Series" value={row.sets || ""} onChange={(event) => updateRow(row.id, "sets", event.target.value)} />
-              <input type="number" min={1} placeholder="Reps" value={row.reps || ""} onChange={(event) => updateRow(row.id, "reps", event.target.value)} />
-              <input inputMode="decimal" placeholder="Kg" value={row.weight || ""} onChange={(event) => updateRow(row.id, "weight", event.target.value)} />
-              <button className="row-delete" type="button" aria-label="Eliminar ejercicio" onClick={() => removeRow(row.id)}>
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="setup-actions">
-          <button className="small-yellow-button" type="button" onClick={addRow}>Agregar más</button>
-          <button className="start-button compact" type="button" onClick={saveRoutine} disabled={isBusy}>
-            {isBusy ? "Guardando..." : isLastPendingDay ? "Finalizar registro de rutina" : "Guardar y continuar"}
-          </button>
-        </div>
-        {visibleMessage ? <p className="setup-message">{visibleMessage}</p> : null}
-      </div>
+      <RoutineExerciseBuilderCard
+        day={day}
+        rows={rows}
+        isBusy={isBusy}
+        isLastPendingDay={isLastPendingDay}
+        message={visibleMessage}
+        onRowChange={updateRow}
+        onAddRow={addRow}
+        onRemoveRow={removeRow}
+        onSave={saveRoutine}
+      />
     </section>
   );
 }
