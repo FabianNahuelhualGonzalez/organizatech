@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 /**
- * Contrato ESTÁTICO de integración parcial (P3-07A). No renderiza React, no ejecuta el componente.
- * Sucesor del contrato de preparación (P3-06): aquel verificaba que los 3 módulos existieran sin
- * estar cableados en el root. Este verifica el estado de integración PARCIAL alcanzado en P3-07A:
+ * Contrato ESTÁTICO de integración (P3-07A + P3-07B). No renderiza React, no ejecuta el
+ * componente. Sucesor del contrato de preparación (P3-06) y de su versión parcial (P3-07A).
+ * Con P3-07B, P3-06 puede considerarse COMPLETAMENTE integrada:
  *
- * INTEGRADO en esta rama:
+ * INTEGRADO desde P3-07A:
  *   - app-screen-resolver.ts: las 5 funciones (dashboard/comparación/routine-builder/active-workout/
  *     training-summary), reemplazando las 11 condiciones JSX equivalentes que existían en el root.
  *   - app-navigation-intent.ts: resolveMenuScreens, canGoBackFromScreen, resolveDayStateReset,
@@ -14,14 +14,14 @@ import { readFileSync } from "node:fs";
  *   - app-auth-screen-resolver.ts: solo resolveInitialAuthState (para screen/statusMessage/
  *     isAuthLoading iniciales). getInitialAuthScreen() fue eliminado del root por redundante.
  *
- * TODAVÍA PENDIENTE (reservado explícitamente para P3-07B, NO se afirma completo aquí):
- *   - resolveWorkoutCompletionScreen: NO integrado. finishCompletedWorkout() conserva su propio
- *     setScreen("dashboard") en un call site que no pasa por "training-summary" — mezclar ambos
- *     casos requiere resolver esa tercera rama primero (fuera de alcance de P3-07A).
- *   - Los 31 call sites directos de setScreen(...) en el root permanecen sin centralizar.
- *
- * Este contrato NO afirma que P3-06 esté "completamente terminado": dos piezas (un resolver
- * completo y toda la migración de setScreen) siguen pendientes, documentadas como tales.
+ * COMPLETADO en P3-07B:
+ *   - El antiguo resolveWorkoutCompletionScreen (que devolvía "training-summary"
+ *     incondicionalmente y no podía modelar el reintento de link pendiente que termina en
+ *     dashboard) fue ELIMINADO de app-navigation-intent.ts y reemplazado por
+ *     resolveWorkoutCompletionTransition en app-navigation-transition.ts, que modela los tres
+ *     flujos reales. finishCompletedWorkout() quedó como limpieza pura sin navegación.
+ *   - Los 31 setScreen directos fueron centralizados en el adaptador applyScreenTransition
+ *     (ver app-navigation-controller-contract.test.ts para los conteos exactos de setters).
  */
 
 function readSource(path: string): string {
@@ -38,6 +38,7 @@ const modules = {
   screenResolver: readSource("src/lib/navigation/app-screen-resolver.ts"),
   navigationIntent: readSource("src/lib/navigation/app-navigation-intent.ts"),
   authScreenResolver: readSource("src/lib/navigation/app-auth-screen-resolver.ts"),
+  navigationTransition: readSource("src/lib/navigation/app-navigation-transition.ts"),
 };
 
 // 1. Fuente canónica: exports esperados presentes en cada módulo (sin cambios respecto a P3-06).
@@ -50,8 +51,16 @@ assert.match(modules.screenResolver, /export function isTrainingSummaryScreenVal
 assert.match(modules.navigationIntent, /export function resolveMenuScreens\(/);
 assert.match(modules.navigationIntent, /export function canGoBackFromScreen\(/);
 assert.match(modules.navigationIntent, /export function resolveDayStateReset\(/);
-assert.match(modules.navigationIntent, /export function resolveWorkoutCompletionScreen\(/);
 assert.match(modules.navigationIntent, /export function resolveNotificationScrollTarget\(/);
+assert.doesNotMatch(
+  modules.navigationIntent,
+  /export function resolveWorkoutCompletionScreen\(/,
+  "resolveWorkoutCompletionScreen fue reemplazado en P3-07B por resolveWorkoutCompletionTransition (app-navigation-transition.ts)",
+);
+assert.match(modules.navigationTransition, /export function resolveWorkoutCompletionTransition\(/);
+assert.match(modules.navigationTransition, /export function createAuthNavigationReset\(/);
+assert.match(modules.navigationTransition, /export function createFlowScreenTransition\(/);
+assert.match(modules.navigationTransition, /export function resolvePasswordRecoveryRouteTransition\(/);
 
 assert.match(modules.authScreenResolver, /export function resolveInitialAuthScreen\(/);
 assert.match(modules.authScreenResolver, /export function resolveInitialAuthStatusMessage\(/);
@@ -101,7 +110,8 @@ assert.doesNotMatch(
   "la condicion JSX original de active-workout 'readiness' debe haberse eliminado",
 );
 
-// 6. app-navigation-intent: 4 de 5 funciones integradas; resolveWorkoutCompletionScreen pendiente.
+// 6. app-navigation-intent: las 4 funciones integradas; la finalización de entrenamiento
+//    pasa por resolveWorkoutCompletionTransition (P3-07B).
 assert.match(appSource, /const menuScreens = resolveMenuScreens\(primaryScreens, hasTrainingEntries, visibleCycleHistoryCount\);/);
 assert.doesNotMatch(appSource, /item === "historial-ciclos" && visibleCycleHistoryCount > 0/, "el filtro inline de menuScreens debe haberse eliminado del root");
 assert.match(appSource, /canGoBackFromScreen\(screen\)/);
@@ -114,9 +124,20 @@ assert.doesNotMatch(
 );
 assert.match(appSource, /resolveNotificationScrollTarget\(section \?\? null\)/);
 assert.doesNotMatch(appSource, /document\.querySelector<HTMLElement>\(`\[data-section="\$\{section\}"\]`\)/, "el selector inline debe haberse eliminado del root");
-assert.doesNotMatch(appSource, /resolveWorkoutCompletionScreen/, "resolveWorkoutCompletionScreen sigue pendiente de integrar (reservado para P3-07B)");
-assert.match(appSource, /function finishCompletedWorkout\(\) \{[\s\S]*?setScreen\("dashboard"\);\s*\n\s*\}/, "finishCompletedWorkout conserva su propio setScreen sin pasar por el resolver (P3-07B)");
-assert.match(appSource, /setScreen\("training-summary"\);/, "los setScreen(\"training-summary\") directos siguen sin centralizar (P3-07B)");
+assert.doesNotMatch(appSource, /resolveWorkoutCompletionScreen/, "el resolver extinto no debe reaparecer en el root");
+assert.match(appSource, /resolveWorkoutCompletionTransition\(\{ hasCompletionSummary: true \}\)/, "los dos guardados con summary deben decidir su destino via el resolver de transicion");
+assert.match(appSource, /resolveWorkoutCompletionTransition\(\{ hasCompletionSummary: false \}\)/, "el reintento de link pendiente (sin summary) debe decidir su destino via el resolver de transicion");
+assert.equal(
+  (appSource.match(/resolveWorkoutCompletionTransition\(/g) ?? []).length,
+  3,
+  "exactamente los tres flujos de finalizacion pasan por el resolver de transicion",
+);
+assert.doesNotMatch(
+  appSource,
+  /function finishCompletedWorkout\(\) \{[\s\S]{0,400}?setScreen\(/,
+  "finishCompletedWorkout es limpieza pura: la navegacion la decide el resolver y la aplica el adaptador (elimina la doble escritura dashboard→training-summary)",
+);
+assert.doesNotMatch(appSource, /setScreen\("training-summary"\)/, "no quedan setters directos hacia training-summary (P3-07B)");
 
 // 7. app-auth-screen-resolver: solo resolveInitialAuthState se integra; getPasswordRecoveryRouteState
 //    sigue siendo la unica fuente de datos, sin moverse ni modificarse.
@@ -130,10 +151,10 @@ assert.match(appSource, /function getPasswordRecoveryRouteState\(\): "none" \| "
 assert.doesNotMatch(appSource, /if \(recoveryState === "expired"\) return "recovery-expired";/, "la derivacion inline duplicada debe haberse eliminado del root");
 assert.doesNotMatch(appSource, /return "Validando sesión\.\.\.";/, "la derivacion inline duplicada de statusMessage debe haberse eliminado del root");
 
-// 8. Ninguno de los 3 módulos afirma ya "No integrado todavía" como si nada hubiese cambiado —
-//    ese texto describía la preparación P3-06 y ya no aplica a las piezas integradas en P3-07A.
-//    (Los módulos en sí no se modifican en esta rama; esta aserción documenta el contrato, no el
-//    contenido de los .ts, que siguen prestando servicio también a resolveWorkoutCompletionScreen,
-//    todavía sin consumidor.)
+// 8. Ningún módulo afirma ya estar "pendiente de integrar": con P3-07B la integración de
+//    P3-06 está completa y los docstrings deben reflejarlo.
+Object.entries(modules).forEach(([label, source]) => {
+  assert.doesNotMatch(source, /No integrado todavía|pendiente de integrar/, `${label} no debe afirmar que sigue pendiente de integracion`);
+});
 
-console.log("app-navigation integration contract (P3-07A, parcial) tests passed");
+console.log("app-navigation integration contract (P3-06 completa via P3-07A+P3-07B) tests passed");

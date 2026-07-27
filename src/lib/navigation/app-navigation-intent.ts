@@ -6,10 +6,12 @@ import type { AppNotificationSection } from "@/lib/notifications/notification-ty
  * duplica nada de ese módulo: `Screen`, la navegación contextual y el back ya están cubiertos
  * ahí). Cada función reproduce exactamente una regla hoy inline en `organizatech-app.tsx`.
  *
- * Puro: sin React, sin DOM, sin storage, sin Supabase. Integrado parcialmente en
- * organizatech-app.tsx desde P3-07A: `resolveMenuScreens`, `canGoBackFromScreen`,
- * `resolveDayStateReset` y `resolveNotificationScrollTarget` ya se usan en el root;
- * `resolveWorkoutCompletionScreen` queda pendiente de integrar para P3-07B.
+ * Puro: sin React, sin DOM, sin storage, sin Supabase. Las cuatro funciones están integradas
+ * en organizatech-app.tsx desde P3-07A. El antiguo `resolveWorkoutCompletionScreen` (que
+ * devolvía "training-summary" incondicionalmente) fue eliminado en P3-07B: no podía modelar
+ * el tercer flujo real de finalización (reintento de link de readiness pendiente, que termina
+ * en dashboard); su sucesor es `resolveWorkoutCompletionTransition` en
+ * `app-navigation-transition.ts`.
  */
 
 /**
@@ -61,18 +63,6 @@ export interface DayStateReset {
  */
 export function resolveDayStateReset(): DayStateReset {
   return { activeRoutineDay: "Lunes", dashboardDayOverride: "", comparisonDay: "Lunes" };
-}
-
-/**
- * Igual a la pantalla final tras completar un entrenamiento. `finishCompletedWorkout()`
- * (organizatech-app.tsx:2955-2962) fija `"dashboard"` como parte de la limpieza del intento
- * activo; su llamador aplica INMEDIATAMENTE después `setScreen("training-summary")` (líneas
- * ~3251-3252 y ~3324-3325, dentro del mismo lote de React). El destino EFECTIVO observable es
- * `"training-summary"` — este resolver documenta y devuelve ese destino final, no el valor
- * transitorio intermedio.
- */
-export function resolveWorkoutCompletionScreen(): Screen {
-  return "training-summary";
 }
 
 export interface NotificationScrollTarget {

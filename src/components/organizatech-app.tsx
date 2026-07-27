@@ -117,6 +117,13 @@ import {
   resolveNotificationScrollTarget,
 } from "@/lib/navigation/app-navigation-intent";
 import {
+  createAuthNavigationReset,
+  createFlowScreenTransition,
+  resolvePasswordRecoveryRouteTransition,
+  resolveWorkoutCompletionTransition,
+  type ScreenTransition,
+} from "@/lib/navigation/app-navigation-transition";
+import {
   isTrainingSummaryScreenValid,
   resolveActiveWorkoutVariant,
   resolveComparisonScreenVariant,
@@ -534,16 +541,14 @@ export function OrganizatechApp({
         clearPasswordRecoveryFlow();
         setIsAuthLoading(false);
         setStatusMessage("El enlace de recuperación expiró o ya fue utilizado.");
-        setScreenHistory([]);
-        setScreen("recovery-expired");
+        applyScreenTransition(resolvePasswordRecoveryRouteTransition("expired"));
         return;
       }
       if (recoveryState === "active") {
         markPasswordRecoveryFlow();
         setIsAuthLoading(false);
         setStatusMessage("Crea una nueva contraseña para continuar.");
-        setScreenHistory([]);
-        setScreen("nueva-password");
+        applyScreenTransition(resolvePasswordRecoveryRouteTransition("active"));
       } else {
         setIsAuthLoading(true);
         setStatusMessage("Validando sesión...");
@@ -558,15 +563,13 @@ export function OrganizatechApp({
         if (currentRecoveryState === "expired") {
           clearPasswordRecoveryFlow();
           setStatusMessage("El enlace de recuperación expiró o ya fue utilizado.");
-          setScreenHistory([]);
-          setScreen("recovery-expired");
+          applyScreenTransition(resolvePasswordRecoveryRouteTransition("expired"));
           return;
         }
         if (currentRecoveryState === "active") {
           markPasswordRecoveryFlow();
           setStatusMessage("Crea una nueva contraseña para continuar.");
-          setScreenHistory([]);
-          setScreen("nueva-password");
+          applyScreenTransition(resolvePasswordRecoveryRouteTransition("active"));
           return;
         }
         if (authState.session) {
@@ -574,7 +577,7 @@ export function OrganizatechApp({
           await refreshData(authState.dataMode);
           if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
           if (!restoreActiveFlowForSession(authState.dataMode, authState.user?.id)) {
-            setScreen("dashboard");
+            applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));
           }
         } else {
           setStatusMessage(authState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
@@ -620,16 +623,14 @@ export function OrganizatechApp({
         clearPasswordRecoveryFlow();
         setIsAuthLoading(false);
         setStatusMessage("El enlace de recuperación expiró o ya fue utilizado.");
-        setScreenHistory([]);
-        setScreen("recovery-expired");
+        applyScreenTransition(resolvePasswordRecoveryRouteTransition("expired"));
         return;
       }
       if (event === "PASSWORD_RECOVERY") {
         markPasswordRecoveryFlow();
         setIsAuthLoading(false);
         setStatusMessage("Crea una nueva contraseña para continuar.");
-        setScreenHistory([]);
-        setScreen("nueva-password");
+        applyScreenTransition(resolvePasswordRecoveryRouteTransition("active"));
         return;
       }
       if (event === "SIGNED_IN" || (event === "INITIAL_SESSION" && session)) {
@@ -637,8 +638,7 @@ export function OrganizatechApp({
           markPasswordRecoveryFlow();
           setIsAuthLoading(false);
           setStatusMessage("Crea una nueva contraseña para continuar.");
-          setScreenHistory([]);
-          setScreen("nueva-password");
+          applyScreenTransition(resolvePasswordRecoveryRouteTransition("active"));
           return;
         }
         setStatusMessage("");
@@ -646,7 +646,7 @@ export function OrganizatechApp({
           if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
           setIsAuthLoading(false);
           if (!restoreActiveFlowForSession(nextState.dataMode, nextState.user?.id)) {
-            setScreen("dashboard");
+            applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));
           }
         });
       }
@@ -843,8 +843,11 @@ export function OrganizatechApp({
 
   useEffect(() => {
     if (screen === "training-summary" && !trainingCompletionSummary) {
-      setScreen("dashboard");
+      applyScreenTransition(createFlowScreenTransition("dashboard", "summary-state-sanitized"));
     }
+    // El adaptador de transiciones solo envuelve setters estables de React; incluirlo como
+    // dependencia re-ejecutaría el saneamiento en cada render sin cambiar su resultado.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, trainingCompletionSummary]);
 
   const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
@@ -1355,6 +1358,16 @@ export function OrganizatechApp({
     setScreen(navigation.screen);
   }
 
+  // Adaptador único de transiciones canónicas (P3-07B): toda pantalla fuera de la navegación
+  // contextual del usuario se aplica aquí, según la política de historial de la transición.
+  function applyScreenTransition(transition: ScreenTransition) {
+    if (transition.historyPolicy === "reset") {
+      applyContextualNavigation(resetContextualNavigation(transition.screen));
+      return;
+    }
+    setScreen(transition.screen);
+  }
+
   function restoreActiveFlowForSession(mode: DataMode, userId?: string) {
     const activeFlow = loadActiveFlow(mode, userId);
     if (!activeFlow) return false;
@@ -1639,7 +1652,7 @@ export function OrganizatechApp({
       setTrainingPlan(plan);
       setSetupByDay(setupState);
       setIsEditingRoutinePlan(true);
-      setScreen("registro-entrenamiento");
+      applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
       setStatusMessage("Configura al menos una rutina, un dia y un ejercicio antes de crear el ciclo.");
       return false;
     }
@@ -1783,7 +1796,7 @@ export function OrganizatechApp({
       if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
       setStatusMessage(getMissingSupabaseMessage());
       clearAuthForms();
-      setScreen("dashboard");
+      applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));
       return;
     }
 
@@ -1818,7 +1831,7 @@ export function OrganizatechApp({
       if (!session && mode === "registro") {
         setStatusMessage("Cuenta creada. Revisa tu correo para confirmar el registro.");
         clearAuthForms();
-        setScreen("login");
+        applyScreenTransition(createAuthNavigationReset("login", "signup-confirmation-pending"));
         return;
       }
 
@@ -1826,7 +1839,7 @@ export function OrganizatechApp({
       await refreshData("supabase");
       if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
       clearAuthForms();
-      setScreen("dashboard");
+      applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));
     } catch (error) {
       if (appliedIdentityToken && !isSessionDataRequestCurrent(appliedIdentityToken)) return;
       setStatusMessage(translateAuthError(error));
@@ -1925,7 +1938,7 @@ export function OrganizatechApp({
       clearPasswordRecoveryFlow();
       clearPasswordRecoveryUrl();
       setStatusMessage("Contrase\u00f1a actualizada correctamente. Ya puedes iniciar sesi\u00f3n.");
-      setScreen("login");
+      applyScreenTransition(createAuthNavigationReset("login", "password-updated"));
     } catch (error) {
       setStatusMessage(translateAuthError(error));
     } finally {
@@ -2076,7 +2089,7 @@ export function OrganizatechApp({
       setReadiness(null);
     }
     setIsMenuOpen(false);
-    setScreen("registro-entrenamiento");
+    applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "routine-editor-opened"));
   }
 
   function cancelRoutineUpdate() {
@@ -2152,7 +2165,7 @@ export function OrganizatechApp({
         setRoutineNotice(successMessage);
         setIsEditingRoutinePlan(true);
         setSetupDay(nextIncompleteDay);
-        setScreen("registro-entrenamiento");
+        applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "routine-setup-continued"));
         return;
       }
 
@@ -2306,7 +2319,7 @@ export function OrganizatechApp({
           );
           setStatusMessage("Plan cycle-scoped actualizado. El historial anterior se conserva.");
           setIsRoutineSuccessOpen(true);
-          setScreen("entrenamiento");
+          applyScreenTransition(createFlowScreenTransition("entrenamiento", "routine-plan-saved"));
           return;
         }
 
@@ -2319,7 +2332,7 @@ export function OrganizatechApp({
         setRoutineNotice("Plan cycle-scoped creado correctamente.");
         setStatusMessage("Ciclo y plan operativo creados correctamente en QA.");
         setIsRoutineSuccessOpen(true);
-        setScreen("entrenamiento");
+        applyScreenTransition(createFlowScreenTransition("entrenamiento", "routine-plan-saved"));
       } catch (error) {
         setStatusMessage(translateTrainingCycleRepositoryError(error));
       } finally {
@@ -2371,7 +2384,7 @@ export function OrganizatechApp({
       if (!allPlannedDaysComplete && nextIncompleteDay) {
         setIsEditingRoutinePlan(true);
         setSetupDay(nextIncompleteDay);
-        setScreen("registro-entrenamiento");
+        applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "routine-setup-continued"));
       } else {
         clearRoutineDraft(dataMode, supabaseUser?.id);
         setIsEditingRoutinePlan(false);
@@ -2415,7 +2428,7 @@ export function OrganizatechApp({
       setHasStartedTraining(false);
       setReadiness(null);
     }
-    setScreen("entrenamiento");
+    applyScreenTransition(createFlowScreenTransition("entrenamiento", "routine-day-opened"));
   }
 
   async function startNewTrainingCycle() {
@@ -2476,7 +2489,7 @@ export function OrganizatechApp({
         setReadiness(null);
         setHasStartedTraining(false);
         setIsEditingRoutinePlan(true);
-        setScreen("registro-entrenamiento");
+        applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
         setStatusMessage(activeCycle
           ? "Ciclo actual finalizado. Configura el nuevo plan antes de crearlo."
           : "Configura el plan del nuevo ciclo antes de crearlo.");
@@ -2514,7 +2527,7 @@ export function OrganizatechApp({
     setIsEditingRoutinePlan(true);
     setIsNewCycleConfirmOpen(false);
     setStatusMessage("Ciclo actual finalizado. Ya puedes crear un nuevo ciclo de entrenamiento.");
-    setScreen("registro-entrenamiento");
+    applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
   }
 
   async function deleteCurrentTrainingCycle() {
@@ -2567,7 +2580,7 @@ export function OrganizatechApp({
         setIsEditingRoutinePlan(true);
         setIsDeleteCycleConfirmOpen(false);
         setStatusMessage("Ciclo cancelado. Ya puedes configurar un nuevo ciclo de entrenamiento.");
-        setScreen("registro-entrenamiento");
+        applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
         await refreshPersistedTrainingCycles();
         return;
       }
@@ -2595,7 +2608,7 @@ export function OrganizatechApp({
       setIsEditingRoutinePlan(true);
       setIsDeleteCycleConfirmOpen(false);
       setStatusMessage("Ciclo eliminado. Ya puedes configurar un nuevo ciclo de entrenamiento.");
-      setScreen("registro-entrenamiento");
+      applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
     } catch (error) {
       if (error instanceof TrainingCycleRepositoryError) {
         setStatusMessage(translateTrainingCycleRepositoryError(error));
@@ -2978,13 +2991,16 @@ export function OrganizatechApp({
     });
   }
 
+  // Limpieza del intento activo tras persistir un entrenamiento. NO navega: el destino lo
+  // decide resolveWorkoutCompletionTransition en cada caller y lo aplica applyScreenTransition
+  // (separación persistencia/decisión/aplicación, P3-07B — elimina la doble escritura previa
+  // "dashboard" → "training-summary" dentro del mismo lote).
   function finishCompletedWorkout() {
     clearWorkoutDraft(dataMode, supabaseUser?.id);
     resetWorkoutAttemptState();
     setActiveWorkoutStartedAt(null);
     setReadiness(null);
     setHasStartedTraining(false);
-    setScreen("dashboard");
   }
 
   async function buildCompletedTrainingSummarySnapshot(input: {
@@ -3086,6 +3102,7 @@ export function OrganizatechApp({
           await confirmTrainingWorkoutReadinessLink(recoveredPendingLink);
           setStatusMessage("Entrenamiento guardado.");
           finishCompletedWorkout();
+          applyScreenTransition(resolveWorkoutCompletionTransition({ hasCompletionSummary: false }));
         } catch (error) {
           setRoutineNotice(translateTrainingWorkoutReadinessLinkError(error));
         } finally {
@@ -3275,7 +3292,7 @@ export function OrganizatechApp({
         setStatusMessage("Entrenamiento guardado.");
         try {
           finishCompletedWorkout();
-          setScreen("training-summary");
+          applyScreenTransition(resolveWorkoutCompletionTransition({ hasCompletionSummary: true }));
         } catch {
           // El entrenamiento ya fue persistido; un fallo local de limpieza no debe habilitar duplicados.
         }
@@ -3348,7 +3365,7 @@ export function OrganizatechApp({
         });
         setStatusMessage("Entrenamiento guardado.");
         finishCompletedWorkout();
-        setScreen("training-summary");
+        applyScreenTransition(resolveWorkoutCompletionTransition({ hasCompletionSummary: true }));
       } catch (error) {
         const message = handlePersistenceError(error);
         setRoutineNotice(message === "Ya existe un entrenamiento registrado para esta rutina y fecha."
@@ -3380,7 +3397,7 @@ export function OrganizatechApp({
     clearPasswordRecoveryUrl();
     clearAuthForms();
     setStatusMessage("");
-    setScreen(nextScreen);
+    applyScreenTransition(createAuthNavigationReset(nextScreen, "auth-screen-switch"));
   }
 
   if (screen === "recovery-expired") {
@@ -3687,7 +3704,7 @@ export function OrganizatechApp({
           summary={trainingCompletionSummary}
           onDashboard={() => {
             setTrainingCompletionSummary(null);
-            setScreen("dashboard");
+            applyScreenTransition(createFlowScreenTransition("dashboard", "summary-dismissed"));
           }}
         />
       )}
@@ -3835,7 +3852,7 @@ export function OrganizatechApp({
         <RoutineSuccessModal
           onConfirm={() => {
             setIsRoutineSuccessOpen(false);
-            setScreen("dashboard");
+            applyScreenTransition(createFlowScreenTransition("dashboard", "routine-success-dismissed"));
           }}
         />
       )}

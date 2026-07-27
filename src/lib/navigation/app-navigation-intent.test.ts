@@ -6,7 +6,6 @@ import {
   resolveDayStateReset,
   resolveMenuScreens,
   resolveNotificationScrollTarget,
-  resolveWorkoutCompletionScreen,
 } from "@/lib/navigation/app-navigation-intent";
 import type { AppNotificationSection } from "@/lib/notifications/notification-types";
 
@@ -60,8 +59,9 @@ assert.deepEqual(resolveDayStateReset(), { activeRoutineDay: "Lunes", dashboardD
 // Determinismo: misma entrada (sin entrada) produce siempre el mismo resultado.
 assert.deepEqual(resolveDayStateReset(), resolveDayStateReset());
 
-// CASO — destino final tras completar un entrenamiento.
-assert.equal(resolveWorkoutCompletionScreen(), "training-summary");
+// Nota P3-07B: el destino tras completar un entrenamiento se modela ahora en
+// app-navigation-transition.ts (resolveWorkoutCompletionTransition), con cobertura propia de
+// los tres flujos reales en app-navigation-transition.test.ts.
 
 // CASO — navegación hacia data-section: cada sección conocida produce el selector esperado.
 const sections: AppNotificationSection[] = [
