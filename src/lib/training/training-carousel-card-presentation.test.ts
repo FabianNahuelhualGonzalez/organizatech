@@ -231,10 +231,10 @@ async function run() {
     const dashboardSource = readFileSync("src/features/dashboard/components/dashboard-screen.tsx", "utf8");
     const cardContentSource = readFileSync("src/features/dashboard/components/dashboard-training-card-content.tsx", "utf8");
     const helperSource = readFileSync("src/lib/training/training-carousel-card-presentation.ts", "utf8");
-    const topbarStart = appSource.indexOf("<header className={`topbar");
-    const topbarEnd = appSource.indexOf("</header>", topbarStart);
-    const topbarSource = topbarStart >= 0 && topbarEnd > topbarStart ? appSource.slice(topbarStart, topbarEnd) : "";
-    assert.match(topbarSource, /topbar-training-meta[\s\S]*trainingTopbarMeta\.cycleLabel[\s\S]*trainingTopbarMeta\.weekLabel[\s\S]*trainingTopbarMeta\.progressLabel/, "topbar muestra ciclo, semana y progreso en bloques");
+    // Desde P3-07A el topbar vive en AppTopbar (src/features/app-shell/components/app-topbar.tsx),
+    // ya no inline en organizatech-app.tsx; el prop se llama `trainingMeta` (antes `trainingTopbarMeta`).
+    const topbarSource = readFileSync("src/features/app-shell/components/app-topbar.tsx", "utf8");
+    assert.match(topbarSource, /topbar-training-meta[\s\S]*trainingMeta\.cycleLabel[\s\S]*trainingMeta\.weekLabel[\s\S]*trainingMeta\.progressLabel/, "topbar muestra ciclo, semana y progreso en bloques");
     assert.match(appSource, /plannedDays: hasRoutinePlan \? dashboardCarouselDays\.length : 0/, "topbar no muestra 0 de 0 cuando no hay plan");
     assert.match(appSource, /function calculateWeeklyCompletedTrainingDays[\s\S]*status === "completed" \? completedCount \+ 1 : completedCount/, "progreso semanal cuenta solo dias completados");
     assert.match(cssSource, /\.topbar-training-meta[\s\S]*justify-content: center/, "segunda linea del topbar queda centrada");

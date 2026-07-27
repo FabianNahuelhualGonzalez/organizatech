@@ -9,11 +9,11 @@ import {
 } from "@/lib/navigation/app-auth-screen-resolver";
 
 /**
- * Pruebas de caracterización: demuestran paridad con `getInitialAuthScreen()`
- * (organizatech-app.tsx:5380-5385), el inicializador lazy de `statusMessage` (líneas 371-376) y
- * el de `isAuthLoading` (línea 389) — para los tres estados posibles de
- * `getPasswordRecoveryRouteState()`. No se toca ni se caracteriza esa función en sí (impura,
- * permanece en React) — solo la derivación pura a partir de su resultado.
+ * Pruebas de caracterización: demuestran paridad con la extinta `getInitialAuthScreen()` y con
+ * los inicializadores lazy que antes derivaban `statusMessage` e `isAuthLoading` por separado —
+ * para los tres estados posibles de `getPasswordRecoveryRouteState()`. Desde P3-07A el root usa
+ * `resolveInitialAuthState` directamente; no se toca ni se caracteriza `getPasswordRecoveryRouteState`
+ * en sí (impura, permanece en React) — solo la derivación pura a partir de su resultado.
  */
 
 const routeStates: PasswordRecoveryRouteState[] = ["none", "active", "expired"];

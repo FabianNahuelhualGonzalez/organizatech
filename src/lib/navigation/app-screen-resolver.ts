@@ -10,8 +10,8 @@
  * nada) — no se "arreglan" ni se inventan variantes nuevas para esos huecos; se los expone como
  * `"none"` para que la paridad sea honesta y verificable por contrato.
  *
- * Puro: sin React, sin DOM, sin storage, sin Supabase. No integrado todavía en
- * organizatech-app.tsx (P3-06 preparación).
+ * Puro: sin React, sin DOM, sin storage, sin Supabase. Integrado en organizatech-app.tsx desde
+ * P3-07A: las 5 funciones reemplazan las condiciones JSX equivalentes que antes vivían inline.
  */
 
 export type DashboardScreenVariant = "blocked" | "content";

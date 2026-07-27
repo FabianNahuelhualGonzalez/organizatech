@@ -2,11 +2,11 @@ import type { Screen } from "@/lib/navigation/app-navigation";
 
 /**
  * Resolución pura del estado inicial de autenticación a partir del estado de recuperación de
- * contraseña YA CALCULADO. Reproduce exactamente las tres derivaciones hoy independientes en
- * `organizatech-app.tsx` — `getInitialAuthScreen()` (líneas 5380-5385), el inicializador lazy de
- * `statusMessage` (líneas 371-376) y el de `isAuthLoading` (línea 389) — que hoy llaman
- * `getPasswordRecoveryRouteState()` tres veces por separado para derivar tres valores
- * relacionados del mismo estado.
+ * contraseña YA CALCULADO. Reproducía exactamente las tres derivaciones que antes eran
+ * independientes en `organizatech-app.tsx` — la extinta `getInitialAuthScreen()`, el
+ * inicializador lazy de `statusMessage` y el de `isAuthLoading` —, que llamaban a
+ * `getPasswordRecoveryRouteState()` por separado para derivar tres valores relacionados del mismo
+ * estado.
  *
  * Deliberadamente NO incluye `getPasswordRecoveryRouteState()` en sí: esa función lee
  * `window.location.search`/`window.location.hash`, `localStorage` (vía
@@ -15,7 +15,11 @@ import type { Screen } from "@/lib/navigation/app-navigation";
  * `organizatech-app.tsx`. Este módulo solo modela la parte pura: estado de ruta → estado inicial
  * de la app.
  *
- * Puro: sin React, sin DOM, sin storage, sin Supabase. No integrado todavía (P3-06 preparación).
+ * Puro: sin React, sin DOM, sin storage, sin Supabase. Integrado en organizatech-app.tsx desde
+ * P3-07A a través de `resolveInitialAuthState`: los tres `useState` iniciales de
+ * screen/statusMessage/isAuthLoading llaman `resolveInitialAuthState(getPasswordRecoveryRouteState())`
+ * cada uno por separado (se preserva el conteo de llamadas de hoy a la función impura;
+ * `getInitialAuthScreen()` quedó redundante y fue eliminada del root).
  */
 
 export type PasswordRecoveryRouteState = "none" | "active" | "expired";
@@ -26,7 +30,7 @@ export interface InitialAuthState {
   isAuthLoading: boolean;
 }
 
-/** Igual a `getInitialAuthScreen()` (organizatech-app.tsx:5380-5385). */
+/** Igual a la extinta `getInitialAuthScreen()`, eliminada del root al integrar este resolver. */
 export function resolveInitialAuthScreen(routeState: PasswordRecoveryRouteState): Screen {
   if (routeState === "expired") return "recovery-expired";
   if (routeState === "active") return "nueva-password";

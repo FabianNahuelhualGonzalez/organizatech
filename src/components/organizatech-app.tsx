@@ -2,13 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bell,
-  ChevronLeft,
   Dumbbell,
   Eye,
   EyeOff,
   Lock,
-  LogOut,
   Mail,
   Pencil,
   Save,
@@ -108,6 +105,24 @@ import {
   type ContextualNavigationState,
   type Screen,
 } from "@/lib/navigation/app-navigation";
+import { AppNavigationDrawer } from "@/features/app-shell/components/app-navigation-drawer";
+import { AppScreenHeader } from "@/features/app-shell/components/app-screen-header";
+import { AppShellLayout } from "@/features/app-shell/components/app-shell-layout";
+import { AppTopbar } from "@/features/app-shell/components/app-topbar";
+import { resolveInitialAuthState } from "@/lib/navigation/app-auth-screen-resolver";
+import {
+  canGoBackFromScreen,
+  resolveDayStateReset,
+  resolveMenuScreens,
+  resolveNotificationScrollTarget,
+} from "@/lib/navigation/app-navigation-intent";
+import {
+  isTrainingSummaryScreenValid,
+  resolveActiveWorkoutVariant,
+  resolveComparisonScreenVariant,
+  resolveDashboardScreenVariant,
+  resolveRoutineBuilderVariant,
+} from "@/lib/navigation/app-screen-resolver";
 import { isSessionExpiredError, translateAuthError, translatePersistenceError } from "@/lib/supabase/auth-errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
@@ -356,7 +371,7 @@ export function OrganizatechApp({
   trainingCyclesSnapshotSource = "ui-main-qa",
   trainingWorkoutReadinessV2Enabled = false,
 }: OrganizatechAppProps) {
-  const [screen, setScreen] = useState<Screen>(() => getInitialAuthScreen());
+  const [screen, setScreen] = useState<Screen>(() => resolveInitialAuthState(getPasswordRecoveryRouteState()).screen);
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
   const [sessionName, setSessionName] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
@@ -368,12 +383,9 @@ export function OrganizatechApp({
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
-  const [statusMessage, setStatusMessage] = useState(() => {
-    const recoveryState = getPasswordRecoveryRouteState();
-    if (recoveryState === "expired") return "El enlace de recuperación expiró o ya fue utilizado.";
-    if (recoveryState === "active") return "Crea una nueva contraseña para continuar.";
-    return "Validando sesión...";
-  });
+  const [statusMessage, setStatusMessage] = useState(
+    () => resolveInitialAuthState(getPasswordRecoveryRouteState()).statusMessage,
+  );
   const [dataSource, setDataSource] = useState<DataSource>("local");
   const [dataMode, setDataMode] = useState<DataMode>("demo");
   const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
@@ -386,7 +398,9 @@ export function OrganizatechApp({
   const [profileAvatarLoading, setProfileAvatarLoading] = useState(false);
   const [profileAvatarError, setProfileAvatarError] = useState("");
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
-  const [isAuthLoading, setIsAuthLoading] = useState(() => getPasswordRecoveryRouteState() === "none");
+  const [isAuthLoading, setIsAuthLoading] = useState(
+    () => resolveInitialAuthState(getPasswordRecoveryRouteState()).isAuthLoading,
+  );
   const [isBusy, setIsBusy] = useState(false);
   const isSavingTrainingRef = useRef(false);
   const passwordUpdateSuccessRef = useRef(false);
@@ -2452,9 +2466,12 @@ export function OrganizatechApp({
         setExercises([]);
         setEntries([]);
         setTrainingSessions([]);
-        setActiveRoutineDay("Lunes");
-        setDashboardDayOverride("");
-        setComparisonDay("Lunes");
+        {
+          const dayReset = resolveDayStateReset();
+          setActiveRoutineDay(dayReset.activeRoutineDay);
+          setDashboardDayOverride(dayReset.dashboardDayOverride);
+          setComparisonDay(dayReset.comparisonDay);
+        }
         setExerciseDrafts({});
         setReadiness(null);
         setHasStartedTraining(false);
@@ -2486,9 +2503,12 @@ export function OrganizatechApp({
     setSetupByDay(createSetupByDay());
     setSetupDay("Lunes");
     setTrainingPlan(nextPlan);
-    setActiveRoutineDay("Lunes");
-    setDashboardDayOverride("");
-    setComparisonDay("Lunes");
+    {
+      const dayReset = resolveDayStateReset();
+      setActiveRoutineDay(dayReset.activeRoutineDay);
+      setDashboardDayOverride(dayReset.dashboardDayOverride);
+      setComparisonDay(dayReset.comparisonDay);
+    }
     setExerciseDrafts({});
     setReadiness(null);
     setIsEditingRoutinePlan(true);
@@ -2535,9 +2555,12 @@ export function OrganizatechApp({
         setTrainingPlan(nextPlan);
         setSetupByDay(createSetupByDay());
         setSetupDay("Lunes");
-        setActiveRoutineDay("Lunes");
-        setDashboardDayOverride("");
-        setComparisonDay("Lunes");
+        {
+          const dayReset = resolveDayStateReset();
+          setActiveRoutineDay(dayReset.activeRoutineDay);
+          setDashboardDayOverride(dayReset.dashboardDayOverride);
+          setComparisonDay(dayReset.comparisonDay);
+        }
         setExerciseDrafts({});
         setReadiness(null);
         setHasStartedTraining(false);
@@ -2560,9 +2583,12 @@ export function OrganizatechApp({
       setTrainingPlan(nextPlan);
       setSetupByDay(createSetupByDay());
       setSetupDay("Lunes");
-      setActiveRoutineDay("Lunes");
-      setDashboardDayOverride("");
-      setComparisonDay("Lunes");
+      {
+        const dayReset = resolveDayStateReset();
+        setActiveRoutineDay(dayReset.activeRoutineDay);
+        setDashboardDayOverride(dayReset.dashboardDayOverride);
+        setComparisonDay(dayReset.comparisonDay);
+      }
       setExerciseDrafts({});
       setReadiness(null);
       setHasStartedTraining(false);
@@ -3513,10 +3539,11 @@ export function OrganizatechApp({
   }
 
   function scrollToNotificationSection(section?: AppNotificationSection) {
-    if (!section || typeof document === "undefined") return;
+    const scrollTarget = resolveNotificationScrollTarget(section ?? null);
+    if (!scrollTarget || typeof document === "undefined") return;
 
     window.setTimeout(() => {
-      const target = document.querySelector<HTMLElement>(`[data-section="${section}"]`);
+      const target = document.querySelector<HTMLElement>(scrollTarget.selector);
       if (!target) return;
 
       target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -3527,163 +3554,109 @@ export function OrganizatechApp({
     }, 160);
   }
 
-  const menuScreens = hasTrainingEntries
-    ? primaryScreens
-    : primaryScreens.filter((item) =>
-      item === "dashboard" ||
-      item === "entrenamiento" ||
-      item === "perfil" ||
-      item === "comparacion" ||
-      item === "registro-entrenamiento" ||
-      (item === "historial-ciclos" && visibleCycleHistoryCount > 0)
-    );
+  const menuScreens = resolveMenuScreens(primaryScreens, hasTrainingEntries, visibleCycleHistoryCount);
+
+  const dashboardScreenVariant = resolveDashboardScreenVariant(isCycleScopedPlanBlocked);
+  const comparisonScreenVariant = resolveComparisonScreenVariant(isCycleScopedPlanBlocked);
+  const routineBuilderVariant = resolveRoutineBuilderVariant({
+    isCycleScopedPlanBlocked,
+    hasRoutinePlan,
+    isEditingRoutinePlan,
+  });
+  const activeWorkoutVariant = resolveActiveWorkoutVariant({
+    isCycleScopedPlanBlocked,
+    hasRoutinePlan,
+    isEditingRoutinePlan,
+    hasStartedTraining,
+    hasReadiness: Boolean(readiness),
+  });
+
+  function toggleMenu() {
+    setIsNotificationPanelOpen(false);
+    setIsMenuOpen((value) => {
+      const next = !value;
+      if (next) {
+        void refreshProfileAvatar({ force: true, allowProfileLookup: true });
+      }
+      return next;
+    });
+  }
 
   return (
-    <main className="app-shell">
-      <header className={`topbar ${isTopbarHidden ? "hidden" : ""}`}>
-        <button
-          className={`icon-button menu-trigger ${isMenuOpen ? "active" : ""}`}
-          aria-label="Abrir menú"
-          aria-expanded={isMenuOpen}
-          onClick={() => {
-            setIsNotificationPanelOpen(false);
-            setIsMenuOpen((value) => {
-              const next = !value;
-              if (next) {
-                void refreshProfileAvatar({ force: true, allowProfileLookup: true });
-              }
-              return next;
-            });
-          }}
-        >
-          <span className="hamburger-line" />
-          <span className="hamburger-line" />
-          <span className="hamburger-line" />
-        </button>
-        <div>
-          <h1>Organizatech</h1>
-          {trainingTopbarMeta ? (
-            <p className="topbar-training-meta" aria-label={`${trainingTopbarMeta.cycleLabel}, ${trainingTopbarMeta.weekLabel}, ${trainingTopbarMeta.progressLabel}`}>
-              <span>{trainingTopbarMeta.cycleLabel}</span>
-              <span>{trainingTopbarMeta.weekLabel}</span>
-              <span>{trainingTopbarMeta.progressLabel}</span>
-            </p>
-          ) : (
-            <p className="eyebrow">{hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}</p>
-          )}
-        </div>
-        <div className="notification-shell">
-          <button
-            className="icon-button notification-trigger"
-            aria-label="Ver notificaciones"
-            aria-expanded={isNotificationPanelOpen}
-            onClick={toggleNotifications}
-          >
-            <Bell size={18} />
-            {notificationBadgeText ? (
-              <span className="notification-badge" aria-label={notificationBadgeAriaLabel ?? undefined}>
-                {notificationBadgeText}
-              </span>
-            ) : null}
-          </button>
-        </div>
-      </header>
-
-      {isNotificationPanelOpen ? (
-        <>
-          <button
-            className="notification-backdrop"
-            aria-label="Cerrar notificaciones"
-            onClick={() => setIsNotificationPanelOpen(false)}
-          />
-          <div className="notification-panel" role="dialog" aria-label="Notificaciones">
-            <div className="notification-panel-header">
-              <strong>Notificaciones</strong>
-              <span>{notificationPanelSubtitle}</span>
-            </div>
-            {appNotifications.length > 0 ? (
-              <div className="notification-list">
-                {newNotifications.length > 0 ? (
-                  <NotificationGroup
-                    title="Nuevas"
-                    notifications={newNotifications}
-                    seenNotificationRecordsById={seenNotificationRecordsById}
-                    onOpen={openNotificationTarget}
-                  />
-                ) : null}
-                {historyNotifications.length > 0 ? (
-                  <NotificationGroup
-                    title="Historial"
-                    notifications={historyNotifications}
-                    seenNotificationRecordsById={seenNotificationRecordsById}
-                    onOpen={openNotificationTarget}
-                  />
-                ) : null}
+    <AppShellLayout
+      topbar={
+        <AppTopbar
+          isHidden={isTopbarHidden}
+          isMenuOpen={isMenuOpen}
+          onMenuToggle={toggleMenu}
+          trainingMeta={trainingTopbarMeta}
+          fallbackText={hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}
+          isNotificationPanelOpen={isNotificationPanelOpen}
+          notificationBadgeText={notificationBadgeText}
+          notificationBadgeAriaLabel={notificationBadgeAriaLabel}
+          onToggleNotifications={toggleNotifications}
+        />
+      }
+      notificationOverlay={
+        isNotificationPanelOpen ? (
+          <>
+            <button
+              className="notification-backdrop"
+              aria-label="Cerrar notificaciones"
+              onClick={() => setIsNotificationPanelOpen(false)}
+            />
+            <div className="notification-panel" role="dialog" aria-label="Notificaciones">
+              <div className="notification-panel-header">
+                <strong>Notificaciones</strong>
+                <span>{notificationPanelSubtitle}</span>
               </div>
-            ) : (
-              <p className="notification-empty">{NOTIFICATION_EMPTY_MESSAGE}</p>
-            )}
-          </div>
-        </>
-      ) : null}
-
-      {isMenuOpen && (
-        <>
-          <button className="menu-backdrop" aria-label="Cerrar menú" onClick={() => setIsMenuOpen(false)} />
-          <div className="menu-drawer-shell" role="dialog" aria-label="Menú de navegación">
-            <div className="menu-drawer-top">
-              <button
-                className="drawer-close"
-                aria-label="Cerrar menú"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                <span className="drawer-x-line" />
-                <span className="drawer-x-line" />
-              </button>
-            </div>
-            <div className="menu-drawer-body">
-              <div className="menu-panel" role="menu" aria-label="Menú principal">
-                <ProfileMenuHeader
-                  profile={profileViewModel}
-                  onAvatarImageError={handleProfileAvatarImageError}
-                  avatarResetKey={profileAvatarResetKey}
-                />
-                <div className="menu-grid">
-                  {menuScreens.map((item) => (
-                    <button
-                      key={item}
-                      className={`menu-link ${screen === item ? "active" : ""}`}
-                      role="menuitem"
-                      onClick={() => navigateTo(item)}
-                    >
-                      {screenLabel(item)}
-                    </button>
-                  ))}
+              {appNotifications.length > 0 ? (
+                <div className="notification-list">
+                  {newNotifications.length > 0 ? (
+                    <NotificationGroup
+                      title="Nuevas"
+                      notifications={newNotifications}
+                      seenNotificationRecordsById={seenNotificationRecordsById}
+                      onOpen={openNotificationTarget}
+                    />
+                  ) : null}
+                  {historyNotifications.length > 0 ? (
+                    <NotificationGroup
+                      title="Historial"
+                      notifications={historyNotifications}
+                      seenNotificationRecordsById={seenNotificationRecordsById}
+                      onOpen={openNotificationTarget}
+                    />
+                  ) : null}
                 </div>
-                <div className="menu-account">
-                  <button className="logout-button" role="menuitem" onClick={handleLogout} disabled={isBusy}>
-                    <LogOut size={17} />
-                    Cerrar sesión
-                  </button>
-                </div>
-              </div>
-              <button className="drawer-empty" aria-label="Cerrar menú" onClick={() => setIsMenuOpen(false)} />
+              ) : (
+                <p className="notification-empty">{NOTIFICATION_EMPTY_MESSAGE}</p>
+              )}
             </div>
-          </div>
-        </>
-      )}
-
-      {screen !== "dashboard" && screen !== "training-summary" && (
-        <div className="section-back-row">
-          <button className="button secondary section-back-button" type="button" onClick={goBack}>
-            <ChevronLeft size={17} />
-            Volver
-          </button>
-        </div>
-      )}
-
+          </>
+        ) : null
+      }
+      navigationOverlay={
+        <AppNavigationDrawer
+          isOpen={isMenuOpen}
+          profileHeader={
+            <ProfileMenuHeader
+              profile={profileViewModel}
+              onAvatarImageError={handleProfileAvatarImageError}
+              avatarResetKey={profileAvatarResetKey}
+            />
+          }
+          items={menuScreens.map((item) => ({ id: item, label: screenLabel(item), isActive: screen === item }))}
+          isLogoutDisabled={isBusy}
+          onClose={() => setIsMenuOpen(false)}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      }
+      screenHeader={canGoBackFromScreen(screen) ? <AppScreenHeader onBack={goBack} /> : null}
+    >
       {screen === "dashboard" && (
-        isCycleScopedPlanBlocked ? (
+        dashboardScreenVariant === "blocked" ? (
           <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
         ) : (
           <DashboardScreen
@@ -3709,7 +3682,7 @@ export function OrganizatechApp({
           />
         )
       )}
-      {screen === "training-summary" && trainingCompletionSummary && (
+      {screen === "training-summary" && isTrainingSummaryScreenValid(Boolean(trainingCompletionSummary)) && trainingCompletionSummary && (
         <TrainingCompletionSummaryScreen
           summary={trainingCompletionSummary}
           onDashboard={() => {
@@ -3718,10 +3691,10 @@ export function OrganizatechApp({
           }}
         />
       )}
-      {screen === "registro-entrenamiento" && isCycleScopedPlanBlocked && !isEditingRoutinePlan && (
+      {screen === "registro-entrenamiento" && routineBuilderVariant === "blocked" && (
         <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
       )}
-      {screen === "registro-entrenamiento" && !isCycleScopedPlanBlocked && (!hasRoutinePlan || isEditingRoutinePlan) && (
+      {screen === "registro-entrenamiento" && routineBuilderVariant === "editor" && (
         <InitialTrainingScreen
           day={setupDay}
           setDay={setSetupDay}
@@ -3739,7 +3712,7 @@ export function OrganizatechApp({
           configuredDays={getConfiguredSetupDays(setupByDay)}
         />
       )}
-      {screen === "registro-entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && (
+      {screen === "registro-entrenamiento" && routineBuilderVariant === "management" && (
         <CycleManagementScreen
           trainingPlan={displayTrainingPlan}
           exercises={displayExercises}
@@ -3751,13 +3724,13 @@ export function OrganizatechApp({
           requestDeleteCycle={() => setIsDeleteCycleConfirmOpen(true)}
         />
       )}
-      {screen === "entrenamiento" && isCycleScopedPlanBlocked && (
+      {screen === "entrenamiento" && activeWorkoutVariant === "blocked" && (
         <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
       )}
-      {screen === "entrenamiento" && !isCycleScopedPlanBlocked && !hasRoutinePlan && (
+      {screen === "entrenamiento" && activeWorkoutVariant === "empty" && (
         <EmptyDashboard startRegistration={() => navigateTo("registro-entrenamiento")} />
       )}
-      {screen === "entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && !hasStartedTraining && (
+      {screen === "entrenamiento" && activeWorkoutVariant === "start" && (
         <TrainingStartScreen
           day={visibleDay}
           routine={visibleRoutine}
@@ -3771,7 +3744,7 @@ export function OrganizatechApp({
           notice={dailyReadinessError || routineNotice}
         />
       )}
-      {screen === "entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && hasStartedTraining && !readiness && (
+      {screen === "entrenamiento" && activeWorkoutVariant === "readiness" && (
         <TrainingReadinessScreen
           onSubmit={submitDailyReadiness}
           onSkip={skipDailyReadiness}
@@ -3779,7 +3752,7 @@ export function OrganizatechApp({
           error={dailyReadinessError}
         />
       )}
-      {screen === "entrenamiento" && !isCycleScopedPlanBlocked && hasRoutinePlan && !isEditingRoutinePlan && hasStartedTraining && readiness && (
+      {screen === "entrenamiento" && activeWorkoutVariant === "guided" && (
         <GuidedTrainingScreen
           day={visibleDay}
           routine={visibleRoutine}
@@ -3806,7 +3779,7 @@ export function OrganizatechApp({
         />
       )}
       {screen === "comparacion" && (
-        isCycleScopedPlanBlocked ? (
+        comparisonScreenVariant === "blocked" ? (
           <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
         ) : (
           <ComparisonScreenV2
@@ -3872,8 +3845,7 @@ export function OrganizatechApp({
           onConfirm={() => void saveInitialRoutine(true)}
         />
       )}
-
-    </main>
+    </AppShellLayout>
   );
 }
 
@@ -5375,13 +5347,6 @@ function getPasswordRecoveryRedirectUrl() {
   const url = new URL(window.location.origin);
   url.searchParams.set("flow", "password-recovery");
   return url.toString();
-}
-
-function getInitialAuthScreen(): Screen {
-  const recoveryState = getPasswordRecoveryRouteState();
-  if (recoveryState === "expired") return "recovery-expired";
-  if (recoveryState === "active") return "nueva-password";
-  return "login";
 }
 
 function getPasswordRecoveryRouteState(): "none" | "active" | "expired" {

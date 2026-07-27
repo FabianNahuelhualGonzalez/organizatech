@@ -6,7 +6,10 @@ import type { AppNotificationSection } from "@/lib/notifications/notification-ty
  * duplica nada de ese módulo: `Screen`, la navegación contextual y el back ya están cubiertos
  * ahí). Cada función reproduce exactamente una regla hoy inline en `organizatech-app.tsx`.
  *
- * Puro: sin React, sin DOM, sin storage, sin Supabase. No integrado todavía (P3-06 preparación).
+ * Puro: sin React, sin DOM, sin storage, sin Supabase. Integrado parcialmente en
+ * organizatech-app.tsx desde P3-07A: `resolveMenuScreens`, `canGoBackFromScreen`,
+ * `resolveDayStateReset` y `resolveNotificationScrollTarget` ya se usan en el root;
+ * `resolveWorkoutCompletionScreen` queda pendiente de integrar para P3-07B.
  */
 
 /**
