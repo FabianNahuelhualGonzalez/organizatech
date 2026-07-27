@@ -107,8 +107,20 @@ export function getTrainingPlanObjectiveOptions(cycleType: TrainingCycleId): rea
   return TRAINING_PLAN_OBJECTIVES_BY_CYCLE[cycleType];
 }
 
+export function getTrainingPlanObjectiveField(
+  cycleType: TrainingCycleId,
+): TrainingPlanObjectiveField {
+  return objectiveFieldByCycle[cycleType];
+}
+
 export function getTrainingPlanDurationOptions(cycleType: TrainingCycleId): readonly number[] {
   return TRAINING_PLAN_DURATIONS_BY_CYCLE[cycleType];
+}
+
+export function getTrainingPlanDurationField(
+  cycleType: TrainingCycleId,
+): TrainingPlanDurationField {
+  return durationFieldByCycle[cycleType];
 }
 
 export function validateTrainingPlan(value: unknown): TrainingPlanValidationResult {

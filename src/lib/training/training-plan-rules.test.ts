@@ -8,7 +8,9 @@ import {
   TRAINING_PLAN_DURATIONS_BY_CYCLE,
   TRAINING_PLAN_OBJECTIVES_BY_CYCLE,
   createDefaultTrainingPlan,
+  getTrainingPlanDurationField,
   getTrainingPlanDurationOptions,
+  getTrainingPlanObjectiveField,
   getTrainingPlanObjectiveOptions,
   validateTrainingPlan,
   validateTrainingPlanSetup,
@@ -68,6 +70,19 @@ for (const cycleType of TRAINING_CYCLE_IDS) {
   assert.deepEqual(getTrainingPlanObjectiveOptions(cycleType), TRAINING_PLAN_OBJECTIVES_BY_CYCLE[cycleType]);
   assert.deepEqual(getTrainingPlanDurationOptions(cycleType), TRAINING_PLAN_DURATIONS_BY_CYCLE[cycleType]);
 }
+
+assert.deepEqual(TRAINING_CYCLE_IDS.map(getTrainingPlanObjectiveField), [
+  "macroObjective",
+  "mesoObjective",
+  "microFocus",
+  "sessionFocus",
+]);
+assert.deepEqual(TRAINING_CYCLE_IDS.map(getTrainingPlanDurationField), [
+  "macroDurationMonths",
+  "mesoDurationWeeks",
+  "microDurationWeeks",
+  "sessionDurationDays",
+]);
 
 assert.deepEqual(validateTrainingPlan(null), {
   valid: false,
