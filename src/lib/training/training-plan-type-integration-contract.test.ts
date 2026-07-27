@@ -75,10 +75,17 @@ for (const callSite of [
   /function createTrainingPlanFromPersistedCycle\([^)]*fallback: TrainingPlan\): TrainingPlan/,
   /function normalizeTrainingPlan\(value: unknown\): TrainingPlan/,
   /isTrainingCycleId\(snapshotCycleType\)/,
-  /event\.target\.value as TrainingCycleId/,
+  // P3-07C: el selector de ciclo emite string y el root lo angosta con el guard canónico
+  // (updateCycleType) — el cast inseguro del DOM quedó prohibido.
+  /if \(!isTrainingCycleId\(value\)\) return;/,
 ]) {
   assert.match(appStaticSource, callSite, "los call-sites principales deben conservar sus tipos y guard");
 }
+assert.doesNotMatch(
+  appStaticSource,
+  /event\.target\.value as TrainingCycleId/,
+  "el flujo integrado no debe castear input del DOM directamente al tipo de dominio",
+);
 
 assert.match(appStaticSource, /interface TrainingCycleSnapshot \{/);
 assert.match(appStaticSource, /plan: TrainingPlan;/);

@@ -82,7 +82,10 @@ assert.match(scrollSource, /scrollIntoView/);
 });
 assert.doesNotMatch(appSource, /const VISIBLE_NEW_NOTIFICATIONS_LIMIT\b/);
 assert.doesNotMatch(appSource, /const SEEN_NOTIFICATIONS_MAX_RECORDS\b/);
-assert.match(appSource, /import \{ NotificationGroup \} from "@\/features\/notifications\/components\/NotificationGroup";/);
+// Desde P3-07C el root importa NotificationPanel (que a su vez consume NotificationGroup);
+// el root no importa el grupo directamente ni lo redefine.
+assert.match(appSource, /import \{ NotificationPanel \} from "@\/features\/notifications\/components\/NotificationPanel";/);
+assert.match(notificationGroupSource, /export function NotificationGroup\b/);
 assert.doesNotMatch(appSource, /^\s*function NotificationGroup\b/m);
 
 // CASO 8: la suite normal mantiene las pruebas conductuales del modelo que cubren sus ramas.

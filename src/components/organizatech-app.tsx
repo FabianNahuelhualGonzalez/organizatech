@@ -44,13 +44,14 @@ import { TrainingReadinessScreen } from "@/features/active-workout/components/Tr
 import { TrainingStartScreen } from "@/features/active-workout/components/TrainingStartScreen";
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
-import { NotificationGroup } from "@/features/notifications/components/NotificationGroup";
+import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
 import { ComparisonScreenV2 } from "@/features/progress/components/comparison-screen-v2";
 import { ConfirmRoutineUpdateModal } from "@/features/routine-builder/components/ConfirmRoutineUpdateModal";
 import { RoutineSuccessModal } from "@/features/routine-builder/components/RoutineSuccessModal";
 import { ConfirmDeleteCycleModal } from "@/features/training-plan/components/ConfirmDeleteCycleModal";
 import { ConfirmNewCycleModal } from "@/features/training-plan/components/ConfirmNewCycleModal";
 import { CycleManagementScreen } from "@/features/training-plan/components/CycleManagementScreen";
+import { TrainingPlanSetupCard } from "@/features/training-plan/components/TrainingPlanSetupCard";
 import { CycleScopedPlanBlocker } from "@/features/training-plan/components/CycleScopedPlanBlocker";
 import { TRAINING_CYCLE_PRESENTATIONS as trainingCycles } from "@/features/training-plan/model/training-cycle-presentation";
 import { buildProfileViewModelFromSources } from "@/lib/profile/profile-view-model";
@@ -3615,43 +3616,17 @@ export function OrganizatechApp({
         />
       }
       notificationOverlay={
-        isNotificationPanelOpen ? (
-          <>
-            <button
-              className="notification-backdrop"
-              aria-label="Cerrar notificaciones"
-              onClick={() => setIsNotificationPanelOpen(false)}
-            />
-            <div className="notification-panel" role="dialog" aria-label="Notificaciones">
-              <div className="notification-panel-header">
-                <strong>Notificaciones</strong>
-                <span>{notificationPanelSubtitle}</span>
-              </div>
-              {appNotifications.length > 0 ? (
-                <div className="notification-list">
-                  {newNotifications.length > 0 ? (
-                    <NotificationGroup
-                      title="Nuevas"
-                      notifications={newNotifications}
-                      seenNotificationRecordsById={seenNotificationRecordsById}
-                      onOpen={openNotificationTarget}
-                    />
-                  ) : null}
-                  {historyNotifications.length > 0 ? (
-                    <NotificationGroup
-                      title="Historial"
-                      notifications={historyNotifications}
-                      seenNotificationRecordsById={seenNotificationRecordsById}
-                      onOpen={openNotificationTarget}
-                    />
-                  ) : null}
-                </div>
-              ) : (
-                <p className="notification-empty">{NOTIFICATION_EMPTY_MESSAGE}</p>
-              )}
-            </div>
-          </>
-        ) : null
+        <NotificationPanel
+          isOpen={isNotificationPanelOpen}
+          subtitle={notificationPanelSubtitle}
+          totalNotificationsCount={appNotifications.length}
+          newNotifications={newNotifications}
+          historyNotifications={historyNotifications}
+          seenNotificationRecordsById={seenNotificationRecordsById}
+          emptyMessage={NOTIFICATION_EMPTY_MESSAGE}
+          onClose={() => setIsNotificationPanelOpen(false)}
+          onOpenNotification={openNotificationTarget}
+        />
       }
       navigationOverlay={
         <AppNavigationDrawer
@@ -4160,7 +4135,6 @@ function InitialTrainingScreen({
   const currentStep = Math.max(1, plannedDays.indexOf(day) + 1);
   const remainingDays = plannedDays.filter((item) => item !== day && !configuredDays.includes(item));
   const isLastPendingDay = remainingDays.length === 0;
-  const selectedCycle = trainingCycles.find((cycle) => cycle.id === trainingPlan.cycleType) ?? trainingCycles[0];
   const objectiveOptions = getCycleObjectiveOptions(trainingPlan.cycleType);
   const durationOptions = getCycleDurationOptions(trainingPlan.cycleType);
   const objectiveValue = getCycleObjectiveValue(trainingPlan);
@@ -4181,6 +4155,11 @@ function InitialTrainingScreen({
     setDay(sortedDays.includes(item) ? item : sortedDays[0]);
   }
 
+  function updateCycleType(value: string) {
+    if (!isTrainingCycleId(value)) return;
+    updateTrainingPlan({ cycleType: value });
+  }
+
   function updateCycleObjective(value: string) {
     if (trainingPlan.cycleType === "macro") updateTrainingPlan({ macroObjective: value });
     if (trainingPlan.cycleType === "meso") updateTrainingPlan({ mesoObjective: value });
@@ -4198,65 +4177,21 @@ function InitialTrainingScreen({
 
   return (
     <section className="setup-screen">
-      <div className="setup-card training-cycles-card">
-        <div className="setup-section-heading">
-          <p className="eyebrow">Planificación deportiva</p>
-          <h3>Selecciona tu ciclo de entrenamiento</h3>
-        </div>
-        <div className="cycle-flow-card">
-          <label className="cycle-select-field">
-            <span>Ciclo de entrenamiento</span>
-            <select
-              className="cycle-select"
-              value={trainingPlan.cycleType}
-              onChange={(event) => updateTrainingPlan({ cycleType: event.target.value as TrainingCycleId })}
-            >
-              {trainingCycles.map((cycle) => (
-                <option key={cycle.id} value={cycle.id}>{cycle.title}</option>
-              ))}
-            </select>
-          </label>
-          <div className="cycle-description">
-            <strong>{selectedCycle.title}</strong>
-            <p>{selectedCycle.detail}</p>
-          </div>
-          <label className="cycle-select-field">
-            <span>¿Cuál es el objetivo principal?</span>
-            <select className="cycle-select" value={objectiveValue} onChange={(event) => updateCycleObjective(event.target.value)}>
-              {objectiveOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </label>
-          <div className="cycle-description objective-description">
-            <strong>{objectiveValue}</strong>
-            <p>{objectiveDescription}</p>
-          </div>
-          <label className="cycle-select-field">
-            <span>Duración</span>
-            <select className="cycle-select" value={durationValue} onChange={(event) => updateCycleDuration(event.target.value)}>
-              {durationOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <div className="cycle-select-field">
-            <span>Selecciona días de entrenamiento</span>
-            <div className="cycle-chip-grid days">
-              {TRAINING_DAY_LABELS.map((item) => (
-                <button
-                  className={`cycle-chip ${plannedDays.includes(item) ? "active" : ""} ${day === item ? "current" : ""} ${configuredDays.includes(item) ? "configured" : ""}`}
-                  key={item}
-                  type="button"
-                  onClick={() => toggleTrainingDay(item)}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+      <TrainingPlanSetupCard
+        cycleType={trainingPlan.cycleType}
+        objectiveValue={objectiveValue}
+        objectiveOptions={objectiveOptions}
+        objectiveDescription={objectiveDescription}
+        durationValue={durationValue}
+        durationOptions={durationOptions}
+        plannedDays={plannedDays}
+        activeDay={day}
+        configuredDays={configuredDays}
+        onCycleTypeChange={updateCycleType}
+        onObjectiveChange={updateCycleObjective}
+        onDurationChange={updateCycleDuration}
+        onToggleTrainingDay={toggleTrainingDay}
+      />
 
       <div className="setup-card routine-day-builder-card">
         <div className="setup-section-heading">

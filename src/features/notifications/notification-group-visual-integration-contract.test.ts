@@ -11,8 +11,13 @@ const groupSource = readFileSync("src/features/notifications/components/Notifica
 const iconsSource = readFileSync("src/features/notifications/components/NotificationIcons.tsx", "utf8");
 const featureSource = `${groupSource}\n${iconsSource}`;
 
-assert.match(appSource, /import \{ NotificationGroup \} from "@\/features\/notifications\/components\/NotificationGroup";/);
-assert.match(appSource, /<NotificationGroup\b/);
+// Desde P3-07C el root delega el panel completo en NotificationPanel, que es quien consume
+// NotificationGroup (dos grupos: Nuevas e Historial). El root ya no lo importa directamente.
+const panelSource = readFileSync("src/features/notifications/components/NotificationPanel.tsx", "utf8");
+assert.match(appSource, /import \{ NotificationPanel \} from "@\/features\/notifications\/components\/NotificationPanel";/);
+assert.match(panelSource, /import \{ NotificationGroup \} from "\.\/NotificationGroup";/);
+assert.equal((panelSource.match(/<NotificationGroup\b/g) ?? []).length, 2, "NotificationPanel renderiza los dos grupos");
+assert.doesNotMatch(appSource, /<NotificationGroup\b/, "el root no debe renderizar grupos directamente");
 
 for (const componentName of [
   "NotificationGroup",

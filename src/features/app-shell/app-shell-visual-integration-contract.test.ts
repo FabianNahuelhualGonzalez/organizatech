@@ -17,7 +17,8 @@ import { readFileSync } from "node:fs";
  * 5. Los componentes de App Shell no importan lógica prohibida (organizatech-app, Supabase,
  *    repositories, storage productivo).
  * 6. El refresh de avatar permanece en un callback del root (toggleMenu), no en los componentes.
- * 7. Notifications sigue siendo un slot externo: el JSX del panel permanece en el root.
+ * 7. Notifications sigue siendo responsabilidad externa a AppShellLayout: desde P3-07C el root
+ *    llena el slot con NotificationPanel (estado y callbacks siguen en el root).
  * 8. `globals.css` no se referencia como modificado por este contrato (la verificación de bytes
  *    reales queda en el gate de `git diff` del reporte final, no aquí).
  * 9. Regresión de comportamiento (sin harness de render, siguiendo el patrón estático ya usado en
@@ -118,12 +119,13 @@ Object.entries(components).forEach(([label, source]) => {
   assert.doesNotMatch(source, /refreshProfileAvatar/, `${label} no debe conocer refreshProfileAvatar (logica de produccion del root)`);
 });
 
-// 7. Notifications sigue siendo un slot externo: el JSX del panel permanece en el root.
-assert.match(appSource, /notificationOverlay=\{\s*isNotificationPanelOpen \? \(/);
-assert.match(appSource, /className="notification-panel" role="dialog" aria-label="Notificaciones"/);
-assert.match(appSource, /<NotificationGroup/);
+// 7. Notifications sigue siendo responsabilidad externa a AppShellLayout: el root llena el slot
+//    con NotificationPanel (P3-07C) — el estado, las props y los callbacks siguen siendo del
+//    root, y ninguno de los 5 componentes de App Shell dibuja el panel.
+assert.match(appSource, /notificationOverlay=\{\s*<NotificationPanel/);
+assert.match(appSource, /isOpen=\{isNotificationPanelOpen\}/);
 Object.entries(components).forEach(([label, source]) => {
-  assert.doesNotMatch(source, /notification-panel"/, `${label} no debe dibujar el panel de notificaciones (sigue siendo slot del root)`);
+  assert.doesNotMatch(source, /notification-panel"|<NotificationPanel/, `${label} no debe dibujar el panel de notificaciones (sigue siendo slot del root)`);
 });
 
 // 9a. toggleMenu: cierra notificaciones, luego alterna isMenuOpen, y el refresh de avatar solo
@@ -142,9 +144,9 @@ assertInOrder(toggleMenuSource, [
 assert.match(components.topbar, /\{notificationBadgeText \? \(/);
 assert.match(components.topbar, /className="notification-badge" aria-label={notificationBadgeAriaLabel \?\? undefined}/);
 
-// 9c. Overlay de notificaciones: el backdrop cierra el panel; el trigger alterna isMenuOpen=false
-//     como efecto lateral coordinado con la apertura del drawer (ver toggleMenu arriba).
-assert.match(appSource, /className="notification-backdrop"\s*\n\s*aria-label="Cerrar notificaciones"\s*\n\s*onClick={\(\) => setIsNotificationPanelOpen\(false\)}/);
+// 9c. Overlay de notificaciones: el cierre sigue siendo un callback del root pasado al panel
+//     (el backdrop en si vive en NotificationPanel y se verifica en su propio contrato).
+assert.match(appSource, /onClose=\{\(\) => setIsNotificationPanelOpen\(false\)\}/);
 
 // 9d. Drawer: onNavigate y onLogout llegan directo del root, sin envoltorios que oculten el navigateTo/handleLogout reales.
 assert.match(appSource, /onNavigate={navigateTo}/);
