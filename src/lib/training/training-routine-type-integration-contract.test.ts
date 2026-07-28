@@ -51,7 +51,7 @@ assert.match(
 );
 assert.match(
   appStaticSource,
-  /const draft = loadRoutineDraft\(mode, userId, \{[\s\S]*?normalizeSetupByDay,[\s\S]*?normalizeTrainingPlan,[\s\S]*?hasSetupDraftContent,[\s\S]*?\}\);/,
+  /const draft = loadRoutineDraft\(mode, userId, \{[\s\S]*?normalizeSetupByDay,[\s\S]*?normalizeTrainingPlan: normalizePersistedTrainingPlan,[\s\S]*?hasSetupDraftContent,[\s\S]*?\}\);/,
   "la carga debe conservar ambos normalizadores tipados",
 );
 assert.match(
