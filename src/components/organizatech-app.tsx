@@ -50,6 +50,10 @@ import { RoutineBuilderDayCard } from "@/features/routine-builder/components/Rou
 import { RoutineBuilderNameCard } from "@/features/routine-builder/components/RoutineBuilderNameCard";
 import { RoutineExerciseBuilderCard } from "@/features/routine-builder/components/RoutineExerciseBuilderCard";
 import { RoutineSuccessModal } from "@/features/routine-builder/components/RoutineSuccessModal";
+import {
+  resolveRoutineBuilderSavePreparation,
+  type RoutineBuilderSaveConfirmation,
+} from "@/features/routine-builder/model/routine-builder-save";
 import { ConfirmDeleteCycleModal } from "@/features/training-plan/components/ConfirmDeleteCycleModal";
 import { ConfirmNewCycleModal } from "@/features/training-plan/components/ConfirmNewCycleModal";
 import { CycleManagementScreen } from "@/features/training-plan/components/CycleManagementScreen";
@@ -2105,18 +2109,9 @@ export function OrganizatechApp({
     setStatusMessage("No se realizaron cambios en la rutina.");
   }
 
-  async function saveInitialRoutine(confirmedRoutineUpdate = false) {
+  async function saveInitialRoutine(confirmation: RoutineBuilderSaveConfirmation) {
     const dayState = setupByDay[setupDay] ?? createSetupDayState();
     const routineName = dayState.routineName.trim() || setupDay;
-    const nonEmptyRows = dayState.rows.filter((row) => row.name.trim());
-    const validRows = isTrainingCyclesRepositoryActive
-      ? nonEmptyRows
-      : dedupeExerciseRowsByName(nonEmptyRows);
-    const invalidWeightRow = nonEmptyRows.find((row) => row.weight.trim() !== "" && parseDecimalWeightInput(row.weight) === null);
-    if (invalidWeightRow) {
-      setStatusMessage(`Completa el peso de "${invalidWeightRow.name.trim()}" con un decimal valido.`);
-      return;
-    }
     const plannedDays = sortTrainingDaysByWeekOrder(
       trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [setupDay],
     );
@@ -2130,6 +2125,28 @@ export function OrganizatechApp({
       persistedActiveCycle &&
       isCycleScopedTrainingCycle(persistedActiveCycle),
     );
+    const savePreparation = resolveRoutineBuilderSavePreparation({
+      rows: dayState.rows,
+      persistenceMode: isTrainingCyclesRepositoryActive ? "cycle_scoped" : "legacy",
+      allowEmptyRows: isCycleScopedRoutineEdit,
+      requiresRoutineUpdateConfirmation:
+        isChangingRoutineDays && !isTrainingCyclesRepositoryActive,
+      confirmation,
+    });
+    if (savePreparation.kind === "invalid_weight") {
+      setStatusMessage(`Completa el peso de "${savePreparation.exerciseName}" con un decimal valido.`);
+      return;
+    }
+    if (savePreparation.kind === "no_exercises") {
+      setStatusMessage("Agrega al menos un ejercicio para crear la rutina.");
+      return;
+    }
+    if (savePreparation.kind === "confirmation_required") {
+      setIsRoutineUpdateConfirmOpen(true);
+      return;
+    }
+
+    const validRows = savePreparation.rows;
     const savedDayState = {
       routineName,
       rows: validRows.map((row) => ({
@@ -2147,16 +2164,6 @@ export function OrganizatechApp({
     const nextIncompleteDay = plannedDays.find((day) => day !== setupDay && !completedDays.includes(day));
     const allPlannedDaysComplete = plannedDays.every((day) => completedDays.includes(day));
     const daysToPersist = plannedDays.filter((day) => nextSetupByDay[day]?.rows.some((row) => row.name.trim()));
-
-    if (validRows.length === 0 && !isCycleScopedRoutineEdit) {
-      setStatusMessage("Agrega al menos un ejercicio para crear la rutina.");
-      return;
-    }
-
-    if (isChangingRoutineDays && !isTrainingCyclesRepositoryActive && !confirmedRoutineUpdate) {
-      setIsRoutineUpdateConfirmOpen(true);
-      return;
-    }
 
     if (isTrainingCyclesRepositoryActive) {
       setIsRoutineUpdateConfirmOpen(false);
@@ -3698,7 +3705,7 @@ export function OrganizatechApp({
           updateRow={updateSetupRow}
           addRow={addSetupRow}
           removeRow={removeSetupRow}
-          saveRoutine={saveInitialRoutine}
+          saveRoutine={() => void saveInitialRoutine("unconfirmed")}
           trainingPlan={trainingPlan}
           updateTrainingPlan={updateTrainingPlan}
           message={statusMessage}
@@ -3836,7 +3843,7 @@ export function OrganizatechApp({
       {isRoutineUpdateConfirmOpen && (
         <ConfirmRoutineUpdateModal
           onCancel={() => cancelRoutineUpdate()}
-          onConfirm={() => void saveInitialRoutine(true)}
+          onConfirm={() => void saveInitialRoutine("confirmed_routine_update")}
         />
       )}
     </AppShellLayout>

@@ -12,9 +12,8 @@ import type { SetupExerciseRow } from "@/lib/training/training-routine-draft";
  *   de peso decimal viven en el contenedor, no aquí.
  * - `value={row.sets || ""}` y `value={row.reps || ""}` muestran 0 como caja vacía;
  *   `value={row.name}` va sin coalescer, como el original.
- * - El botón de guardar usa `onClick={onSave}` por REFERENCIA DESNUDA: el SyntheticEvent fluye
- *   como primer argumento (hoy eso hace truthy el parámetro `confirmedRoutineUpdate` del
- *   contenedor). Envolverlo en `() => onSave()` cambiaría comportamiento observable.
+ * - El botón de guardar invoca `onSave()` mediante una wrapper sin argumentos. El evento de
+ *   React no cruza el contrato visual ni puede convertirse en intención de confirmación.
  * - Etiqueta de guardar de tres vías: "Guardando..." / "Finalizar registro de rutina" /
  *   "Guardar y continuar".
  * - `message` llega YA FILTRADO por el contenedor (el original filtra dos strings de estado);
@@ -22,8 +21,8 @@ import type { SetupExerciseRow } from "@/lib/training/training-routine-draft";
  * - Sin estado vacío para `rows.length === 0` (el original tampoco lo tiene) y sin `<label>`
  *   en los inputs (solo placeholders), igual que el original.
  *
- * Sin estado propio, sin efectos, sin dominio. No integrado todavía (P3-19A preparación): el
- * bloque original permanece en el root hasta la integración.
+ * Sin estado propio, sin efectos y sin dominio. Integrado visualmente desde P3-19B; la
+ * preparación y persistencia del guardado permanecen en el contenedor.
  */
 
 export type SetupExerciseRowField = keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId" | "exerciseLineageId">;
@@ -79,7 +78,7 @@ export function RoutineExerciseBuilderCard({
       </div>
       <div className="setup-actions">
         <button className="small-yellow-button" type="button" onClick={onAddRow}>Agregar más</button>
-        <button className="start-button compact" type="button" onClick={onSave} disabled={isBusy}>
+        <button className="start-button compact" type="button" onClick={() => onSave()} disabled={isBusy}>
           {isBusy ? "Guardando..." : isLastPendingDay ? "Finalizar registro de rutina" : "Guardar y continuar"}
         </button>
       </div>

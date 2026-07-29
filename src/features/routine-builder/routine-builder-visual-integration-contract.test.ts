@@ -26,6 +26,9 @@ const packageSource = readSource("package.json");
 const successSource = readSource("src/features/routine-builder/components/RoutineSuccessModal.tsx");
 const updateSource = readSource("src/features/routine-builder/components/ConfirmRoutineUpdateModal.tsx");
 const setupCardSource = readSource("src/features/training-plan/components/TrainingPlanSetupCard.tsx");
+const savePreparationSource = readSource(
+  "src/features/routine-builder/model/routine-builder-save.ts",
+);
 
 const cards = {
   dayCard: readSource("src/features/routine-builder/components/RoutineBuilderDayCard.tsx"),
@@ -89,15 +92,24 @@ assert.match(screenSource, /<RoutineBuilderDayCard\s+plannedDays=\{plannedDays\}
 assert.match(screenSource, /<RoutineBuilderNameCard\s+day=\{day\}\s+routineName=\{routineName\}\s+onRoutineNameChange=\{setRoutineName\}\s*\/>/);
 assert.match(screenSource, /<RoutineExerciseBuilderCard\s+day=\{day\}\s+rows=\{rows\}\s+isBusy=\{isBusy\}\s+isLastPendingDay=\{isLastPendingDay\}\s+message=\{visibleMessage\}\s+onRowChange=\{updateRow\}\s+onAddRow=\{addRow\}\s+onRemoveRow=\{removeRow\}\s+onSave=\{saveRoutine\}\s*\/>/);
 
-// 5. Trampa de onSave/SyntheticEvent: la referencia debe seguir DESNUDA en ambos extremos —
-//    el contenedor la pasa sin envolver y el componente la conecta sin envolver. Preservar
-//    deliberadamente que el SyntheticEvent fluya como primer argumento (revisión funcional
-//    reservada para P3-25; no se corrige aquí).
-assert.doesNotMatch(screenSource, /onSave=\{\(\) => saveRoutine\(\)\}/, "no envolver saveRoutine al pasarlo al componente");
-assert.doesNotMatch(screenSource, /onSave=\{\(\) => void saveRoutine\(\)\}/);
-assert.doesNotMatch(screenSource, /onSave=\{\(event\) => saveRoutine\(\)\}/);
-assert.match(cards.exerciseCard, /onClick=\{onSave\} disabled=\{isBusy\}/, "el componente conecta onSave por referencia desnuda");
-assert.doesNotMatch(cards.exerciseCard, /onClick=\{\(\) => onSave\(\)\}/, "envolver onSave cambiaria el comportamiento observable del contenedor");
+// 5. Contrato de guardado: ningun SyntheticEvent cruza como confirmacion. El componente
+//    invoca una callback sin argumentos y el root expresa ambas intenciones mediante literales.
+assert.match(screenSource, /onSave=\{saveRoutine\}/);
+assert.match(cards.exerciseCard, /onClick=\{\(\) => onSave\(\)\} disabled=\{isBusy\}/);
+assert.doesNotMatch(cards.exerciseCard, /onClick=\{onSave\}/);
+assert.doesNotMatch(cards.exerciseCard, /SyntheticEvent fluye|REFERENCIA DESNUDA/);
+assert.match(appSource, /saveRoutine=\{\(\) => void saveInitialRoutine\("unconfirmed"\)\}/);
+assert.doesNotMatch(appSource, /saveRoutine=\{saveInitialRoutine\}/);
+assert.match(
+  appSource,
+  /onConfirm=\{\(\) => void saveInitialRoutine\("confirmed_routine_update"\)\}/,
+);
+assert.match(
+  appSource,
+  /async function saveInitialRoutine\(confirmation: RoutineBuilderSaveConfirmation\)/,
+);
+assert.doesNotMatch(appSource, /saveInitialRoutine\(confirmedRoutineUpdate\s*=\s*false\)/);
+assert.doesNotMatch(appSource, /saveInitialRoutine\(true\)/);
 
 // 6. DOM/clases/copy de los 3 componentes nuevos, con la estructura exacta del bloque original.
 assert.match(cards.dayCard, /className="setup-card routine-day-builder-card"/);
@@ -149,15 +161,40 @@ assert.match(appSource, /<TrainingStartScreen/);
 assert.match(appSource, /<GuidedTrainingScreen/);
 assert.match(appSource, /<TrainingReadinessScreen/);
 
-// 10. updateSetupRow y saveInitialRoutine permanecen en el root durante esta fase (P3-20+).
+// 10. updateSetupRow y los efectos de saveInitialRoutine permanecen en el root. La preparacion
+//     pura se delega al modulo P3-25 sin integrar el reducer P3-20/P3-21.
 assert.match(appSource, /function updateSetupRow\(/);
 assert.match(appSource, /(?:async\s+)?function saveInitialRoutine\(/);
+assert.match(
+  appSource,
+  /from "@\/features\/routine-builder\/model\/routine-builder-save";/,
+);
+assert.match(appSource, /resolveRoutineBuilderSavePreparation\(\{/);
+assert.match(appSource, /persistenceMode: isTrainingCyclesRepositoryActive \? "cycle_scoped" : "legacy"/);
+assert.match(appSource, /allowEmptyRows: isCycleScopedRoutineEdit/);
+assert.match(
+  appSource,
+  /requiresRoutineUpdateConfirmation:\s*isChangingRoutineDays && !isTrainingCyclesRepositoryActive/,
+);
+assert.match(savePreparationSource, /confirmation !== "confirmed_routine_update"/);
+assert.doesNotMatch(appSource, /\buseReducer\b|\broutineBuilderReducer\b/);
 
-// 11. Controlador de navegación intacto: 2 escritores de pantalla, 1 de historial.
+// 11. Las ramas productivas de persistencia siguen en el root; el modulo puro no las importa.
+assert.match(appSource, /if \(isTrainingCyclesRepositoryActive\)/);
+assert.match(appSource, /addCycleScopedTrainingDaysAndExercises\(\{/);
+assert.match(appSource, /for \(const dayToPersist of daysToPersist\)/);
+assert.match(appSource, /await deleteExercise\(exerciseId, dataMode\)/);
+assert.match(appSource, /await saveExercise\(\{/);
+assert.doesNotMatch(
+  stripComments(savePreparationSource),
+  /saveExercise|deleteExercise|addCycleScopedTrainingDaysAndExercises|repository|supabase|storage/,
+);
+
+// 12. Controlador de navegación intacto: 2 escritores de pantalla, 1 de historial.
 assert.equal((appSource.match(/setScreen\(/g) ?? []).length, 2, "controlador de navegacion intacto: 2 escritores autorizados");
 assert.equal((appSource.match(/setScreenHistory\(/g) ?? []).length, 1, "controlador de navegacion intacto: 1 escritor de historial");
 
-// 12. La preparación fue absorbida: el contrato de gap ya no existe como archivo separado.
+// 13. La preparación fue absorbida: el contrato de gap ya no existe como archivo separado.
 assert.doesNotMatch(packageSource, /routine-builder-visual-gap-preparation-contract\.test\.ts/, "el contrato de preparacion ya no debe existir");
 
 const registration = "tsx src/features/routine-builder/routine-builder-visual-integration-contract.test.ts";
