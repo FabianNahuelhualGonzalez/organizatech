@@ -249,13 +249,13 @@ assert.equal((appSource.match(/setScreen\(/g) ?? []).length, 2, "controlador de 
 assert.equal((appSource.match(/setScreenHistory\(/g) ?? []).length, 1, "controlador de navegacion intacto: 1 escritor de historial");
 
 // 16. La preparación fue absorbida y los cinco tests de modelo, más este contrato, están
-//     registrados exactamente una vez. P3-26 eleva la suite de 117 a 118 comandos.
+//     registrados exactamente una vez. La consolidacion P3-15 a P3-26 suma 122 comandos.
 assert.doesNotMatch(packageSource, /routine-builder-visual-gap-preparation-contract\.test\.ts/, "el contrato de preparacion ya no debe existir");
 
 const registration = "tsx src/features/routine-builder/routine-builder-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);
 const testCommands = (JSON.parse(packageSource) as { scripts: { test: string } }).scripts.test.split(" && ");
-assert.equal(testCommands.length, 118);
+assert.equal(testCommands.length, 122);
 for (const command of [
   "tsx src/features/routine-builder/model/routine-builder-state.test.ts",
   "tsx src/features/routine-builder/model/routine-builder-draft-normalization.test.ts",

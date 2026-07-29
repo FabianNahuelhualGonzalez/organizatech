@@ -76,8 +76,10 @@ for (const [callback, parameter] of [
 }
 assert.match(files.setupCard, /onCycleTypeChange\(event\.target\.value\)/, "el selector emite el string crudo, sin cast");
 assert.doesNotMatch(files.setupCard, /as\s+TrainingCycleId/, "el componente no debe castear al tipo de dominio");
-// Guard canónico en el root: string → isTrainingCycleId → actualizar plan solo si es válido.
-assert.match(appSource, /function updateCycleType\(value: string\) \{\s*\n\s*if \(!isTrainingCycleId\(value\)\) return;\s*\n\s*updateTrainingPlan\(\{ cycleType: value \}\);/);
+// P3-18: el root conserva el boundary string del componente y lo entrega al controller,
+// cuyo guard canónico decide si la edición de cycleType puede aplicarse.
+assert.match(appSource, /function updateCycleType\(value: string\) \{\s*\n\s*updateTrainingPlan\(\{ type: "cycle_type", value \}\);/);
+assert.match(appSource, /const result = applyTrainingPlanEdit\(\{ plan: current, activeDay: setupDay \}, edit\);/);
 assert.match(appSource, /onCycleTypeChange=\{updateCycleType\}/);
 assert.doesNotMatch(appSource, /event\.target\.value as TrainingCycleId/, "el cast inseguro quedo eliminado del flujo integrado");
 // Catálogos canónicos compartidos, sin copias locales en el componente.

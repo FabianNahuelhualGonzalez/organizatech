@@ -71,16 +71,16 @@ for (const preservedCopy of [
 
 for (const callSite of [
   /useState<TrainingPlan>\(\(\) => createDefaultTrainingPlan\(\)\)/,
-  /function createDefaultTrainingPlan\(\): TrainingPlan/,
   /function createTrainingPlanFromPersistedCycle\([^)]*fallback: TrainingPlan\): TrainingPlan/,
-  /function normalizeTrainingPlan\(value: unknown\): TrainingPlan/,
+  /function normalizePersistedTrainingPlan\(value: unknown\): TrainingPlan/,
+  /return normalizeTrainingPlanInput\(value\)\.plan;/,
   /isTrainingCycleId\(snapshotCycleType\)/,
-  // P3-07C: el selector de ciclo emite string y el root lo angosta con el guard canónico
-  // (updateCycleType) — el cast inseguro del DOM quedó prohibido.
-  /if \(!isTrainingCycleId\(value\)\) return;/,
+  /applyTrainingPlanEdit\(\{ plan: current, activeDay: setupDay \}, edit\)/,
 ]) {
-  assert.match(appStaticSource, callSite, "los call-sites principales deben conservar sus tipos y guard");
+  assert.match(appStaticSource, callSite, "los call-sites principales deben conservar sus tipos y boundaries");
 }
+assert.doesNotMatch(appStaticSource, /^\s*function createDefaultTrainingPlan\s*\(/m);
+assert.doesNotMatch(appStaticSource, /^\s*function normalizeTrainingPlan\s*\(/m);
 assert.doesNotMatch(
   appStaticSource,
   /event\.target\.value as TrainingCycleId/,

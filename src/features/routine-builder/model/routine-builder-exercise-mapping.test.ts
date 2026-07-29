@@ -581,7 +581,7 @@ for (const forbidden of [
 const packageJson = JSON.parse(packageSource) as { scripts: { test: string } };
 const mappingTestCommand = "tsx src/features/routine-builder/model/routine-builder-exercise-mapping.test.ts";
 const testCommands = packageJson.scripts.test.split(" && ");
-assert.equal(testCommands.length, 118);
+assert.equal(testCommands.length, 122);
 assert.equal(testCommands.filter((command) => command === mappingTestCommand).length, 1);
 
 console.log("routine-builder exercise mapping tests passed");

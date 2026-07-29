@@ -87,7 +87,11 @@ assert.match(
 assert.match(restoreRoutineDraftStaticSource, /loadRoutineDraft\(mode, userId, \{/);
 assert.match(restoreRoutineDraftStaticSource, /resolveSetupRecovery\(input\)\s*\{/);
 assert.match(restoreRoutineDraftStaticSource, /resolveRoutineBuilderDraftRecovery\(input\)/);
-assert.match(restoreRoutineDraftStaticSource, /normalizeTrainingPlan/);
+assert.match(
+  restoreRoutineDraftStaticSource,
+  /normalizeTrainingPlan: normalizePersistedTrainingPlan/,
+  "recovery debe usar la normalizacion canonica de Training Plan",
+);
 assert.doesNotMatch(restoreRoutineDraftStaticSource, /normalizeSetupByDay/);
 assert.doesNotMatch(restoreRoutineDraftStaticSource, /hasSetupDraftContent/);
 
