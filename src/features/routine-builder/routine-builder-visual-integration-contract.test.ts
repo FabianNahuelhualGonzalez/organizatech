@@ -10,6 +10,9 @@ import { readFileSync } from "node:fs";
  * bloques inline `routine-day-builder-card` / `routine-name-card` / `exercise-builder-card`).
  * Absorbe la cobertura del extinto contrato de preparación
  * (`routine-builder-visual-gap-preparation-contract.test.ts`, eliminado en esta rama).
+ * P3-26 amplía este contrato estático al wiring del reducer, mapping, recovery y save. Sigue
+ * sin renderizar React ni probar interacciones o persistencia runtime; esa evidencia vive en
+ * los tests conductuales de cada módulo.
  */
 function readSource(path: string): string {
   return readFileSync(path, "utf8");
@@ -161,9 +164,61 @@ assert.match(appSource, /<TrainingStartScreen/);
 assert.match(appSource, /<GuidedTrainingScreen/);
 assert.match(appSource, /<TrainingReadinessScreen/);
 
-// 10. updateSetupRow y los efectos de saveInitialRoutine permanecen en el root. La preparacion
-//     pura se delega al modulo P3-25 sin integrar el reducer P3-20/P3-21.
+// 10. El reducer es la única fuente de verdad del editor; los aliases son sólo lectura y no
+//     quedan setters/useState legacy ni un segundo reducer paralelo.
+assert.match(appSource, /import \{ useCallback, useEffect, useMemo, useReducer, useRef, useState \} from "react";/);
+assert.match(appSource, /from "@\/features\/routine-builder\/model\/routine-builder-state";/);
+assert.match(appSource, /\bcreateRoutineBuilderState\(\{/);
+assert.match(appSource, /\broutineBuilderReducer\b/);
+assert.match(appSource, /\bcreateRoutineBuilderRow\(createId\(\)\)/);
+assert.equal((appSource.match(/\buseReducer\(/g) ?? []).length, 1, "un único reducer en el root");
+assert.match(appSource, /const setupDay = routineBuilderState\.activeDay;/);
+assert.match(appSource, /const setupByDay = routineBuilderState\.setupByDay;/);
+assert.doesNotMatch(appSource, /const \[setupDay,/);
+assert.doesNotMatch(appSource, /const \[setupByDay,/);
+assert.doesNotMatch(appSource, /\bsetSetupDay\b|\bsetSetupByDay\b/);
+
+// 11. Mapping P3-23B: una sola implementación, identidad visual explícita, políticas reales y
+//     bloqueo antes de cualquier estado parcial o navegación dependiente.
+assert.match(appSource, /from "@\/features\/routine-builder\/model\/routine-builder-exercise-mapping";/);
+assert.doesNotMatch(appSource, /^function createSetupByDayFromExercises\b/m);
+const mappingAdapterStart = appSource.indexOf("function prepareRoutineBuilderStateFromExercises(");
+const mappingAdapterEnd = appSource.indexOf("\n  function navigateTo(", mappingAdapterStart);
+assert.ok(mappingAdapterStart >= 0 && mappingAdapterEnd > mappingAdapterStart);
+const mappingAdapterSource = appSource.slice(mappingAdapterStart, mappingAdapterEnd);
+assert.match(mappingAdapterSource, /visualRowId: exercise\.id/);
+assert.match(mappingAdapterSource, /unknownDayPolicy: "fallback_to_monday"/);
+assert.match(mappingAdapterSource, /existingRowsPolicy: "append"/);
+assert.match(mappingAdapterSource, /initialSetupByDay: createSetupByDay\(\)/);
+assert.match(mappingAdapterSource, /if \(mapping\.kind === "blocked"\)/);
+assert.match(mappingAdapterSource, /No se pudo preparar la rutina para editar\. Intenta nuevamente\./);
+assert.ok(
+  mappingAdapterSource.indexOf('if (mapping.kind === "blocked")') <
+    mappingAdapterSource.indexOf("dispatchRoutineBuilder({"),
+  "blocked se resuelve antes de despachar estado",
+);
+assert.match(appSource, /!prepareRoutineBuilderStateFromExercises\(exercises, activeRoutineDay\)[\s\S]*?return;/);
+
+// 12. Recovery P3-24 está conectado al overload real de storage. Full y partial mantienen
+//     mensajes distintos y discardedRowCount se consume; las normalizaciones legacy salen.
+assert.match(appSource, /from "@\/features\/routine-builder\/model\/routine-builder-draft-recovery";/);
+assert.match(appSource, /resolveSetupRecovery\(input\) \{/);
+assert.match(appSource, /const result = resolveRoutineBuilderDraftRecovery\(input\);/);
+assert.match(appSource, /type: "replace_state",\s+state: \{ activeDay: draft\.setupDay, setupByDay: draft\.setupByDay \}/);
+assert.match(appSource, /Recuperamos tu avance pendiente\./);
+assert.match(appSource, /Se descartó 1 fila inválida\./);
+assert.match(appSource, /Se descartaron \$\{draft\.recovery\.discardedRowCount\} filas inválidas\./);
+assert.match(appSource, /draft\.recovery\.discardedRowCount/);
+assert.doesNotMatch(appSource, /^function normalizeSetupByDay\b/m);
+assert.doesNotMatch(appSource, /^function hasSetupDraftContent\b/m);
+
+// 13. updateSetupRow y los efectos de saveInitialRoutine permanecen en el root. El parsing HTML
+//     precede a acciones discriminadas y la preparación pura continúa delegada a P3-25.
 assert.match(appSource, /function updateSetupRow\(/);
+assert.match(appSource, /type: "update_row_field"/);
+assert.match(appSource, /readWeightInput\(value, currentRow\.weight\)/);
+assert.match(appSource, /readSetupNumber\(value\)/);
+assert.doesNotMatch(appSource, /\{ \.\.\.row, \[field\]:/);
 assert.match(appSource, /(?:async\s+)?function saveInitialRoutine\(/);
 assert.match(
   appSource,
@@ -177,9 +232,8 @@ assert.match(
   /requiresRoutineUpdateConfirmation:\s*isChangingRoutineDays && !isTrainingCyclesRepositoryActive/,
 );
 assert.match(savePreparationSource, /confirmation !== "confirmed_routine_update"/);
-assert.doesNotMatch(appSource, /\buseReducer\b|\broutineBuilderReducer\b/);
 
-// 11. Las ramas productivas de persistencia siguen en el root; el modulo puro no las importa.
+// 14. Las ramas productivas de persistencia siguen en el root; el modulo puro no las importa.
 assert.match(appSource, /if \(isTrainingCyclesRepositoryActive\)/);
 assert.match(appSource, /addCycleScopedTrainingDaysAndExercises\(\{/);
 assert.match(appSource, /for \(const dayToPersist of daysToPersist\)/);
@@ -190,14 +244,26 @@ assert.doesNotMatch(
   /saveExercise|deleteExercise|addCycleScopedTrainingDaysAndExercises|repository|supabase|storage/,
 );
 
-// 12. Controlador de navegación intacto: 2 escritores de pantalla, 1 de historial.
+// 15. Controlador de navegación intacto: 2 escritores de pantalla, 1 de historial.
 assert.equal((appSource.match(/setScreen\(/g) ?? []).length, 2, "controlador de navegacion intacto: 2 escritores autorizados");
 assert.equal((appSource.match(/setScreenHistory\(/g) ?? []).length, 1, "controlador de navegacion intacto: 1 escritor de historial");
 
-// 13. La preparación fue absorbida: el contrato de gap ya no existe como archivo separado.
+// 16. La preparación fue absorbida y los cinco tests de modelo, más este contrato, están
+//     registrados exactamente una vez. P3-26 eleva la suite de 117 a 118 comandos.
 assert.doesNotMatch(packageSource, /routine-builder-visual-gap-preparation-contract\.test\.ts/, "el contrato de preparacion ya no debe existir");
 
 const registration = "tsx src/features/routine-builder/routine-builder-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);
+const testCommands = (JSON.parse(packageSource) as { scripts: { test: string } }).scripts.test.split(" && ");
+assert.equal(testCommands.length, 118);
+for (const command of [
+  "tsx src/features/routine-builder/model/routine-builder-state.test.ts",
+  "tsx src/features/routine-builder/model/routine-builder-draft-normalization.test.ts",
+  "tsx src/features/routine-builder/model/routine-builder-draft-recovery.test.ts",
+  "tsx src/features/routine-builder/model/routine-builder-exercise-mapping.test.ts",
+  "tsx src/features/routine-builder/model/routine-builder-save.test.ts",
+]) {
+  assert.equal(testCommands.filter((item) => item === command).length, 1, `${command} registrado una vez`);
+}
 
 console.log("routine-builder visual static integration contract tests passed");
