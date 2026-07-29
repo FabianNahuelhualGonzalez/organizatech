@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   Dumbbell,
   Eye,
@@ -9,7 +9,6 @@ import {
   Mail,
   Pencil,
   Save,
-  Trash2,
   UserPlus,
 } from "lucide-react";
 import {
@@ -47,7 +46,21 @@ import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard"
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
 import { ComparisonScreenV2 } from "@/features/progress/components/comparison-screen-v2";
 import { ConfirmRoutineUpdateModal } from "@/features/routine-builder/components/ConfirmRoutineUpdateModal";
+import { RoutineBuilderDayCard } from "@/features/routine-builder/components/RoutineBuilderDayCard";
+import { RoutineBuilderNameCard } from "@/features/routine-builder/components/RoutineBuilderNameCard";
+import { RoutineExerciseBuilderCard } from "@/features/routine-builder/components/RoutineExerciseBuilderCard";
 import { RoutineSuccessModal } from "@/features/routine-builder/components/RoutineSuccessModal";
+import {
+  resolveRoutineBuilderSavePreparation,
+  type RoutineBuilderSaveConfirmation,
+} from "@/features/routine-builder/model/routine-builder-save";
+import { resolveRoutineBuilderDraftRecovery } from "@/features/routine-builder/model/routine-builder-draft-recovery";
+import { createSetupByDayFromExercises } from "@/features/routine-builder/model/routine-builder-exercise-mapping";
+import {
+  createRoutineBuilderRow,
+  createRoutineBuilderState,
+  routineBuilderReducer,
+} from "@/features/routine-builder/model/routine-builder-state";
 import { ConfirmDeleteCycleModal } from "@/features/training-plan/components/ConfirmDeleteCycleModal";
 import { ConfirmNewCycleModal } from "@/features/training-plan/components/ConfirmNewCycleModal";
 import { CycleManagementScreen } from "@/features/training-plan/components/CycleManagementScreen";
@@ -309,9 +322,23 @@ import {
   getCycleObjectiveValue,
   getRoutineDays,
 } from "@/lib/training/training-plan-calculations";
+import {
+  applyTrainingPlanEdit,
+  createNextTrainingPlan,
+  resolveTrainingPlanSetupTransition,
+  type TrainingPlanEdit,
+} from "@/lib/training/training-plan-controller";
 import { isTrainingCycleId } from "@/lib/training/training-cycle-id";
 import type { TrainingCycleId } from "@/lib/training/training-cycle-id";
 import type { TrainingPlan } from "@/lib/training/training-plan-model";
+import { normalizeTrainingPlanInput } from "@/lib/training/training-plan-normalization";
+import {
+  createDefaultTrainingPlan,
+  getTrainingPlanDurationField,
+  getTrainingPlanDurationOptions,
+  getTrainingPlanObjectiveField,
+  getTrainingPlanObjectiveOptions as getCycleObjectiveOptions,
+} from "@/lib/training/training-plan-rules";
 import type {
   SetupDayState,
   SetupExerciseRow,
@@ -332,10 +359,6 @@ const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
 const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
 const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
-const macroObjectives = ["Fuerza", "Hipertrofia", "Recomposición", "Definición", "Rendimiento", "Salud"];
-const mesoObjectives = ["Fuerza", "Hipertrofia", "Potencia", "Resistencia", "Descarga", "Definición"];
-const microFocusOptions = ["Progresión", "Mantenimiento", "Descarga", "Técnica"];
-const sessionFocusOptions = ["Técnica", "Volumen", "Intensidad", "Control/RIR"];
 const objectiveDescriptions: Record<string, string> = {
   Fuerza: "Busca aumentar la capacidad de levantar más carga. Prioriza ejercicios base, descansos amplios y progresión controlada de peso.",
   Hipertrofia: "Enfocada en aumentar masa muscular. Combina volumen, tensión mecánica y progresión de repeticiones o carga.",
@@ -353,9 +376,8 @@ const objectiveDescriptions: Record<string, string> = {
   Intensidad: "Sesión orientada a trabajar con cargas exigentes o esfuerzo alto, cuidando descansos y técnica.",
   "Control/RIR": "Sesión enfocada en regular el esfuerzo usando RIR para saber cuántas repeticiones quedan en reserva.",
 };
-const macroDurations = [6, 7, 8, 9, 10, 11];
-const mesoDurations = [3, 4, 5, 6];
 
+type TrainingDayLabel = (typeof TRAINING_DAY_LABELS)[number];
 type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>>;
 
 interface TrainingCycleSnapshot {
@@ -425,8 +447,16 @@ export function OrganizatechApp({
   const [isEditingRoutinePlan, setIsEditingRoutinePlan] = useState(false);
   const [routineNotice, setRoutineNotice] = useState("");
   const [isTopbarHidden, setIsTopbarHidden] = useState(false);
-  const [setupDay, setSetupDay] = useState("Lunes");
-  const [setupByDay, setSetupByDay] = useState<Record<string, SetupDayState>>(() => createSetupByDay());
+  const [routineBuilderState, dispatchRoutineBuilder] = useReducer(
+    routineBuilderReducer,
+    undefined,
+    () => createRoutineBuilderState({
+      activeDay: "Lunes",
+      setupByDay: createSetupByDay(),
+    }),
+  );
+  const setupDay = routineBuilderState.activeDay;
+  const setupByDay = routineBuilderState.setupByDay;
   const [trainingPlan, setTrainingPlan] = useState<TrainingPlan>(() => createDefaultTrainingPlan());
   const [activeRoutineDay, setActiveRoutineDay] = useState("Lunes");
   const [dashboardDayOverride, setDashboardDayOverride] = useState("");
@@ -854,9 +884,12 @@ export function OrganizatechApp({
   const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
   const canEditProfilePersonalData = Boolean(supabaseUser && getSupabaseBrowserClient());
   const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
-  const persistedActiveCyclePlan = isTrainingCyclesRepositoryActive && persistedActiveCycle
-    ? createTrainingPlanFromPersistedCycle(persistedActiveCycle, trainingPlan)
-    : null;
+  const persistedActiveCyclePlan = useMemo(
+    () => isTrainingCyclesRepositoryActive && persistedActiveCycle
+      ? createTrainingPlanFromPersistedCycle(persistedActiveCycle, trainingPlan)
+      : null,
+    [isTrainingCyclesRepositoryActive, persistedActiveCycle, trainingPlan],
+  );
   const displayTrainingPlan = persistedActiveCyclePlan ?? trainingPlan;
   const isCycleScopedActiveCycle = Boolean(persistedActiveCycle && isCycleScopedTrainingCycle(persistedActiveCycle));
   const isCycleScopedLookupPending = isTrainingCyclesRepositoryActive && isPersistedCyclesLoading && !persistedActiveCycle;
@@ -1271,6 +1304,7 @@ export function OrganizatechApp({
       setPersistedCycleHistory([]);
       clearCycleScopedPlanState();
       setTrainingPlan(createDefaultTrainingPlan());
+      dispatchRoutineBuilder({ type: "reset_state", setupByDay: createSetupByDay(), activeDay: "Lunes" });
       setCycleHistory([]);
       setSeenNotificationRecords([]);
       setIsPersistedCyclesLoading(false);
@@ -1282,7 +1316,7 @@ export function OrganizatechApp({
 
       if (typeof window !== "undefined" && nextStorageScope) {
         setTrainingPlan(loadTrainingPlan(nextStorageScope, {
-          normalize: normalizeTrainingPlan,
+          normalize: normalizePersistedTrainingPlan,
           createDefault: createDefaultTrainingPlan,
         }));
         setCycleHistory(loadCycleHistory<TrainingCycleSnapshot>(nextStorageScope));
@@ -1328,6 +1362,7 @@ export function OrganizatechApp({
     setEntries([]);
     setTrainingSessions([]);
     setTrainingPlan(createDefaultTrainingPlan());
+    dispatchRoutineBuilder({ type: "reset_state", setupByDay: createSetupByDay(), activeDay: "Lunes" });
     setCycleHistory([]);
     setSeenNotificationRecords([]);
     setPersistedActiveCycle(null);
@@ -1395,21 +1430,42 @@ export function OrganizatechApp({
   function restoreRoutineDraftForSession(mode: DataMode, userId?: string) {
     const draft = loadRoutineDraft(mode, userId, {
       setupDays: TRAINING_DAY_LABELS,
-      normalizeSetupByDay,
-      normalizeTrainingPlan,
-      hasSetupDraftContent,
+      resolveSetupRecovery(input) {
+        const result = resolveRoutineBuilderDraftRecovery(input);
+        if (result.kind === "discard") {
+          return { kind: "discard", shouldClearStoredDraft: true };
+        }
+
+        return {
+          kind: "restore",
+          setupDay: result.state.activeDay,
+          setupByDay: result.state.setupByDay,
+          recovery: result.recovery,
+        };
+      },
+      normalizeTrainingPlan: normalizePersistedTrainingPlan,
     });
     if (!draft) return false;
 
-    setSetupDay(draft.setupDay);
-    setSetupByDay(draft.setupByDay);
+    dispatchRoutineBuilder({
+      type: "replace_state",
+      state: { activeDay: draft.setupDay, setupByDay: draft.setupByDay },
+    });
     setTrainingPlan(draft.trainingPlan);
     setIsEditingRoutinePlan(draft.isEditingRoutinePlan);
     setRoutineEditorReturnScreen(draft.routineEditorReturnScreen);
     setActiveRoutineDay(draft.activeRoutineDay);
     applyContextualNavigation(resetContextualNavigation("registro-entrenamiento"));
     setIsMenuOpen(false);
-    setStatusMessage("Recuperamos tu avance pendiente.");
+    if (draft.recovery.kind === "full") {
+      setStatusMessage("Recuperamos tu avance pendiente.");
+    } else if (draft.recovery.discardedRowCount === 1) {
+      setStatusMessage("Recuperamos parte de tu avance pendiente. Se descartó 1 fila inválida.");
+    } else {
+      setStatusMessage(
+        `Recuperamos parte de tu avance pendiente. Se descartaron ${draft.recovery.discardedRowCount} filas inválidas.`,
+      );
+    }
     return true;
   }
 
@@ -1651,7 +1707,10 @@ export function OrganizatechApp({
     const planInput = createCycleScopedPlanInput(plan, setupState, trainingCyclesSnapshotSource);
     if (!planInput) {
       setTrainingPlan(plan);
-      setSetupByDay(setupState);
+      dispatchRoutineBuilder({
+        type: "replace_state",
+        state: { activeDay: setupDay, setupByDay: setupState },
+      });
       setIsEditingRoutinePlan(true);
       applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
       setStatusMessage("Configura al menos una rutina, un dia y un ejercicio antes de crear el ciclo.");
@@ -1947,6 +2006,35 @@ export function OrganizatechApp({
     }
   }
 
+  function prepareRoutineBuilderStateFromExercises(
+    sourceExercises: ExerciseTemplate[],
+    requestedDay: string,
+  ) {
+    const mapping = createSetupByDayFromExercises({
+      placements: sourceExercises.map((exercise) => ({
+        exercise,
+        visualRowId: exercise.id,
+      })),
+      initialSetupByDay: createSetupByDay(),
+      unknownDayPolicy: "fallback_to_monday",
+      existingRowsPolicy: "append",
+    });
+    if (mapping.kind === "blocked") {
+      setStatusMessage("No se pudo preparar la rutina para editar. Intenta nuevamente.");
+      return false;
+    }
+
+    const visibleDay = getVisibleTrainingDay(sourceExercises, requestedDay);
+    const activeDay = TRAINING_DAY_LABELS.some((day) => day === visibleDay)
+      ? visibleDay
+      : "Lunes";
+    dispatchRoutineBuilder({
+      type: "replace_state",
+      state: { activeDay, setupByDay: mapping.setupByDay },
+    });
+    return true;
+  }
+
   function navigateTo(nextScreen: Screen) {
     const decision = resolveContextualNavigation({
       current: { screen, history: screenHistory },
@@ -1959,14 +2047,18 @@ export function OrganizatechApp({
       return;
     }
 
+    if (
+      decision.prepareRoutineEditor &&
+      !prepareRoutineBuilderStateFromExercises(exercises, activeRoutineDay)
+    ) {
+      return;
+    }
+
     if (decision.clearTrainingCompletionSummary) {
       setTrainingCompletionSummary(null);
     }
 
-    if (decision.prepareRoutineEditor) {
-      setSetupByDay(createSetupByDayFromExercises(exercises));
-      setSetupDay(getVisibleTrainingDay(exercises, activeRoutineDay));
-    } else if (decision.tryRestoreActiveWorkout) {
+    if (!decision.prepareRoutineEditor && decision.tryRestoreActiveWorkout) {
       if (restoreActiveWorkoutForNavigation()) return;
       if (decision.resetTrainingStart) {
         setHasStartedTraining(false);
@@ -2009,50 +2101,57 @@ export function OrganizatechApp({
   }
 
   function updateSetupRow(id: string, field: keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId" | "exerciseLineageId">, value: string) {
-    setSetupByDay((current) =>
-      updateSetupDay(current, setupDay, (state) => ({
-        ...state,
-        rows: state.rows.map((row) => (
-          row.id === id
-            ? { ...row, [field]: field === "name" ? value : field === "weight" ? readWeightInput(value, row.weight) : readSetupNumber(value) }
-            : row
-        )),
-      })),
-    );
-  }
+    const currentRow = setupByDay[setupDay]?.rows.find((row) => row.id === id);
+    if (!currentRow) return;
 
-  function updateSetupRoutineName(value: string) {
-    setSetupByDay((current) =>
-      updateSetupDay(current, setupDay, (state) => ({ ...state, routineName: value })),
-    );
-  }
+    if (field === "name") {
+      dispatchRoutineBuilder({ type: "update_row_field", rowId: id, update: { field, value } });
+      return;
+    }
+    if (field === "weight") {
+      dispatchRoutineBuilder({
+        type: "update_row_field",
+        rowId: id,
+        update: { field, value: readWeightInput(value, currentRow.weight) },
+      });
+      return;
+    }
 
-  function updateTrainingPlan(patch: Partial<TrainingPlan>) {
-    setTrainingPlan((current) => {
-      const next = { ...current, ...patch };
-      if (patch.trainingDays) {
-        const days = sortTrainingDaysByWeekOrder(
-          patch.trainingDays.length > 0 ? patch.trainingDays : [setupDay],
-        );
-        next.trainingDays = days;
-        if (!days.includes(setupDay)) setSetupDay(days[0]);
-      }
-      return next;
+    dispatchRoutineBuilder({
+      type: "update_row_field",
+      rowId: id,
+      update: { field, value: readSetupNumber(value) },
     });
   }
 
+  function updateTrainingPlan(edit: TrainingPlanEdit) {
+    setTrainingPlan((current) => {
+      const result = applyTrainingPlanEdit({ plan: current, activeDay: setupDay }, edit);
+      if (result.kind !== "updated") return current;
+      if (result.state.activeDay !== setupDay) {
+        dispatchRoutineBuilder({ type: "select_day", day: result.state.activeDay });
+      }
+      return result.state.plan;
+    });
+  }
+
+  function updateSetupRoutineName(value: string) {
+    dispatchRoutineBuilder({ type: "set_routine_name", routineName: value });
+  }
+
   function addSetupRow() {
-    setSetupByDay((current) =>
-      updateSetupDay(current, setupDay, (state) => ({ ...state, rows: [...state.rows, createSetupRow()] })),
-    );
+    dispatchRoutineBuilder({ type: "add_row", row: createRoutineBuilderRow(createId()) });
   }
 
   function removeSetupRow(id: string) {
     const row = setupByDay[setupDay]?.rows.find((item) => item.id === id);
-    if (
+    const isCycleScopedEdit = Boolean(
       isTrainingCyclesRepositoryActive &&
       persistedActiveCycle &&
-      isCycleScopedTrainingCycle(persistedActiveCycle) &&
+      isCycleScopedTrainingCycle(persistedActiveCycle),
+    );
+    if (
+      isCycleScopedEdit &&
       row?.sourceExerciseId
     ) {
       const hasRegisteredEntry = displayEntries.some((entry) =>
@@ -2063,26 +2162,15 @@ export function OrganizatechApp({
       if (!confirmed) return;
     }
 
-    setSetupByDay((current) =>
-      updateSetupDay(current, setupDay, (state) => {
-        const isCycleScopedEdit = Boolean(
-          isTrainingCyclesRepositoryActive &&
-          persistedActiveCycle &&
-          isCycleScopedTrainingCycle(persistedActiveCycle),
-        );
-        return {
-          ...state,
-          rows: isCycleScopedEdit || state.rows.length > 1
-            ? state.rows.filter((row) => row.id !== id)
-            : state.rows,
-        };
-      }),
-    );
+    dispatchRoutineBuilder({
+      type: "remove_row",
+      rowId: id,
+      allowEmptyRows: isCycleScopedEdit,
+    });
   }
 
   function openRoutineEditor(day = visibleDay) {
-    setSetupByDay(createSetupByDayFromExercises(displayExercises));
-    setSetupDay(day);
+    if (!prepareRoutineBuilderStateFromExercises(displayExercises, day)) return;
     setIsEditingRoutinePlan(true);
     setRoutineEditorReturnScreen(screen);
     if (screen === "entrenamiento") {
@@ -2095,26 +2183,17 @@ export function OrganizatechApp({
 
   function cancelRoutineUpdate() {
     const activeDays = getRoutineDays(exercises);
+    const nextDay = activeDays.includes(activeRoutineDay) ? activeRoutineDay : activeDays[0] ?? "Lunes";
+    if (!prepareRoutineBuilderStateFromExercises(exercises, nextDay)) return;
     clearRoutineDraft(dataMode, supabaseUser?.id);
     setTrainingPlan((current) => ({ ...current, trainingDays: activeDays }));
-    setSetupByDay(createSetupByDayFromExercises(exercises));
-    setSetupDay(activeDays.includes(activeRoutineDay) ? activeRoutineDay : activeDays[0] ?? "Lunes");
     setIsRoutineUpdateConfirmOpen(false);
     setStatusMessage("No se realizaron cambios en la rutina.");
   }
 
-  async function saveInitialRoutine(confirmedRoutineUpdate = false) {
+  async function saveInitialRoutine(confirmation: RoutineBuilderSaveConfirmation) {
     const dayState = setupByDay[setupDay] ?? createSetupDayState();
     const routineName = dayState.routineName.trim() || setupDay;
-    const nonEmptyRows = dayState.rows.filter((row) => row.name.trim());
-    const validRows = isTrainingCyclesRepositoryActive
-      ? nonEmptyRows
-      : dedupeExerciseRowsByName(nonEmptyRows);
-    const invalidWeightRow = nonEmptyRows.find((row) => row.weight.trim() !== "" && parseDecimalWeightInput(row.weight) === null);
-    if (invalidWeightRow) {
-      setStatusMessage(`Completa el peso de "${invalidWeightRow.name.trim()}" con un decimal valido.`);
-      return;
-    }
     const plannedDays = sortTrainingDaysByWeekOrder(
       trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [setupDay],
     );
@@ -2128,6 +2207,28 @@ export function OrganizatechApp({
       persistedActiveCycle &&
       isCycleScopedTrainingCycle(persistedActiveCycle),
     );
+    const savePreparation = resolveRoutineBuilderSavePreparation({
+      rows: dayState.rows,
+      persistenceMode: isTrainingCyclesRepositoryActive ? "cycle_scoped" : "legacy",
+      allowEmptyRows: isCycleScopedRoutineEdit,
+      requiresRoutineUpdateConfirmation:
+        isChangingRoutineDays && !isTrainingCyclesRepositoryActive,
+      confirmation,
+    });
+    if (savePreparation.kind === "invalid_weight") {
+      setStatusMessage(`Completa el peso de "${savePreparation.exerciseName}" con un decimal valido.`);
+      return;
+    }
+    if (savePreparation.kind === "no_exercises") {
+      setStatusMessage("Agrega al menos un ejercicio para crear la rutina.");
+      return;
+    }
+    if (savePreparation.kind === "confirmation_required") {
+      setIsRoutineUpdateConfirmOpen(true);
+      return;
+    }
+
+    const validRows = savePreparation.rows;
     const savedDayState = {
       routineName,
       rows: validRows.map((row) => ({
@@ -2142,30 +2243,48 @@ export function OrganizatechApp({
       [setupDay]: savedDayState,
     };
     const completedDays = getConfiguredSetupDays(nextSetupByDay);
-    const nextIncompleteDay = plannedDays.find((day) => day !== setupDay && !completedDays.includes(day));
-    const allPlannedDaysComplete = plannedDays.every((day) => completedDays.includes(day));
+    const activeDayAccepted = validRows.length > 0 || isCycleScopedRoutineEdit;
+    const configuredDaysForTransition = activeDayAccepted && !completedDays.includes(setupDay)
+      ? [...completedDays, setupDay]
+      : completedDays;
+    const setupTransition = resolveTrainingPlanSetupTransition({
+      plan: { ...trainingPlan, trainingDays: plannedDays },
+      activeDay: setupDay,
+      configuredDays: configuredDaysForTransition,
+      activeDayAccepted,
+      requiresRoutineUpdateConfirmation: isChangingRoutineDays && !isTrainingCyclesRepositoryActive,
+      routineUpdateConfirmed: confirmation === "confirmed_routine_update",
+    });
+    const nextIncompleteDay = setupTransition.kind === "continue_setup"
+      ? setupTransition.nextDay
+      : null;
     const daysToPersist = plannedDays.filter((day) => nextSetupByDay[day]?.rows.some((row) => row.name.trim()));
 
-    if (validRows.length === 0 && !isCycleScopedRoutineEdit) {
-      setStatusMessage("Agrega al menos un ejercicio para crear la rutina.");
+    if (setupTransition.kind === "blocked") {
+      if (setupTransition.reason === "active_day_not_ready") {
+        setStatusMessage("Agrega al menos un ejercicio para crear la rutina.");
+      }
       return;
     }
 
-    if (isChangingRoutineDays && !isTrainingCyclesRepositoryActive && !confirmedRoutineUpdate) {
+    if (setupTransition.kind === "confirm_update") {
       setIsRoutineUpdateConfirmOpen(true);
       return;
     }
 
     if (isTrainingCyclesRepositoryActive) {
       setIsRoutineUpdateConfirmOpen(false);
-      setSetupByDay(nextSetupByDay);
+      dispatchRoutineBuilder({
+        type: "replace_state",
+        state: { activeDay: setupDay, setupByDay: nextSetupByDay },
+      });
 
-      if (!allPlannedDaysComplete && nextIncompleteDay) {
+      if (setupTransition.kind === "continue_setup") {
         const successMessage = `Rutina de ${setupDay} preparada.`;
-        setStatusMessage(`${successMessage} Ahora configura ${nextIncompleteDay}.`);
+        setStatusMessage(`${successMessage} Ahora configura ${setupTransition.nextDay}.`);
         setRoutineNotice(successMessage);
         setIsEditingRoutinePlan(true);
-        setSetupDay(nextIncompleteDay);
+        dispatchRoutineBuilder({ type: "select_day", day: setupTransition.nextDay });
         applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "routine-setup-continued"));
         return;
       }
@@ -2343,7 +2462,10 @@ export function OrganizatechApp({
     }
 
     setIsRoutineUpdateConfirmOpen(false);
-    setSetupByDay(nextSetupByDay);
+    dispatchRoutineBuilder({
+      type: "replace_state",
+      state: { activeDay: setupDay, setupByDay: nextSetupByDay },
+    });
     setIsBusy(true);
     try {
       for (const dayToPersist of daysToPersist) {
@@ -2378,13 +2500,12 @@ export function OrganizatechApp({
       const refreshedData = await refreshData(dataMode);
       if (!refreshedData) return;
       setActiveRoutineDay(setupDay);
-      setSetupByDay(nextSetupByDay);
       const successMessage = `Rutina de ${setupDay} guardada.`;
       setStatusMessage(nextIncompleteDay ? `${successMessage} Ahora configura ${nextIncompleteDay}.` : "Registro de rutina finalizado.");
       setRoutineNotice(successMessage);
-      if (!allPlannedDaysComplete && nextIncompleteDay) {
+      if (setupTransition.kind === "continue_setup") {
         setIsEditingRoutinePlan(true);
-        setSetupDay(nextIncompleteDay);
+        dispatchRoutineBuilder({ type: "select_day", day: setupTransition.nextDay });
         applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "routine-setup-continued"));
       } else {
         clearRoutineDraft(dataMode, supabaseUser?.id);
@@ -2447,7 +2568,7 @@ export function OrganizatechApp({
       try {
         const activeCycle = await getActiveTrainingCycle();
 
-        const nextPlan = createControlledNextTrainingPlan();
+        const nextPlan = createNextTrainingPlan("controlled_cycle_scoped");
         const freshSetup = createSetupByDay();
         const activeCycleToClose = activeCycle?.status === "active" ? activeCycle : null;
 
@@ -2474,8 +2595,7 @@ export function OrganizatechApp({
         setActiveWorkoutStartedAt(null);
         setPersistedActiveCycle(null);
         clearCycleScopedPlanState();
-        setSetupByDay(freshSetup);
-        setSetupDay("Lunes");
+        dispatchRoutineBuilder({ type: "reset_state", setupByDay: freshSetup, activeDay: "Lunes" });
         setTrainingPlan(nextPlan);
         setExercises([]);
         setEntries([]);
@@ -2509,13 +2629,12 @@ export function OrganizatechApp({
     const nextHistory = [...cycleHistory, snapshot];
     setCycleHistory(nextHistory);
 
-    const nextPlan = createDefaultTrainingPlan();
+    const nextPlan = createNextTrainingPlan("default");
     replaceLocalData([], []);
     setExercises([]);
     setEntries([]);
     setTrainingSessions([]);
-    setSetupByDay(createSetupByDay());
-    setSetupDay("Lunes");
+    dispatchRoutineBuilder({ type: "reset_state", setupByDay: createSetupByDay(), activeDay: "Lunes" });
     setTrainingPlan(nextPlan);
     {
       const dayReset = resolveDayStateReset();
@@ -2560,15 +2679,14 @@ export function OrganizatechApp({
           ),
         });
 
-        const nextPlan = createDefaultTrainingPlan();
+        const nextPlan = createNextTrainingPlan("default");
         clearRoutineDraft(dataMode, supabaseUser?.id);
         clearWorkoutDraft(dataMode, supabaseUser?.id);
         resetWorkoutAttemptState();
         setActiveWorkoutStartedAt(null);
         clearCycleScopedPlanState();
         setTrainingPlan(nextPlan);
-        setSetupByDay(createSetupByDay());
-        setSetupDay("Lunes");
+        dispatchRoutineBuilder({ type: "reset_state", setupByDay: createSetupByDay(), activeDay: "Lunes" });
         {
           const dayReset = resolveDayStateReset();
           setActiveRoutineDay(dayReset.activeRoutineDay);
@@ -2593,10 +2711,9 @@ export function OrganizatechApp({
       setActiveWorkoutStartedAt(null);
       await refreshData(dataMode);
 
-      const nextPlan = createDefaultTrainingPlan();
+      const nextPlan = createNextTrainingPlan("default");
       setTrainingPlan(nextPlan);
-      setSetupByDay(createSetupByDay());
-      setSetupDay("Lunes");
+      dispatchRoutineBuilder({ type: "reset_state", setupByDay: createSetupByDay(), activeDay: "Lunes" });
       {
         const dayReset = resolveDayStateReset();
         setActiveRoutineDay(dayReset.activeRoutineDay);
@@ -3689,14 +3806,14 @@ export function OrganizatechApp({
       {screen === "registro-entrenamiento" && routineBuilderVariant === "editor" && (
         <InitialTrainingScreen
           day={setupDay}
-          setDay={setSetupDay}
+          setDay={(day) => dispatchRoutineBuilder({ type: "select_day", day })}
           routineName={setupByDay[setupDay]?.routineName ?? ""}
           setRoutineName={updateSetupRoutineName}
           rows={setupByDay[setupDay]?.rows ?? createSetupRows()}
           updateRow={updateSetupRow}
           addRow={addSetupRow}
           removeRow={removeSetupRow}
-          saveRoutine={saveInitialRoutine}
+          saveRoutine={() => void saveInitialRoutine("unconfirmed")}
           trainingPlan={trainingPlan}
           updateTrainingPlan={updateTrainingPlan}
           message={statusMessage}
@@ -3834,7 +3951,7 @@ export function OrganizatechApp({
       {isRoutineUpdateConfirmOpen && (
         <ConfirmRoutineUpdateModal
           onCancel={() => cancelRoutineUpdate()}
-          onConfirm={() => void saveInitialRoutine(true)}
+          onConfirm={() => void saveInitialRoutine("confirmed_routine_update")}
         />
       )}
     </AppShellLayout>
@@ -4123,7 +4240,7 @@ function InitialTrainingScreen({
   removeRow: (id: string) => void;
   saveRoutine: () => void;
   trainingPlan: TrainingPlan;
-  updateTrainingPlan: (patch: Partial<TrainingPlan>) => void;
+  updateTrainingPlan: (edit: TrainingPlanEdit) => void;
   message: string;
   isBusy: boolean;
   configuredDays: string[];
@@ -4131,8 +4248,6 @@ function InitialTrainingScreen({
   const plannedDays = sortTrainingDaysByWeekOrder(
     trainingPlan.trainingDays.length > 0 ? trainingPlan.trainingDays : [day],
   );
-  const completedPlannedDays = plannedDays.filter((item) => configuredDays.includes(item));
-  const currentStep = Math.max(1, plannedDays.indexOf(day) + 1);
   const remainingDays = plannedDays.filter((item) => item !== day && !configuredDays.includes(item));
   const isLastPendingDay = remainingDays.length === 0;
   const objectiveOptions = getCycleObjectiveOptions(trainingPlan.cycleType);
@@ -4143,36 +4258,19 @@ function InitialTrainingScreen({
   const visibleMessage = message === "Modo de prueba activo." || message === "Progreso actualizado." ? "" : message;
 
   function toggleTrainingDay(item: string) {
-    const isSelected = plannedDays.includes(item);
-    const nextDays = isSelected && plannedDays.length > 1
-      ? plannedDays.filter((current) => current !== item)
-      : isSelected
-        ? plannedDays
-        : [...plannedDays, item];
-
-    const sortedDays = sortTrainingDaysByWeekOrder(nextDays);
-    updateTrainingPlan({ trainingDays: sortedDays });
-    setDay(sortedDays.includes(item) ? item : sortedDays[0]);
+    updateTrainingPlan({ type: "toggle_training_day", value: item });
   }
 
   function updateCycleType(value: string) {
-    if (!isTrainingCycleId(value)) return;
-    updateTrainingPlan({ cycleType: value });
+    updateTrainingPlan({ type: "cycle_type", value });
   }
 
   function updateCycleObjective(value: string) {
-    if (trainingPlan.cycleType === "macro") updateTrainingPlan({ macroObjective: value });
-    if (trainingPlan.cycleType === "meso") updateTrainingPlan({ mesoObjective: value });
-    if (trainingPlan.cycleType === "micro") updateTrainingPlan({ microFocus: value });
-    if (trainingPlan.cycleType === "session") updateTrainingPlan({ sessionFocus: value });
+    updateTrainingPlan({ type: "objective", value });
   }
 
   function updateCycleDuration(value: string) {
-    const numericValue = Number(value);
-    if (trainingPlan.cycleType === "macro") updateTrainingPlan({ macroDurationMonths: numericValue });
-    if (trainingPlan.cycleType === "meso") updateTrainingPlan({ mesoDurationWeeks: numericValue });
-    if (trainingPlan.cycleType === "micro") updateTrainingPlan({ microDurationWeeks: numericValue });
-    if (trainingPlan.cycleType === "session") updateTrainingPlan({ sessionDurationDays: numericValue });
+    updateTrainingPlan({ type: "duration", value });
   }
 
   return (
@@ -4193,78 +4291,30 @@ function InitialTrainingScreen({
         onToggleTrainingDay={toggleTrainingDay}
       />
 
-      <div className="setup-card routine-day-builder-card">
-        <div className="setup-section-heading">
-          <p className="eyebrow">Configura tus rutinas por día</p>
-          <h3>Rutina {currentStep} de {plannedDays.length} · {day}</h3>
-        </div>
-        <div className="routine-build-progress">
-          <span>{completedPlannedDays.length} de {plannedDays.length} días completados</span>
-          <div className="mini-progress-track">
-            <div className="mini-progress-fill" style={{ width: `${Math.round((completedPlannedDays.length / plannedDays.length) * 100)}%` }} />
-          </div>
-        </div>
-        <div className="routine-build-days">
-          {plannedDays.map((item) => (
-            <button
-              className={`routine-build-day ${item === day ? "current" : ""} ${configuredDays.includes(item) ? "done" : ""}`}
-              key={item}
-              type="button"
-              onClick={() => setDay(item)}
-            >
-              <strong>{item}</strong>
-              <span>{configuredDays.includes(item) ? "Listo" : item === day ? "Actual" : "Pendiente"}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <RoutineBuilderDayCard
+        plannedDays={plannedDays}
+        activeDay={day}
+        configuredDays={configuredDays}
+        onSelectDay={setDay}
+      />
 
-      <div className="setup-card routine-name-card">
-        <div className="setup-section-heading">
-          <p className="eyebrow">Rutina del día {day}</p>
-          <h3>Nombre de la rutina</h3>
-        </div>
-        <input
-          className="setup-name-input"
-          placeholder="Ej: Empuje, Jalón, Piernas"
-          value={routineName}
-          onChange={(event) => setRoutineName(event.target.value)}
-        />
-      </div>
+      <RoutineBuilderNameCard
+        day={day}
+        routineName={routineName}
+        onRoutineNameChange={setRoutineName}
+      />
 
-      <div className="setup-card exercise-builder-card">
-        <div className="setup-section-heading">
-          <p className="eyebrow">Rutina del día {day}</p>
-          <h3>Ejercicios a programar</h3>
-        </div>
-        <div className="setup-table">
-          <div className="setup-table-head">
-            <span>Nombre ejercicio</span>
-            <span>Series</span>
-            <span>Repeticiones</span>
-            <span>Kg</span>
-            <span />
-          </div>
-          {rows.map((row, index) => (
-            <div className="setup-row" key={row.id}>
-              <input placeholder={`Ejercicio ${index + 1}`} value={row.name} onChange={(event) => updateRow(row.id, "name", event.target.value)} />
-              <input type="number" min={1} placeholder="Series" value={row.sets || ""} onChange={(event) => updateRow(row.id, "sets", event.target.value)} />
-              <input type="number" min={1} placeholder="Reps" value={row.reps || ""} onChange={(event) => updateRow(row.id, "reps", event.target.value)} />
-              <input inputMode="decimal" placeholder="Kg" value={row.weight || ""} onChange={(event) => updateRow(row.id, "weight", event.target.value)} />
-              <button className="row-delete" type="button" aria-label="Eliminar ejercicio" onClick={() => removeRow(row.id)}>
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="setup-actions">
-          <button className="small-yellow-button" type="button" onClick={addRow}>Agregar más</button>
-          <button className="start-button compact" type="button" onClick={saveRoutine} disabled={isBusy}>
-            {isBusy ? "Guardando..." : isLastPendingDay ? "Finalizar registro de rutina" : "Guardar y continuar"}
-          </button>
-        </div>
-        {visibleMessage ? <p className="setup-message">{visibleMessage}</p> : null}
-      </div>
+      <RoutineExerciseBuilderCard
+        day={day}
+        rows={rows}
+        isBusy={isBusy}
+        isLastPendingDay={isLastPendingDay}
+        message={visibleMessage}
+        onRowChange={updateRow}
+        onAddRow={addRow}
+        onRemoveRow={removeRow}
+        onSave={saveRoutine}
+      />
     </section>
   );
 }
@@ -4554,44 +4604,14 @@ function createSetupDayState(): SetupDayState {
   };
 }
 
-function createSetupByDay(): Record<string, SetupDayState> {
-  return Object.fromEntries(TRAINING_DAY_LABELS.map((day) => [day, createSetupDayState()]));
+function createSetupByDay(): Record<TrainingDayLabel, SetupDayState> {
+  return Object.fromEntries(
+    TRAINING_DAY_LABELS.map((day) => [day, createSetupDayState()]),
+  ) as Record<TrainingDayLabel, SetupDayState>;
 }
 
 function getConfiguredSetupDays(setupByDay: Record<string, SetupDayState>): string[] {
   return TRAINING_DAY_LABELS.filter((day) => setupByDay[day]?.rows.some((row) => row.name.trim()));
-}
-
-function hasSetupDraftContent(setupByDay: Record<string, SetupDayState>) {
-  return TRAINING_DAY_LABELS.some((day) => {
-    const state = setupByDay[day];
-    return Boolean(state?.routineName.trim() || state?.rows.some((row) => row.name.trim() || row.sets || row.reps || row.weight));
-  });
-}
-
-function createDefaultTrainingPlan(): TrainingPlan {
-  return {
-    cycleType: "meso",
-    macroObjective: "Hipertrofia",
-    macroDurationMonths: 6,
-    mesoObjective: "Hipertrofia",
-    mesoDurationWeeks: 4,
-    microDurationWeeks: 1,
-    sessionDurationDays: 1,
-    trainingDays: ["Lunes"],
-    microFocus: "Progresión",
-    sessionFocus: "Técnica",
-  };
-}
-
-function createControlledNextTrainingPlan(): TrainingPlan {
-  return {
-    ...createDefaultTrainingPlan(),
-    // 2.2AK controlled validation path; replace with explicit UI selection in the final product flow.
-    cycleType: "micro",
-    microFocus: "Descarga",
-    microDurationWeeks: 1,
-  };
 }
 
 function createTrainingPlanFromPersistedCycle(cycle: PersistedTrainingCycle, fallback: TrainingPlan): TrainingPlan {
@@ -4615,22 +4635,23 @@ function createTrainingPlanFromPersistedCycle(cycle: PersistedTrainingCycle, fal
       trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
     ),
   };
+  const objectiveField = getTrainingPlanObjectiveField(cycleType);
+  const durationField = getTrainingPlanDurationField(cycleType);
+  next[objectiveField] = goal;
+  if (duration > 0) next[durationField] = duration;
 
-  if (cycleType === "macro") {
-    next.macroObjective = goal;
-    if (duration > 0) next.macroDurationMonths = duration;
-  } else if (cycleType === "meso") {
-    next.mesoObjective = goal;
-    if (duration > 0) next.mesoDurationWeeks = duration;
-  } else if (cycleType === "micro") {
-    next.microFocus = goal;
-    if (duration > 0) next.microDurationWeeks = duration;
-  } else {
-    next.sessionFocus = goal;
-    if (duration > 0) next.sessionDurationDays = duration;
-  }
+  const normalized = normalizeTrainingPlanInput(next);
+  const invalidActiveObjective = normalized.repairs.some((repair) => (
+    repair.code === "invalid_objective_replaced" && repair.field === objectiveField
+  ));
+  const invalidActiveDuration = normalized.repairs.some((repair) => (
+    repair.code === "invalid_duration_replaced" && repair.field === durationField
+  ));
+  if (!invalidActiveObjective && !invalidActiveDuration) return normalized.plan;
 
-  return next;
+  if (invalidActiveObjective) next[objectiveField] = fallback[objectiveField];
+  if (invalidActiveDuration) next[durationField] = fallback[durationField];
+  return normalizeTrainingPlanInput(next).plan;
 }
 
 function createCycleScopedPlanInput(
@@ -4738,55 +4759,8 @@ function addDaysToDateKey(value: string, days: number) {
   return getLocalDateKey(date);
 }
 
-function normalizeTrainingPlan(value: unknown): TrainingPlan {
-  const fallback = createDefaultTrainingPlan();
-  if (!value || typeof value !== "object") return fallback;
-
-  const parsed = value as Partial<TrainingPlan>;
-  const trainingDays = Array.isArray(parsed.trainingDays)
-    ? parsed.trainingDays.filter((day) => TRAINING_DAY_LABELS.some((label) => label === day))
-    : fallback.trainingDays;
-
-  return {
-    cycleType: isTrainingCycleId(parsed.cycleType) ? parsed.cycleType : fallback.cycleType,
-    macroObjective: parsed.macroObjective || fallback.macroObjective,
-    macroDurationMonths: macroDurations.includes(Number(parsed.macroDurationMonths)) ? Number(parsed.macroDurationMonths) : fallback.macroDurationMonths,
-    mesoObjective: parsed.mesoObjective || fallback.mesoObjective,
-    mesoDurationWeeks: mesoDurations.includes(Number(parsed.mesoDurationWeeks)) ? Number(parsed.mesoDurationWeeks) : fallback.mesoDurationWeeks,
-    microDurationWeeks: Number(parsed.microDurationWeeks) === 1 ? 1 : fallback.microDurationWeeks,
-    sessionDurationDays: Number(parsed.sessionDurationDays) === 1 ? 1 : fallback.sessionDurationDays,
-    trainingDays: sortTrainingDaysByWeekOrder(
-      trainingDays.length > 0 ? trainingDays : fallback.trainingDays,
-    ),
-    microFocus: parsed.microFocus || fallback.microFocus,
-    sessionFocus: parsed.sessionFocus || fallback.sessionFocus,
-  };
-}
-
-function normalizeSetupByDay(value: unknown) {
-  const fallback = createSetupByDay();
-  if (!value || typeof value !== "object") return fallback;
-
-  const parsed = value as Record<string, Partial<SetupDayState> | undefined>;
-  return Object.fromEntries(TRAINING_DAY_LABELS.map((day) => {
-    const state = parsed[day];
-    const rows = Array.isArray(state?.rows)
-      ? state.rows.map((row) => ({
-        id: typeof row.id === "string" ? row.id : createId(),
-        sourceExerciseId: typeof row.sourceExerciseId === "string" ? row.sourceExerciseId : undefined,
-        exerciseLineageId: typeof row.exerciseLineageId === "string" ? row.exerciseLineageId : null,
-        name: typeof row.name === "string" ? row.name : "",
-        sets: Number(row.sets) || 0,
-        reps: Number(row.reps) || 0,
-        weight: formatDecimalEs(readRequiredWeight(row.weight ?? "")),
-      }))
-      : fallback[day].rows;
-
-    return [day, {
-      routineName: typeof state?.routineName === "string" ? state.routineName : "",
-      rows: rows.length > 0 ? rows : createSetupRows(),
-    }];
-  })) as Record<string, SetupDayState>;
+function normalizePersistedTrainingPlan(value: unknown): TrainingPlan {
+  return normalizeTrainingPlanInput(value).plan;
 }
 
 function saveWorkoutDraft(draft: Omit<WorkoutDraft, "userKey"> & { userKey: BrowserStorageScope | null }) {
@@ -4882,18 +4856,15 @@ function mergeTrainingPlanWithExercises(plan: TrainingPlan, exercises: ExerciseT
   };
 }
 
-function getCycleObjectiveOptions(cycleType: TrainingCycleId) {
-  if (cycleType === "macro") return macroObjectives;
-  if (cycleType === "meso") return mesoObjectives;
-  if (cycleType === "micro") return microFocusOptions;
-  return sessionFocusOptions;
-}
-
 function getCycleDurationOptions(cycleType: TrainingCycleId) {
-  if (cycleType === "macro") return macroDurations.map((value) => ({ value, label: `${value} meses` }));
-  if (cycleType === "meso") return mesoDurations.map((value) => ({ value, label: `${value} semanas` }));
-  if (cycleType === "micro") return [{ value: 1, label: "1 semana" }];
-  return [{ value: 1, label: "1 día" }];
+  return getTrainingPlanDurationOptions(cycleType).map((value) => ({
+    value,
+    label: cycleType === "macro"
+      ? `${value} meses`
+      : cycleType === "session"
+        ? `${value} día`
+        : `${value} semana${value === 1 ? "" : "s"}`,
+  }));
 }
 
 function getCycleTypeTitle(plan: TrainingPlan) {
@@ -5007,45 +4978,6 @@ function readSnapshotStringList(snapshot: PersistedTrainingCycleSnapshot, key: s
   return value
     .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     .slice(0, limit);
-}
-
-function createSetupByDayFromExercises(exercises: ExerciseTemplate[]): Record<string, SetupDayState> {
-  const byDay = createSetupByDay();
-
-  for (const exercise of dedupeExercisesByDayAndRoutine(exercises)) {
-    const day = exercise.day && TRAINING_DAY_LABELS.some((label) => label === exercise.day) ? exercise.day : "Lunes";
-    const current = byDay[day];
-    const isEmpty = current.rows.every((row) => !row.name.trim());
-
-    byDay[day] = {
-      routineName: current.routineName || exercise.routine || day,
-      rows: [
-        ...(isEmpty ? [] : current.rows),
-        {
-          id: exercise.id,
-          sourceExerciseId: exercise.id,
-          exerciseLineageId: exercise.exerciseLineageId,
-          name: exercise.name,
-          sets: exercise.targetSets,
-          reps: exercise.targetReps,
-          weight: formatDecimalEs(exercise.baseWeight),
-        },
-      ],
-    };
-  }
-
-  return byDay;
-}
-
-function updateSetupDay(
-  current: Record<string, SetupDayState>,
-  day: string,
-  updater: (state: SetupDayState) => SetupDayState,
-) {
-  return {
-    ...current,
-    [day]: updater(current[day] ?? createSetupDayState()),
-  };
 }
 
 function createSetupRow(): SetupExerciseRow {
