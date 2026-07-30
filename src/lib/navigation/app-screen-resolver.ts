@@ -10,19 +10,19 @@
  * nada) — no se "arreglan" ni se inventan variantes nuevas para esos huecos; se los expone como
  * `"none"` para que la paridad sea honesta y verificable por contrato.
  *
- * Puro: sin React, sin DOM, sin storage, sin Supabase. Integrado en organizatech-app.tsx desde
- * P3-07A: las 5 funciones reemplazan las condiciones JSX equivalentes que antes vivían inline.
+ * Puro: sin React, sin DOM, sin storage, sin Supabase. Las cinco funciones resuelven las variantes
+ * que el root consume para decidir su JSX.
  */
 
 export type DashboardScreenVariant = "blocked" | "content";
 export type ComparisonScreenVariant = "blocked" | "content";
 
-/** Igual a `isCycleScopedPlanBlocked ? <CycleScopedPlanBlocker/> : <DashboardScreen/>` (línea ~3686). */
+/** Resuelve blocker o contenido para Dashboard. */
 export function resolveDashboardScreenVariant(isCycleScopedPlanBlocked: boolean): DashboardScreenVariant {
   return isCycleScopedPlanBlocked ? "blocked" : "content";
 }
 
-/** Igual a `isCycleScopedPlanBlocked ? <CycleScopedPlanBlocker/> : <ComparisonScreenV2/>` (línea ~3809). */
+/** Resuelve blocker o contenido para Comparison. */
 export function resolveComparisonScreenVariant(isCycleScopedPlanBlocked: boolean): ComparisonScreenVariant {
   return isCycleScopedPlanBlocked ? "blocked" : "content";
 }
@@ -84,11 +84,8 @@ export function resolveActiveWorkoutVariant(input: ResolveActiveWorkoutVariantIn
 }
 
 /**
- * Igual a la condición de validez de `training-summary`: `screen === "training-summary" &&
- * trainingCompletionSummary` (visibilidad, línea ~3712) y al efecto de saneamiento
- * `screen === "training-summary" && !trainingCompletionSummary → setScreen("dashboard")`
- * (línea ~830-834). Responde: dado que `screen === "training-summary"`, ¿sigue siendo válido
- * permanecer en esa pantalla?
+ * Responde si `training-summary` conserva el summary requerido tanto por su render como por el
+ * saneamiento de navegación del root.
  */
 export function isTrainingSummaryScreenValid(hasTrainingCompletionSummary: boolean): boolean {
   return hasTrainingCompletionSummary;

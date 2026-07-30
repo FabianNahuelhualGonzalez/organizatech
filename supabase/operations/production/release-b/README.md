@@ -10,7 +10,7 @@ lzycxltqbrtsnwfdotqw
 
 Release B backend v2 is installed in Production.
 
-The frontend still remains on the legacy readiness flow. The next phase is a separate controlled frontend integration. Do not re-run the apply script, do not run rollback, and do not modify Vercel from this bundle.
+The frontend has a controlled v2 integration behind the server-only `ENABLE_TRAINING_WORKOUT_READINESS_V2 === "true"` flag and only uses it for cycle-scoped active cycles. The legacy readiness flow remains the fallback when the flag is disabled or the active cycle is not cycle-scoped. Do not re-run the apply script, do not run rollback, and do not modify Vercel from this bundle.
 
 ## Real Production execution results
 

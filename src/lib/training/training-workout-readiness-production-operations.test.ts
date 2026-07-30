@@ -165,10 +165,10 @@ assert.match(readme, /PROD_SERVICE_ROLE_EXPLICIT_ACL_CLEAN/i, "README registra c
 assert.match(readme, /table ACL rows = 0/i, "README registra ACL tabla real");
 assert.match(readme, /save RPC ACL rows = 0/i, "README registra ACL save RPC real");
 assert.match(readme, /link RPC ACL rows = 0/i, "README registra ACL link RPC real");
-assert.match(readme, /frontend still remains on the legacy readiness flow/i, "README confirma frontend legacy");
+assert.match(readme, /controlled v2 integration behind the server-only `ENABLE_TRAINING_WORKOUT_READINESS_V2 === "true"` flag/i, "README documenta integracion frontend controlada");
+assert.match(readme, /legacy readiness flow remains the fallback when the flag is disabled or the active cycle is not cycle-scoped/i, "README conserva fallback legacy");
 assert.match(readme, /Do not re-run `02_apply_training_workout_readiness_v2\.sql`/i, "README prohibe reejecutar apply");
 assert.match(readme, /Do not run `04_emergency_rollback\.sql` without explicit Architecture authorization/i, "README prohibe rollback sin autorizacion");
-assert.match(readme, /next phase is a separate controlled frontend integration/i, "README documenta siguiente fase separada");
 
 for (const [label, value] of [
   ["precheck", precheck],

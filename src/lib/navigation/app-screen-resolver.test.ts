@@ -9,8 +9,8 @@ import {
 } from "@/lib/navigation/app-screen-resolver";
 
 /**
- * Pruebas de caracterización: demuestran paridad con las condiciones JSX hoy en
- * organizatech-app.tsx (líneas ~3685-3818), sin renderizar React. Cubren cada variante válida,
+ * Pruebas de caracterización: demuestran paridad con las condiciones JSX del root, sin renderizar
+ * React. Cubren cada variante válida,
  * los huecos ("none") donde producción hoy no renderiza nada, y los fallbacks.
  */
 
