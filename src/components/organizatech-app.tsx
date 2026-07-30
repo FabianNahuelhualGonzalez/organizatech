@@ -186,6 +186,15 @@ import {
   type SessionDataIdentity,
   type SessionDataRequestToken,
 } from "@/lib/session/session-data-epoch";
+import {
+  finalizeSessionOperationOwner,
+  isSessionOperationOwner,
+  resolveActiveWorkoutSessionBoundary,
+  resolveIncomingWorkoutDraftRecoveryScope,
+  settleSessionOperationPromise,
+  tryAcquireSessionOperationOwner,
+  type SessionOperationOwner,
+} from "@/lib/session/active-workout-session-boundary";
 import { translateTrainingCycleRepositoryError } from "@/lib/training/training-cycle-error";
 import {
   cancelTrainingCycle,
@@ -242,11 +251,9 @@ import {
 } from "@/lib/training/exercise-last-observation-presentation";
 import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
 import {
-  acquireWorkoutSaveLock,
   buildCurrentWorkoutSavePlan,
   incompleteCurrentWorkoutMessage,
   isExerciseRegisteredInCurrentWorkout,
-  releaseWorkoutSaveLock,
 } from "@/lib/training/workout-registration";
 import {
   clearWorkoutDraft as clearStoredWorkoutDraft,
@@ -259,9 +266,7 @@ import {
 } from "@/lib/training/workout-draft-storage";
 import {
   createWorkoutAttemptId,
-  releaseWorkoutStartLock,
   resolveWorkoutAttemptId,
-  tryAcquireWorkoutStartLock,
 } from "@/lib/training/training-workout-attempt-lifecycle";
 import {
   canResumeActiveWorkoutFromMemory,
@@ -431,7 +436,8 @@ export function OrganizatechApp({
     () => resolveInitialAuthState(getPasswordRecoveryRouteState()).isAuthLoading,
   );
   const [isBusy, setIsBusy] = useState(false);
-  const isSavingTrainingRef = useRef(false);
+  // P3-31: lock secundario redundante con completion; se conserva hasta consolidar locks.
+  const isSavingTrainingRef = useRef<SessionOperationOwner | null>(null);
   const passwordUpdateSuccessRef = useRef(false);
   const [exercises, setExercises] = useState<ExerciseTemplate[]>([]);
   const [cycleScopedPlan, setCycleScopedPlan] = useState<CycleScopedTrainingPlan | null>(null);
@@ -470,9 +476,9 @@ export function OrganizatechApp({
   const [activeWorkoutStartedAt, setActiveWorkoutStartedAt] = useState<string | null>(null);
   const [activeWorkoutAttemptId, setActiveWorkoutAttemptId] = useState<string | null>(null);
   const activeWorkoutAttemptIdRef = useRef<string | null>(null);
-  const workoutStartInFlightRef = useRef(false);
-  const dailyReadinessSaveInFlightRef = useRef(false);
-  const workoutCompletionInFlightRef = useRef(false);
+  const workoutStartInFlightRef = useRef<SessionOperationOwner | null>(null);
+  const dailyReadinessSaveInFlightRef = useRef<SessionOperationOwner | null>(null);
+  const workoutCompletionInFlightRef = useRef<SessionOperationOwner | null>(null);
   const lastProfileAvatarRefreshAtRef = useRef(0);
   const profileAvatarBootstrapUserIdRef = useRef<string | null>(null);
   const lastProfileAvatarErrorRefreshAtRef = useRef(0);
@@ -502,6 +508,7 @@ export function OrganizatechApp({
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
   const activeBrowserStorageScopeRef = useRef<BrowserStorageScope | null>(null);
+  const incomingWorkoutDraftRecoveryScopeRef = useRef<BrowserStorageScope | null>(null);
   const sessionDataEpochRef = useRef(createSessionDataEpoch());
   const sessionDataMountedRef = useRef(true);
 
@@ -511,6 +518,49 @@ export function OrganizatechApp({
     setActiveWorkoutAttemptId(null);
     setPendingWorkoutReadinessLink(null);
     setHasRecoverableWorkoutStart(false);
+  }, []);
+
+  const resetActiveWorkoutSessionState = useCallback(() => {
+    const hadActiveWorkoutBusyOwner = Boolean(
+      isSavingTrainingRef.current || workoutCompletionInFlightRef.current,
+    );
+
+    isSavingTrainingRef.current = null;
+    workoutStartInFlightRef.current = null;
+    dailyReadinessSaveInFlightRef.current = null;
+    workoutCompletionInFlightRef.current = null;
+    activeWorkoutAttemptIdRef.current = null;
+    pendingReadinessLinkRef.current = null;
+    activeWorkoutReadinessContextRef.current = null;
+    latestExercisePerformanceRequestKeyRef.current = null;
+    latestExerciseObservationRequestKeyRef.current = null;
+
+    setActiveExerciseIndex(0);
+    setExerciseDrafts({});
+    setReadiness(null);
+    setCheckingDailyReadiness(false);
+    setSavingDailyReadiness(false);
+    setDailyReadinessError("");
+    setHasStartedTraining(false);
+    setActiveWorkoutStartedAt(null);
+    setActiveWorkoutAttemptId(null);
+    setPendingWorkoutReadinessLink(null);
+    setHasRecoverableWorkoutStart(false);
+    setRoutineNotice("");
+    setTrainingCompletionSummary(null);
+
+    const latestPerformanceIdle = getLatestExercisePerformanceIdleState();
+    setLatestExercisePerformance(latestPerformanceIdle.performance);
+    setLatestExercisePerformanceLoading(latestPerformanceIdle.loading);
+    setLatestExercisePerformanceError(latestPerformanceIdle.error);
+
+    const latestObservationIdle = getLatestExerciseObservationIdleState();
+    setLatestExerciseObservation(latestObservationIdle.observation);
+    setLatestExerciseObservationLoading(latestObservationIdle.loading);
+    setLatestExerciseObservationError(latestObservationIdle.error);
+    setLatestExerciseObservationDidQuery(false);
+
+    if (hadActiveWorkoutBusyOwner) setIsBusy(false);
   }, []);
 
   function clearCycleScopedPlanState() {
@@ -546,6 +596,52 @@ export function OrganizatechApp({
     return sessionDataMountedRef.current &&
       isSessionDataRequestTokenCurrent(sessionDataEpochRef.current, token);
   }, []);
+
+  function tryAcquireActiveWorkoutOperation(
+    lockRef: { current: SessionOperationOwner | null },
+  ): SessionOperationOwner | null {
+    const owner = tryAcquireSessionOperationOwner(
+      lockRef.current,
+      captureSessionDataRequestToken(),
+    );
+    if (!owner) return null;
+    lockRef.current = owner;
+    return owner;
+  }
+
+  function isActiveWorkoutOperationCurrent(
+    lockRef: { current: SessionOperationOwner | null },
+    owner: SessionOperationOwner,
+  ): boolean {
+    return isSessionOperationOwner(lockRef.current, owner) &&
+      isSessionDataRequestCurrent(owner.requestToken);
+  }
+
+  function settleActiveWorkoutOperation<T>(
+    lockRef: { current: SessionOperationOwner | null },
+    owner: SessionOperationOwner,
+    request: Promise<T>,
+  ) {
+    return settleSessionOperationPromise({
+      request,
+      owner,
+      getCurrentOwner: () => lockRef.current,
+      isRequestCurrent: isSessionDataRequestCurrent,
+    });
+  }
+
+  function finalizeActiveWorkoutOperation(
+    lockRef: { current: SessionOperationOwner | null },
+    owner: SessionOperationOwner,
+  ): boolean {
+    const finalization = finalizeSessionOperationOwner({
+      currentOwner: lockRef.current,
+      owner,
+      isRequestCurrent: isSessionDataRequestCurrent,
+    });
+    lockRef.current = finalization.nextOwner;
+    return finalization.canFinalize;
+  }
 
   useEffect(() => {
     sessionDataMountedRef.current = true;
@@ -853,6 +949,8 @@ export function OrganizatechApp({
 
   useEffect(() => {
     if (screen === "entrenamiento" && !hasStartedTraining && !hasRecoverableWorkoutStart) {
+      const scope = getBrowserStorageScope(dataMode, supabaseUser?.id);
+      if (scope && incomingWorkoutDraftRecoveryScopeRef.current === scope) return;
       clearWorkoutDraft(dataMode, supabaseUser?.id);
     }
   }, [dataMode, hasRecoverableWorkoutStart, hasStartedTraining, screen, supabaseUser?.id]);
@@ -1289,10 +1387,25 @@ export function OrganizatechApp({
 
   function applySessionState(authState: SupabaseSessionState) {
     const nextStorageScope = getBrowserStorageScope(authState.dataMode, authState.user?.id);
-    const identityChanged = advanceSessionDataIdentity({
+    const nextIdentity = {
       userId: authState.user?.id ?? null,
       scope: nextStorageScope,
+    };
+    const sessionBoundary = resolveActiveWorkoutSessionBoundary({
+      currentIdentity: sessionDataEpochRef.current,
+      nextIdentity,
+      event: "session_applied",
     });
+    const identityChanged = sessionBoundary.invalidateEpoch
+      ? advanceSessionDataIdentity(nextIdentity, { force: sessionBoundary.forceEpochAdvance })
+      : false;
+    if (sessionBoundary.resetActiveWorkoutMemory) {
+      incomingWorkoutDraftRecoveryScopeRef.current = resolveIncomingWorkoutDraftRecoveryScope({
+        scope: nextStorageScope,
+        willAttemptAutomaticRecovery: Boolean(authState.session),
+      });
+      resetActiveWorkoutSessionState();
+    }
     const hasStorageScopeChanged = activeBrowserStorageScopeRef.current !== nextStorageScope;
     if (hasStorageScopeChanged) {
       setExercises([]);
@@ -1338,12 +1451,24 @@ export function OrganizatechApp({
   }
 
   function clearUserSessionState(message: string, storageScope = activeBrowserStorageScopeRef.current) {
-    advanceSessionDataIdentity({ userId: null, scope: null }, { force: true });
-    clearBrowserStorageScope(storageScope);
+    const signedOutIdentity = { userId: null, scope: null };
+    const sessionBoundary = resolveActiveWorkoutSessionBoundary({
+      currentIdentity: sessionDataEpochRef.current,
+      nextIdentity: signedOutIdentity,
+      event: "signed_out",
+    });
+    if (sessionBoundary.invalidateEpoch) {
+      advanceSessionDataIdentity(signedOutIdentity, { force: sessionBoundary.forceEpochAdvance });
+    }
+    if (sessionBoundary.resetActiveWorkoutMemory) {
+      incomingWorkoutDraftRecoveryScopeRef.current = null;
+      resetActiveWorkoutSessionState();
+    }
+    if (sessionBoundary.clearClosingStorageScope) {
+      clearBrowserStorageScope(storageScope);
+    }
     clearPasswordRecoveryFlow();
     activeBrowserStorageScopeRef.current = null;
-    resetWorkoutAttemptState();
-    setActiveWorkoutStartedAt(null);
     setSupabaseSession(null);
     setSupabaseUser(null);
     setProfilePersonalData(null);
@@ -1367,16 +1492,6 @@ export function OrganizatechApp({
     setPersistedCycleHistory([]);
     setIsPersistedCyclesLoading(false);
     clearCycleScopedPlanState();
-    setExerciseDrafts({});
-    setReadiness(null);
-    setDailyReadinessError("");
-    setCheckingDailyReadiness(false);
-    setSavingDailyReadiness(false);
-    const latestPerformanceIdle = getLatestExercisePerformanceIdleState();
-    setLatestExercisePerformance(latestPerformanceIdle.performance);
-    setLatestExercisePerformanceLoading(latestPerformanceIdle.loading);
-    setLatestExercisePerformanceError(latestPerformanceIdle.error);
-    setHasStartedTraining(false);
     applyContextualNavigation(resetContextualNavigation("login"));
     setIsMenuOpen(false);
     setStatusMessage(message);
@@ -1402,7 +1517,11 @@ export function OrganizatechApp({
   }
 
   function restoreActiveFlowForSession(mode: DataMode, userId?: string) {
+    const recoveryScope = getBrowserStorageScope(mode, userId);
     const activeFlow = loadActiveFlow(mode, userId);
+    if (incomingWorkoutDraftRecoveryScopeRef.current === recoveryScope) {
+      incomingWorkoutDraftRecoveryScopeRef.current = null;
+    }
     if (!activeFlow) return false;
     const restoration = resolveActiveFlowRestoration(activeFlow.flow);
 
@@ -1498,7 +1617,11 @@ export function OrganizatechApp({
   }
 
   function restoreActiveWorkoutForNavigation() {
+    const recoveryScope = getBrowserStorageScope(dataMode, supabaseUser?.id);
     const draft = loadWorkoutDraft(dataMode, supabaseUser?.id);
+    if (incomingWorkoutDraftRecoveryScopeRef.current === recoveryScope) {
+      incomingWorkoutDraftRecoveryScopeRef.current = null;
+    }
     const memoryState = {
       attemptV2: trainingWorkoutReadinessV2Enabled && isCycleScopedActiveCycle,
       hasStartedTraining,
@@ -2881,7 +3004,9 @@ export function OrganizatechApp({
   }
 
   async function startTrainingWithDailyReadiness() {
-    if (!tryAcquireWorkoutStartLock(workoutStartInFlightRef)) return;
+    const operationOwner = tryAcquireActiveWorkoutOperation(workoutStartInFlightRef);
+    if (!operationOwner) return;
+    let ownsCheckingState = false;
 
     try {
       if (checkingDailyReadiness || savingDailyReadiness) return;
@@ -2921,12 +3046,18 @@ export function OrganizatechApp({
       }
 
       setCheckingDailyReadiness(true);
-      try {
-        const record = await getDailyTrainingReadiness();
-        setReadiness(record?.payload ?? null);
+      ownsCheckingState = true;
+      const readinessResult = await settleActiveWorkoutOperation(
+        workoutStartInFlightRef,
+        operationOwner,
+        getDailyTrainingReadiness(),
+      );
+      if (readinessResult.kind === "stale") return;
+      if (readinessResult.kind === "success") {
+        setReadiness(readinessResult.value?.payload ?? null);
         setHasRecoverableWorkoutStart(false);
-      } catch (error) {
-        const message = translateDailyReadinessError(error);
+      } else {
+        const message = translateDailyReadinessError(readinessResult.error);
         if (trainingWorkoutReadinessV2Enabled && startSnapshot.attemptId) {
           setHasStartedTraining(false);
           setHasRecoverableWorkoutStart(true);
@@ -2941,11 +3072,12 @@ export function OrganizatechApp({
         resetWorkoutAttemptState();
         setDailyReadinessError(message);
         setRoutineNotice(message);
-      } finally {
-        setCheckingDailyReadiness(false);
       }
     } finally {
-      releaseWorkoutStartLock(workoutStartInFlightRef);
+      const canFinalize = finalizeActiveWorkoutOperation(workoutStartInFlightRef, operationOwner);
+      if (ownsCheckingState && canFinalize) {
+        setCheckingDailyReadiness(false);
+      }
     }
   }
 
@@ -2958,7 +3090,9 @@ export function OrganizatechApp({
   }
 
   async function persistDailyReadiness(value: TrainingReadiness) {
-    if (!tryAcquireWorkoutStartLock(dailyReadinessSaveInFlightRef)) return;
+    const operationOwner = tryAcquireActiveWorkoutOperation(dailyReadinessSaveInFlightRef);
+    if (!operationOwner) return;
+    let ownsSavingState = false;
 
     try {
       if (savingDailyReadiness) return;
@@ -2980,13 +3114,17 @@ export function OrganizatechApp({
         }
 
         setSavingDailyReadiness(true);
-        try {
-          const record = await saveDailyTrainingReadiness(value);
-          setReadiness(record.payload);
-        } catch (error) {
-          setDailyReadinessError(translateDailyReadinessError(error));
-        } finally {
-          setSavingDailyReadiness(false);
+        ownsSavingState = true;
+        const saveResult = await settleActiveWorkoutOperation(
+          dailyReadinessSaveInFlightRef,
+          operationOwner,
+          saveDailyTrainingReadiness(value),
+        );
+        if (saveResult.kind === "stale") return;
+        if (saveResult.kind === "success") {
+          setReadiness(saveResult.value.payload);
+        } else {
+          setDailyReadinessError(translateDailyReadinessError(saveResult.error));
         }
         return;
       }
@@ -3006,14 +3144,21 @@ export function OrganizatechApp({
       }
 
       setSavingDailyReadiness(true);
-      try {
-        const record = await saveTrainingWorkoutReadiness({
+      ownsSavingState = true;
+      const saveResult = await settleActiveWorkoutOperation(
+        dailyReadinessSaveInFlightRef,
+        operationOwner,
+        saveTrainingWorkoutReadiness({
           workoutAttemptId: context.workoutAttemptId,
           cycleId: context.cycleId,
           cycleDayId: context.cycleDayId,
           workoutStartedAt: context.workoutStartedAt,
           payload,
-        });
+        }),
+      );
+      if (saveResult.kind === "stale") return;
+      if (saveResult.kind === "success") {
+        const record = saveResult.value;
         if (record.contextMismatch) {
           setDailyReadinessError("Este intento ya tiene un formulario guardado con informacion diferente. Recarga el entrenamiento para recuperar sus datos.");
           return;
@@ -3022,13 +3167,14 @@ export function OrganizatechApp({
         setHasRecoverableWorkoutStart(false);
         setPendingReadinessLink(null);
         persistCurrentWorkoutDraftSnapshot(record.payload);
-      } catch (error) {
-        setDailyReadinessError(translateTrainingWorkoutReadinessError(error));
-      } finally {
-        setSavingDailyReadiness(false);
+      } else {
+        setDailyReadinessError(translateTrainingWorkoutReadinessError(saveResult.error));
       }
     } finally {
-      releaseWorkoutStartLock(dailyReadinessSaveInFlightRef);
+      const canFinalize = finalizeActiveWorkoutOperation(dailyReadinessSaveInFlightRef, operationOwner);
+      if (ownsSavingState && canFinalize) {
+        setSavingDailyReadiness(false);
+      }
     }
   }
 
@@ -3055,11 +3201,21 @@ export function OrganizatechApp({
     setActiveExerciseIndex((index) => Math.min(index + 1, Math.max(0, dayExercises.length - 1)));
   }
 
-  async function confirmTrainingWorkoutReadinessLink(pendingLink: PendingWorkoutReadinessLink) {
-    const result = await linkTrainingWorkoutReadinessSession({
-      workoutAttemptId: pendingLink.workoutAttemptId,
-      trainingSessionId: pendingLink.trainingSessionId,
-    });
+  async function confirmTrainingWorkoutReadinessLink(
+    pendingLink: PendingWorkoutReadinessLink,
+    operationOwner: SessionOperationOwner,
+  ) {
+    const linkResult = await settleActiveWorkoutOperation(
+      workoutCompletionInFlightRef,
+      operationOwner,
+      linkTrainingWorkoutReadinessSession({
+        workoutAttemptId: pendingLink.workoutAttemptId,
+        trainingSessionId: pendingLink.trainingSessionId,
+      }),
+    );
+    if (linkResult.kind === "stale") return false;
+    if (linkResult.kind === "error") throw linkResult.error;
+    const result = linkResult.value;
 
     if (result.trainingSessionId !== pendingLink.trainingSessionId) {
       throw new TrainingWorkoutReadinessLinkFlowError("La vinculacion del formulario no coincide con la sesion guardada.");
@@ -3067,6 +3223,7 @@ export function OrganizatechApp({
     if (!result.linked && !result.alreadyLinked) {
       throw new TrainingWorkoutReadinessLinkFlowError("No pudimos confirmar la vinculacion del formulario con la sesion guardada.");
     }
+    return true;
   }
 
   function persistWorkoutDraftWithPendingLink(input: {
@@ -3122,24 +3279,31 @@ export function OrganizatechApp({
     workoutStartedAt: string | null;
     savedAt: string;
     trainedDate: string;
-  }) {
-    const historicalEntries = await Promise.allSettled(input.validExercises.map(async (exercise) => {
-      if (!exercise.exerciseLineageId) {
-        return [exercise.id, { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput] as const;
-      }
+  }, operationOwner: SessionOperationOwner) {
+    const historicalResult = await settleActiveWorkoutOperation(
+      workoutCompletionInFlightRef,
+      operationOwner,
+      Promise.allSettled(input.validExercises.map(async (exercise) => {
+        if (!exercise.exerciseLineageId) {
+          return [exercise.id, { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput] as const;
+        }
 
-      const latest = await getLatestExercisePerformanceByLineage({
-        exerciseLineageId: exercise.exerciseLineageId,
-        currentSessionId: input.sessionId,
-      });
+        const latest = await getLatestExercisePerformanceByLineage({
+          exerciseLineageId: exercise.exerciseLineageId,
+          currentSessionId: input.sessionId,
+        });
 
-      return [
-        exercise.id,
-        latest
-          ? { status: "ready", latest } satisfies TrainingCompletionHistoricalInput
-          : { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput,
-      ] as const;
-    }));
+        return [
+          exercise.id,
+          latest
+            ? { status: "ready", latest } satisfies TrainingCompletionHistoricalInput
+            : { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput,
+        ] as const;
+      })),
+    );
+    if (historicalResult.kind === "stale") return null;
+    if (historicalResult.kind === "error") throw historicalResult.error;
+    const historicalEntries = historicalResult.value;
 
     const historicalByExerciseId: Record<string, TrainingCompletionHistoricalInput> = {};
     historicalEntries.forEach((result, index) => {
@@ -3198,27 +3362,33 @@ export function OrganizatechApp({
   }
 
   async function saveCompletedTraining() {
-    if (!tryAcquireWorkoutStartLock(workoutCompletionInFlightRef)) return;
-    let saveLockAcquired = false;
+    const operationOwner = tryAcquireActiveWorkoutOperation(workoutCompletionInFlightRef);
+    if (!operationOwner) return;
+    let saveOperationOwner: SessionOperationOwner | null = null;
+    let ownsBusyState = false;
 
     try {
       if (isBusy) return;
-      if (!acquireWorkoutSaveLock(isSavingTrainingRef)) return;
-      saveLockAcquired = true;
+      saveOperationOwner = tryAcquireActiveWorkoutOperation(isSavingTrainingRef);
+      if (!saveOperationOwner) return;
 
       const recoveredPendingLink = pendingReadinessLinkRef.current;
       if (recoveredPendingLink) {
         setIsBusy(true);
+        ownsBusyState = true;
         setRoutineNotice("");
         try {
-          await confirmTrainingWorkoutReadinessLink(recoveredPendingLink);
+          const linked = await confirmTrainingWorkoutReadinessLink(
+            recoveredPendingLink,
+            operationOwner,
+          );
+          if (!linked || !isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
           setStatusMessage("Entrenamiento guardado.");
           finishCompletedWorkout();
           applyScreenTransition(resolveWorkoutCompletionTransition({ hasCompletionSummary: false }));
         } catch (error) {
+          if (!isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
           setRoutineNotice(translateTrainingWorkoutReadinessLinkError(error));
-        } finally {
-          setIsBusy(false);
         }
         return;
       }
@@ -3326,10 +3496,12 @@ export function OrganizatechApp({
         }
 
         setIsBusy(true);
+        ownsBusyState = true;
         setRoutineNotice("");
-        let savedTrainingSessionId: string;
-        try {
-          savedTrainingSessionId = await createTrainingSessionWithCycleEntries({
+        const sessionSaveResult = await settleActiveWorkoutOperation(
+          workoutCompletionInFlightRef,
+          operationOwner,
+          createTrainingSessionWithCycleEntries({
             cycleId: persistedActiveCycle.id,
             cycleDayId: cycleDay.id,
             plannedDay,
@@ -3339,12 +3511,16 @@ export function OrganizatechApp({
             status: "completed",
             notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${formatReadinessNote(readiness)}`,
             entries: entriesInput,
-          });
-        } catch (error) {
-          setRoutineNotice(handlePersistenceError(error));
-          setIsBusy(false);
+          }),
+        );
+        if (sessionSaveResult.kind === "stale") return;
+        if (sessionSaveResult.kind === "error") {
+          const message = handlePersistenceError(sessionSaveResult.error);
+          if (!isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+          setRoutineNotice(message);
           return;
         }
+        const savedTrainingSessionId = sessionSaveResult.value;
 
         if (shouldLinkWorkoutReadiness) {
           let nextPendingLink: PendingWorkoutReadinessLink;
@@ -3359,7 +3535,6 @@ export function OrganizatechApp({
             nextPendingLink = createdPendingLink;
           } catch (error) {
             setRoutineNotice(translateTrainingWorkoutReadinessLinkError(error));
-            setIsBusy(false);
             return;
           }
 
@@ -3378,10 +3553,14 @@ export function OrganizatechApp({
           });
 
           try {
-            await confirmTrainingWorkoutReadinessLink(nextPendingLink);
+            const linked = await confirmTrainingWorkoutReadinessLink(
+              nextPendingLink,
+              operationOwner,
+            );
+            if (!linked || !isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
           } catch (error) {
+            if (!isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
             setRoutineNotice(translateTrainingWorkoutReadinessLinkError(error));
-            setIsBusy(false);
             return;
           }
         }
@@ -3393,7 +3572,8 @@ export function OrganizatechApp({
           workoutStartedAt: capturedStartedAt,
           savedAt: new Date().toISOString(),
           trainedDate,
-        });
+        }, operationOwner);
+        if (!summarySnapshot || !isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
         setTrainingCompletionSummary(summarySnapshot);
 
         setExerciseDrafts((current) => {
@@ -3409,19 +3589,23 @@ export function OrganizatechApp({
           // El entrenamiento ya fue persistido; un fallo local de limpieza no debe habilitar duplicados.
         }
 
-        try {
-          const scopedSessionData = await getCycleScopedTrainingSessionData(persistedActiveCycle.id, cycleScopedPlan);
-          setEntries(scopedSessionData.entries);
-          setTrainingSessions(scopedSessionData.sessions);
-        } catch {
+        const scopedSessionResult = await settleActiveWorkoutOperation(
+          workoutCompletionInFlightRef,
+          operationOwner,
+          getCycleScopedTrainingSessionData(persistedActiveCycle.id, cycleScopedPlan),
+        );
+        if (scopedSessionResult.kind === "stale") return;
+        if (scopedSessionResult.kind === "error") {
           setCycleScopedLoadError("Entrenamiento guardado. Recarga el panel para ver la sesion registrada.");
-        } finally {
-          setIsBusy(false);
+        } else {
+          setEntries(scopedSessionResult.value.entries);
+          setTrainingSessions(scopedSessionResult.value.sessions);
         }
         return;
       }
 
       setIsBusy(true);
+      ownsBusyState = true;
       setRoutineNotice("");
       try {
         const currentWeekDates = getCurrentSantiagoWeekDates();
@@ -3431,33 +3615,40 @@ export function OrganizatechApp({
         const trainingWeek = getLegacyWeekNumberForTrainingDate(trainingSessions, entries, trainedDate);
         const capturedExerciseDrafts = exerciseDrafts;
         const capturedStartedAt = activeWorkoutStartedAt;
-        const savedSession = await saveTrainingSessionWithEntries({
-          routine: visibleRoutine,
-          plannedDay,
-          plannedDate,
-          trainedDate,
-          weekNumber: trainingWeek,
-          status: "completed",
-          notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${formatReadinessNote(readiness)}`,
-          entries: validExercises.map((exercise) => {
-          const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
-          const previous = metrics.filter((entry) => entry.exerciseId === exercise.id).at(-1);
-          return {
-            id: createId(),
-            exerciseId: exercise.id,
-            exerciseName: exercise.name,
-            routine: exercise.routine,
-            targetSets: exercise.targetSets,
-            targetReps: exercise.targetReps,
-            weight: readRequiredWeight(draft.weight),
-            previousWeight: previous?.weight ?? exercise.baseWeight,
-            reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
-            rir: draft.rir,
-            notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
-            observation: draft.observation,
-          };
-        }),
-        }, dataMode);
+        const sessionSaveResult = await settleActiveWorkoutOperation(
+          workoutCompletionInFlightRef,
+          operationOwner,
+          saveTrainingSessionWithEntries({
+            routine: visibleRoutine,
+            plannedDay,
+            plannedDate,
+            trainedDate,
+            weekNumber: trainingWeek,
+            status: "completed",
+            notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${formatReadinessNote(readiness)}`,
+            entries: validExercises.map((exercise) => {
+              const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
+              const previous = metrics.filter((entry) => entry.exerciseId === exercise.id).at(-1);
+              return {
+                id: createId(),
+                exerciseId: exercise.id,
+                exerciseName: exercise.name,
+                routine: exercise.routine,
+                targetSets: exercise.targetSets,
+                targetReps: exercise.targetReps,
+                weight: readRequiredWeight(draft.weight),
+                previousWeight: previous?.weight ?? exercise.baseWeight,
+                reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
+                rir: draft.rir,
+                notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
+                observation: draft.observation,
+              };
+            }),
+          }, dataMode),
+        );
+        if (sessionSaveResult.kind === "stale") return;
+        if (sessionSaveResult.kind === "error") throw sessionSaveResult.error;
+        const savedSession = sessionSaveResult.value;
 
         const summarySnapshot = await buildCompletedTrainingSummarySnapshot({
           sessionId: savedSession.id,
@@ -3466,7 +3657,8 @@ export function OrganizatechApp({
           workoutStartedAt: capturedStartedAt,
           savedAt: new Date().toISOString(),
           trainedDate,
-        });
+        }, operationOwner);
+        if (!summarySnapshot || !isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
         setTrainingCompletionSummary(summarySnapshot);
         setTrainingSessions((current) => [...current, savedSession]);
         setEntries((current) => [...current, ...savedSession.entries]);
@@ -3479,16 +3671,24 @@ export function OrganizatechApp({
         finishCompletedWorkout();
         applyScreenTransition(resolveWorkoutCompletionTransition({ hasCompletionSummary: true }));
       } catch (error) {
+        if (!isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
         const message = handlePersistenceError(error);
+        if (!isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
         setRoutineNotice(message === "Ya existe un entrenamiento registrado para esta rutina y fecha."
           ? "Ya existe un entrenamiento registrado para esta rutina y fecha. Puedes revisar el resumen o editar el registro existente."
           : message);
-      } finally {
-        setIsBusy(false);
       }
     } finally {
-      if (saveLockAcquired) releaseWorkoutSaveLock(isSavingTrainingRef);
-      releaseWorkoutStartLock(workoutCompletionInFlightRef);
+      const canFinalize = finalizeActiveWorkoutOperation(
+        workoutCompletionInFlightRef,
+        operationOwner,
+      );
+      if (saveOperationOwner) {
+        finalizeActiveWorkoutOperation(isSavingTrainingRef, saveOperationOwner);
+      }
+      if (ownsBusyState && canFinalize) {
+        setIsBusy(false);
+      }
     }
   }
 
