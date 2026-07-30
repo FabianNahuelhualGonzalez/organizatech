@@ -6,17 +6,15 @@ import type { AppNotificationSection } from "@/lib/notifications/notification-ty
  * duplica nada de ese módulo: `Screen`, la navegación contextual y el back ya están cubiertos
  * ahí). Cada función reproduce exactamente una regla hoy inline en `organizatech-app.tsx`.
  *
- * Puro: sin React, sin DOM, sin storage, sin Supabase. Las cuatro funciones están integradas
- * en organizatech-app.tsx desde P3-07A. El antiguo `resolveWorkoutCompletionScreen` (que
- * devolvía "training-summary" incondicionalmente) fue eliminado en P3-07B: no podía modelar
- * el tercer flujo real de finalización (reintento de link de readiness pendiente, que termina
- * en dashboard); su sucesor es `resolveWorkoutCompletionTransition` en
+ * Puro: sin React, sin DOM, sin storage, sin Supabase. Las cuatro funciones están integradas en
+ * organizatech-app.tsx. La finalización de workouts, incluido el reintento de link de readiness
+ * pendiente, se modela por separado mediante `resolveWorkoutCompletionTransition` en
  * `app-navigation-transition.ts`.
  */
 
 /**
- * Igual a `menuScreens` (organizatech-app.tsx:~3530-3538): sin entradas de entrenamiento
- * registradas, el drawer se recorta a un subconjunto fijo de pantallas (más "historial-ciclos"
+ * Sin entradas de entrenamiento registradas, el drawer se recorta a un subconjunto fijo de
+ * pantallas (más "historial-ciclos"
  * solo si hay ciclos visibles); con entradas, se muestran todas las `primaryScreens`. Retorna
  * siempre un arreglo nuevo (no la misma referencia de `primaryScreens`) — una mejora de pureza
  * deliberada y segura: no se observó ningún punto del código que dependa de la identidad de
@@ -39,8 +37,8 @@ export function resolveMenuScreens(
 }
 
 /**
- * Igual a la condición de visibilidad de la fila "Volver" (organizatech-app.tsx:~3676):
- * `screen !== "dashboard" && screen !== "training-summary"`. No considera si `screenHistory`
+ * Modela la condición de visibilidad de la fila "Volver": `screen !== "dashboard" && screen !==
+ * "training-summary"`. No considera si `screenHistory`
  * está vacío (la propia producción tampoco lo hace hoy — `goBack()` cae a su fallback en ese
  * caso vía `resolveContextualBackNavigation`, ya cubierto en `app-navigation.ts`).
  */
@@ -55,10 +53,8 @@ export interface DayStateReset {
 }
 
 /**
- * Igual al bloque de 3 líneas repetido de forma idéntica en `startNewTrainingCycle` (líneas
- * ~2455-2457, ~2489-2491) y `deleteCurrentTrainingCycle` (líneas ~2538-2540, ~2563-2565) — el
- * "reseteo de día" que acompaña toda transición de ciclo de entrenamiento. Devuelve el paquete de
- * valores, no los aplica (la aplicación via `setActiveRoutineDay`/`setDashboardDayOverride`/
+ * Devuelve el reseteo de día que acompaña las transiciones productivas de ciclo; no aplica los
+ * valores (la aplicación via `setActiveRoutineDay`/`setDashboardDayOverride`/
  * `setComparisonDay` permanece en React).
  */
 export function resolveDayStateReset(): DayStateReset {
@@ -70,12 +66,9 @@ export interface NotificationScrollTarget {
 }
 
 /**
- * Modela como INTENCIÓN pura el destino de scroll que hoy `scrollToNotificationSection`
- * (organizatech-app.tsx:3515-3528, function name y cuerpo con `document.querySelector`/
- * `window.setTimeout`/`scrollIntoView` fijados por contrato en
- * `notification-integration-contract.test.ts` — NO se toca ni se mueve esa función en esta
- * preparación) ejecuta directamente contra el DOM. Este resolver solo calcula el selector CSS
- * equivalente (`[data-section="${section}"]`), sin tocar `document`. La ejecución real
+ * Modela como intención pura el destino que `scrollToNotificationSection` ejecuta contra el DOM.
+ * Este resolver sólo calcula el selector CSS equivalente (`[data-section="${section}"]`), sin
+ * tocar `document`. La ejecución real
  * (`querySelector` + `scrollIntoView` + el resaltado con `setTimeout`) permanece,
  * intencionalmente, del lado de React.
  */

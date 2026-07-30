@@ -8,9 +8,9 @@
  * hermanos, cada uno con su propio parámetro genérico independiente. Este módulo no importa
  * `TrainingPlan` ni ningún tipo de storage.
  *
- * La lógica de construcción y normalización (`createSetupRow`, `createSetupDayState`,
- * `normalizeSetupByDay`, `createSetupByDayFromExercises`, etc.) permanece temporalmente en
- * `organizatech-app.tsx` — no se mueve en esta fase.
+ * El reducer, la normalización, el mapping y la recuperación canónicos viven bajo
+ * `@/features/routine-builder/model`; el root conserva sólo la orquestación React y la generación
+ * externa de IDs que requieren los flujos productivos.
  */
 
 export interface SetupExerciseRow {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import {
   ACTIVE_FLOW_MAX_AGE_MS,
@@ -16,7 +16,6 @@ import {
   saveCycleHistory,
   saveRoutineDraft,
   saveTrainingPlan,
-  type LoadRoutineDraftOptions,
   type LoadRoutineDraftRecoveryOptions,
   type PersistableRoutineDraftStorageRecord,
   type RecoveredRoutineDraftStorageRecord,
@@ -31,9 +30,9 @@ import {
 } from "@/lib/storage/browser-storage";
 import { TRAINING_DAY_LABELS } from "@/lib/training/training-day-order";
 import type { SetupDayState } from "@/lib/training/training-routine-draft";
-// Único punto del árbol de storage que referencia una feature: exclusivamente en este archivo de
-// TEST, para construir un adapter de prueba equivalente al que P3-26 construirá desde el root.
-// src/lib/storage/app-flow-storage.ts (código productivo) nunca importa esto.
+// Único punto del árbol de storage que referencia una feature: exclusivamente en este test,
+// para construir el mismo adapter que usa el root. El código productivo de storage no importa
+// features.
 import {
   resolveRoutineBuilderDraftRecovery,
   type RoutineBuilderDraftRecovery,
@@ -42,7 +41,6 @@ import {
 const USER_A = "11111111-1111-4111-8111-111111111111";
 const USER_B = "22222222-2222-4222-8222-222222222222";
 const NOW = 1_000_000_000;
-const SETUP_DAYS = ["Lunes", "Martes", "Miercoles"];
 
 interface TestSetupDay {
   routineName: string;
@@ -109,36 +107,15 @@ function createRoutineDraft(): TestRoutineDraft {
   };
 }
 
-function normalizeSetupByDay(value: unknown): TestSetupByDay {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return value as TestSetupByDay;
-}
-
 function normalizeTrainingPlan(value: unknown): TestTrainingPlan {
   if (!value || typeof value !== "object" || Array.isArray(value)) return { name: "Fallback" };
   const name = (value as { name?: unknown }).name;
   return { name: typeof name === "string" ? name : "Fallback" };
 }
 
-function hasSetupDraftContent(value: TestSetupByDay) {
-  return Object.values(value).some((day) => day.routineName.trim().length > 0);
-}
-
-function loadRoutine(storage: BrowserStorageLike, now = NOW) {
-  return loadRoutineDraft("supabase", USER_A, {
-    setupDays: SETUP_DAYS,
-    normalizeSetupByDay,
-    normalizeTrainingPlan,
-    hasSetupDraftContent,
-    now: () => now,
-    storage,
-  });
-}
-
 // ---------------------------------------------------------------------------------------------
-// Modo recovery (P3-24B): adapter de prueba equivalente al que P3-26 construirá desde el root,
-// usando resolveRoutineBuilderDraftRecovery (P3-24A) directamente. El código productivo de
-// app-flow-storage.ts nunca conoce esta función — sólo conoce la forma genérica
+// Adapter de prueba equivalente al usado por el root. El código productivo de
+// app-flow-storage.ts nunca conoce la feature; sólo conoce la forma genérica
 // RoutineDraftSetupRecoveryResult<TSetupByDay, TRecovery>.
 // ---------------------------------------------------------------------------------------------
 
@@ -295,111 +272,6 @@ function run() {
     saveRoutineDraft(draft, storage);
 
     assert.deepEqual(JSON.parse(values.get(getRoutineDraftKey()) ?? "{}"), draft);
-    assert.deepEqual(loadRoutine(storage), draft);
-  }
-
-  {
-    const { storage, values } = createStorage();
-    const key = getRoutineDraftKey();
-    values.set(key, JSON.stringify({
-      ...createRoutineDraft(),
-      screen: "dashboard",
-      setupDay: "Viernes",
-      activeRoutineDay: "Sabado",
-      routineEditorReturnScreen: "invalid-screen",
-      trainingPlan: { invalid: true },
-    }));
-
-    const restored = loadRoutine(storage);
-    assert.equal(restored?.screen, "registro-entrenamiento");
-    assert.equal(restored?.setupDay, "Lunes");
-    assert.equal(restored?.activeRoutineDay, "Lunes");
-    assert.equal(restored?.routineEditorReturnScreen, null);
-    assert.deepEqual(restored?.trainingPlan, { name: "Fallback" });
-  }
-
-  {
-    const { storage, values, removes } = createStorage();
-    const key = getRoutineDraftKey();
-    values.set(key, JSON.stringify({
-      ...createRoutineDraft(),
-      setupByDay: { Lunes: { routineName: "" } },
-    }));
-
-    assert.equal(loadRoutine(storage), null);
-    assert.deepEqual(removes, [key]);
-  }
-
-  {
-    const { storage, values, removes } = createStorage();
-    const key = getRoutineDraftKey();
-    values.set(key, "{invalid-json");
-
-    assert.equal(loadRoutine(storage), null);
-    assert.deepEqual(removes, [key]);
-  }
-
-  // CASO (gap LOW de auditoria) — normalizeSetupByDay lanza en modo legacy: cleanup + null, igual
-  // que cualquier otra excepcion interna capturada por el catch generico.
-  {
-    const { storage, values, removes } = createStorage();
-    const key = getRoutineDraftKey();
-    values.set(key, JSON.stringify(createRoutineDraft()));
-
-    const throwingNormalizeSetupByDay = (): TestSetupByDay => {
-      throw new Error("normalizeSetupByDay roto");
-    };
-    assert.equal(loadRoutineDraft("supabase", USER_A, {
-      setupDays: SETUP_DAYS,
-      normalizeSetupByDay: throwingNormalizeSetupByDay,
-      normalizeTrainingPlan,
-      hasSetupDraftContent,
-      now: () => NOW,
-      storage,
-    }), null);
-    assert.deepEqual(removes, [key]);
-  }
-
-  // CASO (gap LOW de auditoria) — normalizeTrainingPlan lanza en modo legacy: cleanup + null.
-  {
-    const { storage, values, removes } = createStorage();
-    const key = getRoutineDraftKey();
-    values.set(key, JSON.stringify(createRoutineDraft()));
-
-    const throwingNormalizeTrainingPlan = (): TestTrainingPlan => {
-      throw new Error("normalizeTrainingPlan roto");
-    };
-    assert.equal(loadRoutineDraft("supabase", USER_A, {
-      setupDays: SETUP_DAYS,
-      normalizeSetupByDay,
-      normalizeTrainingPlan: throwingNormalizeTrainingPlan,
-      hasSetupDraftContent,
-      now: () => NOW,
-      storage,
-    }), null);
-    assert.deepEqual(removes, [key]);
-  }
-
-  {
-    const { storage, values, removes } = createStorage();
-    const key = getRoutineDraftKey();
-    values.set(key, JSON.stringify({
-      ...createRoutineDraft(),
-      userKey: getScope(USER_B),
-    }));
-
-    assert.equal(loadRoutine(storage), null);
-    assert.deepEqual(removes, [key]);
-  }
-
-  {
-    const { storage, values } = createStorage();
-    const key = getRoutineDraftKey();
-    values.set(key, JSON.stringify(createRoutineDraft()));
-
-    assert.ok(loadRoutine(storage, NOW + ROUTINE_DRAFT_MAX_AGE_MS));
-    assert.equal(loadRoutine(storage, NOW + ROUTINE_DRAFT_MAX_AGE_MS + 1), null);
-    assert.equal(values.has(key), false);
   }
 
   {
@@ -411,11 +283,38 @@ function run() {
     assert.equal(values.get(getRoutineDraftKey(USER_B)), "other-user");
   }
 
+  // La migración de la clave histórica demo conserva el mismo JSON y lo entrega al recovery
+  // canónico, que actualiza scope/dataMode antes de validar el record.
+  {
+    const { storage, values } = createStorage();
+    const legacyKey = `${BROWSER_STORAGE_PREFIXES.routineDraft}:demo:local`;
+    const demoKey = getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.routineDraft, "demo");
+    values.set(legacyKey, JSON.stringify(createRecoveryRoutineDraftPayload({
+      dataMode: "demo",
+      userKey: "demo:local",
+    })));
+
+    const loaded = loadRoutineDraft("demo", undefined, {
+      setupDays: TRAINING_DAY_LABELS,
+      resolveSetupRecovery: resolveSetupRecoveryAdapter,
+      normalizeTrainingPlan,
+      now: () => NOW,
+      storage,
+    });
+
+    assert.ok(loaded);
+    assert.equal(loaded.dataMode, "demo");
+    assert.equal(loaded.userKey, "demo");
+    assert.equal(values.has(legacyKey), false);
+    assert.equal(values.has(demoKey), true);
+  }
+
   // -------------------------------------------------------------------------------------------
-  // Modo recovery (P3-24B)
+  // Recuperación canónica
   // -------------------------------------------------------------------------------------------
 
-  // CASO — full restore: recovery.code presente, sin filas descartadas.
+  // CASO — JSON persistido antes de existir metadata de recovery: se restaura completo sin
+  // migrar el formato almacenado ni exigir un campo nuevo.
   {
     const { storage, values } = createStorage();
     values.set(getRoutineDraftKey(), JSON.stringify(createRecoveryRoutineDraftPayload()));
@@ -426,6 +325,26 @@ function run() {
     if (loaded.recovery.kind === "full") assert.equal(loaded.recovery.code, "routine_draft_recovered");
     assert.equal(loaded.setupDay, "Martes");
     assert.equal(loaded.setupByDay.Martes.rows.length, 1);
+  }
+
+  // CASO — los fallbacks de pantalla, día activo y plan se conservan al recuperar datos
+  // persistidos malformados pero reparables.
+  {
+    const { storage, values } = createStorage();
+    values.set(getRoutineDraftKey(), JSON.stringify(createRecoveryRoutineDraftPayload({
+      screen: "dashboard",
+      setupDay: "NoExiste",
+      activeRoutineDay: "NoExiste",
+      routineEditorReturnScreen: "invalid-screen",
+      trainingPlan: { invalid: true },
+    })));
+
+    const restored = loadRoutineWithRecovery(storage);
+    assert.equal(restored?.screen, "registro-entrenamiento");
+    assert.equal(restored?.setupDay, "Lunes");
+    assert.equal(restored?.activeRoutineDay, "Lunes");
+    assert.equal(restored?.routineEditorReturnScreen, null);
+    assert.deepEqual(restored?.trainingPlan, { name: "Fallback" });
   }
 
   // CASO — partial restore: discardedRowCount exacto, nunca se degrada a full.
@@ -474,7 +393,7 @@ function run() {
     const key = getRoutineDraftKey();
     values.set(key, JSON.stringify(createRecoveryRoutineDraftPayload()));
 
-    // 1. cargar mediante el overload recovery.
+    // 1. cargar mediante la API recovery.
     const loaded = loadRoutineWithRecovery(storage);
     assert.ok(loaded);
     // 2. confirmar que el resultado contiene recovery.
@@ -590,6 +509,7 @@ function run() {
     const spy = createRecoverySpy();
     assert.equal(loadRoutineDraft("supabase", USER_A, { setupDays: TRAINING_DAY_LABELS, resolveSetupRecovery: spy.resolveSetupRecovery, normalizeTrainingPlan, now: () => NOW, storage }), null);
     assert.equal(spy.callCount(), 0, "version invalida no debe invocar el resolver");
+    assert.equal(values.has(key), false);
   }
   {
     const { storage, values } = createStorage();
@@ -598,6 +518,7 @@ function run() {
     const spy = createRecoverySpy();
     assert.equal(loadRoutineDraft("supabase", USER_A, { setupDays: TRAINING_DAY_LABELS, resolveSetupRecovery: spy.resolveSetupRecovery, normalizeTrainingPlan, now: () => NOW, storage }), null);
     assert.equal(spy.callCount(), 0, "userKey incorrecto no debe invocar el resolver");
+    assert.equal(values.has(key), false);
   }
   {
     const { storage, values } = createStorage();
@@ -606,19 +527,23 @@ function run() {
     const spy = createRecoverySpy();
     assert.equal(loadRoutineDraft("supabase", USER_A, { setupDays: TRAINING_DAY_LABELS, resolveSetupRecovery: spy.resolveSetupRecovery, normalizeTrainingPlan, now: () => NOW, storage }), null);
     assert.equal(spy.callCount(), 0, "dataMode incorrecto no debe invocar el resolver");
+    assert.equal(values.has(key), false);
   }
   {
     const { storage, values } = createStorage();
     const key = getRoutineDraftKey();
     values.set(key, JSON.stringify(createRecoveryRoutineDraftPayload()));
-    const spy = createRecoverySpy();
-    assert.equal(loadRoutineDraft("supabase", USER_A, { setupDays: TRAINING_DAY_LABELS, resolveSetupRecovery: spy.resolveSetupRecovery, normalizeTrainingPlan, now: () => NOW + ROUTINE_DRAFT_MAX_AGE_MS + 1, storage }), null);
-    assert.equal(spy.callCount(), 0, "draft expirado no debe invocar el resolver");
+    const validSpy = createRecoverySpy();
+    assert.ok(loadRoutineDraft("supabase", USER_A, { setupDays: TRAINING_DAY_LABELS, resolveSetupRecovery: validSpy.resolveSetupRecovery, normalizeTrainingPlan, now: () => NOW + ROUTINE_DRAFT_MAX_AGE_MS, storage }));
+    assert.equal(validSpy.callCount(), 1, "el limite exacto del TTL sigue siendo recuperable");
+
+    const expiredSpy = createRecoverySpy();
+    assert.equal(loadRoutineDraft("supabase", USER_A, { setupDays: TRAINING_DAY_LABELS, resolveSetupRecovery: expiredSpy.resolveSetupRecovery, normalizeTrainingPlan, now: () => NOW + ROUTINE_DRAFT_MAX_AGE_MS + 1, storage }), null);
+    assert.equal(expiredSpy.callCount(), 0, "draft expirado no debe invocar el resolver");
+    assert.equal(values.has(key), false);
   }
 
-  // CASO (gap LOW de auditoria) — JSON corrupto en modo recovery: resolveSetupRecovery no debe
-  // ejecutarse (el fallo ocurre al parsear, antes de llegar al resolver), y el resultado es
-  // cleanup + null, igual que en modo legacy.
+  // CASO — JSON corrupto: resolveSetupRecovery no se ejecuta y el record se limpia.
   {
     const { storage, values, removes } = createStorage();
     const key = getRoutineDraftKey();
@@ -633,6 +558,25 @@ function run() {
       storage,
     }), null);
     assert.equal(spy.callCount(), 0, "JSON corrupto no debe invocar el resolver");
+    assert.deepEqual(removes, [key]);
+  }
+
+  // CASO — normalizeTrainingPlan lanza después de una recuperación válida: cleanup + null.
+  {
+    const { storage, values, removes } = createStorage();
+    const key = getRoutineDraftKey();
+    values.set(key, JSON.stringify(createRecoveryRoutineDraftPayload()));
+
+    const throwingNormalizeTrainingPlan = (): TestTrainingPlan => {
+      throw new Error("normalizeTrainingPlan roto");
+    };
+    assert.equal(loadRoutineDraft("supabase", USER_A, {
+      setupDays: TRAINING_DAY_LABELS,
+      resolveSetupRecovery: resolveSetupRecoveryAdapter,
+      normalizeTrainingPlan: throwingNormalizeTrainingPlan,
+      now: () => NOW,
+      storage,
+    }), null);
     assert.deepEqual(removes, [key]);
   }
 
@@ -709,21 +653,17 @@ function run() {
     assert.deepEqual(removes, []);
   }
 
-  // CASO — modo legacy sigue intacto: no requiere resolveSetupRecovery, sigue usando
-  // normalizeSetupByDay/hasSetupDraftContent, y su resultado no trae `recovery`.
-  {
-    const { storage } = createStorage();
-    const draft = createRoutineDraft();
-    saveRoutineDraft(draft, storage);
-    const restored = loadRoutine(storage);
-    assert.ok(restored);
-    assert.ok(!("recovery" in restored), "el modo legacy no agrega metadata de recovery");
-  }
-
-  // CASO — el codigo productivo de storage nunca importa una feature.
+  // CASO — storage conserva una sola API recovery y nunca importa una feature.
   {
     const storageSource = readFileSync("src/lib/storage/app-flow-storage.ts", "utf8");
     assert.doesNotMatch(storageSource, /from ["']@\/features\//, "storage no debe importar features");
+    assert.doesNotMatch(storageSource, /\bLoadRoutineDraftOptions\b|\bisLegacyLoadRoutineDraftOptions\b/);
+    assert.doesNotMatch(storageSource, /\bnormalizeSetupByDay\b|\bhasSetupDraftContent\b/);
+    assert.equal(
+      (storageSource.match(/^export function loadRoutineDraft</gm) ?? []).length,
+      1,
+      "loadRoutineDraft debe tener una sola declaración productiva",
+    );
   }
 
   {
@@ -808,6 +748,8 @@ function run() {
 
   {
     const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+    assert.equal(existsSync("src/app/page.backup.tsx"), false, "el backup obsoleto no debe existir");
+    assert.doesNotMatch(appSource, /dailyReadinessRecord/i, "el root no debe conservar estado readiness sin lectores");
     assert.doesNotMatch(appSource, /function (?:get|save|load|clear)(?:ActiveFlow|RoutineDraft)/);
     assert.doesNotMatch(appSource, /BROWSER_STORAGE_PREFIXES\.(?:activeFlow|routineDraft)/);
     assert.doesNotMatch(appSource, /function (?:save|load)(?:TrainingPlan|CycleHistory)/);
@@ -817,47 +759,15 @@ function run() {
   }
 }
 
-// CASO (tipos) — el overload recovery exige `recovery` en el resultado restaurado, y las opciones
-// legacy/recovery son mutuamente excluyentes: un objeto que mezcle campos de ambos modos es
-// rechazado por el compilador. Se prueba vía asignabilidad directa a cada tipo de opciones
-// (no invocando loadRoutineDraft) porque, dentro de statements muy profundamente anidados en una
-// función de ~600 líneas, la resolución de overloads de TypeScript deja de aplicar el chequeo de
-// propiedades excedentes con precisión (verificado empíricamente); la asignación directa a un
-// tipo nombrado es la forma robusta de expresar la misma garantía sin depender de la resolución
-// de overloads.
+// CASO (tipos) — la única API de lectura exige un resolver y devuelve metadata de recovery.
 function runTypeCompatibilityChecks() {
   const { storage } = createStorage();
 
-  // Nota de formato: TypeScript ancla el diagnostico de "propiedad excedente" a la linea de la
-  // propiedad especifica que sobra, no a la linea de apertura del objeto — por eso estos tres
-  // literales van en una sola linea, para que el `@ts-expect-error` inmediatamente anterior caiga
-  // exactamente sobre esa linea.
-
-  // @ts-expect-error mezclar normalizeSetupByDay (legacy) con resolveSetupRecovery (recovery) no debe satisfacer LoadRoutineDraftRecoveryOptions.
-  const legacyFieldOnRecovery: LoadRoutineDraftRecoveryOptions<RecoverySetupByDay, TestTrainingPlan, RoutineBuilderDraftRecovery> = { setupDays: TRAINING_DAY_LABELS, normalizeSetupByDay, resolveSetupRecovery: resolveSetupRecoveryAdapter, normalizeTrainingPlan, storage };
-  void legacyFieldOnRecovery;
-
-  // @ts-expect-error mezclar resolveSetupRecovery (recovery) con hasSetupDraftContent (legacy) no debe satisfacer LoadRoutineDraftOptions.
-  const recoveryFieldOnLegacy: LoadRoutineDraftOptions<TestSetupByDay, TestTrainingPlan> = { setupDays: SETUP_DAYS, hasSetupDraftContent, resolveSetupRecovery: resolveSetupRecoveryAdapter, normalizeTrainingPlan, storage };
-  void recoveryFieldOnLegacy;
-
-  // @ts-expect-error las opciones recovery sin resolveSetupRecovery no satisfacen el tipo (falta metadata obligatoria del modo recovery).
+  // @ts-expect-error las opciones sin resolveSetupRecovery no satisfacen el único contrato de lectura.
   const incompleteRecoveryOptions: LoadRoutineDraftRecoveryOptions<RecoverySetupByDay, TestTrainingPlan, RoutineBuilderDraftRecovery> = { setupDays: TRAINING_DAY_LABELS, normalizeTrainingPlan, storage };
   void incompleteRecoveryOptions;
 
-  // Confirmacion positiva (sin @ts-expect-error): las opciones legacy siguen siendo validas
-  // exactamente con su forma original, sin ningun campo de recovery.
-  const legacyOptions: LoadRoutineDraftOptions<TestSetupByDay, TestTrainingPlan> = {
-    setupDays: SETUP_DAYS,
-    normalizeSetupByDay,
-    normalizeTrainingPlan,
-    hasSetupDraftContent,
-    storage,
-  };
-  void legacyOptions;
-
-  // Confirmacion positiva: las opciones recovery, completas y sin campos legacy, siguen siendo
-  // validas y loadRoutineDraft las acepta (esto SI ejecuta el overload recovery real).
+  // Confirmación positiva: las opciones completas son aceptadas por la API real.
   const recoveryOptions: LoadRoutineDraftRecoveryOptions<RecoverySetupByDay, TestTrainingPlan, RoutineBuilderDraftRecovery> = {
     setupDays: TRAINING_DAY_LABELS,
     resolveSetupRecovery: resolveSetupRecoveryAdapter,

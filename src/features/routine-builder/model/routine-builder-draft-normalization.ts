@@ -4,80 +4,44 @@ import { parseDecimalWeightInput, formatDecimalEs } from "@/lib/progress/weight-
 import type { RoutineBuilderState } from "./routine-builder-state";
 
 /**
- * Normalización pura de drafts legacy/desconocidos de Routine Builder (P3-22): convierte un
- * `unknown` — el resultado crudo de leer un draft persistido, potencialmente de una versión
- * anterior de la app — en un `RoutineBuilderState` típado y siempre válido.
+ * Fuente canónica y pura para normalizar drafts legacy o desconocidos de Routine Builder a un
+ * `RoutineBuilderState` válido. La recuperación productiva entrega juntos `setupDay` y
+ * `setupByDay`; este módulo valida ambos sin leer storage.
  *
- * Modela la MISMA responsabilidad que hoy cumplen, juntas, `normalizeSetupByDay`
- * (organizatech-app.tsx, ~líneas 4718-4742) y la validación de `setupDay` que hoy vive en
- * `loadRoutineDraft` (`src/lib/storage/app-flow-storage.ts`, líneas ~168-170) — reconstruidas
- * aquí a partir de evidencia exacta (quotes literales de ambas), no de inferencia.
+ * La generación de IDs permanece fuera de este boundary. El mapping, dedupe y lineage viven en
+ * `routine-builder-exercise-mapping.ts`, y la integración React usa el reducer canónico.
  *
- * ALCANCE — explícitamente EXCLUIDO de este módulo (fases posteriores):
- * - generación de IDs (`createId`/`crypto.randomUUID`) — nunca se invoca aquí; ver DECISIÓN
- *   "sin generación de IDs" más abajo.
- * - mapping, dedupe y lineage contra `ExerciseTemplate[]` reales (`createSetupByDayFromExercises`,
- *   `dedupeExercisesByDayAndRoutine`, resolución real de `exerciseLineageId`) — P3-23.
- * - lectura/escritura de storage (`loadRoutineDraft`/`saveRoutineDraft`/`clearRoutineDraft`) —
- *   este módulo sólo recibe un `unknown` ya extraído y devuelve un valor; nunca toca
- *   localStorage/sessionStorage.
- * - integración en el root, wiring con `useReducer`/componentes visuales — P3-26.
- *
- * DECISIÓN P3-22 — sin generación de IDs: a diferencia de `normalizeSetupByDay` (que invoca
- * `createId()` para toda fila cuyo `id` no sea un string, línea 4727), este normalizador NUNCA
+ * Sin generación de IDs: a diferencia del antiguo normalizador local, este normalizador nunca
  * fabrica un id. Una fila cuyo `id` no sea un string no-vacío se DESCARTA por completo (no se
  * incluye en el resultado) — preservarla con un id vacío violaría el invariante que
  * `createRoutineBuilderRow` ya impone en el modelo puro (rechaza id vacío), y fabricar un id
- * violaría el requisito explícito de esta fase. El total de filas descartadas por esta razón, o
+ * violaría el contrato puro. El total de filas descartadas por esta razón, o
  * por no ser un objeto normalizable (ver próxima decisión), se reporta en `discardedRowCount`.
  *
- * DECISIÓN P3-22 — filas malformadas (no-objeto) se descartan, no explotan: hoy, una entrada
- * `null`/`undefined`/no-objeto dentro de `rows` hace que `normalizeSetupByDay` lance una
- * excepción no capturada (`row.id` sobre `null`/`undefined`), que sólo el `try/catch` externo de
- * `loadRoutineDraft` contiene — y al contenerla, descarta el DRAFT COMPLETO (los 7 días), no sólo
- * la fila afectada. Una función cuyo propósito es precisamente absorber datos corruptos no debe
- * poder lanzar por esta causa: aquí, una entrada de fila que no sea un objeto plano se descarta
- * individualmente (cuenta en `discardedRowCount`) sin afectar el resto del día ni de los demás
- * días.
+ * Las filas malformadas se descartan sin lanzar. Una entrada que no sea un objeto plano se
+ * descarta individualmente (cuenta en `discardedRowCount`) sin afectar los demás días.
  *
- * DECISIÓN P3-22 — `weight` con tipo inesperado (booleano/objeto/array) no explota: por la misma
- * razón anterior — hoy `row.weight` booleano/objeto/array hace que `parseDecimalWeightInput`
- * (vía `readRequiredWeight`) llame `.trim()` sobre un valor sin ese método y lance, con el mismo
- * efecto de "descarta el draft completo" vía el catch externo. Aquí, cualquier `weight` que no
- * sea `string` ni `number` se trata como ausente (mismo resultado final que produce hoy un
- * `weight` ausente: `"0"`), sin lanzar.
+ * Un `weight` con tipo inesperado no lanza: cualquier valor que no sea `string` ni `number` se
+ * trata como ausente y normaliza a `"0"`.
  *
- * DECISIÓN P3-22 — `sets`/`reps` exigen ser finitos y no-negativos: `normalizeSetupByDay` aplica
- * `Number(row.sets) || 0` sin ninguna otra validación — un valor negativo, no-finito, o
- * proveniente de un booleano/array (`Number(true) = 1`, `Number([5]) = 5`) pasa sin corrección.
- * Este normalizador exige que el valor original sea `string` o `number` (cualquier otro tipo se
- * trata como ausente → `0`) y que el resultado de `Number(...)` sea finito y `>= 0` (de lo
- * contrario → `0`) — simétrico con la guarda que `weight` ya tiene hoy vía
+ * `sets`/`reps` exigen ser finitos y no-negativos. El valor original debe ser `string` o `number`;
+ * cualquier otro tipo se trata como ausente y cualquier resultado no-finito o negativo cae a
+ * `0`, simétrico con la guarda que `weight` aplica mediante
  * `parseDecimalWeightInput` (`Number.isFinite(value) && value >= 0`). No se redondea ni se fuerza
  * a entero: un `sets`/`reps` fraccionario válido (p. ej. `2.5`) se preserva, igual que hoy.
  *
- * DECISIÓN P3-22 — días/claves desconocidas se ignoran, arrays de nivel superior se rechazan:
- * `normalizeSetupByDay` sólo itera `TRAINING_DAY_LABELS` (cualquier clave ajena en el input nunca
- * se lee); ese comportamiento se preserva igual aquí. Pero un `setupByDay` cuyo valor de nivel
- * superior sea un ARRAY hoy "funciona por casualidad" (accede a `arr[dia]`, que es siempre
- * `undefined`, degradando silenciosamente al fallback) sin ningún guard explícito — aquí se
- * rechaza explícitamente vía `isPlainObject` (que excluye arrays), con el mismo resultado final
- * (fallback por día), pero sin depender de una coincidencia de acceso a propiedades.
+ * Los días desconocidos se ignoran y los arrays de nivel superior se rechazan. Sólo se iteran
+ * `TRAINING_DAY_LABELS`; cualquier clave ajena nunca se lee.
  *
- * DECISIÓN P3-22 — sin relleno a 4 filas en blanco: `normalizeSetupByDay` reemplaza incluso un
- * `rows: []` legítimo por `createSetupRows()` (4 filas vacías nuevas, con ids generados). Esa es
- * una decisión de UX/presentación (mostrar 4 filas editables por defecto), no de parsing puro, y
- * requeriría generar IDs — prohibido en esta fase. Aquí, un día sin filas válidas normaliza a
- * `rows: []`; si una fase futura (P3-26) decide rellenar con filas placeholder, lo hará
- * despachando `add_row` explícitamente (P3-21), con IDs provistos por su llamador.
+ * Un día sin filas válidas normaliza a `rows: []`; rellenar filas editables es una decisión de
+ * presentación y requiere IDs provistos externamente.
  *
- * DECISIÓN P3-22 — `activeDay`/`setupDay`: el input legacy real (`RoutineDraftStorageRecord`,
+ * `activeDay`/`setupDay`: el input persistido (`RoutineDraftStorageRecord`,
  * `src/lib/storage/app-flow-storage.ts`) persiste el día activo bajo la clave `setupDay`; el
  * modelo puro ya existente (`RoutineBuilderState`, `routine-builder-state.ts`) lo llama
  * `activeDay`. Este normalizador LEE `setupDay` del input (fidelidad al dato legacy real) y
- * ESCRIBE `activeDay` en el resultado (fidelidad al contrato típado ya existente), validando
- * contra `TRAINING_DAY_LABELS` con fallback a `TRAINING_DAY_LABELS[0]` — misma regla que ya usa
- * `loadRoutineDraft` (líneas ~168-170) hoy, fuera de `normalizeSetupByDay`.
+ * ESCRIBE `activeDay` en el resultado (fidelidad al contrato tipado), validando
+ * contra `TRAINING_DAY_LABELS` con fallback a `TRAINING_DAY_LABELS[0]`.
  *
  * `fallbackApplied` es `true` únicamente cuando el input de nivel superior no era un objeto plano
  * en absoluto (incluye arrays, `null`, `undefined`, primitivos) — en ese caso el resultado es el

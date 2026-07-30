@@ -2,25 +2,12 @@ import type { SetupDayState, SetupExerciseRow } from "@/lib/training/training-ro
 import { TRAINING_DAY_LABELS } from "@/lib/training/training-day-order";
 
 /**
- * Fuente pura y tipada del estado de Routine Builder (P3-20, corregida en P3-20B tras
- * auditoría; extendida en P3-21 con operaciones de fila): día seleccionado y borrador por día.
- * Espeja el estado real hoy disperso en `organizatech-app.tsx` — `setupDay`/`setupByDay`
- * (líneas ~430-431), reutilizando `SetupDayState`/`SetupExerciseRow` desde su fuente canónica
- * sin redefinirlos.
+ * Fuente pura y tipada del estado de Routine Builder: día seleccionado, borrador por día y
+ * operaciones de fila. El root la integra mediante `useReducer` y conserva la generación externa
+ * de IDs, persistencia, mensajes, confirmaciones y navegación.
  *
- * Esta fase NO integra `useReducer` en el root ni reemplaza los `useState` existentes
- * (P3-26). Es un modelo aislado, verificado por su propio test unitario.
- *
- * ALCANCE — explícitamente EXCLUIDO de este módulo (fases posteriores):
- * - generación de IDs (`createId`, `crypto.randomUUID`) — permanece en el root; este módulo
- *   solo CONSUME un id ya generado externamente (P3-26 será quien lo obtenga de la
- *   infraestructura productiva actual y lo entregue al reducer).
- * - normalización de drafts legacy / datos desconocidos de storage (`normalizeSetupByDay`) — P3-22.
- * - mapping, dedupe y lineage desde `ExerciseTemplate[]` reales (`createSetupByDayFromExercises`,
- *   `dedupeExercisesByDayAndRoutine`) — P3-23.
- * - draft recovery, cleanup y expiración desde storage — P3-24.
- * - `saveInitialRoutine`, persistencia, confirmaciones y mensajes de éxito/error de guardado — P3-25.
- * - integración de `useReducer` en el root, wiring con los componentes visuales, navegación — P3-26.
+ * La normalización, el mapping y la recuperación viven en módulos especializados de esta feature;
+ * este reducer no los duplica ni accede a storage.
  *
  * DECISIÓN P3-21B (corrige P3-21 tras auditoría, hallazgo MEDIUM M1) — `remove_row` exige
  * `allowEmptyRows: boolean` como campo OBLIGATORIO de la acción (sin `?`, sin valor por
@@ -31,7 +18,7 @@ import { TRAINING_DAY_LABELS } from "@/lib/training/training-day-order";
  * `persistedActiveCycle`/Supabase — el flujo cycle-scoped SÍ permite `rows: []`, el flujo legacy
  * nunca lo permite). Ese booleano es infraestructura productiva que este módulo puro no conoce
  * ni debe importar, así que NO se lee aquí: en su lugar, `allowEmptyRows` es el parámetro puro
- * que el caller (P3-25/P3-26) debe resolver ANTES de despachar, mapeando:
+ * que el caller debe resolver antes de despachar, mapeando:
  *   - flujo legacy  → despachar `allowEmptyRows: false`;
  *   - flujo cycle-scoped → despachar `allowEmptyRows: true` (después de resolver la
  *     confirmación de UI por `sourceExerciseId`, que sigue sin modelarse aquí).
@@ -42,27 +29,16 @@ import { TRAINING_DAY_LABELS } from "@/lib/training/training-day-order";
  * `allowEmptyRows: true` → se permite `rows: []` (política cycle-scoped). El reducer nunca abre
  * `window.confirm`.
  *
- * DECISIÓN P3-21 — `add_row` sobre un día AÚN NO presente en `setupByDay` crea el día con
- * ÚNICAMENTE la fila entregada (cero filas en blanco adicionales). Esto difiere deliberadamente
- * de `addSetupRow()` en el root, que hoy — por un acoplamiento incidental con el fallback
- * genérico de `updateSetupDay` (`current[day] ?? createSetupDayState()`, pensado para
- * `updateSetupRow`/`updateSetupRoutineName`, no para altas) — termina creando 4 filas en blanco
- * más la nueva (5 filas en total) la primera vez que se agrega una fila a un día nuevo. Esa
- * generación de 4 filas en blanco depende de `createId()` (una por fila) y es, en sí misma, un
- * comportamiento no exigido por ningún test ni por el contrato de integración visual; replicarla
- * aquí violaría "no generar IDs" y "crear solo la fila solicitada" (instrucción explícita del
- * ticket P3-21).
+ * `add_row` sobre un día aún no presente crea el día con únicamente la fila entregada. El root
+ * genera el ID y despacha esa fila; el reducer no fabrica placeholders adicionales.
  *
- * DECISIÓN P3-20B — `message`/`isBusy` NO forman parte de este estado. `statusMessage`/`isBusy`
- * son hoy canales GLOBALES compartidos por toda la app (auth, logout, gestión de ciclos), no
- * exclusivos de Routine Builder. Incluirlos aquí como slices propios habría creado doble
- * ownership (dos fuentes de verdad para el mismo concepto). Cómo P3-26 coordine este reducer con
- * ese estado global (leerlo, reflejarlo, o mantenerlo fuera del reducer) es una decisión de esa
- * fase de integración; este módulo deliberadamente no la anticipa ni la duplica.
+ * `message`/`isBusy` no forman parte de este estado. `statusMessage`/`isBusy` son canales globales
+ * compartidos por toda la app, y el root los mantiene fuera del reducer para evitar doble
+ * ownership.
  *
  * DECISIÓN P3-20B — el initializer YA NO acepta `setupByDay` implícito (`{}` por defecto):
  * `setupByDay` es un input OBLIGATORIO. Producción siempre requiere un mapa preparado mediante
- * el `createSetupByDay()` del root (que genera IDs vía `createId()`, responsabilidad de P3-21).
+ * el `createSetupByDay()` del root (que genera IDs vía `createId()`).
  * Omitir un default silencioso impide que un consumidor futuro olvide accidentalmente entregar
  * el estado real y termine con un mapa vacío sin darse cuenta.
  *
@@ -235,10 +211,7 @@ export function routineBuilderReducer(
       };
     }
     case "reset_state":
-      // No corresponde a cancelRoutineUpdate (que reconstruye setupByDay desde ejercicios
-      // reales vía createSetupByDayFromExercises — P3-23/P3-26). reset_state solo modela el
-      // reset "en blanco" de startNewTrainingCycle/deleteCurrentTrainingCycle: un setupByDay ya
-      // preparado externamente, sin tocar mensajes ni busy globales (que ya no viven aquí).
+      // Modela el reset con un setupByDay preparado externamente, sin tocar mensajes ni busy.
       return createRoutineBuilderState({ setupByDay: action.setupByDay, activeDay: action.activeDay });
     case "replace_state":
       return cloneRoutineBuilderState(action.state);

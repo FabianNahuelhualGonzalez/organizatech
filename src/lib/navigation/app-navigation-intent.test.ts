@@ -14,7 +14,7 @@ import type { AppNotificationSection } from "@/lib/notifications/notification-ty
  * organizatech-app.tsx, sin renderizar React, sin acceder al DOM.
  */
 
-// Igual a `const primaryScreens: Screen[]` (organizatech-app.tsx:306).
+// Mismo catálogo que el root entrega al resolver de menú.
 const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
 
 // Los 12 valores de Screen (paridad con app-navigation.ts).

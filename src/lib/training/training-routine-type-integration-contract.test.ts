@@ -110,14 +110,12 @@ assert.match(
 );
 assert.match(
   appFlowStorageStaticSource,
-  /export function loadRoutineDraft<TSetupByDay, TTrainingPlan>\(/,
-  "loadRoutineDraft debe conservar el overload legacy de dos genericos",
+  /export function loadRoutineDraft<TSetupByDay, TTrainingPlan, TRecovery>\([\s\S]*?options: LoadRoutineDraftRecoveryOptions<TSetupByDay, TTrainingPlan, TRecovery>[\s\S]*?RecoveredRoutineDraftStorageRecord<TSetupByDay, TTrainingPlan, TRecovery> \| null/,
+  "loadRoutineDraft debe exponer una sola API recovery con tres genericos independientes",
 );
-assert.match(
-  appFlowStorageStaticSource,
-  /export function loadRoutineDraft<TSetupByDay, TTrainingPlan, TRecovery>\([\s\S]*?LoadRoutineDraftRecoveryOptions<TSetupByDay, TTrainingPlan, TRecovery>/,
-  "loadRoutineDraft debe conservar el overload recovery con tres genericos independientes",
-);
+assert.equal((appFlowStorageStaticSource.match(/^export function loadRoutineDraft</gm) ?? []).length, 1);
+assert.doesNotMatch(appFlowStorageStaticSource, /\bLoadRoutineDraftOptions\b|\bisLegacyLoadRoutineDraftOptions\b/);
+assert.doesNotMatch(appFlowStorageStaticSource, /\bnormalizeSetupByDay\b|\bhasSetupDraftContent\b/);
 assert.doesNotMatch(appFlowStorageStaticSource, /from ["']@\/features\//);
 
 for (const functionName of [

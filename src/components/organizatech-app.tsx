@@ -205,7 +205,6 @@ import {
   getDailyTrainingReadiness,
   saveDailyTrainingReadiness,
   translateDailyReadinessError,
-  type TrainingDailyReadinessRecord,
 } from "@/lib/training/training-daily-readiness-repository";
 import type { TrainingReadiness } from "@/lib/training/training-readiness-draft";
 import {
@@ -464,7 +463,6 @@ export function OrganizatechApp({
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
   const [exerciseDrafts, setExerciseDrafts] = useState<Record<string, ExerciseDraft>>({});
   const [readiness, setReadiness] = useState<TrainingReadiness | null>(null);
-  const [, setDailyReadinessRecord] = useState<TrainingDailyReadinessRecord | null>(null);
   const [checkingDailyReadiness, setCheckingDailyReadiness] = useState(false);
   const [savingDailyReadiness, setSavingDailyReadiness] = useState(false);
   const [dailyReadinessError, setDailyReadinessError] = useState("");
@@ -1371,7 +1369,6 @@ export function OrganizatechApp({
     clearCycleScopedPlanState();
     setExerciseDrafts({});
     setReadiness(null);
-    setDailyReadinessRecord(null);
     setDailyReadinessError("");
     setCheckingDailyReadiness(false);
     setSavingDailyReadiness(false);
@@ -2926,7 +2923,6 @@ export function OrganizatechApp({
       setCheckingDailyReadiness(true);
       try {
         const record = await getDailyTrainingReadiness();
-        setDailyReadinessRecord(record);
         setReadiness(record?.payload ?? null);
         setHasRecoverableWorkoutStart(false);
       } catch (error) {
@@ -2986,7 +2982,6 @@ export function OrganizatechApp({
         setSavingDailyReadiness(true);
         try {
           const record = await saveDailyTrainingReadiness(value);
-          setDailyReadinessRecord(record);
           setReadiness(record.payload);
         } catch (error) {
           setDailyReadinessError(translateDailyReadinessError(error));
@@ -3023,7 +3018,6 @@ export function OrganizatechApp({
           setDailyReadinessError("Este intento ya tiene un formulario guardado con informacion diferente. Recarga el entrenamiento para recuperar sus datos.");
           return;
         }
-        setDailyReadinessRecord(null);
         setReadiness(record.payload);
         setHasRecoverableWorkoutStart(false);
         setPendingReadinessLink(null);

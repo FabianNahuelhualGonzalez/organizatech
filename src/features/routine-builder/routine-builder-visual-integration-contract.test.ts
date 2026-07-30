@@ -10,9 +10,9 @@ import { readFileSync } from "node:fs";
  * bloques inline `routine-day-builder-card` / `routine-name-card` / `exercise-builder-card`).
  * Absorbe la cobertura del extinto contrato de preparación
  * (`routine-builder-visual-gap-preparation-contract.test.ts`, eliminado en esta rama).
- * P3-26 amplía este contrato estático al wiring del reducer, mapping, recovery y save. Sigue
- * sin renderizar React ni probar interacciones o persistencia runtime; esa evidencia vive en
- * los tests conductuales de cada módulo.
+ * También cubre el wiring actual del reducer, mapping, recovery y save. Sigue sin renderizar React
+ * ni probar interacciones o persistencia runtime; esa evidencia vive en los tests conductuales de
+ * cada módulo.
  */
 function readSource(path: string): string {
   return readFileSync(path, "utf8");
@@ -199,8 +199,8 @@ assert.ok(
 );
 assert.match(appSource, /!prepareRoutineBuilderStateFromExercises\(exercises, activeRoutineDay\)[\s\S]*?return;/);
 
-// 12. Recovery P3-24 está conectado al overload real de storage. Full y partial mantienen
-//     mensajes distintos y discardedRowCount se consume; las normalizaciones legacy salen.
+// 12. Recovery está conectado a la API única de storage. Full y partial mantienen mensajes
+//     distintos y discardedRowCount se consume; las normalizaciones retiradas no vuelven al root.
 assert.match(appSource, /from "@\/features\/routine-builder\/model\/routine-builder-draft-recovery";/);
 assert.match(appSource, /resolveSetupRecovery\(input\) \{/);
 assert.match(appSource, /const result = resolveRoutineBuilderDraftRecovery\(input\);/);
