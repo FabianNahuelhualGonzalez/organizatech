@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import type { ExerciseEntry, ExerciseTemplate } from "@/lib/progress/types";
 import type {
   CycleHistoryDataSource,
   CycleHistorySourceCycle,
   CycleHistorySourceCycleData,
 } from "@/lib/training/cycle-history/cycle-history-data-source";
+import {
+  createLegacyCycleHistoryServiceAdapter,
+  type LegacyCycleHistorySnapshot,
+} from "@/lib/training/cycle-history/cycle-history-legacy-adapter";
 import { createCycleHistoryService } from "@/lib/training/cycle-history/cycle-history-service";
 import type { CycleHistoryPersonalData } from "@/lib/training/cycle-history/cycle-history-types";
+import { createDefaultTrainingPlan } from "@/lib/training/training-plan-rules";
 
 const CYCLE_A = "cycle-a";
 const CYCLE_B = "cycle-b";
@@ -117,6 +123,7 @@ function createFakeSource(options: {
   cycle?: CycleHistorySourceCycle | null;
   data?: CycleHistorySourceCycleData;
   error?: unknown;
+  errors?: Partial<Record<"list" | "cycle" | "data" | "personal", unknown>>;
 } = {}): FakeSourceControl {
   const calls = { list: 0, cycle: 0, data: 0, personal: 0 };
   const requestedCycleIds = { cycle: [] as string[], data: [] as string[] };
@@ -130,24 +137,24 @@ function createFakeSource(options: {
     source: {
       async listCycles() {
         calls.list += 1;
-        if (options.error) throw options.error;
+        if (options.errors?.list ?? options.error) throw options.errors?.list ?? options.error;
         return cycles;
       },
       async loadCycle(selectedCycleId) {
         calls.cycle += 1;
         requestedCycleIds.cycle.push(selectedCycleId);
-        if (options.error) throw options.error;
+        if (options.errors?.cycle ?? options.error) throw options.errors?.cycle ?? options.error;
         return cycle;
       },
       async loadCycleData(selectedCycleId) {
         calls.data += 1;
         requestedCycleIds.data.push(selectedCycleId);
-        if (options.error) throw options.error;
+        if (options.errors?.data ?? options.error) throw options.errors?.data ?? options.error;
         return data;
       },
       async loadPersonalData() {
         calls.personal += 1;
-        if (options.error) throw options.error;
+        if (options.errors?.personal ?? options.error) throw options.errors?.personal ?? options.error;
         return personalData();
       },
     },
@@ -165,6 +172,19 @@ function createService(control: FakeSourceControl, enabled = true) {
 async function testEmptyList() {
   const control = createFakeSource({ cycles: [] });
   assert.deepEqual(await createService(control).listCycles(), { status: "empty", cycles: [] });
+}
+
+async function testEmptyCycleIdDoesNotCallDataSource() {
+  const control = createFakeSource();
+  const service = createService(control);
+
+  for (const cycleId of ["", "   "]) {
+    const result = await service.loadCycleDetail(cycleId);
+    assert.equal(result.status, "error");
+    if (result.status === "error") assert.equal(result.error.code, "cycle_required");
+  }
+
+  assert.deepEqual(control.calls, { list: 0, cycle: 0, data: 0, personal: 0 });
 }
 
 async function testDeterministicListOrderAndLegacyExclusion() {
@@ -433,6 +453,57 @@ async function testRepositoryErrorIsSanitized() {
   assert.doesNotMatch(JSON.stringify(result), /secret_token|select \*/i);
 }
 
+async function testListFailureIsSanitizedWithoutMutatingInput() {
+  const cycles = [
+    makeCycle("cycle-older", { endedAt: "2026-06-01T00:00:00.000Z" }),
+    makeCycle("cycle-newer", { endedAt: "2026-07-01T00:00:00.000Z" }),
+  ];
+  const before = JSON.stringify(cycles);
+  const success = await createService(createFakeSource({ cycles })).listCycles();
+  assert.equal(JSON.stringify(cycles), before);
+  assert.deepEqual(
+    success.status === "ready" ? success.cycles.map((cycle) => cycle.cycleId) : [],
+    ["cycle-newer", "cycle-older"],
+  );
+
+  const secret = "select secret_token from profiles where user_id = private-user";
+  const failure = await createService(createFakeSource({ errors: { list: new Error(secret) } })).listCycles();
+  assert.deepEqual(failure, {
+    status: "error",
+    error: { code: "unexpected", message: "No pudimos cargar el historial de ciclos." },
+  });
+  assert.doesNotMatch(JSON.stringify(failure), /secret_token|private-user|select /i);
+}
+
+async function testDetailStageFailuresAreIndependentAndSanitized() {
+  const stages = [
+    {
+      stage: "cycle" as const,
+      expectedCalls: { list: 0, cycle: 1, data: 0, personal: 0 },
+    },
+    {
+      stage: "data" as const,
+      expectedCalls: { list: 0, cycle: 1, data: 1, personal: 0 },
+    },
+    {
+      stage: "personal" as const,
+      expectedCalls: { list: 0, cycle: 1, data: 1, personal: 1 },
+    },
+  ];
+
+  for (const { stage, expectedCalls } of stages) {
+    const secret = `${stage}: service_role=private-${stage}`;
+    const control = createFakeSource({ errors: { [stage]: new Error(secret) } });
+    const result = await createService(control).loadCycleDetail(CYCLE_A);
+    assert.equal(result.status, "error");
+    if (result.status !== "error") continue;
+    assert.equal(result.error.code, "unexpected");
+    assert.equal(result.error.message, "No pudimos cargar el detalle de este ciclo.");
+    assert.doesNotMatch(JSON.stringify(result), /service_role|private-/i);
+    assert.deepEqual(control.calls, expectedCalls);
+  }
+}
+
 async function testUnknownCycleReturnsTypedErrorWithoutLoadingData() {
   const control = createFakeSource({ cycle: null });
   const result = await createService(control).loadCycleDetail("missing-cycle");
@@ -483,6 +554,160 @@ async function testInputsAreNotMutatedAndResultsAreDeterministic() {
   assert.deepEqual(first, second);
 }
 
+function makeLegacySnapshot(
+  id: string,
+  endedAt: string,
+): LegacyCycleHistorySnapshot {
+  const plan = createDefaultTrainingPlan();
+  plan.trainingDays = ["Lunes", "Miércoles"];
+  const exercises: ExerciseTemplate[] = [
+    {
+      id: `${id}-squat`,
+      exerciseLineageId: `${id}-squat-lineage`,
+      routine: "Piernas",
+      day: "Lunes",
+      name: "Sentadilla",
+      targetSets: 3,
+      targetReps: 10,
+      baseWeight: 80,
+    },
+    {
+      id: `${id}-press`,
+      routine: "Torso",
+      day: "Miércoles",
+      name: "Press banca",
+      targetSets: 3,
+      targetReps: 8,
+      baseWeight: 60,
+    },
+  ];
+  const entries: ExerciseEntry[] = [
+    {
+      id: `${id}-entry-1`,
+      sessionId: `${id}-session-1`,
+      exerciseLineageId: `${id}-squat-lineage`,
+      exerciseId: `${id}-squat`,
+      exerciseName: "Sentadilla",
+      routine: "Piernas",
+      week: 1,
+      date: "2026-06-01",
+      targetSets: 3,
+      targetReps: 10,
+      weight: 80,
+      previousWeight: 75,
+      reps: [10, 10, 10],
+    },
+    {
+      id: `${id}-entry-2`,
+      sessionId: `${id}-session-1`,
+      exerciseId: `${id}-press`,
+      exerciseName: "Press banca",
+      routine: "Torso",
+      week: 1,
+      date: "2026-06-01",
+      targetSets: 3,
+      targetReps: 8,
+      weight: 60,
+      previousWeight: 55,
+      reps: [8, 8, 8],
+    },
+    {
+      id: `${id}-entry-3`,
+      sessionId: `${id}-session-2`,
+      exerciseLineageId: `${id}-squat-lineage`,
+      exerciseId: `${id}-squat`,
+      exerciseName: "Sentadilla",
+      routine: "Piernas",
+      week: 2,
+      date: "2026-06-08",
+      targetSets: 3,
+      targetReps: 10,
+      weight: 85,
+      previousWeight: 80,
+      reps: [10, 10, 10],
+    },
+  ];
+
+  return {
+    id,
+    name: `Ciclo ${id}`,
+    createdAt: "2026-06-01T10:00:00.000Z",
+    endedAt,
+    plan,
+    exercises,
+    entries,
+  };
+}
+
+async function testLegacyAdapterPreservesHistoryAndPdfWithoutMutation() {
+  const older = makeLegacySnapshot("legacy-old", "2026-06-15T10:00:00.000Z");
+  const newer = makeLegacySnapshot("legacy-new", "2026-06-30T10:00:00.000Z");
+  const snapshots = [older, newer];
+  const before = JSON.stringify(snapshots);
+  const service = createLegacyCycleHistoryServiceAdapter({
+    snapshots,
+    personalData: personalData(),
+    now: () => "2026-07-21T12:00:00.000Z",
+  });
+
+  const list = await service.listCycles();
+  assert.equal(list.status, "ready");
+  if (list.status !== "ready") return;
+  assert.deepEqual(list.cycles.map((cycle) => cycle.cycleId), ["legacy-new", "legacy-old"]);
+  assert.deepEqual(list.cycles.map((cycle) => cycle.cycleNumber), [2, 1]);
+  assert.equal(list.cycles[0]?.trainingDayCount, 2);
+
+  const result = await service.loadCycleDetail("legacy-new");
+  assert.equal(result.status, "ready");
+  if (result.status !== "ready") return;
+  assert.equal(result.data.sessionCount, 2);
+  assert.equal(result.data.entryCount, 3);
+  assert.deepEqual(result.data.breakdown.weeksWithData, [1, 2]);
+  assert.deepEqual(
+    result.data.plan.routines.map((routine) => routine.name),
+    ["Piernas", "Torso"],
+  );
+  assert.equal(
+    result.data.breakdown.routines[0]?.exercises[0]?.identity.key,
+    "legacy-new-squat-lineage",
+  );
+  assert.equal(
+    result.data.breakdown.routines[1]?.exercises[0]?.identity.kind,
+    "trainingCycleExercise",
+  );
+  assert.equal(result.data.metrics.totalVolumeKg, 6390);
+  assert.equal(result.data.pdfModel.cycle.cycleId, "legacy-new");
+  assert.equal(result.data.pdfModel.generatedAt, "2026-07-21T12:00:00.000Z");
+  assert.equal(JSON.stringify(snapshots), before);
+  assert.notEqual(result.data.plan.routines, newer.exercises);
+  assert.notEqual(
+    result.data.breakdown.routines[0]?.exercises[0]?.weeks[1]?.series[0]?.reps,
+    newer.entries[0]?.reps,
+  );
+
+  const second = await service.loadCycleDetail("legacy-new");
+  assert.deepEqual(second, result);
+  assert.notEqual(
+    second.status === "ready" ? second.data.plan : null,
+    result.data.plan,
+    "cada carga debe producir un output independiente",
+  );
+}
+
+async function testLegacyAdapterEmptyAndInvalidIds() {
+  const invalid = makeLegacySnapshot("", "2026-06-30T10:00:00.000Z");
+  const service = createLegacyCycleHistoryServiceAdapter({ snapshots: [invalid] });
+  assert.deepEqual(await service.listCycles(), { status: "empty", cycles: [] });
+
+  const emptyId = await service.loadCycleDetail("   ");
+  assert.equal(emptyId.status, "error");
+  if (emptyId.status === "error") assert.equal(emptyId.error.code, "cycle_required");
+
+  const missing = await service.loadCycleDetail("missing");
+  assert.equal(missing.status, "error");
+  if (missing.status === "error") assert.equal(missing.error.code, "cycle_not_found");
+}
+
 function testProductionDataSourceHasNoLegacyQueries() {
   const source = readFileSync(
     "src/lib/training/cycle-history/cycle-history-data-source.ts",
@@ -499,6 +724,7 @@ function testProductionDataSourceHasNoLegacyQueries() {
 
 async function run() {
   await testEmptyList();
+  await testEmptyCycleIdDoesNotCallDataSource();
   await testDeterministicListOrderAndLegacyExclusion();
   await testTrainingDayCountPropagatesEquallyToListAndDetail();
   await testMissingPersistedDayCountRemainsNullable();
@@ -514,11 +740,15 @@ async function run() {
   await testServiceSharesHistoricalExerciseOrderWithPdfModel();
   await testDisabledFlagMakesNoRepositoryCalls();
   await testRepositoryErrorIsSanitized();
+  await testListFailureIsSanitizedWithoutMutatingInput();
+  await testDetailStageFailuresAreIndependentAndSanitized();
   await testUnknownCycleReturnsTypedErrorWithoutLoadingData();
   await testLoadedCycleMustMatchSelectedId();
   await testLegacyCycleIsNotReinterpretedOrQueried();
   await testNoRegistrationsReturnsEmptyDetail();
   await testInputsAreNotMutatedAndResultsAreDeterministic();
+  await testLegacyAdapterPreservesHistoryAndPdfWithoutMutation();
+  await testLegacyAdapterEmptyAndInvalidIds();
   testProductionDataSourceHasNoLegacyQueries();
 
   console.log("cycle-history-service tests passed");

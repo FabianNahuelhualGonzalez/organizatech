@@ -4,13 +4,17 @@ import { readFileSync } from "node:fs";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  createRepositoryCycleHistoryDataSource,
   loadRepositoryCycles,
   mapRepositoryCycle,
 } from "@/lib/training/cycle-history/cycle-history-data-source";
 import {
   countCycleScopedTrainingDays,
   createCycleScopedTrainingDayCountsLoader,
+  type CycleScopedTrainingPlan,
+  type CycleScopedTrainingSessionData,
 } from "@/lib/training/cycle-scoped-training-repository";
+import type { ProfilePersonalData } from "@/lib/profile/profile-repository";
 import type { TrainingCycle } from "@/lib/training/training-cycles-repository";
 
 const USER_ID = "e936bd5c-11fb-43cf-b31c-67125a4caf54";
@@ -224,6 +228,191 @@ async function testEmptyRepositoryListSkipsDayCountBatch() {
   assert.equal(dayCountCalls, 0);
 }
 
+async function testRepositoryDataSourceMapsAllOperationsWithoutCallerOwnership() {
+  const cycle = makeRepositoryCycle(CYCLE_A);
+  const plan: CycleScopedTrainingPlan = {
+    routines: [
+      {
+        id: "routine-a",
+        cycleId: CYCLE_A,
+        name: "Piernas",
+        sortOrder: 2,
+        notes: null,
+        days: [
+          {
+            id: "day-a",
+            cycleId: CYCLE_A,
+            routineId: "routine-a",
+            weekIndex: 3,
+            dayCode: "wednesday",
+            sortOrder: 4,
+            notes: null,
+            exercises: [
+              {
+                id: "exercise-a",
+                cycleId: CYCLE_A,
+                dayId: "day-a",
+                name: "Sentadilla",
+                targetSets: 4,
+                targetReps: 6,
+                baseWeight: 110,
+                sideWeight: null,
+                sortOrder: 5,
+                createdAt: "2026-06-02T00:00:00.000Z",
+                notes: null,
+                sourceLegacyExerciseId: "legacy-exercise-a",
+                exerciseLineageId: "lineage-a",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const sessionData: CycleScopedTrainingSessionData = {
+    sessions: [
+      {
+        id: "session-a",
+        cycleId: CYCLE_A,
+        cycleDayId: "day-a",
+        routineId: "routine-a",
+        routine: "Piernas",
+        weekNumber: 3,
+        calendarWeekStart: "2026-06-15",
+        plannedDay: "wednesday",
+        plannedDate: "2026-06-17",
+        trainedDate: "2026-06-18",
+        trainedAt: "2026-06-18T10:00:00.000Z",
+        status: "completed",
+        entries: [],
+      },
+    ],
+    entries: [
+      {
+        id: "entry-a",
+        sessionId: "session-a",
+        cycleId: CYCLE_A,
+        cycleDayId: "day-a",
+        trainingCycleExerciseId: "exercise-a",
+        exerciseLineageId: "lineage-a",
+        exerciseId: "legacy-exercise-a",
+        exerciseName: "Sentadilla",
+        routine: "Piernas",
+        week: 3,
+        date: "2026-06-18",
+        targetSets: 4,
+        targetReps: 6,
+        weight: 110,
+        previousWeight: 105,
+        reps: [6, 6, 6, 6],
+      },
+    ],
+  };
+  const profile: ProfilePersonalData = {
+    id: USER_ID,
+    displayName: "Ada Lovelace",
+    firstName: "Ada",
+    lastName: "Lovelace",
+    email: "ada@example.com",
+    birthDate: "1990-01-01",
+    gender: "female",
+    phoneNumber: null,
+    avatarPath: null,
+    avatarUpdatedAt: null,
+  };
+  const calls = {
+    active: 0,
+    history: 0,
+    dayCounts: [] as string[][],
+    plan: [] as string[],
+    sessions: [] as Array<{ cycleId: string; plan: CycleScopedTrainingPlan }>,
+    personal: 0,
+  };
+  const dataSource = createRepositoryCycleHistoryDataSource({
+    getActiveCycle: async () => {
+      calls.active += 1;
+      return cycle;
+    },
+    getHistoricalCycles: async () => {
+      calls.history += 1;
+      return [];
+    },
+    getTrainingDayCounts: async (cycleIds) => {
+      calls.dayCounts.push([...cycleIds]);
+      return new Map([[CYCLE_A, 3]]);
+    },
+    getTrainingPlan: async (cycleId) => {
+      calls.plan.push(cycleId);
+      return plan;
+    },
+    getTrainingSessionData: async (cycleId, receivedPlan) => {
+      calls.sessions.push({ cycleId, plan: receivedPlan });
+      return sessionData;
+    },
+    getPersonalData: async () => {
+      calls.personal += 1;
+      return profile;
+    },
+  });
+
+  const listed = await dataSource.listCycles();
+  const selected = await dataSource.loadCycle(CYCLE_A);
+  const mapped = await dataSource.loadCycleData(CYCLE_A);
+  const personal = await dataSource.loadPersonalData();
+
+  assert.equal(listed[0]?.id, CYCLE_A);
+  assert.equal(listed[0]?.trainingDayCount, 3);
+  assert.equal(selected?.id, CYCLE_A);
+  assert.deepEqual(calls.plan, [CYCLE_A]);
+  assert.equal(calls.sessions[0]?.cycleId, CYCLE_A);
+  assert.equal(calls.sessions[0]?.plan, plan);
+  assert.deepEqual(mapped.plan.routines[0]?.days[0]?.exercises[0], {
+    id: "exercise-a",
+    cycleId: CYCLE_A,
+    dayId: "day-a",
+    name: "Sentadilla",
+    targetSets: 4,
+    targetReps: 6,
+    baseWeight: 110,
+    sortOrder: 5,
+    createdAt: "2026-06-02T00:00:00.000Z",
+    exerciseLineageId: "lineage-a",
+  });
+  assert.deepEqual(mapped.sessions, [{
+    id: "session-a",
+    cycleId: CYCLE_A,
+    routineId: "routine-a",
+    routineName: "Piernas",
+    calendarWeekStart: "2026-06-15",
+    trainedDate: "2026-06-18",
+    plannedDate: "2026-06-17",
+    trainedAt: "2026-06-18T10:00:00.000Z",
+  }]);
+  assert.deepEqual(mapped.entries, [{
+    id: "entry-a",
+    sessionId: "session-a",
+    cycleId: CYCLE_A,
+    exerciseLineageId: "lineage-a",
+    trainingCycleExerciseId: "exercise-a",
+    exerciseName: "Sentadilla",
+    weight: 110,
+    reps: [6, 6, 6, 6],
+  }]);
+  assert.notEqual(mapped.entries[0]?.reps, sessionData.entries[0]?.reps);
+  assert.deepEqual(personal, {
+    firstName: "Ada",
+    lastName: "Lovelace",
+    email: "ada@example.com",
+    birthDate: "1990-01-01",
+    gender: "female",
+    phoneNumber: null,
+  });
+  assert.deepEqual(calls.dayCounts, [[CYCLE_A], [CYCLE_A]]);
+  assert.equal(calls.active, 2);
+  assert.equal(calls.history, 2);
+  assert.equal(calls.personal, 1);
+}
+
 function testCanonicalSourceContract() {
   const repositorySource = readFileSync(
     "src/lib/training/cycle-scoped-training-repository.ts",
@@ -244,8 +433,10 @@ function testCanonicalSourceContract() {
   assert.match(loaderSource, /\.is\("deleted_at", null\)/);
   assert.doesNotMatch(loaderSource, /training_sessions|exercise_entries|trained_date|planned_date/);
   assert.match(dataSource, /getCycleScopedTrainingDayCounts/);
+  assert.match(dataSource, /createRepositoryCycleHistoryDataSource\(\s*dependencies:/);
   assert.match(dataSource, /trainingDayCount,/);
   assert.doesNotMatch(dataSource, /readTrainingDayCount/);
+  assert.doesNotMatch(dataSource, /userId:\s*string|user_id:\s*string/);
 }
 
 async function run() {
@@ -254,6 +445,7 @@ async function run() {
   await testEmptyCycleListSkipsAuthenticationAndQuery();
   await testDataSourceUsesPersistedCountsInsteadOfSnapshot();
   await testEmptyRepositoryListSkipsDayCountBatch();
+  await testRepositoryDataSourceMapsAllOperationsWithoutCallerOwnership();
   testCanonicalSourceContract();
 
   console.log("cycle-history-training-day-count tests passed");

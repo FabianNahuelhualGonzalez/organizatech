@@ -271,6 +271,178 @@ async function testInvalidationPreventsPreviousIdentityDetailFromReappearing() {
   });
 }
 
+async function testConcurrentListLoadsDiscardLateResponse() {
+  const first = createDeferred<CycleHistoryListResult>();
+  const second = createDeferred<CycleHistoryListResult>();
+  const list = createListService([first.promise, second.promise]);
+  const detail = createFakeCoordinator();
+  const controller = createCycleHistoryAppController({
+    enabled: true,
+    service: list.service,
+    coordinator: detail.coordinator,
+  });
+
+  const firstLoad = controller.loadList();
+  const secondLoad = controller.loadList();
+  second.resolve({ status: "ready", cycles: [makeCycle("new-identity-cycle", 2)] });
+  await secondLoad;
+  first.resolve({ status: "ready", cycles: [makeCycle("late-cycle", 1)] });
+  await firstLoad;
+
+  const state = controller.getState();
+  assert.equal(state.expandedCycleId, "new-identity-cycle");
+  assert.deepEqual(
+    state.listState.status === "ready" ? state.listState.cycles.map((cycle) => cycle.cycleId) : [],
+    ["new-identity-cycle"],
+  );
+  assert.deepEqual(detail.loadCalls, ["new-identity-cycle"]);
+}
+
+async function testConcurrentRetryDiscardsLateError() {
+  const lateError = createDeferred<CycleHistoryListResult>();
+  const currentRetry = createDeferred<CycleHistoryListResult>();
+  const list = createListService([
+    { status: "ready", cycles: [makeCycle("cycle-initial", 1)] },
+    lateError.promise,
+    currentRetry.promise,
+  ]);
+  const detail = createFakeCoordinator();
+  const controller = createCycleHistoryAppController({
+    enabled: true,
+    service: list.service,
+    coordinator: detail.coordinator,
+  });
+  await controller.loadList();
+
+  const firstRetry = controller.retryList();
+  const secondRetry = controller.retryList();
+  currentRetry.resolve({ status: "ready", cycles: [makeCycle("cycle-current", 2)] });
+  await secondRetry;
+  lateError.resolve({
+    status: "error",
+    error: { code: "late_error", message: "Este error ya no corresponde." },
+  });
+  await firstRetry;
+
+  const state = controller.getState();
+  assert.equal(state.listState.status, "ready");
+  assert.equal(state.expandedCycleId, "cycle-current");
+  assert.doesNotMatch(JSON.stringify(state), /late_error|ya no corresponde/);
+}
+
+async function testRapidSelectionDiscardsPreviousDetail() {
+  const detailA = createDeferred<CycleHistoryLoadState>();
+  const detailB = createDeferred<CycleHistoryLoadState>();
+  const list = createListService([{
+    status: "ready",
+    cycles: [makeCycle("cycle-a", 2), makeCycle("cycle-b", 1)],
+  }]);
+  const detail = createFakeCoordinator((cycleId) => (
+    cycleId === "cycle-a" ? detailA.promise : detailB.promise
+  ));
+  const controller = createCycleHistoryAppController({
+    enabled: true,
+    service: list.service,
+    coordinator: detail.coordinator,
+  });
+
+  const initialLoad = controller.loadList();
+  await Promise.resolve();
+  assert.equal(controller.getState().expandedCycleId, "cycle-a");
+
+  const selectB = controller.toggleCycle("cycle-b");
+  detailB.resolve({
+    status: "error",
+    cycleId: "cycle-b",
+    error: { code: "current_b", message: "Detalle B vigente." },
+  });
+  await selectB;
+  detailA.resolve({
+    status: "error",
+    cycleId: "cycle-a",
+    error: { code: "stale_a", message: "Detalle A tardio." },
+  });
+  await initialLoad;
+
+  const state = controller.getState();
+  assert.equal(state.expandedCycleId, "cycle-b");
+  assert.deepEqual(state.detailState, {
+    status: "error",
+    cycleId: "cycle-b",
+    error: { code: "current_b", message: "Detalle B vigente." },
+  });
+  assert.doesNotMatch(JSON.stringify(state), /stale_a|tardio/);
+}
+
+async function testRefreshReplacesRemovedSelection() {
+  const cycleA = makeCycle("cycle-a", 2);
+  const cycleB = makeCycle("cycle-b", 1);
+  const list = createListService([
+    { status: "ready", cycles: [cycleA, cycleB] },
+    { status: "ready", cycles: [cycleA] },
+  ]);
+  const detail = createFakeCoordinator();
+  const controller = createCycleHistoryAppController({
+    enabled: true,
+    service: list.service,
+    coordinator: detail.coordinator,
+  });
+  await controller.loadList();
+  await controller.toggleCycle("cycle-b");
+
+  await controller.retryList();
+
+  assert.equal(controller.getState().expandedCycleId, "cycle-a");
+  assert.deepEqual(detail.loadCalls, ["cycle-a", "cycle-b", "cycle-a"]);
+  assert.doesNotMatch(JSON.stringify(controller.getState()), /cycle-b/);
+}
+
+async function testSubscribeUnsubscribeAndCleanup() {
+  const list = createListService([{ status: "empty", cycles: [] }]);
+  const detail = createFakeCoordinator();
+  const controller = createCycleHistoryAppController({
+    enabled: true,
+    service: list.service,
+    coordinator: detail.coordinator,
+  });
+  const snapshots: string[] = [];
+  const unsubscribe = controller.subscribe((state) => snapshots.push(state.listState.status));
+
+  await controller.loadList();
+  assert.deepEqual(snapshots, ["loading", "empty"]);
+
+  unsubscribe();
+  await controller.retryList();
+  controller.invalidateAll();
+  assert.deepEqual(snapshots, ["loading", "empty"]);
+  assert.equal(detail.getInvalidateAllCalls(), 1);
+}
+
+async function testInvalidCycleIdsAreNoOp() {
+  const list = createListService([{
+    status: "ready",
+    cycles: [makeCycle("cycle-a", 1)],
+  }]);
+  const detail = createFakeCoordinator();
+  const controller = createCycleHistoryAppController({
+    enabled: true,
+    service: list.service,
+    coordinator: detail.coordinator,
+  });
+  await controller.loadList();
+  const before = controller.getState();
+
+  await controller.toggleCycle("");
+  await controller.toggleCycle("   ");
+  await controller.toggleCycle("unknown-cycle");
+  await controller.retryCycle("");
+  await controller.retryCycle("unknown-cycle");
+
+  assert.equal(controller.getState(), before);
+  assert.deepEqual(detail.loadCalls, ["cycle-a"]);
+  assert.deepEqual(detail.invalidatedCycles, []);
+}
+
 function testProductiveWiringContract() {
   const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
   const containerSource = readFileSync(
@@ -281,20 +453,40 @@ function testProductiveWiringContract() {
     "src/app/qa/training-cycle-history/training-cycle-history-qa-client.tsx",
     "utf8",
   );
+  const legacyAdapterSource = readFileSync(
+    "src/lib/training/cycle-history/cycle-history-legacy-adapter.ts",
+    "utf8",
+  );
 
+  // Contrato ESTATICO/source-based: valida wiring/lifecycle, no renderiza React ni
+  // reemplaza la cobertura runtime del controller ejecutada arriba.
   assert.match(appSource, /import \{ CycleHistoryProductiveContainer \} from "@\/components\/training\/cycle-history";/);
   assert.match(appSource, /<CycleHistoryProductiveContainer/);
   assert.match(appSource, /enabled={isTrainingCyclesRepositoryActive}/);
   assert.match(appSource, /identityKey={supabaseUser\?\.id \?\? null}/);
+  assert.match(appSource, /legacySnapshots={cycleHistory}/);
   assert.doesNotMatch(appSource, /function CycleHistoryScreen\(/);
   assert.doesNotMatch(appSource, /function PersistedCycleHistoryScreen\(/);
 
   assert.match(containerSource, /createRepositoryCycleHistoryDataSource\(\)/);
+  assert.match(containerSource, /createLegacyCycleHistoryServiceAdapter\(\{ snapshots: legacySnapshots \}\)/);
+  assert.match(containerSource, /const legacyModeEnabled = !enabled;/);
+  assert.match(containerSource, /enabled: repositoryAccessEnabled \|\| legacyModeEnabled/);
   assert.match(containerSource, /createCycleHistoryService/);
   assert.match(containerSource, /createCycleHistoryLoadCoordinator/);
+  assert.match(containerSource, /\[enabled, identityKey, legacySnapshots\]/);
+  assert.match(containerSource, /const unsubscribe = controller\.subscribe\(updateState\)/);
+  assert.match(containerSource, /unsubscribe\(\);\s*controller\.invalidateAll\(\);/);
   assert.match(containerSource, /controller\.invalidateAll\(\)/);
   assert.match(containerSource, /onRetryList={\(\) => void controller\.retryList\(\)}/);
   assert.doesNotMatch(containerSource, /Blob|jsPDF|html2canvas|createObjectURL/);
+
+  assert.doesNotMatch(
+    legacyAdapterSource,
+    /from "@\/lib\/(?:supabase|storage|[^"\n]*repository)|localStorage|sessionStorage|window\.|document\./,
+  );
+  assert.match(legacyAdapterSource, /buildCycleHistoryBreakdown/);
+  assert.match(legacyAdapterSource, /buildCycleHistoryPdfModel/);
 
   assert.match(qaSource, /export function TrainingCycleHistoryQaClient/);
   assert.doesNotMatch(qaSource, /CycleHistoryProductiveContainer/);
@@ -308,6 +500,12 @@ async function run() {
   await testListAndDetailRetryAreIndependent();
   await testInvalidationPreventsPreviousIdentityListFromReappearing();
   await testInvalidationPreventsPreviousIdentityDetailFromReappearing();
+  await testConcurrentListLoadsDiscardLateResponse();
+  await testConcurrentRetryDiscardsLateError();
+  await testRapidSelectionDiscardsPreviousDetail();
+  await testRefreshReplacesRemovedSelection();
+  await testSubscribeUnsubscribeAndCleanup();
+  await testInvalidCycleIdsAreNoOp();
   testProductiveWiringContract();
   console.log("cycle-history-app-controller tests passed");
 }

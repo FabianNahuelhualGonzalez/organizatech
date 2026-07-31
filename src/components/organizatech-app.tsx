@@ -3883,6 +3883,7 @@ export function OrganizatechApp({
           key={`${supabaseUser?.id ?? "anonymous"}:${isTrainingCyclesRepositoryActive ? "enabled" : "disabled"}`}
           enabled={isTrainingCyclesRepositoryActive}
           identityKey={supabaseUser?.id ?? null}
+          legacySnapshots={cycleHistory}
         />
       )}
       {screen === "perfil" && (
