@@ -44,9 +44,11 @@ assert.doesNotMatch(appSource, /import \{ NotificationGroup \}/, "el root ya no 
 // 4. DOM/clases/roles/ARIA del componente, con la estructura exacta del JSX original.
 assert.match(panelSource, /if \(!isOpen\) return null;/);
 assert.match(panelSource, /className="notification-backdrop"\s*\n\s*aria-label="Cerrar notificaciones"\s*\n\s*onClick=\{onClose\}/);
-assert.match(panelSource, /className="notification-panel" role="dialog" aria-label="Notificaciones"/);
+assert.match(panelSource, /className="notification-panel"/);
+assert.match(panelSource, /role="dialog"/);
+assert.match(panelSource, /aria-label="Notificaciones"/);
 assert.match(panelSource, /className="notification-panel-header"/);
-assert.match(panelSource, /<strong>Notificaciones<\/strong>/);
+assert.match(panelSource, /<strong id=\{NOTIFICATION_PANEL_TITLE_ID\}>Notificaciones<\/strong>/);
 assert.match(panelSource, /totalNotificationsCount > 0 \? \(/);
 assert.match(panelSource, /className="notification-list"/);
 // P3-48B (COMPROBACIONES ESTATICAS / SOURCE-BASED: leen el codigo fuente; NO renderizan React ni
@@ -121,5 +123,47 @@ assert.equal(
   1,
   "el contrato debe estar registrado exactamente una vez",
 );
+
+// -------------------------------------------------------------------------------------------
+// P3-50B1 — NotificationPanel conectado al motor compartido de foco.
+//
+// COMPROBACIONES ESTATICAS / SOURCE-BASED: leen el codigo fuente. NO ejecutan foco, teclado ni
+// DOM, y NO sustituyen la QA manual en navegador (ver informe).
+// -------------------------------------------------------------------------------------------
+assert.match(panelSource, /import \{ useOverlayFocusManagement \} from "@\/ui\/overlays\/use-overlay-focus-management";/);
+// Las aserciones estructurales se evaluan sobre el CODIGO sin comentarios: la documentacion del
+// componente menciona `tabIndex={-1}` y `notification-item`, y podria satisfacerlas por accidente.
+const panelCode = panelSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+// (2) El hook se invoca ANTES del return condicional por isOpen.
+const panelHookIndex = panelSource.indexOf("useOverlayFocusManagement<HTMLDivElement>(");
+const panelEarlyReturnIndex = panelSource.indexOf("if (!isOpen) return null;");
+assert.ok(panelHookIndex >= 0 && panelEarlyReturnIndex > panelHookIndex, "el hook debe llamarse antes del early return");
+// (3)(4) Ref conectado, isActive={isOpen}, id estable, aria-modal y tabIndex fallback.
+assert.match(panelSource, /isActive: isOpen,\s*\n\s*onClose,\s*\n\s*canClose: true,/);
+assert.match(panelCode, /ref=\{panelRef\}/);
+assert.match(panelSource, /export const NOTIFICATION_PANEL_ID = "notification-panel";/);
+assert.match(panelCode, /id=\{NOTIFICATION_PANEL_ID\}/);
+assert.match(panelCode, /aria-modal="true"/);
+assert.match(panelCode, /tabIndex=\{-1\}/);
+// (10) Titulo visible asociado por aria-labelledby, sin perder el nombre accesible.
+assert.match(panelSource, /export const NOTIFICATION_PANEL_TITLE_ID = "notification-panel-title";/);
+assert.match(panelCode, /aria-labelledby=\{NOTIFICATION_PANEL_TITLE_ID\}/);
+// (5)(6) Foco inicial por fallback natural: NO se marca un objetivo explicito en el panel.
+assert.doesNotMatch(panelCode, /OVERLAY_INITIAL_FOCUS_ATTRIBUTE/, "el foco inicial debe resolverse por fallback natural");
+// (11) Sin listeners, stacks ni selectores locales.
+for (const forbiddenLocal of [
+  /addEventListener|removeEventListener/,
+  /useEffect/,
+  /querySelectorAll/,
+  /activeOverlayOwners|activeModalOwners/,
+  /dangerouslySetInnerHTML/,
+]) {
+  assert.doesNotMatch(panelCode, forbiddenLocal, `el panel no debe implementar ${forbiddenLocal}`);
+}
+// (8) aria-controls coincidente en el trigger de la topbar.
+const topbarSource = readSource("src/features/app-shell/components/app-topbar.tsx");
+assert.match(topbarSource, /aria-controls=\{NOTIFICATION_PANEL_ID\}/);
+assert.match(topbarSource, /import \{ NOTIFICATION_PANEL_ID \} from "@\/features\/notifications\/components\/NotificationPanel";/);
+assert.match(topbarSource, /aria-expanded=\{isNotificationPanelOpen\}/, "el trigger conserva aria-expanded");
 
 console.log("notification-panel visual integration contract tests passed");

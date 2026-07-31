@@ -1,5 +1,6 @@
 import { Bell } from "lucide-react";
 import { IconButton } from "@/ui/buttons/icon-button";
+import { NOTIFICATION_PANEL_ID } from "@/features/notifications/components/NotificationPanel";
 import { AppMenuButton } from "./app-menu-button";
 
 export interface AppTopbarTrainingMeta {
@@ -54,6 +55,7 @@ export function AppTopbar({
           className="notification-trigger"
           aria-label="Ver notificaciones"
           aria-expanded={isNotificationPanelOpen}
+          aria-controls={NOTIFICATION_PANEL_ID}
           onClick={onToggleNotifications}
         >
           <Bell size={18} />

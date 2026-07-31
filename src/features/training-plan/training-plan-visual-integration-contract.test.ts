@@ -256,10 +256,17 @@ const overlayEngineConsumers: string[] = [];
     }
   }
 })("src");
+// P3-50B1 conecto Drawer y NotificationPanel al MISMO motor. La garantia sigue siendo una lista
+// EXACTA (no un "al menos"): un cuarto consumidor inesperado debe hacer fallar este contrato. Se
+// ordena para que el resultado no dependa del orden de recorrido del directorio.
 assert.deepEqual(
-  overlayEngineConsumers,
-  ["src/ui/modals/modal-shell.tsx"],
-  "en P3-50B0 el unico consumidor del motor es ModalShell (Drawer/NotificationPanel llegan despues)",
+  overlayEngineConsumers.sort(),
+  [
+    "src/features/app-shell/components/app-navigation-drawer.tsx",
+    "src/features/notifications/components/NotificationPanel.tsx",
+    "src/ui/modals/modal-shell.tsx",
+  ],
+  "los consumidores del motor compartido son exactamente ModalShell, Drawer y NotificationPanel",
 );
 
 // ConfirmDialog bloquea Escape durante busy y enfoca la accion segura.
