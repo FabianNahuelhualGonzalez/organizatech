@@ -21,6 +21,10 @@ const readinessScreenStaticSource = readFileSync(
   "src/features/active-workout/components/TrainingReadinessScreen.tsx",
   "utf8",
 );
+const controllerStateStaticSource = readFileSync(
+  "src/features/active-workout/model/active-workout-controller-state.ts",
+  "utf8",
+);
 const packageStaticSource = readFileSync("package.json", "utf8");
 
 assert.match(
@@ -51,10 +55,13 @@ assert.match(
   "WorkoutDraft debe conservar el generico de readiness",
 );
 assert.match(
-  appStaticSource,
-  /const \[readiness, setReadiness\] = useState<TrainingReadiness \| null>\(null\);/,
-  "el estado React debe conservar TrainingReadiness",
+  controllerStateStaticSource,
+  /readiness: TrainingReadiness \| null;/,
+  "el controller React debe conservar TrainingReadiness como fuente unica",
 );
+assert.match(appStaticSource, /\breadiness,\s*checkingDailyReadiness,/);
+assert.match(appStaticSource, /\} = useActiveWorkoutController\(\);/);
+assert.doesNotMatch(appStaticSource, /const \[readiness,\s*setReadiness\]/);
 assert.match(
   readinessScreenStaticSource,
   /onSubmit: \(value: Omit<TrainingReadiness, "skipped">\) => void \| Promise<void>;/,

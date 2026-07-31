@@ -5,22 +5,25 @@ import { useMemo, useReducer } from "react";
 import {
   activeWorkoutControllerReducer,
   createInitialActiveWorkoutControllerState,
+  resolveActiveExerciseIndexChange,
+  resolveActiveWorkoutCompletionTransition,
+  resolveActiveWorkoutExerciseDraftUpdate,
   type ActiveWorkoutControllerState,
+  type ActiveWorkoutRecoveryTransition,
+  type ActiveWorkoutStartTransition,
 } from "@/features/active-workout/model/active-workout-controller-state";
 
 type ControllerExerciseDraft = ActiveWorkoutControllerState["exerciseDrafts"][string];
 type ControllerReadiness = NonNullable<ActiveWorkoutControllerState["readiness"]>;
 type ControllerPendingLink = NonNullable<ActiveWorkoutControllerState["pendingReadinessLink"]>;
-type ControllerCompletionSummary = NonNullable<ActiveWorkoutControllerState["trainingCompletionSummary"]>;
 
 export interface ActiveWorkoutControllerActions {
-  setActiveExerciseIndex: (index: number) => void;
-  replaceExerciseDraftsFromRecovery: (
+  selectExercise: (index: number, exerciseCount: number) => boolean;
+  replaceExerciseDrafts: (
     drafts: Readonly<Record<string, ControllerExerciseDraft>>,
   ) => void;
-  updateExerciseDraft: (exerciseId: string, draft: ControllerExerciseDraft) => void;
-  removeCompletedExerciseDrafts: (exerciseIds: readonly string[]) => void;
-  setReadiness: (readiness: ControllerReadiness) => void;
+  updateExerciseDraft: (exerciseId: string, draft: ControllerExerciseDraft) => boolean;
+  publishReadiness: (readiness: ControllerReadiness) => void;
   clearReadiness: () => void;
   beginDailyReadinessCheck: () => void;
   completeDailyReadinessCheck: () => void;
@@ -30,17 +33,23 @@ export interface ActiveWorkoutControllerActions {
   failDailyReadinessSave: (error: string) => void;
   publishDailyReadinessError: (error: string) => void;
   clearDailyReadinessError: () => void;
-  markTrainingStarted: () => void;
   markTrainingStopped: () => void;
-  setActiveWorkoutStartedAt: (startedAt: string) => void;
-  clearActiveWorkoutStartedAt: () => void;
-  setActiveWorkoutAttemptId: (attemptId: string) => void;
-  clearActiveWorkoutAttemptId: () => void;
-  setPendingReadinessLink: (pendingLink: ControllerPendingLink) => void;
+  clearTrainingStart: () => void;
+  recordWorkoutStartedAt: (startedAt: string) => void;
+  publishPendingReadinessLink: (pendingLink: ControllerPendingLink) => void;
   clearPendingReadinessLink: () => void;
-  setRecoverableWorkoutStart: (available: boolean) => void;
-  setTrainingCompletionSummary: (summary: ControllerCompletionSummary) => void;
   clearTrainingCompletionSummary: () => void;
+  commitWorkoutStart: (transition: ActiveWorkoutStartTransition) => void;
+  recoverWorkout: (transition: ActiveWorkoutRecoveryTransition) => void;
+  markWorkoutStartRecoverable: () => void;
+  clearRecoverableWorkoutStart: () => void;
+  abortWorkoutStart: () => void;
+  finishWorkout: () => void;
+  discardWorkout: () => void;
+  publishWorkoutCompletion: (
+    summary: NonNullable<ActiveWorkoutControllerState["trainingCompletionSummary"]>,
+    completedExerciseIds: readonly string[],
+  ) => boolean;
   resetActiveWorkout: () => void;
 }
 
@@ -61,19 +70,22 @@ export function useActiveWorkoutController(): UseActiveWorkoutControllerResult {
   );
 
   const actions = useMemo<ActiveWorkoutControllerActions>(() => ({
-    setActiveExerciseIndex: (index) => {
-      dispatch({ type: "active_exercise_index_changed", index });
+    selectExercise: (index, exerciseCount) => {
+      const selection = resolveActiveExerciseIndexChange({ index, exerciseCount });
+      if (selection.kind === "rejected") return false;
+      dispatch({ type: "active_exercise_index_changed", index: selection.value });
+      return true;
     },
-    replaceExerciseDraftsFromRecovery: (drafts) => {
-      dispatch({ type: "exercise_drafts_recovered", drafts });
+    replaceExerciseDrafts: (drafts) => {
+      dispatch({ type: "exercise_drafts_replaced", drafts });
     },
     updateExerciseDraft: (exerciseId, draft) => {
-      dispatch({ type: "exercise_draft_updated", exerciseId, draft });
+      const update = resolveActiveWorkoutExerciseDraftUpdate({ exerciseId, draft });
+      if (update.kind === "rejected") return false;
+      dispatch({ type: "exercise_draft_updated", ...update.value });
+      return true;
     },
-    removeCompletedExerciseDrafts: (exerciseIds) => {
-      dispatch({ type: "completed_exercise_drafts_removed", exerciseIds });
-    },
-    setReadiness: (readiness) => {
+    publishReadiness: (readiness) => {
       dispatch({ type: "readiness_changed", readiness });
     },
     clearReadiness: () => {
@@ -83,7 +95,7 @@ export function useActiveWorkoutController(): UseActiveWorkoutControllerResult {
       dispatch({ type: "readiness_check_started" });
     },
     completeDailyReadinessCheck: () => {
-      dispatch({ type: "readiness_check_succeeded" });
+      dispatch({ type: "readiness_check_finished" });
     },
     failDailyReadinessCheck: (error) => {
       dispatch({ type: "readiness_check_failed", error });
@@ -92,7 +104,7 @@ export function useActiveWorkoutController(): UseActiveWorkoutControllerResult {
       dispatch({ type: "readiness_save_started" });
     },
     completeDailyReadinessSave: () => {
-      dispatch({ type: "readiness_save_succeeded" });
+      dispatch({ type: "readiness_save_finished" });
     },
     failDailyReadinessSave: (error) => {
       dispatch({ type: "readiness_save_failed", error });
@@ -103,38 +115,53 @@ export function useActiveWorkoutController(): UseActiveWorkoutControllerResult {
     clearDailyReadinessError: () => {
       dispatch({ type: "readiness_error_cleared" });
     },
-    markTrainingStarted: () => {
-      dispatch({ type: "training_started" });
-    },
     markTrainingStopped: () => {
       dispatch({ type: "training_stopped" });
     },
-    setActiveWorkoutStartedAt: (startedAt) => {
+    clearTrainingStart: () => {
+      dispatch({ type: "training_start_cleared" });
+    },
+    recordWorkoutStartedAt: (startedAt) => {
       dispatch({ type: "workout_started_at_set", startedAt });
     },
-    clearActiveWorkoutStartedAt: () => {
-      dispatch({ type: "workout_started_at_cleared" });
-    },
-    setActiveWorkoutAttemptId: (attemptId) => {
-      dispatch({ type: "workout_attempt_id_set", attemptId });
-    },
-    clearActiveWorkoutAttemptId: () => {
-      dispatch({ type: "workout_attempt_id_cleared" });
-    },
-    setPendingReadinessLink: (pendingLink) => {
+    publishPendingReadinessLink: (pendingLink) => {
       dispatch({ type: "pending_readiness_link_set", pendingLink });
     },
     clearPendingReadinessLink: () => {
       dispatch({ type: "pending_readiness_link_cleared" });
     },
-    setRecoverableWorkoutStart: (available) => {
-      dispatch({ type: "workout_recovery_availability_changed", available });
-    },
-    setTrainingCompletionSummary: (summary) => {
-      dispatch({ type: "completion_summary_set", summary });
-    },
     clearTrainingCompletionSummary: () => {
       dispatch({ type: "completion_summary_cleared" });
+    },
+    commitWorkoutStart: (transition) => {
+      dispatch({ type: "workout_start_committed", transition });
+    },
+    recoverWorkout: (transition) => {
+      dispatch({ type: "workout_recovered", transition });
+    },
+    markWorkoutStartRecoverable: () => {
+      dispatch({ type: "workout_start_marked_recoverable" });
+    },
+    clearRecoverableWorkoutStart: () => {
+      dispatch({ type: "workout_recovery_availability_changed", available: false });
+    },
+    abortWorkoutStart: () => {
+      dispatch({ type: "workout_start_aborted" });
+    },
+    finishWorkout: () => {
+      dispatch({ type: "workout_finished" });
+    },
+    discardWorkout: () => {
+      dispatch({ type: "workout_discarded" });
+    },
+    publishWorkoutCompletion: (summary, completedExerciseIds) => {
+      const completion = resolveActiveWorkoutCompletionTransition({
+        summary,
+        completedExerciseIds,
+      });
+      if (completion.kind === "rejected") return false;
+      dispatch({ type: "workout_completion_published", transition: completion.value });
+      return true;
     },
     resetActiveWorkout: () => {
       dispatch({ type: "active_workout_reset" });

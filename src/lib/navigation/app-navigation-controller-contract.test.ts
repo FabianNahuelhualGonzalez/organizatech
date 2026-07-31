@@ -107,7 +107,7 @@ const finishSource = sourceSection(
   "  async function buildCompletedTrainingSummarySnapshot",
 );
 assert.doesNotMatch(finishSource, /setScreen\(|applyScreenTransition\(|applyContextualNavigation\(/, "finishCompletedWorkout no navega");
-["clearWorkoutDraft", "resetWorkoutAttemptState", "setActiveWorkoutStartedAt(null)", "setReadiness(null)", "setHasStartedTraining(false)"].forEach((marker) => {
+["clearWorkoutDraft", "activeWorkoutAttemptIdRef.current = null", "pendingReadinessLinkRef.current = null", "activeWorkoutReadinessContextRef.current = null", "activeWorkoutActions.finishWorkout()"].forEach((marker) => {
   assert.ok(finishSource.includes(marker), `finishCompletedWorkout conserva la limpieza: ${marker}`);
 });
 assert.equal(

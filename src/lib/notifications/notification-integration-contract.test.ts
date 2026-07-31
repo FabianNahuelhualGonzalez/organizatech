@@ -54,7 +54,7 @@ assertInOrder(openTargetSource, [
   "resolveNotificationOpenIntent(notification)",
   "markNotificationsSeen([intent.notificationId])",
   "setIsNotificationPanelOpen(false)",
-  "setTrainingCompletionSummary(null)",
+  "activeWorkoutActions.clearTrainingCompletionSummary()",
   "setDashboardDayOverride(intent.dashboardDayOverride)",
   "setComparisonDay(intent.comparisonDayOverride)",
   "navigateTo(intent.target)",
