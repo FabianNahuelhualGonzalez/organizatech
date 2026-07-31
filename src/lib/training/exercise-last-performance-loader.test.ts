@@ -250,6 +250,31 @@ async function run() {
       },
     ]);
   }
+  // P3-32. El contexto de entrada no se muta al construir la request ni al resolver la carga.
+  {
+    const context = Object.freeze({
+      exerciseLineageId: LINEAGE_ID,
+      currentSessionId: SESSION_ID,
+      beforeTimestamp: BEFORE_TIMESTAMP,
+    });
+    const request = createLatestExercisePerformanceRequest(context);
+    assert.ok(request);
+    assert.deepEqual(context, {
+      exerciseLineageId: LINEAGE_ID,
+      currentSessionId: SESSION_ID,
+      beforeTimestamp: BEFORE_TIMESTAMP,
+    });
+
+    const params = request!.params;
+    const result = await loadLatestExercisePerformanceForRequest({
+      request,
+      fetcher: async () => null,
+      getCurrentRequestKey: () => request!.key,
+    });
+    assert.equal(result.stale, false);
+    assert.deepEqual(request!.params, params, "la request no se muta al ejecutarse");
+  }
+
 }
 
 void run();

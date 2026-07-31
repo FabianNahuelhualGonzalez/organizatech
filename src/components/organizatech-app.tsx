@@ -35,6 +35,7 @@ import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
 import { ProfileScreen } from "@/components/profile/ProfileScreen";
 import { CycleHistoryProductiveContainer } from "@/components/training/cycle-history";
 import { GuidedTrainingScreen } from "@/features/active-workout/components/GuidedTrainingScreen";
+import { useActiveWorkoutExerciseHistory } from "@/features/active-workout/hooks/useActiveWorkoutExerciseHistory";
 import { TrainingCompletionSummaryScreen } from "@/features/active-workout/components/TrainingCompletionSummaryScreen";
 import { TrainingReadinessScreen } from "@/features/active-workout/components/TrainingReadinessScreen";
 import { TrainingStartScreen } from "@/features/active-workout/components/TrainingStartScreen";
@@ -218,27 +219,8 @@ import {
   translateTrainingWorkoutReadinessError,
   type TrainingWorkoutReadinessPayload,
 } from "@/lib/training/training-workout-readiness-repository";
-import {
-  getLatestExercisePerformanceByLineage,
-  type LatestExercisePerformance,
-} from "@/lib/training/exercise-last-performance-repository";
-import {
-  createStableWorkoutStartedAt,
-  createLatestExercisePerformanceRequest,
-  getLatestExercisePerformanceIdleState,
-  getLatestExercisePerformanceLoadingState,
-  loadLatestExercisePerformanceForRequest,
-} from "@/lib/training/exercise-last-performance-loader";
-import {
-  getLatestExerciseObservationByLineage,
-  type LatestExerciseObservation,
-} from "@/lib/training/exercise-last-observation-repository";
-import {
-  createLatestExerciseObservationRequest,
-  getLatestExerciseObservationIdleState,
-  getLatestExerciseObservationLoadingState,
-  loadLatestExerciseObservationForRequest,
-} from "@/lib/training/exercise-last-observation-loader";
+import { getLatestExercisePerformanceByLineage } from "@/lib/training/exercise-last-performance-repository";
+import { createStableWorkoutStartedAt } from "@/lib/training/exercise-last-performance-loader";
 import {
   createExerciseDraft,
   normalizeExerciseDraft,
@@ -476,15 +458,8 @@ export function OrganizatechApp({
   const pendingReadinessLinkRef = useRef<PendingWorkoutReadinessLink | null>(null);
   const [hasRecoverableWorkoutStart, setHasRecoverableWorkoutStart] = useState(false);
   const activeWorkoutReadinessContextRef = useRef<ActiveWorkoutReadinessContext | null>(null);
-  const [latestExercisePerformance, setLatestExercisePerformance] = useState<LatestExercisePerformance | null>(null);
-  const [latestExercisePerformanceLoading, setLatestExercisePerformanceLoading] = useState(false);
-  const [latestExercisePerformanceError, setLatestExercisePerformanceError] = useState("");
-  const latestExercisePerformanceRequestKeyRef = useRef<string | null>(null);
-  const [latestExerciseObservation, setLatestExerciseObservation] = useState<LatestExerciseObservation | null>(null);
-  const [latestExerciseObservationLoading, setLatestExerciseObservationLoading] = useState(false);
-  const [latestExerciseObservationError, setLatestExerciseObservationError] = useState("");
-  const [latestExerciseObservationDidQuery, setLatestExerciseObservationDidQuery] = useState(false);
-  const latestExerciseObservationRequestKeyRef = useRef<string | null>(null);
+  // P3-32: el estado data/loading/error, las request-key refs y los effects de historial del
+  // ejercicio activo son propiedad exclusiva de useActiveWorkoutExerciseHistory (ver más abajo).
   const [trainingCompletionSummary, setTrainingCompletionSummary] = useState<TrainingCompletionSummary | null>(null);
   const [routineEditorReturnScreen, setRoutineEditorReturnScreen] = useState<Screen | null>(null);
   const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>([]);
@@ -509,46 +484,6 @@ export function OrganizatechApp({
     setHasRecoverableWorkoutStart(false);
   }, []);
 
-  const resetActiveWorkoutSessionState = useCallback(() => {
-    const hadActiveWorkoutBusyOwner = Boolean(workoutCompletionInFlightRef.current);
-
-    workoutStartInFlightRef.current = null;
-    dailyReadinessSaveInFlightRef.current = null;
-    workoutCompletionInFlightRef.current = null;
-    activeWorkoutAttemptIdRef.current = null;
-    pendingReadinessLinkRef.current = null;
-    activeWorkoutReadinessContextRef.current = null;
-    latestExercisePerformanceRequestKeyRef.current = null;
-    latestExerciseObservationRequestKeyRef.current = null;
-
-    setActiveExerciseIndex(0);
-    setExerciseDrafts({});
-    setReadiness(null);
-    setCheckingDailyReadiness(false);
-    setSavingDailyReadiness(false);
-    setDailyReadinessError("");
-    setHasStartedTraining(false);
-    setActiveWorkoutStartedAt(null);
-    setActiveWorkoutAttemptId(null);
-    setPendingWorkoutReadinessLink(null);
-    setHasRecoverableWorkoutStart(false);
-    setRoutineNotice("");
-    setTrainingCompletionSummary(null);
-
-    const latestPerformanceIdle = getLatestExercisePerformanceIdleState();
-    setLatestExercisePerformance(latestPerformanceIdle.performance);
-    setLatestExercisePerformanceLoading(latestPerformanceIdle.loading);
-    setLatestExercisePerformanceError(latestPerformanceIdle.error);
-
-    const latestObservationIdle = getLatestExerciseObservationIdleState();
-    setLatestExerciseObservation(latestObservationIdle.observation);
-    setLatestExerciseObservationLoading(latestObservationIdle.loading);
-    setLatestExerciseObservationError(latestObservationIdle.error);
-    setLatestExerciseObservationDidQuery(false);
-
-    if (hadActiveWorkoutBusyOwner) setIsBusy(false);
-  }, []);
-
   function clearCycleScopedPlanState() {
     isCycleScopedDisplayLockedRef.current = false;
     setCycleScopedPlan(null);
@@ -569,8 +504,10 @@ export function OrganizatechApp({
     profileAvatarBootstrapUserIdRef.current = null;
     lastProfileAvatarRefreshAtRef.current = 0;
     lastProfileAvatarErrorRefreshAtRef.current = 0;
-    latestExercisePerformanceRequestKeyRef.current = null;
-    latestExerciseObservationRequestKeyRef.current = null;
+    // P3-32: ya no se limpian aquí las request keys de historial. Viven dentro del coordinador y su
+    // invalidación ante un cambio de identidad la garantiza el SessionDataRequestToken capturado
+    // antes del await: aunque la request key coincidiera por accidente entre dos usuarios, el token
+    // deja de ser vigente y el resultado se descarta. Ver runActiveWorkoutHistoryLoad.
     return true;
   }, []);
 
@@ -1181,111 +1118,55 @@ export function OrganizatechApp({
     [unseenNotificationCount],
   );
 
-  useEffect(() => {
-    const requestToken = captureSessionDataRequestToken();
+  const {
+    latestExercisePerformance,
+    latestExercisePerformanceLoading,
+    latestExercisePerformanceError,
+    latestExerciseObservation,
+    latestExerciseObservationLoading,
+    latestExerciseObservationError,
+    latestExerciseObservationDidQuery,
+    resetExerciseHistory,
+    resetExercisePerformanceHistory,
+  } = useActiveWorkoutExerciseHistory({
+    activeWorkoutExerciseId,
+    activeWorkoutExerciseLineageId,
+    activeWorkoutStartedAt,
+    observationUserId: supabaseUser?.id ?? null,
+    captureSessionDataRequestToken,
+    isSessionDataRequestCurrent,
+  });
 
-    if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
-      latestExercisePerformanceRequestKeyRef.current = null;
-      const idle = getLatestExercisePerformanceIdleState();
-      setLatestExercisePerformance(idle.performance);
-      setLatestExercisePerformanceLoading(idle.loading);
-      setLatestExercisePerformanceError(idle.error);
-      return;
-    }
+  const resetActiveWorkoutSessionState = useCallback(() => {
+    const hadActiveWorkoutBusyOwner = Boolean(workoutCompletionInFlightRef.current);
 
-    const request = createLatestExercisePerformanceRequest({
-      exerciseLineageId: activeWorkoutExerciseLineageId,
-      currentSessionId: null,
-      beforeTimestamp: activeWorkoutStartedAt,
-    });
+    workoutStartInFlightRef.current = null;
+    dailyReadinessSaveInFlightRef.current = null;
+    workoutCompletionInFlightRef.current = null;
+    activeWorkoutAttemptIdRef.current = null;
+    pendingReadinessLinkRef.current = null;
+    activeWorkoutReadinessContextRef.current = null;
 
-    latestExercisePerformanceRequestKeyRef.current = request?.key ?? null;
+    setActiveExerciseIndex(0);
+    setExerciseDrafts({});
+    setReadiness(null);
+    setCheckingDailyReadiness(false);
+    setSavingDailyReadiness(false);
+    setDailyReadinessError("");
+    setHasStartedTraining(false);
+    setActiveWorkoutStartedAt(null);
+    setActiveWorkoutAttemptId(null);
+    setPendingWorkoutReadinessLink(null);
+    setHasRecoverableWorkoutStart(false);
+    setRoutineNotice("");
+    setTrainingCompletionSummary(null);
 
-    if (!request) {
-      const idle = getLatestExercisePerformanceIdleState();
-      setLatestExercisePerformance(idle.performance);
-      setLatestExercisePerformanceLoading(idle.loading);
-      setLatestExercisePerformanceError(idle.error);
-      return;
-    }
+    // P3-32: el coordinador es dueño de ambos flujos; el reset delega en su propia API en lugar de
+    // manipular refs/estado que ya no pertenecen al root.
+    resetExerciseHistory();
 
-    const loading = getLatestExercisePerformanceLoadingState();
-    setLatestExercisePerformance(loading.performance);
-    setLatestExercisePerformanceLoading(loading.loading);
-    setLatestExercisePerformanceError(loading.error);
-
-    let isMounted = true;
-    void loadLatestExercisePerformanceForRequest({
-      request,
-      fetcher: getLatestExercisePerformanceByLineage,
-      getCurrentRequestKey: () => latestExercisePerformanceRequestKeyRef.current,
-    }).then((result) => {
-      if (!isMounted || result.stale || !isSessionDataRequestCurrent(requestToken)) return;
-      setLatestExercisePerformance(result.performance);
-      setLatestExercisePerformanceLoading(result.loading);
-      setLatestExercisePerformanceError(result.error);
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, isSessionDataRequestCurrent]);
-
-  useEffect(() => {
-    const requestToken = captureSessionDataRequestToken();
-    const observationUserId = supabaseUser?.id ?? null;
-
-    if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
-      latestExerciseObservationRequestKeyRef.current = null;
-      const idle = getLatestExerciseObservationIdleState();
-      setLatestExerciseObservation(idle.observation);
-      setLatestExerciseObservationLoading(idle.loading);
-      setLatestExerciseObservationError(idle.error);
-      setLatestExerciseObservationDidQuery(false);
-      return;
-    }
-
-    const request = createLatestExerciseObservationRequest({
-      userId: observationUserId,
-      exerciseLineageId: activeWorkoutExerciseLineageId,
-      currentSessionId: null,
-      beforeTimestamp: activeWorkoutStartedAt,
-    });
-
-    latestExerciseObservationRequestKeyRef.current = request?.key ?? null;
-
-    if (!request) {
-      const idle = getLatestExerciseObservationIdleState();
-      setLatestExerciseObservation(idle.observation);
-      setLatestExerciseObservationLoading(idle.loading);
-      setLatestExerciseObservationError(idle.error);
-      setLatestExerciseObservationDidQuery(false);
-      return;
-    }
-
-    const loading = getLatestExerciseObservationLoadingState();
-    setLatestExerciseObservation(loading.observation);
-    setLatestExerciseObservationLoading(loading.loading);
-    setLatestExerciseObservationError(loading.error);
-    setLatestExerciseObservationDidQuery(false);
-
-    let isMounted = true;
-    void loadLatestExerciseObservationForRequest({
-      request,
-      fetcher: getLatestExerciseObservationByLineage,
-      getCurrentRequestKey: () => latestExerciseObservationRequestKeyRef.current,
-    }).then((result) => {
-      if (!isMounted || result.stale || !isSessionDataRequestCurrent(requestToken)) return;
-      setLatestExerciseObservation(result.observation);
-      setLatestExerciseObservationLoading(result.loading);
-      setLatestExerciseObservationError(result.error);
-      setLatestExerciseObservationDidQuery(result.didQuery);
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, isSessionDataRequestCurrent, supabaseUser?.id]);
+    if (hadActiveWorkoutBusyOwner) setIsBusy(false);
+  }, [resetExerciseHistory]);
 
   useEffect(() => {
     const currentUserId = supabaseUser?.id ?? null;
@@ -1402,10 +1283,10 @@ export function OrganizatechApp({
       setCycleHistory([]);
       setSeenNotificationRecords([]);
       setIsPersistedCyclesLoading(false);
-      const latestPerformanceIdle = getLatestExercisePerformanceIdleState();
-      setLatestExercisePerformance(latestPerformanceIdle.performance);
-      setLatestExercisePerformanceLoading(latestPerformanceIdle.loading);
-      setLatestExercisePerformanceError(latestPerformanceIdle.error);
+      // P3-32: se conserva exactamente el alcance previo — el cambio de storage scope deja en idle
+      // sólo la performance, sin tocar la observación, porque es una condición independiente del
+      // reset de memoria de Active Workout.
+      resetExercisePerformanceHistory();
       activeBrowserStorageScopeRef.current = nextStorageScope;
 
       if (typeof window !== "undefined" && nextStorageScope) {

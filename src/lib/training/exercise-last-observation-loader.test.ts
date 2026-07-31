@@ -302,6 +302,35 @@ async function run() {
     assert.match(loaderSource, /normalizeExerciseLineageId/);
   }
 
+  // P3-32. El contexto de entrada no se muta al construir la request ni al resolver la carga, y el
+  // userId sigue formando parte de la identidad de la request.
+  {
+    const context = Object.freeze({
+      userId: USER_ID,
+      exerciseLineageId: LINEAGE_ID,
+      currentSessionId: SESSION_ID,
+      beforeTimestamp: BEFORE_TIMESTAMP,
+    });
+    const request = createLatestExerciseObservationRequest(context);
+    assert.ok(request);
+    assert.deepEqual(context, {
+      userId: USER_ID,
+      exerciseLineageId: LINEAGE_ID,
+      currentSessionId: SESSION_ID,
+      beforeTimestamp: BEFORE_TIMESTAMP,
+    });
+    assert.ok(request!.key.startsWith(`${USER_ID}|`), "la request key incorpora el userId del scope");
+
+    const params = request!.params;
+    const result = await loadLatestExerciseObservationForRequest({
+      request,
+      fetcher: async () => null,
+      getCurrentRequestKey: () => request!.key,
+    });
+    assert.equal(result.stale, false);
+    assert.deepEqual(request!.params, params, "la request no se muta al ejecutarse");
+  }
+
   console.log("exercise-last-observation-loader tests passed");
 }
 
