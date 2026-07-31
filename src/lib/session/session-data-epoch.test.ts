@@ -775,21 +775,16 @@ async function run() {
   const activeWorkoutResetSource = extractBetween(
     componentSource,
     "const resetActiveWorkoutSessionState = useCallback",
-    "}, [resetExerciseHistory]);",
+    "}, [activeWorkoutActions, resetExerciseHistory]);",
   );
   for (const resetContract of [
-    "setActiveExerciseIndex(0)",
-    "setExerciseDrafts({})",
-    "setReadiness(null)",
-    "setCheckingDailyReadiness(false)",
-    "setSavingDailyReadiness(false)",
-    'setDailyReadinessError("")',
-    "setHasStartedTraining(false)",
-    "setActiveWorkoutStartedAt(null)",
-    "setActiveWorkoutAttemptId(null)",
-    "setPendingWorkoutReadinessLink(null)",
-    "setHasRecoverableWorkoutStart(false)",
-    "setTrainingCompletionSummary(null)",
+    "workoutStartInFlightRef.current = null",
+    "dailyReadinessSaveInFlightRef.current = null",
+    "workoutCompletionInFlightRef.current = null",
+    "activeWorkoutAttemptIdRef.current = null",
+    "pendingReadinessLinkRef.current = null",
+    "activeWorkoutReadinessContextRef.current = null",
+    "activeWorkoutActions.resetActiveWorkout()",
     // P3-32: performance y observación ya no se resetean con setters sueltos del root; el reset
     // central delega en la API del coordinador, único dueño de ambos estados y de sus request keys.
     "resetExerciseHistory()",

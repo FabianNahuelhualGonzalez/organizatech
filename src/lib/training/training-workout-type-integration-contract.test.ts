@@ -12,6 +12,10 @@ const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf
 const activeDraftStaticSource = readFileSync("src/lib/training/active-workout-draft.ts", "utf8");
 const workoutStorageStaticSource = readFileSync("src/lib/training/workout-draft-storage.ts", "utf8");
 const exerciseDraftStaticSource = readFileSync("src/lib/training/training-exercise-draft.ts", "utf8");
+const controllerStateStaticSource = readFileSync(
+  "src/features/active-workout/model/active-workout-controller-state.ts",
+  "utf8",
+);
 const completionStaticSource = readFileSync("src/lib/training/active-workout-completion.ts", "utf8");
 const completionSummaryStaticSource = readFileSync("src/lib/training/training-completion-summary.ts", "utf8");
 // P3-30: la declaracion `drafts: Record<string, ExerciseDraft>` dejo de estar inline en el root al
@@ -45,6 +49,34 @@ assert.match(
   "active-workout-draft debe ser la fuente del tipo concreto",
 );
 
+// Contrato ESTATICO/source-based del wiring P3-35. Estas aserciones no ejecutan el reducer,
+// no renderizan React y no simulan interacciones del hook.
+assert.match(
+  controllerStateStaticSource,
+  /import type \{ ExerciseDraft \} from "@\/lib\/training\/training-exercise-draft";/,
+  "el controller debe importar ExerciseDraft desde su modulo canonico",
+);
+assert.match(
+  controllerStateStaticSource,
+  /export interface ActiveWorkoutControllerState \{[\s\S]*exerciseDrafts: Record<string, ExerciseDraft>;/,
+  "ActiveWorkoutControllerState debe ser el owner canonico de exerciseDrafts",
+);
+assert.match(
+  appStaticSource,
+  /import \{ useActiveWorkoutController \} from "@\/features\/active-workout\/hooks\/useActiveWorkoutController";/,
+  "el root debe importar el controller productivo",
+);
+assert.match(
+  appStaticSource,
+  /const \{ state: activeWorkoutState, actions: activeWorkoutActions \} = useActiveWorkoutController\(\);/,
+  "el root debe usar una unica instancia del controller",
+);
+assert.match(
+  appStaticSource,
+  /const \{[\s\S]*exerciseDrafts,[\s\S]*\} = activeWorkoutState;/,
+  "el root debe obtener exerciseDrafts desde activeWorkoutState",
+);
+
 assert.match(
   appStaticSource,
   /import \{[^}]*type ActiveWorkoutReadinessContext,[^}]*\} from "@\/lib\/training\/workout-draft-storage";/,
@@ -72,7 +104,11 @@ assert.match(
   "el useRef preexistente debe conservarse literalmente",
 );
 assert.match(activeDraftStaticSource, /WorkoutDraftStorageRecord<TrainingReadiness \| null, Record<string, ExerciseDraft>>/);
-assert.match(appStaticSource, /useState<Record<string, ExerciseDraft>>\(\{\}\)/);
+assert.doesNotMatch(
+  appStaticSource,
+  /useState<Record<string, ExerciseDraft>>\(\{\}\)/,
+  "el root no debe conservar un estado espejo de exerciseDrafts",
+);
 assert.match(appStaticSource, /patch: Partial<ExerciseDraft>/);
 assert.match(guidedScreenStaticSource, /drafts: Record<string, ExerciseDraft>/);
 assert.doesNotMatch(appStaticSource, /function createExerciseDraft\(/);
