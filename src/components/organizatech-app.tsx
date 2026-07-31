@@ -15,7 +15,6 @@ import {
   deactivateActiveCycle,
   deleteExercise,
   loadAppData,
-  normalizeExerciseObservation,
   replaceLocalData,
   saveExercise,
   saveTrainingSessionWithEntries,
@@ -105,7 +104,7 @@ import {
   calculateWeeklySummary,
 } from "@/lib/progress/calculations";
 import { parseDateKeyAsLocalNoon } from "@/lib/progress/week-day";
-import { formatDecimalEs, formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
+import { formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import { calculateEquivalentWeeklyProgress } from "@/lib/progress/weekly-equivalent-progress";
 import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode, TrainingSession } from "@/lib/progress/types";
 import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
@@ -249,21 +248,25 @@ import {
 import {
   buildExerciseLastObservationPresentation,
 } from "@/lib/training/exercise-last-observation-presentation";
-import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
+import {
+  createExerciseDraft,
+  normalizeExerciseDraft,
+  type ExerciseDraft,
+} from "@/lib/training/training-exercise-draft";
 import {
   buildCurrentWorkoutSavePlan,
   incompleteCurrentWorkoutMessage,
   isExerciseRegisteredInCurrentWorkout,
 } from "@/lib/training/workout-registration";
 import {
-  clearWorkoutDraft as clearStoredWorkoutDraft,
-  getDraftUserKey,
-  saveWorkoutDraft as saveStoredWorkoutDraft,
-  loadWorkoutDraft as loadStoredWorkoutDraft,
   type ActiveWorkoutReadinessContext,
   type PendingWorkoutReadinessLink,
-  type WorkoutDraftStorageRecord,
 } from "@/lib/training/workout-draft-storage";
+import {
+  clearActiveWorkoutDraft as clearWorkoutDraft,
+  loadActiveWorkoutDraft as loadWorkoutDraft,
+  saveActiveWorkoutDraft,
+} from "@/lib/training/active-workout-draft";
 import {
   createWorkoutAttemptId,
   resolveWorkoutAttemptId,
@@ -358,8 +361,6 @@ import {
 import { RoutineMetricGrid } from "@/ui/data-display/metric-grid";
 
 const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
-const WORKOUT_DRAFT_VERSION = 1;
-const WORKOUT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
 const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
 const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
@@ -382,7 +383,6 @@ const objectiveDescriptions: Record<string, string> = {
 };
 
 type TrainingDayLabel = (typeof TRAINING_DAY_LABELS)[number];
-type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness | null, Record<string, ExerciseDraft>>;
 
 interface TrainingCycleSnapshot {
   id: string;
@@ -856,7 +856,7 @@ export function OrganizatechApp({
     const flow = getActiveFlow(screen, hasRoutinePlanForDraft, isEditingRoutinePlan, hasStartedTraining, readiness);
 
     function persistFlow() {
-      const userKey = getDraftUserKey(dataMode, supabaseUser?.id);
+      const userKey = getBrowserStorageScope(dataMode, supabaseUser?.id);
       if (!userKey) return;
       saveActiveFlow({
         version: ACTIVE_FLOW_VERSION,
@@ -882,7 +882,7 @@ export function OrganizatechApp({
     if (!isRoutineDraftActive) return;
 
     function persistDraft() {
-      const userKey = getDraftUserKey(dataMode, supabaseUser?.id);
+      const userKey = getBrowserStorageScope(dataMode, supabaseUser?.id);
       if (!userKey) return;
       saveRoutineDraft({
         version: ROUTINE_DRAFT_VERSION,
@@ -915,13 +915,10 @@ export function OrganizatechApp({
     const stableWorkoutStartedAt = activeWorkoutStartedAt;
 
     function persistWorkoutDraft() {
-      const userKey = getDraftUserKey(dataMode, supabaseUser?.id);
-      if (!userKey) return;
-      saveWorkoutDraft({
-        version: WORKOUT_DRAFT_VERSION,
+      saveActiveWorkoutDraft({
         updatedAt: Date.now(),
         dataMode,
-        userKey,
+        userId: supabaseUser?.id,
         activeRoutineDay,
         activeExerciseIndex,
         activeWorkoutStartedAt: stableWorkoutStartedAt,
@@ -2909,11 +2906,10 @@ export function OrganizatechApp({
 
   function persistCurrentWorkoutDraftSnapshot(nextReadiness: TrainingReadiness | null) {
     if (!activeWorkoutStartedAt) return;
-    saveWorkoutDraft({
-      version: WORKOUT_DRAFT_VERSION,
+    saveActiveWorkoutDraft({
       updatedAt: Date.now(),
       dataMode,
-      userKey: getDraftUserKey(dataMode, supabaseUser?.id),
+      userId: supabaseUser?.id,
       activeRoutineDay,
       activeExerciseIndex,
       activeWorkoutStartedAt,
@@ -2981,11 +2977,10 @@ export function OrganizatechApp({
     setActiveExerciseIndex(nextActiveExerciseIndex);
     setHasStartedTraining(true);
 
-    saveWorkoutDraft({
-      version: WORKOUT_DRAFT_VERSION,
+    saveActiveWorkoutDraft({
       updatedAt: Date.now(),
       dataMode,
-      userKey: getDraftUserKey(dataMode, supabaseUser?.id),
+      userId: supabaseUser?.id,
       activeRoutineDay,
       activeExerciseIndex: nextActiveExerciseIndex,
       activeWorkoutStartedAt: startedAt,
@@ -3240,11 +3235,10 @@ export function OrganizatechApp({
     exerciseDrafts: Record<string, ExerciseDraft>;
   }) {
     setPendingWorkoutReadinessLink(input.pendingLink);
-    saveWorkoutDraft({
-      version: WORKOUT_DRAFT_VERSION,
+    saveActiveWorkoutDraft({
       updatedAt: Date.now(),
       dataMode,
-      userKey: getDraftUserKey(dataMode, supabaseUser?.id),
+      userId: supabaseUser?.id,
       activeRoutineDay: input.activeRoutineDay,
       activeExerciseIndex: input.activeExerciseIndex,
       activeWorkoutStartedAt: input.activeWorkoutStartedAt,
@@ -4957,27 +4951,6 @@ function normalizePersistedTrainingPlan(value: unknown): TrainingPlan {
   return normalizeTrainingPlanInput(value).plan;
 }
 
-function saveWorkoutDraft(draft: Omit<WorkoutDraft, "userKey"> & { userKey: BrowserStorageScope | null }) {
-  if (!draft.userKey) return false;
-  return saveStoredWorkoutDraft({ ...draft, userKey: draft.userKey });
-}
-
-function loadWorkoutDraft(mode: DataMode, userId?: string) {
-  return loadStoredWorkoutDraft({
-    mode,
-    userId,
-    version: WORKOUT_DRAFT_VERSION,
-    maxAgeMs: WORKOUT_DRAFT_MAX_AGE_MS,
-    setupDays: TRAINING_DAY_LABELS,
-    normalizeReadiness: normalizeTrainingReadiness,
-    normalizeExerciseDrafts,
-  });
-}
-
-function clearWorkoutDraft(mode: DataMode, userId?: string) {
-  clearStoredWorkoutDraft(mode, userId);
-}
-
 function createTrainingCycleSnapshot(index: number, plan: TrainingPlan, exercises: ExerciseTemplate[], entries: ExerciseEntry[]): TrainingCycleSnapshot {
   const now = new Date().toISOString();
   return {
@@ -5184,67 +5157,6 @@ function createSetupRow(): SetupExerciseRow {
   };
 }
 
-function createExerciseDraft(exercise: ExerciseTemplate): ExerciseDraft {
-  return {
-    weight: "",
-    rir: "",
-    reps: Array.from({ length: exercise.targetSets }, () => ""),
-    registered: false,
-    observation: "",
-  };
-}
-
-function normalizeExerciseDraft(exercise: ExerciseTemplate, draft?: ExerciseDraft): ExerciseDraft {
-  const fallback = createExerciseDraft(exercise);
-  if (!draft) return fallback;
-
-  return {
-    ...fallback,
-    ...draft,
-    reps: Array.from({ length: exercise.targetSets }, (_, index) => draft.reps[index] ?? ""),
-  };
-}
-
-function normalizeExerciseDrafts(value: unknown): Record<string, ExerciseDraft> {
-  if (!value || typeof value !== "object") return {};
-
-  const parsed = value as Record<string, Partial<ExerciseDraft> | undefined>;
-  return Object.fromEntries(Object.entries(parsed).flatMap(([id, draft]) => {
-    if (!draft || typeof id !== "string") return [];
-    const reps = Array.isArray(draft.reps)
-      ? draft.reps.map((item) => (item === "" ? "" : Number(item) || 0))
-      : [];
-
-    return [[id, {
-      weight: typeof draft.weight === "string"
-        ? readWeightInput(draft.weight, "")
-        : draft.weight === undefined
-          ? ""
-          : formatDecimalEs(Number(draft.weight) || 0),
-      rir: typeof draft.rir === "string" ? draft.rir : "",
-      reps,
-      registered: Boolean(draft.registered),
-      observation: normalizeExerciseObservation(draft.observation),
-    } satisfies ExerciseDraft]];
-  }));
-}
-
-function normalizeTrainingReadiness(value: unknown): TrainingReadiness | null {
-  if (!value || typeof value !== "object") return null;
-  const parsed = value as Partial<TrainingReadiness>;
-  return {
-    motivation: normalizeReadinessScore(parsed.motivation),
-    hydration: normalizeReadinessScore(parsed.hydration),
-    sleep: normalizeReadinessScore(parsed.sleep),
-    energy: normalizeReadinessScore(parsed.energy),
-    skipped: Boolean(parsed.skipped),
-  };
-}
-
-function normalizeReadinessScore(value: unknown) {
-  const score = Number(value);
-  return Number.isInteger(score) && score >= 1 && score <= 7 ? score : undefined;
-}
 
 function calculateWeeklyCompletedTrainingDays({
   plannedDays,

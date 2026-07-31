@@ -5,8 +5,11 @@ import {
   normalizeExerciseObservation,
   toPersistedExerciseObservation,
 } from "@/lib/data/repository";
+import { normalizeExerciseDrafts } from "@/lib/training/training-exercise-draft";
 
+// Las lecturas source-based siguientes son contratos estaticos; no renderizan React ni sustituyen tests runtime.
 const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+const exerciseDraftSource = readFileSync("src/lib/training/training-exercise-draft.ts", "utf8");
 const exercisePanelSource = readFileSync("src/features/active-workout/components/ExerciseLastPerformancePanel.tsx", "utf8");
 const repositorySource = readFileSync("src/lib/data/repository.ts", "utf8");
 const cycleScopedRepositorySource = readFileSync(
@@ -18,8 +21,8 @@ const progressTypesSource = readFileSync("src/lib/progress/types.ts", "utf8");
 // 1. Draft nuevo inicia con observation = "".
 function testNewDraftStartsWithEmptyObservation() {
   assert.match(
-    appSource,
-    /function createExerciseDraft\(exercise: ExerciseTemplate\): ExerciseDraft \{\s*\n\s*return \{[\s\S]*?observation: "",\s*\n\s*\};/,
+    exerciseDraftSource,
+    /export function createExerciseDraft\(exercise: ExerciseTemplate\): ExerciseDraft \{\s*\n\s*return \{[\s\S]*?observation: "",\s*\n\s*\};/,
     "createExerciseDraft debe inicializar observation en \"\"",
   );
 }
@@ -27,11 +30,11 @@ function testNewDraftStartsWithEmptyObservation() {
 // 2. Draft antiguo sin observation restaura "".
 function testOldDraftWithoutObservationRestoresEmptyString() {
   assert.equal(normalizeExerciseObservation(undefined), "");
-  assert.match(
-    appSource,
-    /observation: normalizeExerciseObservation\(draft\.observation\),/,
-    "normalizeExerciseDrafts debe normalizar observation con normalizeExerciseObservation al restaurar el draft",
-  );
+  const normalized = normalizeExerciseDrafts({
+    "exercise-1": { weight: "80", rir: "2", reps: [10], registered: false },
+  });
+  assert.equal(normalized["exercise-1"]?.observation, "");
+  assert.match(exerciseDraftSource, /observation: normalizeDraftObservation\(draft\.observation\),/);
 }
 
 // 3. Draft con observation conserva el texto.

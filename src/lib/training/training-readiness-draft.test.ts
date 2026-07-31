@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import type { TrainingReadiness } from "@/lib/training/training-readiness-draft";
+import {
+  normalizeTrainingReadiness,
+  type TrainingReadiness,
+} from "@/lib/training/training-readiness-draft";
 
 /**
  * Paridad estructural de `TrainingReadiness` (estado/borrador de interfaz) contra la definición
@@ -67,7 +70,34 @@ const wrongHydrationType: TrainingReadiness = { skipped: false, hydration: true 
 const unexpectedExtraField: TrainingReadiness = { skipped: false, mood: "great" };
 void [missingSkipped, wrongSkippedType, wrongMotivationType, wrongHydrationType, unexpectedExtraField];
 
-// CASO 6 — Separacion respecto de TrainingDailyReadinessPayload: comprobacion estructural
+// CASO 6 — Normalizacion runtime pura con el mismo rango productivo 1..7.
+{
+  const input = {
+    motivation: "7",
+    hydration: 0,
+    sleep: 4.5,
+    energy: 3,
+    skipped: "yes",
+  };
+  const original = structuredClone(input);
+  const normalized = normalizeTrainingReadiness(input);
+
+  assert.deepEqual(normalized, {
+    motivation: 7,
+    hydration: undefined,
+    sleep: undefined,
+    energy: 3,
+    skipped: true,
+  });
+  assert.deepEqual(input, original, "normalizeTrainingReadiness no muta su entrada");
+  assert.notEqual(normalized, normalizeTrainingReadiness(input), "cada llamada entrega un objeto independiente");
+  assert.deepEqual(normalizeTrainingReadiness(input), normalized, "la normalizacion es determinista");
+  assert.equal(normalizeTrainingReadiness(null), null);
+  assert.equal(normalizeTrainingReadiness(undefined), null);
+  assert.equal(normalizeTrainingReadiness("invalid"), null);
+}
+
+// CASO 7 — Separacion respecto de TrainingDailyReadinessPayload: comprobacion estructural
 // estatica y honesta, sin ejercer asignabilidad de TypeScript entre ambos tipos (eso creaba un
 // contrato de compilacion indebido entre dos modulos que deben poder evolucionar por separado).
 // Esta seccion NO demuestra equivalencia en tiempo de ejecucion entre ambos contratos, NO exige

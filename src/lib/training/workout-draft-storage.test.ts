@@ -7,6 +7,15 @@ import {
 } from "@/lib/navigation/app-navigation";
 import type { DataMode } from "@/lib/supabase/session";
 import {
+  ACTIVE_WORKOUT_DRAFT_MAX_AGE_MS,
+  ACTIVE_WORKOUT_DRAFT_VERSION,
+  buildActiveWorkoutDraftSnapshot,
+  clearActiveWorkoutDraft,
+  loadActiveWorkoutDraft,
+  saveActiveWorkoutDraft,
+  type ActiveWorkoutDraftSnapshotInput,
+} from "@/lib/training/active-workout-draft";
+import {
   clearWorkoutDraft,
   getDraftUserKey as getStoredDraftUserKey,
   getWorkoutDraftKey as getStoredWorkoutDraftKey,
@@ -117,6 +126,43 @@ function createDraft(
   };
 }
 
+function createActiveWorkoutDraftInput(): ActiveWorkoutDraftSnapshotInput {
+  return {
+    updatedAt: NOW,
+    dataMode: "supabase",
+    userId: TEST_USER_IDS["user-1"],
+    activeRoutineDay: "Lunes",
+    activeExerciseIndex: 2,
+    activeWorkoutStartedAt: FIRST_STARTED_AT,
+    hasStartedTraining: true,
+    readiness: {
+      motivation: 6,
+      hydration: 5,
+      sleep: 4,
+      energy: 7,
+      skipped: false,
+    },
+    exerciseDrafts: {
+      "exercise-1": {
+        weight: "82,5",
+        reps: [10, 9, ""],
+        rir: "1",
+        registered: false,
+        observation: "Controlar tecnica",
+      },
+    },
+    workoutAttemptId: "attempt-1",
+    pendingReadinessLink: {
+      workoutAttemptId: "attempt-1",
+      trainingSessionId: "session-1",
+    },
+    cycleId: "cycle-1",
+    cycleDayId: "cycle-day-1",
+    plannedDay: "wednesday",
+    plannedDate: "2026-06-18",
+  };
+}
+
 function load(storage: WorkoutDraftStorageLike, createStartedAt = () => SECOND_STARTED_AT) {
   return loadWorkoutDraft({
     mode: "supabase",
@@ -133,6 +179,121 @@ function load(storage: WorkoutDraftStorageLike, createStartedAt = () => SECOND_S
 }
 
 async function run() {
+  {
+    assert.equal(ACTIVE_WORKOUT_DRAFT_VERSION, 1);
+    assert.equal(ACTIVE_WORKOUT_DRAFT_MAX_AGE_MS, 24 * 60 * 60 * 1000);
+
+    const input = createActiveWorkoutDraftInput();
+    const original = structuredClone(input);
+    const draft = buildActiveWorkoutDraftSnapshot(input);
+    assert.ok(draft);
+    assert.deepEqual(draft, {
+      version: 1,
+      updatedAt: NOW,
+      dataMode: "supabase",
+      userKey: getDraftUserKey("supabase", "user-1"),
+      activeRoutineDay: "Lunes",
+      activeExerciseIndex: 2,
+      activeWorkoutStartedAt: FIRST_STARTED_AT,
+      hasStartedTraining: true,
+      readiness: {
+        motivation: 6,
+        hydration: 5,
+        sleep: 4,
+        energy: 7,
+        skipped: false,
+      },
+      exerciseDrafts: {
+        "exercise-1": {
+          weight: "82,5",
+          reps: [10, 9, ""],
+          rir: "1",
+          registered: false,
+          observation: "Controlar tecnica",
+        },
+      },
+      workoutAttemptId: "attempt-1",
+      pendingReadinessLink: {
+        workoutAttemptId: "attempt-1",
+        trainingSessionId: "session-1",
+      },
+      cycleId: "cycle-1",
+      cycleDayId: "cycle-day-1",
+      plannedDay: "wednesday",
+      plannedDate: "2026-06-18",
+    });
+    assert.deepEqual(input, original, "el builder no muta su input");
+    assert.notEqual(draft.readiness, input.readiness);
+    assert.notEqual(draft.exerciseDrafts, input.exerciseDrafts);
+    assert.notEqual(draft.exerciseDrafts["exercise-1"]?.reps, input.exerciseDrafts["exercise-1"]?.reps);
+    assert.notEqual(draft.pendingReadinessLink, input.pendingReadinessLink);
+  }
+
+  {
+    const { storage, writes } = createStorage();
+    const withoutScope = { ...createActiveWorkoutDraftInput(), userId: undefined };
+    assert.equal(buildActiveWorkoutDraftSnapshot(withoutScope), null);
+    assert.equal(saveActiveWorkoutDraft(withoutScope, storage), false);
+    assert.equal(writes.length, 0, "un scope Supabase ausente no persiste");
+
+    const demoDraft = buildActiveWorkoutDraftSnapshot({
+      ...withoutScope,
+      dataMode: "demo",
+    });
+    assert.equal(demoDraft?.userKey, "demo", "demo conserva su scope canonico sin userId");
+  }
+
+  {
+    const { storage, values } = createStorage();
+    const input = createActiveWorkoutDraftInput();
+    assert.equal(saveActiveWorkoutDraft(input, storage), true);
+    const loaded = loadActiveWorkoutDraft("supabase", TEST_USER_IDS["user-1"], {
+      storage,
+      now: () => NOW,
+      createStartedAt: () => SECOND_STARTED_AT,
+    });
+    assert.equal(loaded?.workoutAttemptId, "attempt-1");
+    assert.deepEqual(loaded?.pendingReadinessLink, input.pendingReadinessLink);
+    assert.equal(loaded?.cycleId, "cycle-1");
+    assert.equal(loaded?.cycleDayId, "cycle-day-1");
+    assert.equal(loaded?.plannedDay, "wednesday");
+    assert.equal(loaded?.plannedDate, "2026-06-18");
+    assert.deepEqual(loaded?.readiness, input.readiness);
+    assert.equal(loaded?.exerciseDrafts["exercise-1"]?.observation, "Controlar tecnica");
+
+    const key = getWorkoutDraftKey("supabase", "user-1");
+    const legacy = JSON.parse(values.get(key) ?? "{}") as {
+      exerciseDrafts?: Record<string, { observation?: string }>;
+    };
+    if (legacy.exerciseDrafts?.["exercise-1"]) {
+      delete legacy.exerciseDrafts["exercise-1"].observation;
+    }
+    values.set(key, JSON.stringify(legacy));
+    assert.equal(
+      loadActiveWorkoutDraft("supabase", TEST_USER_IDS["user-1"], {
+        storage,
+        now: () => NOW,
+      })?.exerciseDrafts["exercise-1"]?.observation,
+      "",
+      "un draft antiguo sin observation recupera string vacio",
+    );
+
+    assert.equal(clearActiveWorkoutDraft("supabase", TEST_USER_IDS["user-1"], storage), true);
+    assert.equal(values.has(key), false);
+  }
+
+  {
+    const { storage } = createStorage();
+    assert.equal(saveActiveWorkoutDraft({
+      ...createActiveWorkoutDraftInput(),
+      updatedAt: NOW - ACTIVE_WORKOUT_DRAFT_MAX_AGE_MS - 1,
+    }, storage), true);
+    assert.equal(loadActiveWorkoutDraft("supabase", TEST_USER_IDS["user-1"], {
+      storage,
+      now: () => NOW,
+    }), null, "el adaptador concreto aplica TTL de 24 horas");
+  }
+
   {
     const activeContext = {
       workoutAttemptId: "attempt-1",
@@ -586,10 +747,38 @@ async function run() {
   {
     // Contrato estatico/source-based: valida wiring productivo; no renderiza React ni reemplaza tests runtime.
     const storageSource = readFileSync("src/lib/training/workout-draft-storage.ts", "utf8");
+    const activeDraftSource = readFileSync("src/lib/training/active-workout-draft.ts", "utf8");
     const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
     const loginPageSource = readFileSync("src/app/login/page.tsx", "utf8");
     const legacyReadinessSource = readFileSync("src/lib/training/training-daily-readiness-repository.ts", "utf8");
     const packageJson = readFileSync("package.json", "utf8");
+    assert.match(activeDraftSource, /export const ACTIVE_WORKOUT_DRAFT_VERSION = 1;/);
+    assert.match(activeDraftSource, /export const ACTIVE_WORKOUT_DRAFT_MAX_AGE_MS = 24 \* 60 \* 60 \* 1000;/);
+    assert.match(activeDraftSource, /export function buildActiveWorkoutDraftSnapshot/);
+    assert.match(
+      activeDraftSource,
+      /export function saveActiveWorkoutDraft[\s\S]*const draft = buildActiveWorkoutDraftSnapshot\(input\);[\s\S]*saveWorkoutDraft\(draft, storage\)/,
+      "el adaptador concreto ejecuta el unico builder productivo antes de persistir",
+    );
+    assert.doesNotMatch(activeDraftSource, /React|organizatech-app|repository|Supabase|Date\.now|Math\.random/);
+    assert.equal(
+      (appSource.match(/saveActiveWorkoutDraft\(\{/g) ?? []).length,
+      4,
+      "las cuatro escrituras productivas usan el adaptador que ejecuta el builder canonico",
+    );
+    for (const [startMarker, endMarker] of [
+      ["function persistWorkoutDraft()", "persistWorkoutDraft();"],
+      ["function persistCurrentWorkoutDraftSnapshot", "function setPendingWorkoutReadinessLink"],
+      ["function prepareWorkoutStartSnapshot", "async function startTrainingWithDailyReadiness"],
+      ["function persistWorkoutDraftWithPendingLink", "function finishCompletedWorkout"],
+    ] as const) {
+      const start = appSource.indexOf(startMarker);
+      const end = appSource.indexOf(endMarker, start + startMarker.length);
+      const block = start >= 0 && end > start ? appSource.slice(start, end) : "";
+      assert.match(block, /saveActiveWorkoutDraft\(\{/, `${startMarker} debe usar el builder real`);
+    }
+    assert.doesNotMatch(appSource, /const WORKOUT_DRAFT_VERSION|const WORKOUT_DRAFT_MAX_AGE_MS/);
+    assert.doesNotMatch(appSource, /function (?:saveWorkoutDraft|loadWorkoutDraft|clearWorkoutDraft)\(/);
     assert.match(appSource, /saveTrainingWorkoutReadiness/, "organizatech-app importa save readiness v2");
     assert.match(appSource, /linkTrainingWorkoutReadinessSession/, "organizatech-app integra link readiness v2 solo desde repositorio");
     assert.match(appSource, /resolveActiveWorkoutReentryDecision/, "organizatech-app usa una decision explicita de reentrada");
