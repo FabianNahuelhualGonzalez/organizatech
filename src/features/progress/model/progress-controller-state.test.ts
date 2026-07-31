@@ -93,6 +93,11 @@ function testInvalidInputsAndNoOpsPreserveState() {
   assert.strictEqual(progressControllerReducer(initial, { type: "day_selected", day: "Lunes" }), initial);
   assert.strictEqual(progressControllerReducer(selected, { type: "exercise_selected", exerciseId: "" }), selected);
   assert.strictEqual(progressControllerReducer(selected, { type: "exercise_selected", exerciseId: " exercise-monday " }), selected);
+  assert.strictEqual(
+    progressControllerReducer(withWeek, { type: "exercise_selected", exerciseId: "exercise-monday" }),
+    withWeek,
+    "reseleccionar el mismo ejercicio conserva la semana vigente mediante no-op",
+  );
 
   for (const week of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
     assert.strictEqual(progressControllerReducer(withWeek, { type: "week_selected", week }), withWeek);
@@ -243,6 +248,96 @@ function testStaticInfrastructureBoundary() {
   );
 }
 
+function testStaticProductiveIntegrationContract() {
+  // Contrato source-based: valida ownership y wiring; no renderiza React ni simula DOM/eventos.
+  const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+  const comparisonSource = readFileSync(
+    "src/features/progress/components/comparison-screen-v2.tsx",
+    "utf8",
+  );
+  const controllerImport = appSource.match(
+    /import \{[^}]+\} from "@\/features\/progress\/model\/progress-controller-state";/,
+  )?.[0] ?? "";
+  const viewStart = appSource.indexOf("  const progressControllerView = buildProgressControllerView(");
+  const viewEnd = appSource.indexOf("  const dashboardCarouselDays", viewStart);
+  const viewSource = viewStart >= 0 && viewEnd > viewStart
+    ? appSource.slice(viewStart, viewEnd)
+    : "";
+
+  for (const importedName of [
+    "buildProgressControllerView",
+    "createInitialProgressControllerState",
+    "progressControllerReducer",
+  ]) {
+    assert.match(controllerImport, new RegExp(`\\b${importedName}\\b`));
+  }
+  assert.equal(
+    (appSource.match(
+      /const \[progressControllerState, dispatchProgressController\] = useReducer\(\s*progressControllerReducer,\s*undefined,\s*createInitialProgressControllerState,\s*\);/g,
+    ) ?? []).length,
+    1,
+    "el root debe crear exactamente un reducer productivo de Progress",
+  );
+  assert.equal(
+    (appSource.match(/\bbuildProgressControllerView\(/g) ?? []).length,
+    1,
+    "la vista canonica se construye exactamente una vez",
+  );
+  assert.match(viewSource, /progressControllerState,/);
+  assert.match(viewSource, /plannedExercises: displayExercises,/);
+  assert.match(viewSource, /entries: metrics,/);
+  assert.match(viewSource, /routineDays,/);
+  assert.match(viewSource, /currentWeek,/);
+  assert.doesNotMatch(viewSource, /entries: (?:entries|displayEntries|calendarNormalizedEntries),/);
+
+  assert.doesNotMatch(appSource, /\bcomparisonDay\b/);
+  assert.doesNotMatch(appSource, /\bsetComparisonDay\b/);
+  assert.doesNotMatch(comparisonSource, /\bcomparisonDay\b|\bsetComparisonDay\b/);
+
+  assert.equal((appSource.match(/dispatchProgressController\(/g) ?? []).length, 9);
+  assert.equal((appSource.match(/type: "selection_reset"/g) ?? []).length, 4);
+  assert.equal((appSource.match(/type: "day_selected"/g) ?? []).length, 3);
+  assert.equal((appSource.match(/type: "exercise_selected"/g) ?? []).length, 1);
+  assert.equal((appSource.match(/type: "week_selected"/g) ?? []).length, 1);
+  assert.match(
+    appSource,
+    /dispatchProgressController\(\{ type: "day_selected", day: intent\.comparisonDayOverride \}\)/,
+  );
+  assert.match(appSource, /model=\{progressControllerView\.comparisonModel\}/);
+  assert.match(
+    appSource,
+    /onDaySelect=\{\(day\) => dispatchProgressController\(\{ type: "day_selected", day \}\)\}/,
+  );
+  assert.match(
+    appSource,
+    /onExerciseSelect=\{\(exerciseId\) => dispatchProgressController\(\{ type: "exercise_selected", exerciseId \}\)\}/,
+  );
+  assert.match(
+    appSource,
+    /onWeekSelect=\{\(week\) => dispatchProgressController\(\{ type: "week_selected", week \}\)\}/,
+  );
+
+  assert.match(comparisonSource, /model: WeeklyExerciseComparisonModel;/);
+  assert.match(comparisonSource, /routineDays: readonly string\[\];/);
+  assert.match(comparisonSource, /onDaySelect: \(day: string\) => void;/);
+  assert.match(comparisonSource, /onExerciseSelect: \(exerciseId: string\) => void;/);
+  assert.match(comparisonSource, /onWeekSelect: \(week: number\) => void;/);
+  assert.doesNotMatch(comparisonSource, /\buseState\b|\buseEffect\b|\buseMemo\b/);
+  assert.doesNotMatch(comparisonSource, /\bbuildWeeklyExerciseComparisonModel\b/);
+  assert.match(comparisonSource, /value=\{model\.selectedDay\}/);
+  assert.match(comparisonSource, /exercise\.isSelected/);
+  assert.match(comparisonSource, /value=\{model\.selectedWeek \?\? ""\}/);
+  assert.match(
+    comparisonSource,
+    /onClick=\{\(event\) => \{\s*event\.stopPropagation\(\);\s*onExerciseSelect\(exercise\.exerciseId\);\s*\}\}/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    /dispatchProgressController\(\{ type: "(?:day_selected|exercise_selected|week_selected)", [^}]*progressControllerView/,
+    "la vista derivada no debe sincronizarse de vuelta al reducer",
+  );
+}
+
 function createSource(overrides: Partial<ProgressControllerSource> = {}): ProgressControllerSource {
   return {
     plannedExercises: [mondayExercise, fridayExercise],
@@ -304,5 +399,6 @@ testRetiredExerciseAndMissingWeekUseCanonicalFallbacks();
 testEmptySourceIsSafe();
 testSelectorIsDeterministicAndDoesNotMutateInputs();
 testStaticInfrastructureBoundary();
+testStaticProductiveIntegrationContract();
 
 console.log("progress controller state tests passed");

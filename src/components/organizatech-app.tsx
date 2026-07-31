@@ -50,6 +50,11 @@ import { DashboardScreen } from "@/features/dashboard/components/dashboard-scree
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
 import { ComparisonScreenV2 } from "@/features/progress/components/comparison-screen-v2";
+import {
+  buildProgressControllerView,
+  createInitialProgressControllerState,
+  progressControllerReducer,
+} from "@/features/progress/model/progress-controller-state";
 import { ConfirmRoutineUpdateModal } from "@/features/routine-builder/components/ConfirmRoutineUpdateModal";
 import { RoutineBuilderDayCard } from "@/features/routine-builder/components/RoutineBuilderDayCard";
 import { RoutineBuilderNameCard } from "@/features/routine-builder/components/RoutineBuilderNameCard";
@@ -448,7 +453,11 @@ export function OrganizatechApp({
   const [trainingPlan, setTrainingPlan] = useState<TrainingPlan>(() => createDefaultTrainingPlan());
   const [activeRoutineDay, setActiveRoutineDay] = useState("Lunes");
   const [dashboardDayOverride, setDashboardDayOverride] = useState("");
-  const [comparisonDay, setComparisonDay] = useState("Lunes");
+  const [progressControllerState, dispatchProgressController] = useReducer(
+    progressControllerReducer,
+    undefined,
+    createInitialProgressControllerState,
+  );
   const { state: activeWorkoutState, actions: activeWorkoutActions } = useActiveWorkoutController();
   const {
     activeExerciseIndex, exerciseDrafts, readiness, checkingDailyReadiness,
@@ -969,6 +978,15 @@ export function OrganizatechApp({
     : calendarNormalizedTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
   const hasRoutinePlan = displayExercises.length > 0;
   const routineDays = getActiveRoutineDays(displayExercises, displayTrainingPlan);
+  const progressControllerView = buildProgressControllerView(
+    progressControllerState,
+    {
+      plannedExercises: displayExercises,
+      entries: metrics,
+      routineDays,
+      currentWeek,
+    },
+  );
   const dashboardCarouselDays = hasRoutinePlan ? routineDays : TRAINING_DAY_LABELS;
   const visibleDay = getVisibleTrainingDay(displayExercises, activeRoutineDay);
   const calendarDashboardDay = getCalendarTrainingDay();
@@ -1533,7 +1551,6 @@ export function OrganizatechApp({
         setEntries(next.entries);
         setTrainingSessions(next.sessions);
         setActiveRoutineDay((current) => getVisibleTrainingDay(next.exercises, current));
-        setComparisonDay((current) => getVisibleTrainingDay(next.exercises, current));
         setTrainingPlan((current) => mergeTrainingPlanWithExercises(current, next.exercises));
       }
       setDataSource(next.source);
@@ -1671,7 +1688,6 @@ export function OrganizatechApp({
         return;
       }
       setActiveRoutineDay((current) => getVisibleTrainingDay(scopedExercises, current));
-      setComparisonDay((current) => getVisibleTrainingDay(scopedExercises, current));
     } catch (error) {
       if (!isSessionDataRequestCurrent(requestToken)) return;
       isCycleScopedDisplayLockedRef.current = false;
@@ -1753,7 +1769,6 @@ export function OrganizatechApp({
     setDataSource("supabase");
     setActiveRoutineDay(getVisibleTrainingDay(scopedExercises, "Lunes"));
     setDashboardDayOverride("");
-    setComparisonDay(getVisibleTrainingDay(scopedExercises, "Lunes"));
     activeWorkoutActions.replaceExerciseDrafts({});
     activeWorkoutActions.clearReadiness();
     activeWorkoutActions.markTrainingStopped();
@@ -2592,7 +2607,7 @@ export function OrganizatechApp({
           const dayReset = resolveDayStateReset();
           setActiveRoutineDay(dayReset.activeRoutineDay);
           setDashboardDayOverride(dayReset.dashboardDayOverride);
-          setComparisonDay(dayReset.comparisonDay);
+          dispatchProgressController({ type: "selection_reset" });
         }
         setIsEditingRoutinePlan(true);
         applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
@@ -2625,7 +2640,7 @@ export function OrganizatechApp({
       const dayReset = resolveDayStateReset();
       setActiveRoutineDay(dayReset.activeRoutineDay);
       setDashboardDayOverride(dayReset.dashboardDayOverride);
-      setComparisonDay(dayReset.comparisonDay);
+      dispatchProgressController({ type: "selection_reset" });
     }
     activeWorkoutActions.replaceExerciseDrafts({});
     activeWorkoutActions.clearReadiness();
@@ -2675,7 +2690,7 @@ export function OrganizatechApp({
           const dayReset = resolveDayStateReset();
           setActiveRoutineDay(dayReset.activeRoutineDay);
           setDashboardDayOverride(dayReset.dashboardDayOverride);
-          setComparisonDay(dayReset.comparisonDay);
+          dispatchProgressController({ type: "selection_reset" });
         }
         setIsEditingRoutinePlan(true);
         setIsDeleteCycleConfirmOpen(false);
@@ -2698,7 +2713,7 @@ export function OrganizatechApp({
         const dayReset = resolveDayStateReset();
         setActiveRoutineDay(dayReset.activeRoutineDay);
         setDashboardDayOverride(dayReset.dashboardDayOverride);
-        setComparisonDay(dayReset.comparisonDay);
+        dispatchProgressController({ type: "selection_reset" });
       }
       setIsEditingRoutinePlan(true);
       setIsDeleteCycleConfirmOpen(false);
@@ -3642,7 +3657,7 @@ export function OrganizatechApp({
       setDashboardDayOverride(intent.dashboardDayOverride);
     }
     if (intent.comparisonDayOverride) {
-      setComparisonDay(intent.comparisonDayOverride);
+      dispatchProgressController({ type: "day_selected", day: intent.comparisonDayOverride });
     }
     navigateTo(intent.target);
     scrollToNotificationSection(intent.section ?? undefined);
@@ -3759,7 +3774,7 @@ export function OrganizatechApp({
             startRegistration={() => navigateTo("registro-entrenamiento")}
             goToRoutine={() => openRoutineDay(dashboardDay)}
             viewSummary={(selectedDay) => {
-              setComparisonDay(selectedDay);
+              dispatchProgressController({ type: "day_selected", day: selectedDay });
               navigateTo("comparacion");
             }}
             switchDay={setDashboardDayOverride}
@@ -3869,12 +3884,11 @@ export function OrganizatechApp({
           <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
         ) : (
           <ComparisonScreenV2
-            exercises={displayExercises}
-            metrics={metrics}
-            currentWeek={currentWeek}
+            model={progressControllerView.comparisonModel}
             routineDays={routineDays}
-            selectedDay={comparisonDay}
-            setSelectedDay={setComparisonDay}
+            onDaySelect={(day) => dispatchProgressController({ type: "day_selected", day })}
+            onExerciseSelect={(exerciseId) => dispatchProgressController({ type: "exercise_selected", exerciseId })}
+            onWeekSelect={(week) => dispatchProgressController({ type: "week_selected", week })}
           />
         )
       )}
