@@ -17,6 +17,7 @@ const files = {
   completion: readSource("src/features/active-workout/components/TrainingCompletionSummaryScreen.tsx"),
   performancePanel: readSource("src/features/active-workout/components/ExerciseLastPerformancePanel.tsx"),
   seriesResult: readSource("src/features/active-workout/components/SeriesResult.tsx"),
+  guided: readSource("src/features/active-workout/components/GuidedTrainingScreen.tsx"),
 };
 
 function assertNoForbiddenImports(source: string, label: string) {
@@ -30,16 +31,20 @@ function assertNoForbiddenImports(source: string, label: string) {
   assert.doesNotMatch(source, /\bwindow\.\w|\bdocument\.\w/);
 }
 
+// Cada componente se verifica contra su consumidor REAL: importado alli, renderizado alli, y
+// nunca declarado inline en el root. Tras P3-30, ExerciseLastPerformancePanel y SeriesResult ya
+// no los consume el root sino GuidedTrainingScreen, que absorbio ese JSX en la extraccion.
 const components = [
-  ["TrainingReadinessScreen", "@/features/active-workout/components/TrainingReadinessScreen"],
-  ["TrainingStartScreen", "@/features/active-workout/components/TrainingStartScreen"],
-  ["TrainingCompletionSummaryScreen", "@/features/active-workout/components/TrainingCompletionSummaryScreen"],
-  ["ExerciseLastPerformancePanel", "@/features/active-workout/components/ExerciseLastPerformancePanel"],
-  ["SeriesResult", "@/features/active-workout/components/SeriesResult"],
+  ["TrainingReadinessScreen", "@/features/active-workout/components/TrainingReadinessScreen", appSource],
+  ["TrainingStartScreen", "@/features/active-workout/components/TrainingStartScreen", appSource],
+  ["TrainingCompletionSummaryScreen", "@/features/active-workout/components/TrainingCompletionSummaryScreen", appSource],
+  ["GuidedTrainingScreen", "@/features/active-workout/components/GuidedTrainingScreen", appSource],
+  ["ExerciseLastPerformancePanel", "@/features/active-workout/components/ExerciseLastPerformancePanel", files.guided],
+  ["SeriesResult", "@/features/active-workout/components/SeriesResult", files.guided],
 ] as const;
-for (const [componentName, modulePath] of components) {
-  assert.match(appSource, new RegExp(`import \\{ ${componentName} \\} from "${modulePath}";`));
-  assert.match(appSource, new RegExp(`<${componentName}\\b`));
+for (const [componentName, modulePath, consumerSource] of components) {
+  assert.match(consumerSource, new RegExp(`import \\{ ${componentName} \\} from "${modulePath}";`));
+  assert.match(consumerSource, new RegExp(`<${componentName}\\b`));
   assert.doesNotMatch(appSource, new RegExp(`^\\s*function ${componentName}\\b`, "m"));
 }
 
@@ -52,6 +57,28 @@ assert.doesNotMatch(files.start, /^\s*function RoutineMetricGrid\b/m);
 assert.match(files.completion, /className="training-completion-table" role="table"/);
 assert.match(files.performancePanel, /className="exercise-observation-textarea"/);
 assert.match(files.seriesResult, /className={`series-result session-summary \$\{result\.tone\}`}/);
+
+// GuidedTrainingScreen (P3-30): extraccion mecanica. Conserva el contrato de props, reutiliza el
+// normalizador canonico de P3-29 sin redeclararlo, y no introduce estado ni efectos propios.
+assert.match(files.guided, /export interface GuidedTrainingScreenProps \{/);
+assert.match(files.guided, /className="card wide mobile-series-card"/);
+assert.match(files.guided, /import \{ RoutineMetricGrid \} from "@\/ui\/data-display\/metric-grid";/);
+assert.doesNotMatch(files.guided, /^\s*function RoutineMetricGrid\b/m);
+assert.match(
+  files.guided,
+  /import \{ normalizeExerciseDraft, type ExerciseDraft \} from "@\/lib\/training\/training-exercise-draft";/,
+);
+assert.doesNotMatch(files.guided, /function normalizeExerciseDrafts?\(/, "no debe duplicar los normalizadores canonicos de P3-29");
+for (const forbiddenHook of [/\buseState\b/, /\buseEffect\b/, /\buseReducer\b/, /\buseRef\b/]) {
+  assert.doesNotMatch(files.guided, forbiddenHook, "GuidedTrainingScreen debe permanecer sin estado ni efectos propios");
+}
+for (const prop of [
+  "day", "routine", "exercises", "targetSummary", "activeIndex", "setActiveIndex", "drafts",
+  "updateDraft", "registerExercise", "saveCompletedTraining", "editRoutine", "routineDays",
+  "switchDay", "notice", "isBusy",
+]) {
+  assert.match(files.guided, new RegExp(`^\\s{2}${prop}[?]?:`, "m"), `GuidedTrainingScreenProps debe declarar ${prop}`);
+}
 
 const registration = "tsx src/features/active-workout/active-workout-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);

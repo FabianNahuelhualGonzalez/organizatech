@@ -12,6 +12,12 @@ const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf
 const activeDraftStaticSource = readFileSync("src/lib/training/active-workout-draft.ts", "utf8");
 const workoutStorageStaticSource = readFileSync("src/lib/training/workout-draft-storage.ts", "utf8");
 const exerciseDraftStaticSource = readFileSync("src/lib/training/training-exercise-draft.ts", "utf8");
+// P3-30: la declaracion `drafts: Record<string, ExerciseDraft>` dejo de estar inline en el root al
+// extraerse GuidedTrainingScreen; ahora vive en GuidedTrainingScreenProps, su ubicacion real.
+const guidedScreenStaticSource = readFileSync(
+  "src/features/active-workout/components/GuidedTrainingScreen.tsx",
+  "utf8",
+);
 const packageStaticSource = readFileSync("package.json", "utf8");
 
 assert.match(
@@ -59,7 +65,7 @@ assert.match(
 assert.match(activeDraftStaticSource, /WorkoutDraftStorageRecord<TrainingReadiness \| null, Record<string, ExerciseDraft>>/);
 assert.match(appStaticSource, /useState<Record<string, ExerciseDraft>>\(\{\}\)/);
 assert.match(appStaticSource, /patch: Partial<ExerciseDraft>/);
-assert.match(appStaticSource, /drafts: Record<string, ExerciseDraft>/);
+assert.match(guidedScreenStaticSource, /drafts: Record<string, ExerciseDraft>/);
 assert.doesNotMatch(appStaticSource, /function createExerciseDraft\(/);
 assert.doesNotMatch(appStaticSource, /function normalizeExerciseDraft\(/);
 assert.doesNotMatch(appStaticSource, /function normalizeExerciseDrafts\(/);

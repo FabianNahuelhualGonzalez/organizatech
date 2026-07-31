@@ -7,7 +7,6 @@ import {
   EyeOff,
   Lock,
   Mail,
-  Pencil,
   Save,
   UserPlus,
 } from "lucide-react";
@@ -35,8 +34,7 @@ import { getSantiagoDateKey } from "@/lib/training/santiago-training-date";
 import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
 import { ProfileScreen } from "@/components/profile/ProfileScreen";
 import { CycleHistoryProductiveContainer } from "@/components/training/cycle-history";
-import { ExerciseLastPerformancePanel } from "@/features/active-workout/components/ExerciseLastPerformancePanel";
-import { SeriesResult } from "@/features/active-workout/components/SeriesResult";
+import { GuidedTrainingScreen } from "@/features/active-workout/components/GuidedTrainingScreen";
 import { TrainingCompletionSummaryScreen } from "@/features/active-workout/components/TrainingCompletionSummaryScreen";
 import { TrainingReadinessScreen } from "@/features/active-workout/components/TrainingReadinessScreen";
 import { TrainingStartScreen } from "@/features/active-workout/components/TrainingStartScreen";
@@ -99,12 +97,11 @@ import {
   type ProfileAvatarState,
 } from "@/lib/profile/profile-avatar";
 import {
-  calculateExerciseMetrics,
   calculateWeeklyComparison,
   calculateWeeklySummary,
 } from "@/lib/progress/calculations";
 import { parseDateKeyAsLocalNoon } from "@/lib/progress/week-day";
-import { formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
+import { isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import { calculateEquivalentWeeklyProgress } from "@/lib/progress/weekly-equivalent-progress";
 import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode, TrainingSession } from "@/lib/progress/types";
 import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
@@ -233,9 +230,6 @@ import {
   loadLatestExercisePerformanceForRequest,
 } from "@/lib/training/exercise-last-performance-loader";
 import {
-  buildExerciseLastPerformancePresentation,
-} from "@/lib/training/exercise-last-performance-presentation";
-import {
   getLatestExerciseObservationByLineage,
   type LatestExerciseObservation,
 } from "@/lib/training/exercise-last-observation-repository";
@@ -245,9 +239,6 @@ import {
   getLatestExerciseObservationLoadingState,
   loadLatestExerciseObservationForRequest,
 } from "@/lib/training/exercise-last-observation-loader";
-import {
-  buildExerciseLastObservationPresentation,
-} from "@/lib/training/exercise-last-observation-presentation";
 import {
   createExerciseDraft,
   normalizeExerciseDraft,
@@ -358,7 +349,6 @@ import {
   type TrainingCompletionHistoricalInput,
   type TrainingCompletionSummary,
 } from "@/lib/training/training-completion-summary";
-import { RoutineMetricGrid } from "@/ui/data-display/metric-grid";
 
 const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
 const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
@@ -4507,237 +4497,6 @@ function InitialTrainingScreen({
   );
 }
 
-function GuidedTrainingScreen({
-  day,
-  routine,
-  exercises,
-  targetSummary,
-  activeIndex,
-  setActiveIndex,
-  drafts,
-  latestExercisePerformance,
-  latestExercisePerformanceLoading,
-  latestExercisePerformanceError,
-  latestExerciseObservation,
-  latestExerciseObservationLoading,
-  latestExerciseObservationError,
-  latestExerciseObservationDidQuery,
-  updateDraft,
-  registerExercise,
-  saveCompletedTraining,
-  editRoutine,
-  routineDays,
-  switchDay,
-  notice,
-  isBusy,
-}: {
-  day: string;
-  routine: string;
-  exercises: ExerciseTemplate[];
-  targetSummary: { totalWeight: number; volume: number; reps: number; exerciseCount: number };
-  activeIndex: number;
-  setActiveIndex: (index: number) => void;
-  drafts: Record<string, ExerciseDraft>;
-  latestExercisePerformance: LatestExercisePerformance | null;
-  latestExercisePerformanceLoading: boolean;
-  latestExercisePerformanceError: string;
-  latestExerciseObservation: LatestExerciseObservation | null;
-  latestExerciseObservationLoading: boolean;
-  latestExerciseObservationError: string;
-  latestExerciseObservationDidQuery: boolean;
-  updateDraft: (exercise: ExerciseTemplate, patch: Partial<ExerciseDraft>) => void;
-  registerExercise: () => void;
-  saveCompletedTraining: () => void;
-  editRoutine: () => void;
-  routineDays: string[];
-  switchDay: (day: string) => void;
-  notice: string;
-  isBusy: boolean;
-}) {
-  const activeExercise = exercises[activeIndex] ?? exercises[0];
-  const draft = activeExercise ? normalizeExerciseDraft(activeExercise, drafts[activeExercise.id]) : null;
-  const isExerciseRegistered = (exercise: ExerciseTemplate) =>
-    isExerciseRegisteredInCurrentWorkout(exercise, drafts);
-  const completedCount = exercises.filter(isExerciseRegistered).length;
-  const allRegistered = exercises.length > 0 && completedCount === exercises.length;
-  const activeExerciseAlreadyRegistered = activeExercise
-    ? isExerciseRegisteredInCurrentWorkout(activeExercise, drafts)
-    : false;
-  const preview = activeExercise && draft
-    ? calculateExerciseMetrics({
-        id: `preview-${activeExercise.id}`,
-        exerciseId: activeExercise.id,
-        exerciseName: activeExercise.name,
-        routine: activeExercise.routine,
-        week: 1,
-        date: new Date().toISOString().slice(0, 10),
-        targetSets: activeExercise.targetSets,
-        targetReps: activeExercise.targetReps,
-        weight: readPreviewWeight(draft.weight, activeExercise.baseWeight),
-        previousWeight: activeExercise.baseWeight,
-        reps: draft.reps.map((value) => Number(value) || 0),
-        rir: draft.rir,
-      })
-    : null;
-  const performancePresentation = activeExercise
-    ? buildExerciseLastPerformancePresentation({
-        planned: {
-          targetSets: activeExercise.targetSets,
-          targetReps: activeExercise.targetReps,
-          baseWeight: activeExercise.baseWeight,
-        },
-        latest: latestExercisePerformance,
-        loading: latestExercisePerformanceLoading,
-        error: latestExercisePerformanceError,
-      })
-    : null;
-  const observationPresentation = buildExerciseLastObservationPresentation({
-    observation: latestExerciseObservation,
-    loading: latestExerciseObservationLoading,
-    error: latestExerciseObservationError,
-    hasQueried: latestExerciseObservationDidQuery,
-  });
-
-  if (!activeExercise || !draft || !preview || !performancePresentation) {
-    return (
-      <section className="screen">
-        <div className="card wide">
-          <h3>No hay ejercicios para {day}</h3>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="screen">
-      <div className="card wide day-switcher-card">
-        <div className="section-heading">
-          <div>
-            <h3>Selecciona rutina o día</h3>
-            <p className="eyebrow">Cambia entre tus días registrados para seguir entrenando.</p>
-          </div>
-        </div>
-        <div className="routine-day-pills">
-          {routineDays.map((item) => (
-            <button
-              key={item}
-              className={`routine-day-pill configured ${item === day ? "active" : ""}`}
-              type="button"
-              onClick={() => switchDay(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="card wide routine-summary-card">
-        <h3>Entrenamiento día {day}</h3>
-        <p className="eyebrow">{routine}</p>
-        {notice ? <div className={`notice-banner ${notice.includes("Ya existe un entrenamiento") ? "warning" : ""}`}>{notice}</div> : null}
-        <p className="eyebrow">Ejercicio {activeIndex + 1} de {exercises.length} · {completedCount} registrados</p>
-        <RoutineMetricGrid targetSummary={targetSummary} />
-        <button className="button secondary" type="button" onClick={editRoutine}>
-          <Pencil size={16} />
-          Editar rutina semanal
-        </button>
-      </div>
-
-      <div className="card wide">
-        <div className="section-heading">
-          <div>
-            <h3>Ejercicios a realizar</h3>
-            <p className="eyebrow">Elige el ejercicio, revisa el objetivo y registra tus series.</p>
-          </div>
-        </div>
-        <div className="routine-list">
-          {exercises.map((exercise, index) => {
-            const isActive = index === activeIndex;
-            const isDone = isExerciseRegistered(exercise);
-
-            return (
-              <button
-                key={exercise.id}
-                className={`routine-item ${isActive ? "active" : ""} ${isDone ? "done" : ""}`}
-                onClick={() => setActiveIndex(index)}
-              >
-                <span className="routine-item-index">{index + 1}</span>
-                <span className="routine-item-main">
-                  <strong>{exercise.name}</strong>
-                  <small>{exercise.targetSets} series · {exercise.targetReps} reps · {formatKg(exercise.baseWeight)}</small>
-                </span>
-                <span className="routine-item-status">
-                  {isDone ? "Registrado" : isActive ? "Actual" : "Pendiente"}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="card wide mobile-series-card">
-        <div className="series-card-heading">
-          <p className="eyebrow">Registro de series</p>
-          <h3>{activeExercise.name}</h3>
-        </div>
-        <div className="series-exercise-card">
-          <ExerciseLastPerformancePanel
-            presentation={performancePresentation}
-            exerciseId={activeExercise.id}
-            observationPresentation={observationPresentation}
-            observationValue={draft.observation}
-            onObservationChange={(value) => updateDraft(activeExercise, { observation: value })}
-          />
-          <label className="series-weight-field">
-            <span>Peso usado</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder={formatKg(activeExercise.baseWeight)}
-              value={draft.weight}
-              onChange={(event) => updateDraft(activeExercise, { weight: readWeightInput(event.target.value, draft.weight) })}
-            />
-          </label>
-          <div className="series-rep-grid">
-            {draft.reps.map((reps, index) => (
-              <label className="series-rep-box" key={index}>
-                <span>Serie {index + 1}</span>
-                <input
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  placeholder={`${activeExercise.targetReps}`}
-                  value={reps}
-                  onChange={(event) => {
-                    const next = [...draft.reps];
-                    next[index] = readOptionalNumber(event.target.value);
-                    updateDraft(activeExercise, { reps: next });
-                  }}
-                />
-              </label>
-            ))}
-          </div>
-        </div>
-        <SeriesResult entry={preview} />
-        {!allRegistered && !activeExerciseAlreadyRegistered ? (
-          <button className="button" type="button" onClick={registerExercise}>
-            <Save size={17} />
-            Registrar serie
-          </button>
-        ) : !allRegistered ? (
-          <button className="button secondary" type="button" disabled>
-            Ejercicio ya registrado
-          </button>
-        ) : (
-          <button className="start-button compact" type="button" onClick={saveCompletedTraining} disabled={isBusy}>
-            {isBusy ? "Guardando..." : "Guardar entrenamiento"}
-          </button>
-        )}
-      </div>
-    </section>
-  );
-}
-
 function TextField({
   name,
   label,
@@ -5401,15 +5160,6 @@ function readWeightInput(value: string, fallback: string) {
 
 function readRequiredWeight(value: string | number | "") {
   return parseDecimalWeightInput(value) ?? 0;
-}
-
-function readPreviewWeight(value: string, fallback: number) {
-  return parseDecimalWeightInput(value) ?? fallback;
-}
-
-function readOptionalNumber(value: string): number | "" {
-  if (value.trim() === "") return "";
-  return parseDecimalWeightInput(value) ?? "";
 }
 
 function formatReadinessNote(value: TrainingReadiness | null) {
