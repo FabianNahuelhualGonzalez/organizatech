@@ -108,6 +108,28 @@ assert.match(files.setupCard, /configuredDays\.includes\(item\) \? "configured" 
 // Pureza adicional del componente (la genérica ya corre en el loop de files).
 assert.doesNotMatch(files.setupCard, /\b(?:useState|useEffect|setScreen|setScreenHistory)\b|from ["']@\/lib\/(?:data|navigation)\//, "TrainingPlanSetupCard es presentacional puro");
 
+// P3-47A (CONTRATO ESTATICO — no sustituye cobertura runtime): los dos modales de confirmacion
+// consumen la primitive compartida de boton y ya no declaran <button> propios, conservando
+// variantes, textos, tipos, disabled y callbacks.
+const buttonPrimitiveSource = readSource("src/ui/buttons/button.tsx");
+assert.equal(
+  (buttonPrimitiveSource.match(/^export function Button\b/gm) ?? []).length,
+  1,
+  "existe una sola definicion productiva de la primitive Button",
+);
+for (const [label, modalSource] of [["deleteModal", files.deleteModal], ["newModal", files.newModal]] as const) {
+  assert.match(modalSource, /import \{ Button \} from "@\/ui\/buttons\/button";/, label);
+  assert.doesNotMatch(modalSource, /<button\b/, `${label}: no deben quedar <button> locales`);
+}
+assert.match(files.deleteModal, /<Button variant="secondary" type="button" onClick=\{onCancel\} disabled=\{isBusy\}>Cancelar<\/Button>/);
+assert.match(files.deleteModal, /<Button variant="danger" type="button" onClick=\{onConfirm\} disabled=\{isBusy\}>/);
+assert.match(files.deleteModal, /\{isBusy \? "Eliminando\.\.\." : "Sí, eliminar ciclo"\}/);
+assert.match(files.newModal, /<Button variant="danger" type="button" onClick=\{onCancel\} disabled=\{isBusy\}>No<\/Button>/);
+assert.match(files.newModal, /<Button variant="success" type="button" onClick=\{onConfirm\} disabled=\{isBusy\}>/);
+assert.match(files.newModal, /\{isBusy \? "Finalizando\.\.\." : "Si"\}/);
+// P3-47A no adopta la primitive en el root ni en Active Workout.
+assert.doesNotMatch(appSource, /from ["']@\/ui\/buttons\/button["']/, "el root no adopta la primitive en P3-47A");
+
 const registration = "tsx src/features/training-plan/training-plan-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);
 

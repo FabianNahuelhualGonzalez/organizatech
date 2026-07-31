@@ -60,9 +60,40 @@ assertStaticMarkersInOrder(submitSection, [
 assert.doesNotMatch(appStaticSource, /buildProfileFormInitialValues|buildProfilePersonalDataPayload/);
 
 // CONTRATO ESTATICO 3: no existe dirty gate y el source bloquea guardar solo durante persistencia.
-const personalDataSection = extractStaticSourceSection(profileScreenStaticSource, "function PersonalDataSection", "function ProfileField");
+// P3-47A: el delimitador de cierre era `function ProfileField`, que dejo de existir al migrar ese
+// wrapper local a la primitive compartida `FormField`. Se reancla a la siguiente declaracion de la
+// misma fuente, `function ProfileSection`, que delimita exactamente la misma seccion.
+const personalDataSection = extractStaticSourceSection(profileScreenStaticSource, "function PersonalDataSection", "function ProfileSection");
 assert.doesNotMatch(personalDataSection, /\bisDirty\b|\bcanSave\b/);
-assert.match(personalDataSection, /<button className="button" type="submit" disabled=\{isSaving\}>/);
+// El submit sigue deshabilitado unicamente durante la persistencia; ahora se declara sobre la
+// primitive compartida, conservando `type="submit"` y `disabled={isSaving}` de forma explicita.
+assert.match(personalDataSection, /<Button variant="primary" type="submit" disabled=\{isSaving\}>/);
+
+// CONTRATO ESTATICO 3B (P3-47A, estatico — no sustituye cobertura runtime): Profile consume las
+// primitives compartidas y ya no declara su propio wrapper de campo.
+assert.match(profileScreenStaticSource, /import \{ FormField \} from "@\/ui\/forms\/form-field";/);
+assert.match(profileScreenStaticSource, /import \{ Button \} from "@\/ui\/buttons\/button";/);
+assert.doesNotMatch(profileScreenStaticSource, /function ProfileField\b/, "el wrapper local debe haberse eliminado tras migrar sus callers");
+assert.doesNotMatch(profileScreenStaticSource, /<ProfileField\b/, "no deben quedar callers del wrapper local");
+assert.equal(
+  (profileScreenStaticSource.match(/<FormField className="profile-field" label=/g) ?? []).length,
+  6,
+  "los seis campos del formulario editable siguen presentes y conservan la clase profile-field",
+);
+for (const fieldLabel of ["Nombre", "Apellido", "Fecha de nacimiento", "Género", "Celular", "Correo"]) {
+  assert.ok(
+    profileScreenStaticSource.includes(`label="${fieldLabel}"`),
+    `el campo ${fieldLabel} debe conservarse`,
+  );
+}
+// Las acciones del formulario conservan orden, textos, tipos y disabled.
+assert.match(
+  personalDataSection,
+  /<Button variant="secondary" type="button" onClick=\{cancelEdition\} disabled=\{isSaving\}>\s*Cancelar\s*<\/Button>/,
+);
+assert.match(personalDataSection, /\{isSaving \? "Guardando\.\.\." : "Guardar cambios"\}/);
+// Los botones que NO mapean a una variante autorizada permanecen nativos en P3-47A.
+assert.match(profileScreenStaticSource, /<button\s+className="profile-edit-button"/);
 
 // CONTRATO ESTATICO 4: el source conserva el wiring de validacion, transformacion y fallback.
 assert.match(profileScreenStaticSource, /validateAvatarSourceFile\(file\)/);

@@ -1,3 +1,5 @@
+import { Button } from "@/ui/buttons/button";
+
 export interface ConfirmRoutineUpdateModalProps {
   onCancel: () => void;
   onConfirm: () => void;
@@ -10,8 +12,8 @@ export function ConfirmRoutineUpdateModal({ onCancel, onConfirm }: ConfirmRoutin
         <h2>Actualizar rutina</h2>
         <p>Si modificas esta rutina, se actualizará tu ciclo de entrenamiento actual. Los días eliminados dejarán de aparecer en el ciclo. ¿Quieres continuar?</p>
         <div className="modal-actions">
-          <button className="button secondary" type="button" onClick={onCancel}>Cancelar</button>
-          <button className="button success-solid" type="button" onClick={onConfirm}>Sí, actualizar rutina</button>
+          <Button variant="secondary" type="button" onClick={onCancel}>Cancelar</Button>
+          <Button variant="success" type="button" onClick={onConfirm}>Sí, actualizar rutina</Button>
         </div>
       </div>
     </div>

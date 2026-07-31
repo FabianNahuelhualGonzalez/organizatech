@@ -64,6 +64,16 @@ assert.match(updateSource, /role="dialog" aria-modal="true" aria-label="Confirma
 assert.match(updateSource, /Sí, actualizar rutina/);
 assert.doesNotMatch(`${successSource}\n${updateSource}`, /ConfirmDialog/);
 
+// P3-47A (CONTRATO ESTATICO — no sustituye cobertura runtime): ConfirmRoutineUpdateModal consume la
+// primitive compartida de boton, sin <button> locales, conservando variantes, textos y callbacks.
+assert.match(updateSource, /import \{ Button \} from "@\/ui\/buttons\/button";/);
+assert.doesNotMatch(updateSource, /<button\b/, "no deben quedar <button> locales en ConfirmRoutineUpdateModal");
+assert.match(updateSource, /<Button variant="secondary" type="button" onClick=\{onCancel\}>Cancelar<\/Button>/);
+assert.match(updateSource, /<Button variant="success" type="button" onClick=\{onConfirm\}>Sí, actualizar rutina<\/Button>/);
+// RoutineSuccessModal queda fuera del alcance de P3-47A y conserva su <button> nativo.
+assert.match(successSource, /<button className="button success-solid" type="button" onClick=\{onConfirm\}>/);
+assert.doesNotMatch(successSource, /from ["']@\/ui\/buttons\/button["']/);
+
 // 2. Los bloques inline previos fueron eliminados del root — no puede pasar con componentes vacíos.
 assert.doesNotMatch(appSource, /className="setup-card routine-day-builder-card"/, "el bloque inline de dias debe haberse eliminado del root");
 assert.doesNotMatch(appSource, /className="setup-card routine-name-card"/, "el bloque inline de nombre debe haberse eliminado del root");

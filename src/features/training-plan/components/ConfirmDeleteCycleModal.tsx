@@ -1,3 +1,5 @@
+import { Button } from "@/ui/buttons/button";
+
 export interface ConfirmDeleteCycleModalProps {
   isBusy: boolean;
   onCancel: () => void;
@@ -12,10 +14,10 @@ export function ConfirmDeleteCycleModal({ isBusy, onCancel, onConfirm }: Confirm
         <p>Este ciclo dejará de estar visible en tu cuenta. Los datos asociados no se mostrarán en tu progreso actual.</p>
         <p>Esta acción no se puede deshacer desde la aplicación.</p>
         <div className="modal-actions">
-          <button className="button secondary" type="button" onClick={onCancel} disabled={isBusy}>Cancelar</button>
-          <button className="button danger-solid" type="button" onClick={onConfirm} disabled={isBusy}>
+          <Button variant="secondary" type="button" onClick={onCancel} disabled={isBusy}>Cancelar</Button>
+          <Button variant="danger" type="button" onClick={onConfirm} disabled={isBusy}>
             {isBusy ? "Eliminando..." : "Sí, eliminar ciclo"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
