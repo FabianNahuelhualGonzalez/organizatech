@@ -16,6 +16,7 @@ import {
 import { validateAvatarSourceFile } from "@/lib/profile/profile-avatar-image";
 import { Button } from "@/ui/buttons/button";
 import { FormField } from "@/ui/forms/form-field";
+import { TextInput } from "@/ui/forms/text-input";
 import type { ProfilePersonalData } from "@/lib/profile/profile-repository";
 import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
 import { ProfileAvatarEditor } from "./ProfileAvatarEditor";
@@ -320,14 +321,14 @@ function PersonalDataSection({
       {isEditing ? (
         <form className="profile-form" onSubmit={handleSubmit}>
           <FormField className="profile-field" label="Nombre" error={fieldErrors.firstName}>
-            <input
+            <TextInput
               value={values.firstName}
               onChange={(event) => setValues((current) => ({ ...current, firstName: event.target.value }))}
               maxLength={80}
             />
           </FormField>
           <FormField className="profile-field" label="Apellido" error={fieldErrors.lastName}>
-            <input
+            <TextInput
               value={values.lastName}
               onChange={(event) => setValues((current) => ({ ...current, lastName: event.target.value }))}
               maxLength={120}
@@ -355,7 +356,7 @@ function PersonalDataSection({
             </select>
           </FormField>
           <FormField className="profile-field" label="Celular" error={fieldErrors.phoneNumber}>
-            <input
+            <TextInput
               value={values.phoneNumber}
               onChange={(event) => setValues((current) => ({ ...current, phoneNumber: event.target.value }))}
               maxLength={30}
@@ -365,7 +366,7 @@ function PersonalDataSection({
             />
           </FormField>
           <FormField className="profile-field" label="Correo">
-            <input value={profile.email ?? "No disponible"} readOnly aria-readonly="true" />
+            <TextInput value={profile.email ?? "No disponible"} readOnly aria-readonly="true" />
           </FormField>
 
           {statusMessage && <p className="profile-form-status">{statusMessage}</p>}

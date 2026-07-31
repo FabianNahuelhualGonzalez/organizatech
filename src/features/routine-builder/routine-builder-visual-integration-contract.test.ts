@@ -138,6 +138,13 @@ assert.match(cards.dayCard, /"Listo" : item === activeDay \? "Actual" : "Pendien
 assert.match(cards.nameCard, /className="setup-card routine-name-card"/);
 assert.match(cards.nameCard, /placeholder="Ej: Empuje, Jalón, Piernas"/);
 assert.doesNotMatch(stripComments(cards.nameCard), /autoFocus|maxLength|<label/, "paridad: el original no los tenia");
+// P3-47B (COMPROBACIONES SOURCE-BASED, no cobertura de render): el input del nombre de rutina pasa
+// a la primitive compartida TextInput, conservando clase, placeholder, value y onChange.
+assert.match(cards.nameCard, /import \{ TextInput \} from "@\/ui\/forms\/text-input";/);
+assert.doesNotMatch(stripComments(cards.nameCard), /<input\b/, "no debe quedar <input> nativo en la card");
+assert.match(cards.nameCard, /<TextInput\s+className="setup-name-input"/);
+assert.match(cards.nameCard, /value=\{routineName\}/);
+assert.match(cards.nameCard, /onChange=\{\(event\) => onRoutineNameChange\(event\.target\.value\)\}/);
 
 assert.match(cards.exerciseCard, /className="setup-card exercise-builder-card"/);
 assert.match(cards.exerciseCard, /aria-label="Eliminar ejercicio"/);
