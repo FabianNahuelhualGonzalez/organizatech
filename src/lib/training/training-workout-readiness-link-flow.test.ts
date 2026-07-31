@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 
-import { releaseWorkoutStartLock, tryAcquireWorkoutStartLock } from "@/lib/training/training-workout-attempt-lifecycle";
 import {
   createWorkoutReadinessPendingLink,
   translateTrainingWorkoutReadinessLinkError,
@@ -18,47 +17,41 @@ interface SimulatedCompletionOptions {
   persistPending: (pending: PendingWorkoutReadinessLink) => void;
   link: (pending: PendingWorkoutReadinessLink) => Promise<{ trainingSessionId: string; linked: boolean; alreadyLinked: boolean }>;
   cleanup: () => void;
-  lock: { current: boolean };
 }
 
 async function simulateCompletion(options: SimulatedCompletionOptions) {
-  if (!tryAcquireWorkoutStartLock(options.lock)) return "locked";
-  try {
-    if (options.pending) {
-      const result = await options.link(options.pending);
-      if (result.trainingSessionId !== options.pending.trainingSessionId) throw new TrainingWorkoutReadinessLinkFlowError("session mismatch");
-      if (!result.linked && !result.alreadyLinked) throw new TrainingWorkoutReadinessLinkFlowError("link failed");
-      options.cleanup();
-      return "linked";
-    }
-
-    if (options.enabled && options.cycleScoped && !isNonEmptyString(options.workoutAttemptId)) {
-      throw new TrainingWorkoutReadinessLinkFlowError("missing attempt");
-    }
-
-    const trainingSessionId = options.enabled && options.cycleScoped ? await options.saveSession() : null;
-    const pendingLink = createWorkoutReadinessPendingLink({
-      enabled: options.enabled,
-      cycleScoped: options.cycleScoped,
-      workoutAttemptId: options.workoutAttemptId,
-      trainingSessionId,
-    });
-
-    if (!pendingLink) {
-      await options.saveSession();
-      options.cleanup();
-      return "legacy";
-    }
-
-    options.persistPending(pendingLink);
-    const result = await options.link(pendingLink);
-    if (result.trainingSessionId !== pendingLink.trainingSessionId) throw new TrainingWorkoutReadinessLinkFlowError("session mismatch");
+  if (options.pending) {
+    const result = await options.link(options.pending);
+    if (result.trainingSessionId !== options.pending.trainingSessionId) throw new TrainingWorkoutReadinessLinkFlowError("session mismatch");
     if (!result.linked && !result.alreadyLinked) throw new TrainingWorkoutReadinessLinkFlowError("link failed");
     options.cleanup();
     return "linked";
-  } finally {
-    releaseWorkoutStartLock(options.lock);
   }
+
+  if (options.enabled && options.cycleScoped && !isNonEmptyString(options.workoutAttemptId)) {
+    throw new TrainingWorkoutReadinessLinkFlowError("missing attempt");
+  }
+
+  const trainingSessionId = options.enabled && options.cycleScoped ? await options.saveSession() : null;
+  const pendingLink = createWorkoutReadinessPendingLink({
+    enabled: options.enabled,
+    cycleScoped: options.cycleScoped,
+    workoutAttemptId: options.workoutAttemptId,
+    trainingSessionId,
+  });
+
+  if (!pendingLink) {
+    await options.saveSession();
+    options.cleanup();
+    return "legacy";
+  }
+
+  options.persistPending(pendingLink);
+  const result = await options.link(pendingLink);
+  if (result.trainingSessionId !== pendingLink.trainingSessionId) throw new TrainingWorkoutReadinessLinkFlowError("session mismatch");
+  if (!result.linked && !result.alreadyLinked) throw new TrainingWorkoutReadinessLinkFlowError("link failed");
+  options.cleanup();
+  return "linked";
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -135,7 +128,6 @@ async function run() {
       cycleScoped: true,
       workoutAttemptId: "attempt-1",
       pending: null,
-      lock: { current: false },
       async saveSession() {
         events.push("save-session");
         return "session-1";
@@ -167,7 +159,6 @@ async function run() {
       cycleScoped: true,
       workoutAttemptId: "attempt-1",
       pending,
-      lock: { current: false },
       async saveSession() {
         events.push("save-session");
         return "session-new";
@@ -196,7 +187,6 @@ async function run() {
       cycleScoped: true,
       workoutAttemptId: "attempt-1",
       pending: null,
-      lock: { current: false },
       async saveSession() {
         events.push("save-session");
         return "session-1";
@@ -226,7 +216,6 @@ async function run() {
       cycleScoped: true,
       workoutAttemptId: null,
       pending: null,
-      lock: { current: false },
       async saveSession() {
         events.push("legacy-save-session");
         return "legacy-session";
@@ -254,7 +243,6 @@ async function run() {
       cycleScoped: true,
       workoutAttemptId: null,
       pending: null,
-      lock: { current: false },
       async saveSession() {
         events.push("unexpected-save-session");
         return "session-1";
@@ -280,7 +268,6 @@ async function run() {
       cycleScoped: true,
       workoutAttemptId: "attempt-1",
       pending: null,
-      lock: { current: false },
       async saveSession() {
         events.push("save-session");
         return "session-1";
@@ -298,59 +285,6 @@ async function run() {
     }), TrainingWorkoutReadinessLinkFlowError);
 
     assert.deepEqual(events, ["save-session", "persist:session-1", "mismatch-link"]);
-  }
-
-  {
-    const lock = { current: false };
-    const events: string[] = [];
-    let releaseSave: () => void = () => { throw new Error("save was not started"); };
-    const first = simulateCompletion({
-      enabled: true,
-      cycleScoped: true,
-      workoutAttemptId: "attempt-1",
-      pending: null,
-      lock,
-      saveSession: () => new Promise((resolve) => {
-        events.push("save-session");
-        releaseSave = () => resolve("session-1");
-      }),
-      persistPending(next) {
-        events.push(`persist:${next.trainingSessionId}`);
-      },
-      async link(next) {
-        events.push(`link:${next.trainingSessionId}`);
-        return { trainingSessionId: next.trainingSessionId, linked: true, alreadyLinked: false };
-      },
-      cleanup() {
-        events.push("cleanup");
-      },
-    });
-    const second = await simulateCompletion({
-      enabled: true,
-      cycleScoped: true,
-      workoutAttemptId: "attempt-1",
-      pending: null,
-      lock,
-      async saveSession() {
-        events.push("duplicate-save-session");
-        return "session-duplicate";
-      },
-      persistPending(next) {
-        events.push(`duplicate-persist:${next.trainingSessionId}`);
-      },
-      async link(next) {
-        events.push(`duplicate-link:${next.trainingSessionId}`);
-        return { trainingSessionId: next.trainingSessionId, linked: true, alreadyLinked: false };
-      },
-      cleanup() {
-        events.push("duplicate-cleanup");
-      },
-    });
-
-    assert.equal(second, "locked");
-    releaseSave();
-    assert.equal(await first, "linked");
-    assert.deepEqual(events, ["save-session", "persist:session-1", "link:session-1", "cleanup"]);
   }
 
   // P2-H.2B: translateTrainingWorkoutReadinessLinkError se movio aqui desde organizatech-app.tsx.

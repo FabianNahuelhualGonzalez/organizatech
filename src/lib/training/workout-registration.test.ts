@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
 import { toPersistedExerciseObservation } from "@/lib/data/repository";
+import type { ExerciseTemplate } from "@/lib/progress/types";
+import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
 import {
-  acquireWorkoutSaveLock,
   buildCurrentWorkoutSavePlan,
   getCurrentWorkoutRegisteredExerciseIds,
+  incompleteCurrentExerciseMessage,
   incompleteCurrentWorkoutMessage,
   isExerciseRegisteredInCurrentWorkout,
   noCurrentWorkoutExercisesMessage,
-  releaseWorkoutSaveLock,
+  resolveCurrentExerciseRegistration,
   type WorkoutRegistrationDraft,
   type WorkoutRegistrationExercise,
 } from "./workout-registration";
@@ -96,38 +100,108 @@ const emptyPlan = buildCurrentWorkoutSavePlan([], {});
 assert.equal(emptyPlan.canSave, false, "sin ejercicios actuales no se guarda");
 assert.equal(emptyPlan.message, noCurrentWorkoutExercisesMessage, "sin ejercicios actuales entrega mensaje visible");
 
-const busyGuardBefore = 0;
-const busyGuardAfter = maybeInvokeWhenNotBusy(true, () => busyGuardBefore + 1);
-assert.equal(busyGuardAfter, busyGuardBefore, "isBusy=true bloquea una segunda persistencia");
-assert.equal(maybeInvokeWhenNotBusy(false, () => 1), 1, "isBusy=false permite continuar");
+const registrationExercises = [
+  createRegistrationExercise("registration-1", 2),
+  createRegistrationExercise("registration-2", 2),
+  createRegistrationExercise("registration-3", 2),
+];
+const validDraft = createRegistrationDraft();
 
-const cycleScopedLock = { current: false };
-assert.equal(acquireWorkoutSaveLock(cycleScopedLock), true, "la primera invocacion cycle-scoped adquiere el lock");
-assert.equal(acquireWorkoutSaveLock(cycleScopedLock), false, "la segunda invocacion inmediata cycle-scoped es ignorada");
-let cycleScopedRepositoryCalls = 0;
-if (acquireWorkoutSaveLock(cycleScopedLock)) cycleScopedRepositoryCalls += 1;
-assert.equal(cycleScopedRepositoryCalls, 0, "cycle-scoped no crea dos llamadas al repository");
-releaseWorkoutSaveLock(cycleScopedLock);
-assert.equal(cycleScopedLock.current, false, "el lock se libera despues de exito");
-assert.equal(acquireWorkoutSaveLock(cycleScopedLock), true, "despues de liberar se permite un nuevo intento");
-releaseWorkoutSaveLock(cycleScopedLock);
+assert.deepEqual(resolveRegistration({ isBusy: true }), { kind: "busy" }, "isBusy no produce accion");
+assert.deepEqual(
+  resolveRegistration({ activeExerciseIndex: 99 }),
+  { kind: "missing_exercise" },
+  "un indice sin ejercicio no produce accion",
+);
+assert.deepEqual(resolveRegistration({
+  drafts: {
+    "registration-1": { ...validDraft, registered: true },
+    "registration-2": { ...validDraft, registered: true },
+  },
+}), {
+  kind: "already_registered_advance",
+  nextExerciseIndex: 2,
+}, "un ejercicio registrado avanza al siguiente pendiente posterior");
+assert.deepEqual(resolveRegistration({
+  drafts: Object.fromEntries(registrationExercises.map((exercise) => [
+    exercise.id,
+    { ...validDraft, registered: true },
+  ])),
+}), { kind: "already_registered_complete" }, "sin siguiente pendiente no altera el indice");
 
-const legacyLock = { current: false };
-let legacyRepositoryCalls = 0;
-if (acquireWorkoutSaveLock(legacyLock)) legacyRepositoryCalls += 1;
-if (acquireWorkoutSaveLock(legacyLock)) legacyRepositoryCalls += 1;
-assert.equal(legacyRepositoryCalls, 1, "legacy no crea dos llamadas al repository");
-try {
-  throw new Error("fallo simulado");
-} catch {
-  releaseWorkoutSaveLock(legacyLock);
+const invalidRegistrationDrafts: Array<[ExerciseDraft, string]> = [
+  [{ ...validDraft, weight: "" }, "peso vacio"],
+  [{ ...validDraft, weight: "peso-invalido" }, "peso invalido"],
+  [{ ...validDraft, reps: [10, ""] }, "rep requerida vacia"],
+];
+for (const [draft, label] of invalidRegistrationDrafts) {
+  assert.deepEqual(resolveRegistration({ drafts: { "registration-1": draft } }), {
+    kind: "invalid_draft",
+    message: incompleteCurrentExerciseMessage,
+  }, `${label} conserva el mensaje productivo`);
 }
-assert.equal(legacyLock.current, false, "el lock se libera despues de error");
 
-const controlledReturnLock = { current: false };
-assert.equal(acquireWorkoutSaveLock(controlledReturnLock), true, "el flujo con retorno controlado adquiere lock");
-releaseWorkoutSaveLock(controlledReturnLock);
-assert.equal(controlledReturnLock.current, false, "el lock se libera despues de retorno controlado");
+const extraRepDecision = expectRegister(resolveRegistration({
+  drafts: { "registration-1": { ...validDraft, reps: [10, 11, ""] } },
+}));
+assert.deepEqual(extraRepDecision.draft.reps, [10, 11], "reps fuera de targetSets no bloquean y se recortan");
+
+const registrationDecision = expectRegister(resolveRegistration({
+  drafts: {
+    "registration-1": {
+      ...validDraft,
+      weight: "95,5",
+      reps: [8, 9],
+      observation: "Mantener control escapular",
+    },
+  },
+}));
+assert.equal(registrationDecision.draft.registered, true, "el registro valido marca registered");
+assert.equal(registrationDecision.draft.observation, "Mantener control escapular", "el registro conserva observation");
+assert.equal(registrationDecision.nextExerciseIndex, 1, "el registro intermedio avanza un indice");
+
+const finalExerciseDecision = expectRegister(resolveRegistration({
+  activeExerciseIndex: 2,
+  drafts: { "registration-3": validDraft },
+}));
+assert.equal(finalExerciseDecision.nextExerciseIndex, 2, "el ultimo ejercicio conserva el ultimo indice");
+
+const historicalIds = new Set([registrationExercises[0]?.trainingCycleExerciseId]);
+assert.equal(historicalIds.has("cycle-registration-1"), true, "fixture: existe historial previo");
+assert.equal(
+  expectRegister(resolveRegistration({ drafts: { "registration-1": validDraft } })).exercise.id,
+  "registration-1",
+  "el historial previo no influye en el draft actual",
+);
+assert.equal(
+  expectRegister(resolveRegistration({
+    drafts: {
+      "registration-1": validDraft,
+      "otro-ejercicio": { ...validDraft, registered: true },
+    },
+  })).exercise.id,
+  "registration-1",
+  "el draft de otro ejercicio no influye por aislamiento de exercise.id",
+);
+
+const immutableDrafts = { "registration-1": createRegistrationDraft({ reps: [7, 8, 9] }) };
+const immutableInput = {
+  isBusy: false,
+  exercises: registrationExercises,
+  activeExerciseIndex: 0,
+  drafts: immutableDrafts,
+};
+const immutableBefore = structuredClone(immutableInput);
+const immutableDecision = expectRegister(resolveCurrentExerciseRegistration(immutableInput));
+assert.deepEqual(immutableInput, immutableBefore, "la decision no muta sus inputs");
+assert.notEqual(immutableDecision.draft, immutableDrafts["registration-1"], "el draft normalizado es independiente");
+assert.notEqual(immutableDecision.draft.reps, immutableDrafts["registration-1"].reps, "las reps normalizadas son independientes");
+
+const zeroDecision = expectRegister(resolveRegistration({
+  drafts: { "registration-1": createRegistrationDraft({ weight: "0", reps: [0, 0] }) },
+}));
+assert.equal(zeroDecision.draft.weight, "0", "cero mantiene la compatibilidad actual de peso");
+assert.deepEqual(zeroDecision.draft.reps, [0, 0], "cero mantiene la compatibilidad actual de reps");
 
 assert.deepEqual(
   createCycleScopedEntryInput(mondayBench, {
@@ -208,6 +282,21 @@ assert.ok(
   "el registro legacy sigue siendo valido sin observation: la propiedad se omite, no se envia null",
 );
 
+// Contrato estatico/source-based: verifica wiring; no renderiza React ni sustituye la cobertura runtime anterior.
+const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+const registrationStart = appSource.indexOf("  function registerCurrentExercise()");
+const registrationEnd = appSource.indexOf("  async function confirmTrainingWorkoutReadinessLink", registrationStart);
+const registrationBlock = registrationStart >= 0 && registrationEnd > registrationStart
+  ? appSource.slice(registrationStart, registrationEnd)
+  : "";
+assert.match(registrationBlock, /resolveCurrentExerciseRegistration\(\{/);
+assert.match(registrationBlock, /switch \(decision\.kind\)/);
+assert.doesNotMatch(
+  registrationBlock,
+  /parseDecimalWeightInput|normalizeExerciseDraft|findIndex|isExerciseRegisteredInCurrentWorkout/,
+  "el root no reimplementa validacion ni busqueda del siguiente pendiente",
+);
+
 console.log("workout-registration tests passed");
 
 function createExercise(id: string, trainingCycleExerciseId: string): WorkoutRegistrationExercise & {
@@ -220,9 +309,45 @@ function createExercise(id: string, trainingCycleExerciseId: string): WorkoutReg
   };
 }
 
-function maybeInvokeWhenNotBusy<T>(isBusy: boolean, action: () => T) {
-  if (isBusy) return 0;
-  return action();
+function createRegistrationExercise(id: string, targetSets: number): ExerciseTemplate {
+  return {
+    id,
+    trainingCycleExerciseId: `cycle-${id}`,
+    exerciseLineageId: `lineage-${id}`,
+    routine: "Lunes",
+    day: "Lunes",
+    name: `Exercise ${id}`,
+    targetSets,
+    targetReps: 10,
+    baseWeight: 80,
+  };
+}
+
+function createRegistrationDraft(overrides: Partial<ExerciseDraft> = {}): ExerciseDraft {
+  return {
+    weight: "100",
+    rir: "2",
+    reps: [10, 10],
+    registered: false,
+    observation: "Observacion actual",
+    ...overrides,
+  };
+}
+
+function resolveRegistration(overrides: Partial<Parameters<typeof resolveCurrentExerciseRegistration>[0]> = {}) {
+  return resolveCurrentExerciseRegistration({
+    isBusy: false,
+    exercises: registrationExercises,
+    activeExerciseIndex: 0,
+    drafts: { "registration-1": validDraft },
+    ...overrides,
+  });
+}
+
+function expectRegister(decision: ReturnType<typeof resolveCurrentExerciseRegistration>) {
+  assert.equal(decision.kind, "register");
+  if (decision.kind !== "register") throw new Error("Expected register decision");
+  return decision;
 }
 
 function createCycleScopedEntryInput(

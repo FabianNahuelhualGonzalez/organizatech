@@ -1,16 +1,3 @@
-export interface WorkoutStartLock {
-  current: boolean;
-}
-
-export function tryAcquireWorkoutStartLock(lock: WorkoutStartLock): boolean {
-  if (lock.current) return false;
-  lock.current = true;
-  return true;
-}
-
-export function releaseWorkoutStartLock(lock: WorkoutStartLock): void {
-  lock.current = false;
-}
 export interface ResolveWorkoutAttemptIdInput {
   enabled: boolean;
   cycleId: string | null;

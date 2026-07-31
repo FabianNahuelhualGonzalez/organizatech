@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 
-import { releaseWorkoutStartLock, tryAcquireWorkoutStartLock } from "@/lib/training/training-workout-attempt-lifecycle";
 import {
   resolveTrainingWorkoutReadinessMode,
   toTrainingWorkoutReadinessPayload,
@@ -19,21 +18,6 @@ const completeContext: TrainingWorkoutReadinessContext = {
 
 function cloneContext(overrides: Partial<TrainingWorkoutReadinessContext> = {}) {
   return { ...completeContext, ...overrides };
-}
-
-async function simulateSubmit(
-  lock: { current: boolean },
-  value: Parameters<typeof toTrainingWorkoutReadinessPayload>[0],
-  save: (payload: ReturnType<typeof toTrainingWorkoutReadinessPayload>) => Promise<void>,
-) {
-  if (!tryAcquireWorkoutStartLock(lock)) return "locked";
-  try {
-    const payload = toTrainingWorkoutReadinessPayload(value);
-    await save(payload);
-    return "saved";
-  } finally {
-    releaseWorkoutStartLock(lock);
-  }
 }
 
 async function run() {
@@ -91,48 +75,6 @@ async function run() {
     const beforeValue = JSON.stringify(value);
     toTrainingWorkoutReadinessPayload(value);
     assert.equal(JSON.stringify(value), beforeValue);
-  }
-
-  for (const [firstPayload, secondPayload] of [
-    [{ skipped: false, motivation: 5, hydration: 5, sleep: 5, energy: 5 }, { skipped: true }],
-    [{ skipped: true }, { skipped: false, motivation: 5, hydration: 5, sleep: 5, energy: 5 }],
-    [{ skipped: false, motivation: 5, hydration: 5, sleep: 5, energy: 5 }, { skipped: false, motivation: 6, hydration: 6, sleep: 6, energy: 6 }],
-    [{ skipped: true }, { skipped: true }],
-  ] as const) {
-    const lock = { current: false };
-    const saves: unknown[] = [];
-    let releaseSave: () => void = () => { throw new Error("save was not started"); };
-    const first = simulateSubmit(lock, firstPayload, (payload) => new Promise<void>((resolve) => {
-      saves.push(payload);
-      releaseSave = resolve;
-    }));
-    const second = await simulateSubmit(lock, secondPayload, async (payload) => {
-      saves.push(payload);
-    });
-    assert.equal(second, "locked");
-    assert.equal(saves.length, 1);
-    assert.deepEqual(saves[0], toTrainingWorkoutReadinessPayload(firstPayload));
-    releaseSave();
-    assert.equal(await first, "saved");
-    assert.equal(lock.current, false);
-  }
-
-  {
-    const lock = { current: false };
-    await assert.rejects(
-      () => simulateSubmit(lock, { skipped: false, motivation: 0 }, async () => undefined),
-      TrainingWorkoutReadinessFlowError,
-    );
-    assert.equal(lock.current, false);
-    assert.equal(await simulateSubmit(lock, { skipped: true }, async () => undefined), "saved");
-  }
-
-  {
-    const lock = { current: false };
-    await assert.rejects(() => simulateSubmit(lock, { skipped: true }, async () => {
-      throw new Error("remote");
-    }), /remote/);
-    assert.equal(lock.current, false);
   }
 
   console.log("training-workout-readiness flow tests passed");
