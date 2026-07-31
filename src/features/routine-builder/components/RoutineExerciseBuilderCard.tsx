@@ -1,6 +1,7 @@
 import { Trash2 } from "lucide-react";
 
 import type { SetupExerciseRow } from "@/lib/training/training-routine-draft";
+import { SectionHeading } from "@/ui/layout/section-heading";
 
 /**
  * Espejo EXACTO de la card inline `setup-card exercise-builder-card` de organizatech-app.tsx
@@ -52,10 +53,11 @@ export function RoutineExerciseBuilderCard({
 }: RoutineExerciseBuilderCardProps) {
   return (
     <div className="setup-card exercise-builder-card">
-      <div className="setup-section-heading">
-        <p className="eyebrow">Rutina del día {day}</p>
-        <h3>Ejercicios a programar</h3>
-      </div>
+      <SectionHeading
+        className="setup-section-heading"
+        eyebrow={<>Rutina del día {day}</>}
+        title="Ejercicios a programar"
+      />
       <div className="setup-table">
         <div className="setup-table-head">
           <span>Nombre ejercicio</span>

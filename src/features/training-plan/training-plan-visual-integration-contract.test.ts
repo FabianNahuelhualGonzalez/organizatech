@@ -208,6 +208,62 @@ assert.match(confirmDialogSource, /MODAL_INITIAL_FOCUS_ATTRIBUTE\]: isBusy \? un
 // P3-47A no adopta la primitive en el root ni en Active Workout.
 assert.doesNotMatch(appSource, /from ["']@\/ui\/buttons\/button["']/, "el root no adopta la primitive en P3-47A");
 
+// -------------------------------------------------------------------------------------------
+// P3-49A — SectionHeading compartido.
+//
+// COMPROBACIONES ESTATICAS / SOURCE-BASED: leen el codigo fuente. NO renderizan React, no montan
+// el componente y no sustituyen QA manual del render real.
+// -------------------------------------------------------------------------------------------
+const sectionHeadingSource = readSource("src/ui/layout/section-heading.tsx");
+const sectionHeadingCode = sectionHeadingSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+
+// (1) Una sola definicion productiva.
+assert.equal(
+  (sectionHeadingSource.match(/^export function SectionHeading\b/gm) ?? []).length,
+  1,
+  "una unica definicion productiva de SectionHeading",
+);
+// API exacta, sin extras de configuracion.
+assert.match(sectionHeadingCode, /className: string;/);
+assert.match(sectionHeadingCode, /eyebrow: ReactNode;/);
+assert.match(sectionHeadingCode, /title: ReactNode;/);
+for (const forbiddenProp of [/\bvariant\b/, /\bheadingLevel\b/, /\baction\b/, /\bicon\b/, /\bsubtitle\b/, /\bas\?:/]) {
+  assert.doesNotMatch(sectionHeadingCode, forbiddenProp, `SectionHeading no debe aceptar ${forbiddenProp}`);
+}
+// (6)(7) Orden eyebrow -> h3 y jerarquia h3 preservada.
+assert.match(
+  sectionHeadingCode,
+  /<div className=\{className\}>\s*<p className="eyebrow">\{eyebrow\}<\/p>\s*<h3>\{title\}<\/h3>\s*<\/div>/,
+  "markup exacto: div > p.eyebrow > h3, en ese orden",
+);
+// (9) Primitive sin hooks, efectos, dominio ni APIs prohibidas; solo importa ReactNode como type.
+assert.match(sectionHeadingSource, /^import type \{ ReactNode \} from "react";/m);
+assert.equal((sectionHeadingSource.match(/^import /gm) ?? []).length, 1, "la primitive solo importa ReactNode como type");
+for (const forbidden of [
+  /\buseState\b/, /\buseEffect\b/, /\buseRef\b/, /\buseMemo\b/, /\buseCallback\b/, /\buseReducer\b/,
+  /dangerouslySetInnerHTML/, /\{\.\.\./, /@\/features\//, /@\/lib\/(?:storage|supabase|data|navigation)\//,
+  /-repository/, /process\.env/, /className="setup-/,
+]) {
+  assert.doesNotMatch(sectionHeadingCode, forbidden, `SectionHeading no debe incorporar ${forbidden}`);
+}
+
+// (3)(4)(5) Consumidor de Training Plan: import canonico, clase y contenido exactos.
+assert.match(files.setupCard, /import \{ SectionHeading \} from "@\/ui\/layout\/section-heading";/);
+assert.match(
+  files.setupCard,
+  /<SectionHeading\s+className="setup-section-heading"\s+eyebrow="Planificación deportiva"\s+title="Selecciona tu ciclo de entrenamiento"\s*\/>/,
+);
+// (8) Sin bloque inline residual en el consumidor migrado.
+assert.doesNotMatch(files.setupCard, /<div className="setup-section-heading">/, "el bloque inline debe haberse eliminado");
+
+// (11) Active Workout permanece FUERA de alcance: conserva su bloque inline y no adopta la primitive.
+const readinessScreenSource = readSource("src/features/active-workout/components/TrainingReadinessScreen.tsx");
+assert.match(readinessScreenSource, /<div className="setup-section-heading">/, "Active Workout no se migra en P3-49A");
+assert.doesNotMatch(readinessScreenSource, /@\/ui\/layout\/section-heading/, "Active Workout no debe importar la primitive");
+assert.doesNotMatch(readinessScreenSource, /<SectionHeading/, "Active Workout no debe usar la primitive");
+// El root tampoco la adopta en esta fase.
+assert.doesNotMatch(appSource, /@\/ui\/layout\/section-heading/, "el root no adopta la primitive en P3-49A");
+
 const registration = "tsx src/features/training-plan/training-plan-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);
 

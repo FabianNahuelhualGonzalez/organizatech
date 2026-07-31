@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 /**
  * Contrato ESTÁTICO de integración visual. No renderiza React, no simula
@@ -331,5 +331,58 @@ for (const command of [
 ]) {
   assert.equal(testCommands.filter((item) => item === command).length, 1, `${command} registrado una vez`);
 }
+
+// -------------------------------------------------------------------------------------------
+// P3-49A — SectionHeading compartido (consumidores de Routine Builder).
+//
+// COMPROBACIONES ESTATICAS / SOURCE-BASED: leen el codigo fuente. NO renderizan React ni montan
+// los componentes; no sustituyen QA manual del render real.
+// -------------------------------------------------------------------------------------------
+
+// (3)(4)(5) Los tres consumidores de Routine Builder: import canonico, clase y contenido exactos.
+for (const [label, cardSource] of [
+  ["dayCard", cards.dayCard],
+  ["nameCard", cards.nameCard],
+  ["exerciseCard", cards.exerciseCard],
+] as const) {
+  assert.match(cardSource, /import \{ SectionHeading \} from "@\/ui\/layout\/section-heading";/, label);
+  assert.match(cardSource, /<SectionHeading\s+className="setup-section-heading"/, label);
+  // (8) Sin bloque inline residual.
+  assert.doesNotMatch(cardSource, /<div className="setup-section-heading">/, `${label}: el bloque inline debe haberse eliminado`);
+}
+assert.match(
+  cards.dayCard,
+  /eyebrow="Configura tus rutinas por día"\s+title=\{<>Rutina \{currentStep\} de \{plannedDays\.length\} · \{activeDay\}<\/>\}/,
+);
+assert.match(cards.nameCard, /eyebrow=\{<>Rutina del día \{day\}<\/>\}\s+title="Nombre de la rutina"/);
+assert.match(cards.exerciseCard, /eyebrow=\{<>Rutina del día \{day\}<\/>\}\s+title="Ejercicios a programar"/);
+
+// (2)(10) EXACTAMENTE cuatro consumidores en todo `src`. Este contrato SI recorre el arbol a
+// proposito: P3-49A cierra el alcance, por lo que un quinto consumidor debe hacerlo fallar.
+const sectionHeadingConsumers: string[] = [];
+(function collectSectionHeadingConsumers(directory: string) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) {
+      collectSectionHeadingConsumers(entryPath);
+      continue;
+    }
+    if (!entry.name.endsWith(".tsx")) continue;
+    if (entryPath === "src/ui/layout/section-heading.tsx") continue;
+    if (readFileSync(entryPath, "utf8").includes("@/ui/layout/section-heading")) {
+      sectionHeadingConsumers.push(entryPath);
+    }
+  }
+})("src");
+assert.deepEqual(
+  sectionHeadingConsumers.sort(),
+  [
+    "src/features/routine-builder/components/RoutineBuilderDayCard.tsx",
+    "src/features/routine-builder/components/RoutineBuilderNameCard.tsx",
+    "src/features/routine-builder/components/RoutineExerciseBuilderCard.tsx",
+    "src/features/training-plan/components/TrainingPlanSetupCard.tsx",
+  ],
+  "P3-49A migra exactamente los cuatro consumidores autorizados, ni uno mas",
+);
 
 console.log("routine-builder visual static integration contract tests passed");
