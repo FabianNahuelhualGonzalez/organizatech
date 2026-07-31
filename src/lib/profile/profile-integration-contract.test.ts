@@ -95,6 +95,62 @@ assert.match(personalDataSection, /\{isSaving \? "Guardando\.\.\." : "Guardar ca
 // Los botones que NO mapean a una variante autorizada permanecen nativos en P3-47A.
 assert.match(profileScreenStaticSource, /<button\s+className="profile-edit-button"/);
 
+// CONTRATO ESTATICO 3D (P3-48B — COMPROBACIONES SOURCE-BASED: leen el codigo fuente; NO renderizan
+// React ni verifican el anuncio real de un lector de pantalla). Los mensajes dinamicos pasan a la
+// primitive compartida StatusMessage, conservando clases, condiciones, textos y orden del DOM.
+const statusMessageStaticSource = readFileSync("src/ui/feedback/status-message.tsx", "utf8");
+assert.equal(
+  (statusMessageStaticSource.match(/^export function StatusMessage\b/gm) ?? []).length,
+  1,
+  "una sola definicion productiva de StatusMessage",
+);
+// Semantica explicita: polite para estados neutros, alert para errores inequivocos.
+assert.match(statusMessageStaticSource, /role="status" aria-live="polite"/);
+assert.match(statusMessageStaticSource, /role="alert"/);
+// El spread no puede degradar la semantica: role/aria-live se omiten del tipo y se aplican despues.
+assert.match(statusMessageStaticSource, /Omit<HTMLAttributes<HTMLParagraphElement>, "role" \| "aria-live" \| "children">/);
+const statusMessageStaticCode = statusMessageStaticSource
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/\/\/.*$/gm, "");
+for (const forbidden of [/useState|useEffect/, /dangerouslySetInnerHTML/, /onClick/, /useRouter|navigate/]) {
+  assert.doesNotMatch(statusMessageStaticCode, forbidden, `StatusMessage no debe incorporar ${forbidden}`);
+}
+
+// Profile ya no duplica el markup migrado.
+assert.match(profileScreenStaticSource, /import \{ StatusMessage \} from "@\/ui\/feedback\/status-message";/);
+assert.match(avatarEditorStaticSource, /import \{ StatusMessage \} from "@\/ui\/feedback\/status-message";/);
+assert.doesNotMatch(profileScreenStaticSource, /<p className="profile-form-status"|<p className="profile-avatar-status"/);
+assert.doesNotMatch(avatarEditorStaticSource, /<p className="profile-avatar-status"/);
+assert.equal((profileScreenStaticSource.match(/<StatusMessage\b/g) ?? []).length, 5, "los cinco mensajes de ProfileScreen migran");
+assert.equal((avatarEditorStaticSource.match(/<StatusMessage\b/g) ?? []).length, 1, "el mensaje del editor de avatar migra");
+
+// Paridad exacta de cada mensaje: clase, condicion y texto.
+assert.match(
+  profileScreenStaticSource,
+  /\{\(statusMessage \|\| externalError\) && \(\s*<StatusMessage className="profile-avatar-status">\{statusMessage \|\| externalError\}<\/StatusMessage>/,
+  "se conserva la prioridad statusMessage || externalError",
+);
+assert.match(profileScreenStaticSource, /\{isLoading && <StatusMessage className="profile-form-status">Cargando datos personales\.\.\.<\/StatusMessage>\}/);
+assert.match(profileScreenStaticSource, /\{!canEdit && <StatusMessage className="profile-form-status">Inicia sesión para guardar tu perfil\.<\/StatusMessage>\}/);
+assert.equal(
+  (profileScreenStaticSource.match(/\{statusMessage && <StatusMessage className="profile-form-status">\{statusMessage\}<\/StatusMessage>\}/g) ?? []).length,
+  2,
+  "los dos mensajes de statusMessage (edicion y lectura) se conservan",
+);
+// El unico origen inequivocamente de error usa la semantica de error.
+assert.match(
+  avatarEditorStaticSource,
+  /\{error && <StatusMessage tone="error" className="profile-avatar-status">\{error\}<\/StatusMessage>\}/,
+);
+// Los mensajes ambiguos NO se clasifican como error.
+assert.doesNotMatch(profileScreenStaticSource, /tone="error"/, "sin clasificacion insegura de mensajes ambiguos");
+// `profile-inline-notice` queda fuera de alcance: no es un mensaje simple sino un aviso con accion.
+assert.match(profileScreenStaticSource, /<div className="profile-inline-notice">/);
+
+// La logica de negocio y los payloads no cambian con esta migracion.
+assert.match(profileScreenStaticSource, /buildProfilePersonalDataPayload\(/);
+assert.match(profileScreenStaticSource, /validateAvatarSourceFile\(file\)/);
+
 // CONTRATO ESTATICO 3C (P3-47B — comprobaciones SOURCE-BASED, no cobertura de render): Profile
 // consume la primitive compartida TextInput solo en los cuatro controles autorizados, conservando
 // intactos value, onChange, maxLength, placeholder, inputMode, autoComplete, readOnly y
