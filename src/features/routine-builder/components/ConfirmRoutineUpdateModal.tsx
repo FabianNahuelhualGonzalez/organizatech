@@ -1,21 +1,27 @@
-import { Button } from "@/ui/buttons/button";
+import { ConfirmDialog } from "@/ui/modals/confirm-dialog";
 
 export interface ConfirmRoutineUpdateModalProps {
   onCancel: () => void;
   onConfirm: () => void;
 }
 
+/**
+ * Sin estado busy: este diálogo nunca lo tuvo y P3-48A no lo inventa. `Escape` ejecuta `onCancel`,
+ * que es la acción segura.
+ */
 export function ConfirmRoutineUpdateModal({ onCancel, onConfirm }: ConfirmRoutineUpdateModalProps) {
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirmar modificacion de rutina">
-      <div className="card confirm-modal">
-        <h2>Actualizar rutina</h2>
-        <p>Si modificas esta rutina, se actualizará tu ciclo de entrenamiento actual. Los días eliminados dejarán de aparecer en el ciclo. ¿Quieres continuar?</p>
-        <div className="modal-actions">
-          <Button variant="secondary" type="button" onClick={onCancel}>Cancelar</Button>
-          <Button variant="success" type="button" onClick={onConfirm}>Sí, actualizar rutina</Button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      ariaLabel="Confirmar modificacion de rutina"
+      title="Actualizar rutina"
+      cancelLabel="Cancelar"
+      cancelVariant="secondary"
+      onCancel={onCancel}
+      confirmLabel="Sí, actualizar rutina"
+      confirmVariant="success"
+      onConfirm={onConfirm}
+    >
+      <p>Si modificas esta rutina, se actualizará tu ciclo de entrenamiento actual. Los días eliminados dejarán de aparecer en el ciclo. ¿Quieres continuar?</p>
+    </ConfirmDialog>
   );
 }

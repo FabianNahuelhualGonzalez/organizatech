@@ -57,22 +57,63 @@ for (const source of [successSource, updateSource, cards.dayCard, cards.nameCard
   assert.doesNotMatch(source, /from ["']@\/components\/organizatech-app["']/);
   assert.doesNotMatch(source, /from ["']@\/lib\/(?:storage|supabase)\//);
 }
-assert.match(successSource, /className="card confirm-modal success-modal"/);
-assert.match(successSource, /role="dialog" aria-modal="true" aria-label="Registro exitoso"/);
+// P3-48A (COMPROBACIONES SOURCE-BASED, no pruebas de render): la estructura de backdrop/card/ARIA
+// dejo de estar inline y la aportan ModalShell/ConfirmDialog.
+assert.match(successSource, /cardClassName="card confirm-modal success-modal"/);
+assert.match(successSource, /ariaLabel="Registro exitoso"/);
 assert.match(successSource, /Tu rutina quedó guardada correctamente\./);
-assert.match(updateSource, /role="dialog" aria-modal="true" aria-label="Confirmar modificacion de rutina"/);
-assert.match(updateSource, /Sí, actualizar rutina/);
-assert.doesNotMatch(`${successSource}\n${updateSource}`, /ConfirmDialog/);
+assert.match(updateSource, /ariaLabel="Confirmar modificacion de rutina"/);
+assert.match(updateSource, /confirmLabel="Sí, actualizar rutina"/);
 
-// P3-47A (CONTRATO ESTATICO — no sustituye cobertura runtime): ConfirmRoutineUpdateModal consume la
-// primitive compartida de boton, sin <button> locales, conservando variantes, textos y callbacks.
-assert.match(updateSource, /import \{ Button \} from "@\/ui\/buttons\/button";/);
-assert.doesNotMatch(updateSource, /<button\b/, "no deben quedar <button> locales en ConfirmRoutineUpdateModal");
-assert.match(updateSource, /<Button variant="secondary" type="button" onClick=\{onCancel\}>Cancelar<\/Button>/);
-assert.match(updateSource, /<Button variant="success" type="button" onClick=\{onConfirm\}>Sí, actualizar rutina<\/Button>/);
-// RoutineSuccessModal queda fuera del alcance de P3-47A y conserva su <button> nativo.
-assert.match(successSource, /<button className="button success-solid" type="button" onClick=\{onConfirm\}>/);
-assert.doesNotMatch(successSource, /from ["']@\/ui\/buttons\/button["']/);
+// ConfirmRoutineUpdateModal delega en ConfirmDialog conservando variantes, textos y callbacks, y
+// sin inventar estado busy (nunca lo tuvo).
+assert.match(updateSource, /import \{ ConfirmDialog \} from "@\/ui\/modals\/confirm-dialog";/);
+assert.doesNotMatch(updateSource, /<button\b|<Button\b/, "las acciones las aporta ConfirmDialog");
+assert.doesNotMatch(updateSource, /modal-backdrop|confirm-modal|modal-actions|role="dialog"/, "estructura delegada");
+assert.match(updateSource, /cancelLabel="Cancelar"[\s\S]*?cancelVariant="secondary"/);
+assert.match(updateSource, /confirmVariant="success"/);
+assert.doesNotMatch(updateSource, /isBusy|confirmBusyLabel/, "no debe inventarse un estado busy");
+
+// RoutineSuccessModal usa ModalShell pero NO ConfirmDialog: una sola accion y jerarquia h3.
+assert.match(successSource, /import \{ MODAL_INITIAL_FOCUS_ATTRIBUTE, ModalShell \} from "@\/ui\/modals\/modal-shell";/);
+assert.doesNotMatch(stripComments(successSource), /ConfirmDialog/, "el modal de exito no debe usar ConfirmDialog");
+assert.match(successSource, /import \{ Button \} from "@\/ui\/buttons\/button";/);
+assert.doesNotMatch(successSource, /<button\b/, "su boton nativo migro al Button compartido");
+assert.match(successSource, /<Button variant="success" type="button" onClick=\{onConfirm\}/);
+assert.match(successSource, /<h3>Registro exitoso<\/h3>/, "conserva la jerarquia h3");
+assert.match(successSource, /<Save size=\{22\} \/>/, "conserva el icono");
+assert.match(successSource, /className="success-icon"/);
+// Escape ejecuta el mismo cierre que OK y el foco inicial va al boton OK.
+assert.match(successSource, /onClose=\{onConfirm\}/);
+assert.match(successSource, /MODAL_INITIAL_FOCUS_ATTRIBUTE\]: ""/);
+
+// P3-48A remediación (COMPROBACIONES ESTATICAS / SOURCE-BASED — NO ejecutan foco, teclado ni DOM;
+// el comportamiento runtime no se ejecuta en esta suite y requiere QA manual):
+// el shell que consume RoutineSuccessModal aisla Escape y respeta el modal superior, de modo que
+// cerrar este modal no cierre tambien un overlay subyacente (p. ej. el keydown en burbuja de
+// `src/app/mobile-menu.tsx`).
+const modalShellSharedSource = readSource("src/ui/modals/modal-shell.tsx");
+const modalShellSharedCode = modalShellSharedSource
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/\/\/.*$/gm, "");
+// Ownership: solo el modal superior del stack procesa Tab/Escape.
+assert.match(modalShellSharedCode, /const activeModalOwners: ModalShellOwner\[\] = \[\];/);
+assert.match(modalShellSharedCode, /if \(!isTopModalOwner\(owner\)\) return;/);
+// Alta/baja por identidad, tolerante a Strict Mode y a cleanups fuera de orden.
+assert.match(modalShellSharedCode, /if \(!activeModalOwners\.includes\(owner\)\) activeModalOwners\.push\(owner\);/);
+assert.match(modalShellSharedCode, /if \(ownerIndex !== -1\) activeModalOwners\.splice\(ownerIndex, 1\);/);
+// Listener en capture, con alta y baja simetricas y sin acumulacion.
+assert.match(modalShellSharedCode, /document\.addEventListener\("keydown", handleKeyDown, true\);/);
+assert.match(modalShellSharedCode, /document\.removeEventListener\("keydown", handleKeyDown, true\);/);
+assert.equal((modalShellSharedCode.match(/addEventListener\(/g) ?? []).length, 1);
+assert.equal((modalShellSharedCode.match(/removeEventListener\(/g) ?? []).length, 1);
+// Escape aislado siempre; el cierre solo ocurre si canClose vigente lo permite.
+assert.match(modalShellSharedCode, /event\.stopImmediatePropagation\(\);/);
+assert.match(modalShellSharedCode, /if \(!canCloseRef\.current\) return;/);
+// Restauracion solo si el elemento previo sigue conectado.
+assert.match(modalShellSharedCode, /previous\.isConnected\) previous\.focus\(\);/);
+// Sin cierre por backdrop.
+assert.doesNotMatch(modalShellSharedCode, /onClick/, "el backdrop no debe cerrar al pulsarlo");
 
 // 2. Los bloques inline previos fueron eliminados del root — no puede pasar con componentes vacíos.
 assert.doesNotMatch(appSource, /className="setup-card routine-day-builder-card"/, "el bloque inline de dias debe haberse eliminado del root");
