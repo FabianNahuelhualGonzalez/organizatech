@@ -56,7 +56,7 @@ assertInOrder(openTargetSource, [
   "setIsNotificationPanelOpen(false)",
   "activeWorkoutActions.clearTrainingCompletionSummary()",
   "setDashboardDayOverride(intent.dashboardDayOverride)",
-  "setComparisonDay(intent.comparisonDayOverride)",
+  "dispatchProgressController({ type: \"day_selected\", day: intent.comparisonDayOverride })",
   "navigateTo(intent.target)",
   "scrollToNotificationSection(intent.section ?? undefined)",
 ]);

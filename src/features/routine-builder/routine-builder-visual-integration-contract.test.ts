@@ -233,7 +233,11 @@ assert.match(appSource, /from "@\/features\/routine-builder\/model\/routine-buil
 assert.match(appSource, /\bcreateRoutineBuilderState\(\{/);
 assert.match(appSource, /\broutineBuilderReducer\b/);
 assert.match(appSource, /\bcreateRoutineBuilderRow\(createId\(\)\)/);
-assert.equal((appSource.match(/\buseReducer\(/g) ?? []).length, 1, "un único reducer en el root");
+assert.equal(
+  (appSource.match(/useReducer\(\s*routineBuilderReducer,/g) ?? []).length,
+  1,
+  "una única fuente routineBuilderReducer en el root",
+);
 assert.match(appSource, /const setupDay = routineBuilderState\.activeDay;/);
 assert.match(appSource, /const setupByDay = routineBuilderState\.setupByDay;/);
 assert.doesNotMatch(appSource, /const \[setupDay,/);
