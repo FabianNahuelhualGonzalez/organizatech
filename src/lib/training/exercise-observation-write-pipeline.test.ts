@@ -11,6 +11,12 @@ import { normalizeExerciseDrafts } from "@/lib/training/training-exercise-draft"
 const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
 const exerciseDraftSource = readFileSync("src/lib/training/training-exercise-draft.ts", "utf8");
 const exercisePanelSource = readFileSync("src/features/active-workout/components/ExerciseLastPerformancePanel.tsx", "utf8");
+// P3-30: el JSX de la pantalla guiada (draft activo, textarea de observacion y grid de series)
+// dejo de vivir inline en el root y pasó a GuidedTrainingScreen. Las aserciones que apuntaban a
+// ese JSX se re-apuntan aqui, sin relajarse; las aserciones negativas pasan a cubrir AMBAS
+// fuentes para que la garantia no se debilite al mover el codigo de archivo.
+const guidedScreenSource = readFileSync("src/features/active-workout/components/GuidedTrainingScreen.tsx", "utf8");
+const appAndGuidedSource = `${appSource}\n${guidedScreenSource}`;
 const repositorySource = readFileSync("src/lib/data/repository.ts", "utf8");
 const cycleScopedRepositorySource = readFileSync(
   "src/lib/training/cycle-scoped-training-repository.ts",
@@ -148,7 +154,7 @@ function testVisualObservationInputExistsAndIsConnectedToDraft() {
     "debe existir un <textarea> identificado por observationFieldId dentro del panel de referencia",
   );
   assert.match(
-    appSource,
+    guidedScreenSource,
     /observationValue=\{draft\.observation\}/,
     "el valor pasado al panel debe provenir de draft.observation",
   );
@@ -172,7 +178,7 @@ function testHistoricalDraftsRemainCompatible() {
 // [OBS-2B2 / PASO 7 caso 13-14] onChange actualiza exclusivamente el draft del ejercicio activo.
 function testOnChangeUpdatesOnlyTheActiveExerciseDraft() {
   assert.match(
-    appSource,
+    guidedScreenSource,
     /onObservationChange=\{\(value\) => updateDraft\(activeExercise, \{ observation: value \}\)\}/,
     "el cambio en el textarea debe llamar updateDraft con activeExercise y solo el campo observation",
   );
@@ -181,7 +187,7 @@ function testOnChangeUpdatesOnlyTheActiveExerciseDraft() {
 // [OBS-2B2 / PASO 7 caso 15] El draft activo se recalcula por exercise.id, aislando el texto al cambiar de ejercicio.
 function testDraftIsRecomputedPerActiveExerciseId() {
   assert.match(
-    appSource,
+    guidedScreenSource,
     /const draft = activeExercise \? normalizeExerciseDraft\(activeExercise, drafts\[activeExercise\.id\]\) : null;/,
     "el draft mostrado debe derivarse siempre de drafts[activeExercise.id], nunca de un valor compartido entre ejercicios",
   );
@@ -190,17 +196,17 @@ function testDraftIsRecomputedPerActiveExerciseId() {
 // [OBS-2B2 / PASO 7 caso 16] El historico nunca se copia al draft actual.
 function testHistoryNeverAutofillsDraft() {
   assert.doesNotMatch(
-    appSource,
+    appAndGuidedSource,
     /updateDraft\([^)]*latestExerciseObservation/,
     "updateDraft nunca debe recibir latestExerciseObservation como fuente de datos",
   );
   assert.doesNotMatch(
-    appSource,
+    appAndGuidedSource,
     /updateDraft\([^)]*observationPresentation/,
     "updateDraft nunca debe recibir observationPresentation como fuente de datos",
   );
   assert.doesNotMatch(
-    appSource,
+    appAndGuidedSource,
     /observation:\s*observationPresentation/,
     "ningun draft debe inicializarse leyendo el texto historico de observationPresentation",
   );
@@ -233,7 +239,7 @@ function testObservationBlockDoesNotUseNotes() {
 // [OBS-2B2 / PASO 7 caso 20] El texto se renderiza como texto plano, sin HTML/Markdown interpretado.
 function testObservationTextRendersAsPlainText() {
   assert.doesNotMatch(
-    `${appSource}\n${exercisePanelSource}`,
+    `${appAndGuidedSource}\n${exercisePanelSource}`,
     /dangerouslySetInnerHTML/,
     "la funcionalidad de observacion no debe introducir dangerouslySetInnerHTML en ningun punto",
   );
@@ -241,7 +247,7 @@ function testObservationTextRendersAsPlainText() {
 
 // [OBS-2B2 / PASO 7 caso 22] El input de observacion vive a nivel ejercicio, no dentro del map de series.
 function testObservationInputIsNotInsideSeriesMap() {
-  const seriesRepGridBlock = appSource.match(/<div className="series-rep-grid">[\s\S]*?<\/div>\s*\n\s*<\/div>/);
+  const seriesRepGridBlock = guidedScreenSource.match(/<div className="series-rep-grid">[\s\S]*?<\/div>\s*\n\s*<\/div>/);
   assert.ok(seriesRepGridBlock, "no se encontro el bloque series-rep-grid");
   assert.doesNotMatch(
     seriesRepGridBlock![0],

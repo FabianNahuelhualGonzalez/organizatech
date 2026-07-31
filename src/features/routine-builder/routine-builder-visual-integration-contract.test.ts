@@ -74,7 +74,11 @@ assert.doesNotMatch(appSource, /\bTrash2\b/, "Trash2 ya no se usa directamente e
 //    TrainingPlanSetupCard -> DayCard -> NameCard -> ExerciseCard, como hermanas directas.
 const screenSource = (() => {
   const start = appSource.indexOf("function InitialTrainingScreen(");
-  const end = appSource.indexOf("\nfunction GuidedTrainingScreen(", start);
+  // Limite estructural estable: la siguiente declaracion de funcion de nivel superior. Antes se
+  // usaba "\nfunction GuidedTrainingScreen(", que dejo de existir en el root al extraerse el
+  // componente (P3-30). Este limite no depende de que funcion concreta siga a
+  // InitialTrainingScreen, por lo que recorta exactamente el mismo cuerpo sin relajar la prueba.
+  const end = appSource.indexOf("\nfunction ", start);
   assert.ok(start >= 0 && end > start, "InitialTrainingScreen debe seguir existiendo como funcion propia");
   return appSource.slice(start, end);
 })();
