@@ -1,3 +1,5 @@
+import { Button } from "@/ui/buttons/button";
+
 export interface ConfirmNewCycleModalProps {
   isBusy: boolean;
   onCancel: () => void;
@@ -11,10 +13,10 @@ export function ConfirmNewCycleModal({ isBusy, onCancel, onConfirm }: ConfirmNew
         <h2>¿Estas seguro?</h2>
         <p>Si decides crear un nuevo ciclo de entrenamiento, finalizaremos el ciclo actual que tienes registrado.</p>
         <div className="modal-actions">
-          <button className="button danger-solid" type="button" onClick={onCancel} disabled={isBusy}>No</button>
-          <button className="button success-solid" type="button" onClick={onConfirm} disabled={isBusy}>
+          <Button variant="danger" type="button" onClick={onCancel} disabled={isBusy}>No</Button>
+          <Button variant="success" type="button" onClick={onConfirm} disabled={isBusy}>
             {isBusy ? "Finalizando..." : "Si"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

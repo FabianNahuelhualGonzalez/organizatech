@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Plus } from "lucide-react";
 
 import {
@@ -14,6 +14,8 @@ import {
   type ProfilePersonalDataInput,
 } from "@/lib/profile/profile-form";
 import { validateAvatarSourceFile } from "@/lib/profile/profile-avatar-image";
+import { Button } from "@/ui/buttons/button";
+import { FormField } from "@/ui/forms/form-field";
 import type { ProfilePersonalData } from "@/lib/profile/profile-repository";
 import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
 import { ProfileAvatarEditor } from "./ProfileAvatarEditor";
@@ -317,32 +319,32 @@ function PersonalDataSection({
 
       {isEditing ? (
         <form className="profile-form" onSubmit={handleSubmit}>
-          <ProfileField label="Nombre" error={fieldErrors.firstName}>
+          <FormField className="profile-field" label="Nombre" error={fieldErrors.firstName}>
             <input
               value={values.firstName}
               onChange={(event) => setValues((current) => ({ ...current, firstName: event.target.value }))}
               maxLength={80}
             />
-          </ProfileField>
-          <ProfileField label="Apellido" error={fieldErrors.lastName}>
+          </FormField>
+          <FormField className="profile-field" label="Apellido" error={fieldErrors.lastName}>
             <input
               value={values.lastName}
               onChange={(event) => setValues((current) => ({ ...current, lastName: event.target.value }))}
               maxLength={120}
             />
-          </ProfileField>
-          <ProfileField label="Fecha de nacimiento" error={fieldErrors.birthDate}>
+          </FormField>
+          <FormField className="profile-field" label="Fecha de nacimiento" error={fieldErrors.birthDate}>
             <input
               type="date"
               value={values.birthDate}
               onChange={(event) => setValues((current) => ({ ...current, birthDate: event.target.value }))}
             />
-          </ProfileField>
+          </FormField>
           <div className="profile-info-row profile-readonly-row">
             <dt>Edad</dt>
             <dd>{formatProfileAgeLabel(values.birthDate)}</dd>
           </div>
-          <ProfileField label="Género" error={fieldErrors.gender}>
+          <FormField className="profile-field" label="Género" error={fieldErrors.gender}>
             <select
               value={values.gender}
               onChange={(event) => setValues((current) => ({ ...current, gender: event.target.value as ProfileFormValues["gender"] }))}
@@ -351,8 +353,8 @@ function PersonalDataSection({
                 <option value={gender} key={gender}>{profileGenderLabels[gender]}</option>
               ))}
             </select>
-          </ProfileField>
-          <ProfileField label="Celular" error={fieldErrors.phoneNumber}>
+          </FormField>
+          <FormField className="profile-field" label="Celular" error={fieldErrors.phoneNumber}>
             <input
               value={values.phoneNumber}
               onChange={(event) => setValues((current) => ({ ...current, phoneNumber: event.target.value }))}
@@ -361,19 +363,19 @@ function PersonalDataSection({
               inputMode="tel"
               autoComplete="tel"
             />
-          </ProfileField>
-          <ProfileField label="Correo">
+          </FormField>
+          <FormField className="profile-field" label="Correo">
             <input value={profile.email ?? "No disponible"} readOnly aria-readonly="true" />
-          </ProfileField>
+          </FormField>
 
           {statusMessage && <p className="profile-form-status">{statusMessage}</p>}
           <div className="profile-form-actions">
-            <button className="button secondary" type="button" onClick={cancelEdition} disabled={isSaving}>
+            <Button variant="secondary" type="button" onClick={cancelEdition} disabled={isSaving}>
               Cancelar
-            </button>
-            <button className="button" type="submit" disabled={isSaving}>
+            </Button>
+            <Button variant="primary" type="submit" disabled={isSaving}>
               {isSaving ? "Guardando..." : "Guardar cambios"}
-            </button>
+            </Button>
           </div>
         </form>
       ) : (
@@ -398,24 +400,6 @@ function PersonalDataSection({
         </>
       )}
     </section>
-  );
-}
-
-function ProfileField({
-  label,
-  error,
-  children,
-}: {
-  label: string;
-  error?: string;
-  children: ReactNode;
-}) {
-  return (
-    <label className="profile-field">
-      <span>{label}</span>
-      {children}
-      {error && <small>{error}</small>}
-    </label>
   );
 }
 
