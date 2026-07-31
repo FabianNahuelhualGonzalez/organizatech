@@ -12,6 +12,8 @@ const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf
 const activeDraftStaticSource = readFileSync("src/lib/training/active-workout-draft.ts", "utf8");
 const workoutStorageStaticSource = readFileSync("src/lib/training/workout-draft-storage.ts", "utf8");
 const exerciseDraftStaticSource = readFileSync("src/lib/training/training-exercise-draft.ts", "utf8");
+const completionStaticSource = readFileSync("src/lib/training/active-workout-completion.ts", "utf8");
+const completionSummaryStaticSource = readFileSync("src/lib/training/training-completion-summary.ts", "utf8");
 // P3-30: la declaracion `drafts: Record<string, ExerciseDraft>` dejo de estar inline en el root al
 // extraerse GuidedTrainingScreen; ahora vive en GuidedTrainingScreenProps, su ubicacion real.
 const guidedScreenStaticSource = readFileSync(
@@ -50,9 +52,16 @@ assert.match(
 );
 assert.match(
   appStaticSource,
-  /import \{[^}]*createExerciseDraft,[^}]*normalizeExerciseDraft,[^}]*type ExerciseDraft,[^}]*\} from "@\/lib\/training\/training-exercise-draft";/,
-  "React debe importar los helpers productivos y ExerciseDraft desde su modulo canonico",
+  /import \{[^}]*createExerciseDraft,[^}]*type ExerciseDraft,[^}]*\} from "@\/lib\/training\/training-exercise-draft";/,
+  "React debe importar createExerciseDraft y ExerciseDraft desde su modulo canonico",
 );
+assert.doesNotMatch(
+  appStaticSource,
+  /import \{[^}]*normalizeExerciseDraft[^}]*\} from "@\/lib\/training\/training-exercise-draft";/,
+  "React no debe retener normalizacion duplicada despues de extraer completion",
+);
+assert.match(completionStaticSource, /import \{[^}]*normalizeExerciseDraft[^}]*\} from "@\/lib\/training\/training-exercise-draft";/);
+assert.match(completionSummaryStaticSource, /import \{[^}]*normalizeExerciseDraft[^}]*\} from "@\/lib\/training\/training-exercise-draft";/);
 
 assert.doesNotMatch(appStaticSource, /^\s*type ActiveWorkoutReadinessContext\s*=/m);
 assert.doesNotMatch(appStaticSource, /^\s*interface ExerciseDraft\s*\{/m);

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
 import {
+  resolveActiveWorkoutCompletionStart,
+  resolveWorkoutReadinessLinkConfirmation,
+} from "@/lib/training/active-workout-completion";
+import {
   createWorkoutReadinessPendingLink,
   translateTrainingWorkoutReadinessLinkError,
   TrainingWorkoutReadinessLinkFlowError,
@@ -20,10 +24,16 @@ interface SimulatedCompletionOptions {
 }
 
 async function simulateCompletion(options: SimulatedCompletionOptions) {
-  if (options.pending) {
-    const result = await options.link(options.pending);
-    if (result.trainingSessionId !== options.pending.trainingSessionId) throw new TrainingWorkoutReadinessLinkFlowError("session mismatch");
-    if (!result.linked && !result.alreadyLinked) throw new TrainingWorkoutReadinessLinkFlowError("link failed");
+  const start = resolveActiveWorkoutCompletionStart(options.pending);
+  if (start.kind === "retry_pending_link") {
+    const result = await options.link(start.pendingLink);
+    const confirmation = resolveWorkoutReadinessLinkConfirmation({
+      pendingLink: start.pendingLink,
+      result,
+    });
+    if (confirmation.kind === "blocked") {
+      throw new TrainingWorkoutReadinessLinkFlowError(confirmation.message);
+    }
     options.cleanup();
     return "linked";
   }
@@ -48,8 +58,10 @@ async function simulateCompletion(options: SimulatedCompletionOptions) {
 
   options.persistPending(pendingLink);
   const result = await options.link(pendingLink);
-  if (result.trainingSessionId !== pendingLink.trainingSessionId) throw new TrainingWorkoutReadinessLinkFlowError("session mismatch");
-  if (!result.linked && !result.alreadyLinked) throw new TrainingWorkoutReadinessLinkFlowError("link failed");
+  const confirmation = resolveWorkoutReadinessLinkConfirmation({ pendingLink, result });
+  if (confirmation.kind === "blocked") {
+    throw new TrainingWorkoutReadinessLinkFlowError(confirmation.message);
+  }
   options.cleanup();
   return "linked";
 }
