@@ -1,6 +1,359 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import {
+  activeWorkoutControllerReducer,
+  createInitialActiveWorkoutControllerState,
+  type ActiveWorkoutControllerAction,
+} from "@/features/active-workout/model/active-workout-controller-state";
+import type { TrainingCompletionSummary } from "@/lib/training/training-completion-summary";
+import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
+import type { TrainingReadiness } from "@/lib/training/training-readiness-draft";
+import type { PendingWorkoutReadinessLink } from "@/lib/training/workout-draft-storage";
+
+// =============================================================================================
+// RUNTIME: importa y ejecuta directamente factory/reducer productivos. Estas pruebas no renderizan
+// React; la sección estática de wiring del hook se encuentra después.
+// =============================================================================================
+
+function createDraft(input: {
+  weight: string;
+  reps: Array<number | "">;
+  observation: string;
+  registered?: boolean;
+}): ExerciseDraft {
+  return {
+    weight: input.weight,
+    rir: "2",
+    reps: input.reps,
+    registered: input.registered ?? false,
+    observation: input.observation,
+  };
+}
+
+function createSummary(): TrainingCompletionSummary & { ownerId: string } {
+  return {
+    ownerId: "owner-must-not-enter-state",
+    sessionId: "session-1",
+    dayLabel: "Lunes",
+    statusLabel: "Completado",
+    workoutName: "Piernas",
+    cycleLabel: "Mesociclo",
+    weekLabel: "Semana 2",
+    progressLabel: "2 de 3 dias",
+    durationMinutes: 42,
+    durationLabel: "42 min",
+    exercises: [{
+      exerciseId: "exercise-a",
+      exerciseLineageId: "lineage-a",
+      exerciseName: "Sentadilla",
+      currentDate: "2026-07-31",
+      currentDateLabel: "31 jul",
+      currentSeriesCount: 2,
+      currentTotalReps: 18,
+      currentWeight: 60,
+      currentWeightLabel: "60 kg",
+      previousDate: "2026-07-24",
+      previousDateLabel: "24 jul",
+      previousSeriesCount: 2,
+      previousTotalReps: 16,
+      previousWeightLabel: "55 kg",
+      repsDifference: 2,
+      weightDifference: 5,
+      comparisonStatus: "ready",
+      repsTone: "positive",
+      weightTone: "positive",
+      resultLines: [{ label: "+2 reps", tone: "positive" }],
+    }],
+  };
+}
+
+function applyActions(actions: readonly ActiveWorkoutControllerAction[]) {
+  return actions.reduce(
+    activeWorkoutControllerReducer,
+    createInitialActiveWorkoutControllerState(),
+  );
+}
+
+const expectedInitialControllerState = {
+  activeExerciseIndex: 0,
+  exerciseDrafts: {},
+  readiness: null,
+  checkingDailyReadiness: false,
+  savingDailyReadiness: false,
+  dailyReadinessError: "",
+  hasStartedTraining: false,
+  activeWorkoutStartedAt: null,
+  activeWorkoutAttemptId: null,
+  pendingReadinessLink: null,
+  hasRecoverableWorkoutStart: false,
+  trainingCompletionSummary: null,
+};
+
+// Estado inicial completo y referencias frescas.
+const initialControllerState = createInitialActiveWorkoutControllerState();
+const secondInitialControllerState = createInitialActiveWorkoutControllerState();
+assert.deepEqual(initialControllerState, expectedInitialControllerState);
+assert.deepEqual(secondInitialControllerState, expectedInitialControllerState);
+assert.notEqual(initialControllerState, secondInitialControllerState);
+assert.notEqual(initialControllerState.exerciseDrafts, secondInitialControllerState.exerciseDrafts);
+
+// Índice inmutable.
+{
+  const before = structuredClone(initialControllerState);
+  const next = activeWorkoutControllerReducer(initialControllerState, {
+    type: "active_exercise_index_changed",
+    index: 2,
+  });
+  assert.equal(next.activeExerciseIndex, 2);
+  assert.deepEqual(initialControllerState, before, "cambiar indice no muta el estado anterior");
+  assert.equal(activeWorkoutControllerReducer(next, {
+    type: "active_exercise_index_changed",
+    index: 2,
+  }), next, "repetir el indice es no-op");
+}
+
+// Recovery clona mapa, drafts y reps; tampoco muta el payload ni retiene cambios posteriores.
+const recoveryDrafts = {
+  "exercise-a": createDraft({ weight: "60", reps: [10, 8], observation: "A" }),
+  "exercise-b": createDraft({ weight: "20", reps: [12], observation: "B" }),
+};
+const recoveryDraftsBefore = structuredClone(recoveryDrafts);
+const recoveredState = activeWorkoutControllerReducer(initialControllerState, {
+  type: "exercise_drafts_recovered",
+  drafts: recoveryDrafts,
+});
+assert.deepEqual(recoveryDrafts, recoveryDraftsBefore, "recovery no muta el input");
+assert.deepEqual(recoveredState.exerciseDrafts, recoveryDraftsBefore);
+assert.notEqual(recoveredState.exerciseDrafts, recoveryDrafts);
+assert.notEqual(recoveredState.exerciseDrafts["exercise-a"], recoveryDrafts["exercise-a"]);
+assert.notEqual(recoveredState.exerciseDrafts["exercise-a"]?.reps, recoveryDrafts["exercise-a"].reps);
+recoveryDrafts["exercise-a"].reps[0] = 99;
+assert.equal(recoveredState.exerciseDrafts["exercise-a"]?.reps[0], 10);
+
+// Actualizar A queda aislado por exerciseId, clona reps y no toca B.
+{
+  const stateBefore = structuredClone(recoveredState);
+  const incomingDraft = createDraft({
+    weight: "65",
+    reps: [9, 9],
+    observation: "A actualizada",
+    registered: true,
+  });
+  const incomingBefore = structuredClone(incomingDraft);
+  const next = activeWorkoutControllerReducer(recoveredState, {
+    type: "exercise_draft_updated",
+    exerciseId: "exercise-a",
+    draft: incomingDraft,
+  });
+
+  assert.deepEqual(next.exerciseDrafts["exercise-a"], incomingBefore);
+  assert.notEqual(next.exerciseDrafts["exercise-a"], incomingDraft);
+  assert.notEqual(next.exerciseDrafts["exercise-a"]?.reps, incomingDraft.reps);
+  assert.equal(next.exerciseDrafts["exercise-b"], recoveredState.exerciseDrafts["exercise-b"]);
+  assert.deepEqual(recoveredState, stateBefore, "el estado anterior permanece intacto");
+  assert.deepEqual(incomingDraft, incomingBefore, "update no muta su payload");
+
+  incomingDraft.reps[0] = 1;
+  assert.equal(next.exerciseDrafts["exercise-a"]?.reps[0], 9);
+}
+
+// Eliminación selectiva conserva otros ejercicios y no muta el mapa previo.
+{
+  const before = structuredClone(recoveredState);
+  const next = activeWorkoutControllerReducer(recoveredState, {
+    type: "completed_exercise_drafts_removed",
+    exerciseIds: ["exercise-a"],
+  });
+  assert.deepEqual(Object.keys(next.exerciseDrafts), ["exercise-b"]);
+  assert.deepEqual(next.exerciseDrafts["exercise-b"], recoveredState.exerciseDrafts["exercise-b"]);
+  assert.deepEqual(recoveredState, before);
+  assert.equal(activeWorkoutControllerReducer(recoveredState, {
+    type: "completed_exercise_drafts_removed",
+    exerciseIds: ["missing"],
+  }), recoveredState, "eliminar ids ausentes es no-op");
+}
+
+// Readiness se clona por allowlist y no acepta ownership adicional.
+{
+  const readinessPayload: TrainingReadiness & { ownerId: string } = {
+    motivation: 6,
+    hydration: 5,
+    sleep: 4,
+    energy: 7,
+    skipped: false,
+    ownerId: "owner-must-not-enter-state",
+  };
+  const payloadBefore = structuredClone(readinessPayload);
+  const next = activeWorkoutControllerReducer(initialControllerState, {
+    type: "readiness_changed",
+    readiness: readinessPayload,
+  });
+  assert.deepEqual(readinessPayload, payloadBefore);
+  assert.notEqual(next.readiness, readinessPayload);
+  assert.equal(next.readiness?.motivation, 6);
+  assert.equal(next.readiness && "ownerId" in next.readiness, false);
+  readinessPayload.motivation = 1;
+  assert.equal(next.readiness?.motivation, 6);
+  assert.equal(activeWorkoutControllerReducer(next, { type: "readiness_cleared" }).readiness, null);
+}
+
+// Pending link se clona por allowlist y no admite campos de identidad externos.
+{
+  const pendingPayload: PendingWorkoutReadinessLink & { userId: string } = {
+    workoutAttemptId: "attempt-1",
+    trainingSessionId: "session-1",
+    userId: "user-must-not-enter-state",
+  };
+  const payloadBefore = structuredClone(pendingPayload);
+  const next = activeWorkoutControllerReducer(initialControllerState, {
+    type: "pending_readiness_link_set",
+    pendingLink: pendingPayload,
+  });
+  assert.deepEqual(pendingPayload, payloadBefore);
+  assert.deepEqual(next.pendingReadinessLink, {
+    workoutAttemptId: "attempt-1",
+    trainingSessionId: "session-1",
+  });
+  assert.notEqual(next.pendingReadinessLink, pendingPayload);
+  pendingPayload.trainingSessionId = "session-mutated";
+  assert.equal(next.pendingReadinessLink?.trainingSessionId, "session-1");
+  assert.equal(activeWorkoutControllerReducer(next, {
+    type: "pending_readiness_link_cleared",
+  }).pendingReadinessLink, null);
+}
+
+// Inicio, recovery, startedAt y attempt ID son transiciones explícitas e independientes.
+{
+  const started = applyActions([
+    { type: "training_started" },
+    { type: "workout_started_at_set", startedAt: "2026-07-31T12:00:00.000Z" },
+    { type: "workout_attempt_id_set", attemptId: "attempt-1" },
+    { type: "workout_recovery_availability_changed", available: true },
+  ]);
+  assert.equal(started.hasStartedTraining, true);
+  assert.equal(started.activeWorkoutStartedAt, "2026-07-31T12:00:00.000Z");
+  assert.equal(started.activeWorkoutAttemptId, "attempt-1");
+  assert.equal(started.hasRecoverableWorkoutStart, true);
+
+  const stopActions: readonly ActiveWorkoutControllerAction[] = [
+    { type: "training_stopped" },
+    { type: "workout_started_at_cleared" },
+    { type: "workout_attempt_id_cleared" },
+    { type: "workout_recovery_availability_changed", available: false },
+  ];
+  const stopped = stopActions.reduce(activeWorkoutControllerReducer, started);
+  assert.equal(stopped.hasStartedTraining, false);
+  assert.equal(stopped.activeWorkoutStartedAt, null);
+  assert.equal(stopped.activeWorkoutAttemptId, null);
+  assert.equal(stopped.hasRecoverableWorkoutStart, false);
+}
+
+// Checking readiness: inicio, success y error controlan loading/error sin tocar otros campos.
+{
+  const checking = activeWorkoutControllerReducer(
+    activeWorkoutControllerReducer(initialControllerState, {
+      type: "readiness_error_published",
+      error: "anterior",
+    }),
+    { type: "readiness_check_started" },
+  );
+  assert.equal(checking.checkingDailyReadiness, true);
+  assert.equal(checking.dailyReadinessError, "");
+  const success = activeWorkoutControllerReducer(checking, { type: "readiness_check_succeeded" });
+  assert.equal(success.checkingDailyReadiness, false);
+  assert.equal(success.dailyReadinessError, "");
+  const failed = activeWorkoutControllerReducer(checking, {
+    type: "readiness_check_failed",
+    error: "check error",
+  });
+  assert.equal(failed.checkingDailyReadiness, false);
+  assert.equal(failed.dailyReadinessError, "check error");
+  assert.equal(activeWorkoutControllerReducer(failed, {
+    type: "readiness_error_cleared",
+  }).dailyReadinessError, "");
+}
+
+// Saving readiness: inicio, success y error controlan loading/error de forma independiente.
+{
+  const saving = activeWorkoutControllerReducer(initialControllerState, {
+    type: "readiness_save_started",
+  });
+  assert.equal(saving.savingDailyReadiness, true);
+  assert.equal(saving.checkingDailyReadiness, false);
+  const success = activeWorkoutControllerReducer(saving, { type: "readiness_save_succeeded" });
+  assert.equal(success.savingDailyReadiness, false);
+  assert.equal(success.dailyReadinessError, "");
+  const failed = activeWorkoutControllerReducer(saving, {
+    type: "readiness_save_failed",
+    error: "save error",
+  });
+  assert.equal(failed.savingDailyReadiness, false);
+  assert.equal(failed.dailyReadinessError, "save error");
+}
+
+// Summary se clona profundamente por allowlist y puede limpiarse sin mutar el payload.
+const summaryPayload = createSummary();
+const summaryPayloadBefore = structuredClone(summaryPayload);
+const summaryState = activeWorkoutControllerReducer(initialControllerState, {
+  type: "completion_summary_set",
+  summary: summaryPayload,
+});
+assert.deepEqual(summaryPayload, summaryPayloadBefore);
+assert.notEqual(summaryState.trainingCompletionSummary, summaryPayload);
+assert.notEqual(summaryState.trainingCompletionSummary?.exercises, summaryPayload.exercises);
+assert.notEqual(
+  summaryState.trainingCompletionSummary?.exercises[0]?.resultLines,
+  summaryPayload.exercises[0]?.resultLines,
+);
+assert.equal(summaryState.trainingCompletionSummary && "ownerId" in summaryState.trainingCompletionSummary, false);
+summaryPayload.exercises[0].resultLines[0].label = "mutado";
+assert.equal(summaryState.trainingCompletionSummary?.exercises[0]?.resultLines[0]?.label, "+2 reps");
+assert.equal(activeWorkoutControllerReducer(summaryState, {
+  type: "completion_summary_cleared",
+}).trainingCompletionSummary, null);
+
+// Reset completo devuelve una instancia fresca, sin revivir valores ni mutar el estado previo.
+{
+  const dirtyState = applyActions([
+    { type: "active_exercise_index_changed", index: 4 },
+    { type: "exercise_drafts_recovered", drafts: recoveryDraftsBefore },
+    { type: "readiness_changed", readiness: { motivation: 6, skipped: false } },
+    { type: "readiness_check_started" },
+    { type: "readiness_save_started" },
+    { type: "training_started" },
+    { type: "workout_started_at_set", startedAt: "2026-07-31T12:00:00.000Z" },
+    { type: "workout_attempt_id_set", attemptId: "attempt-reset" },
+    {
+      type: "pending_readiness_link_set",
+      pendingLink: { workoutAttemptId: "attempt-reset", trainingSessionId: "session-reset" },
+    },
+    { type: "workout_recovery_availability_changed", available: true },
+    { type: "completion_summary_set", summary: createSummary() },
+    { type: "readiness_error_published", error: "error-reset" },
+  ]);
+  const dirtyBefore = structuredClone(dirtyState);
+  const reset = activeWorkoutControllerReducer(dirtyState, { type: "active_workout_reset" });
+  const fresh = createInitialActiveWorkoutControllerState();
+
+  assert.deepEqual(reset, expectedInitialControllerState);
+  assert.deepEqual(dirtyState, dirtyBefore, "reset no muta el estado previo");
+  assert.notEqual(reset, dirtyState);
+  assert.notEqual(reset, fresh);
+  assert.notEqual(reset.exerciseDrafts, dirtyState.exerciseDrafts);
+  assert.notEqual(reset.exerciseDrafts, fresh.exerciseDrafts);
+  assert.deepEqual(activeWorkoutControllerReducer(reset, {
+    type: "active_exercise_index_changed",
+    index: 1,
+  }).exerciseDrafts, {}, "una accion posterior no revive drafts previos");
+}
+
+// Una acción desconocida no se ignora silenciosamente en runtime; el tipo sigue siendo exhaustivo.
+assert.throws(() => activeWorkoutControllerReducer(
+  initialControllerState,
+  { type: "unknown_action" } as unknown as ActiveWorkoutControllerAction,
+));
+
 /**
  * Contrato ESTÁTICO de integración visual. No renderiza React, no simula sliders,
  * clicks ni navegador, y no prueba persistencia.
@@ -11,6 +364,12 @@ function readSource(path: string): string {
 
 const appSource = readSource("src/components/organizatech-app.tsx");
 const packageSource = readSource("package.json");
+const controllerModelSource = readSource(
+  "src/features/active-workout/model/active-workout-controller-state.ts",
+);
+const controllerHookSource = readSource(
+  "src/features/active-workout/hooks/useActiveWorkoutController.ts",
+);
 const files = {
   readiness: readSource("src/features/active-workout/components/TrainingReadinessScreen.tsx"),
   start: readSource("src/features/active-workout/components/TrainingStartScreen.tsx"),
@@ -19,6 +378,70 @@ const files = {
   seriesResult: readSource("src/features/active-workout/components/SeriesResult.tsx"),
   guided: readSource("src/features/active-workout/components/GuidedTrainingScreen.tsx"),
 };
+
+// =============================================================================================
+// ESTÁTICO: wiring del hook preparado. No renderiza React, no ejecuta el hook y no presenta estas
+// comprobaciones source-based como cobertura de interacción.
+// =============================================================================================
+
+assert.match(controllerHookSource, /import \{ useMemo, useReducer \} from "react";/);
+assert.match(controllerHookSource, /activeWorkoutControllerReducer/);
+assert.match(controllerHookSource, /createInitialActiveWorkoutControllerState/);
+assert.match(controllerHookSource, /useReducer\(\s*activeWorkoutControllerReducer,/);
+assert.match(controllerHookSource, /return useMemo\(\(\) => \(\{ state, actions \}\)/);
+assert.doesNotMatch(appSource, /useActiveWorkoutController/, "P3-34A no conecta el hook al root");
+assert.doesNotMatch(controllerHookSource, /\buseEffect\b|\bfetch\s*\(|\blocalStorage\b|\bsessionStorage\b/);
+assert.doesNotMatch(
+  controllerHookSource,
+  /\buseRef\b|\bSessionOperationOwner\b|\bSessionDataRequestToken\b/,
+  "el hook no posee refs, owners ni tokens de sesión",
+);
+assert.doesNotMatch(
+  controllerHookSource,
+  /@\/lib\/(?:storage|navigation|supabase|session)|-repository(?:"|')|active-workout-session-boundary/,
+  "el hook no depende de storage, navegacion, Supabase, repositories ni session owners",
+);
+assert.doesNotMatch(controllerHookSource, /^\s*dispatch\s*:/m, "dispatch no forma parte de la API pública");
+assert.doesNotMatch(controllerHookSource, /\bsetState\b|\bpatchState\b|\bmergeState\b/);
+
+assert.doesNotMatch(controllerModelSource, /from "react"|\buse[A-Z]\w*\b/);
+assert.doesNotMatch(controllerModelSource, /\bDate\.now\b|\bMath\.random\b|\bwindow\b|\bdocument\b/);
+assert.doesNotMatch(controllerModelSource, /\bfetch\s*\(|\bsetTimeout\b|\bsetInterval\b/);
+assert.doesNotMatch(controllerModelSource, /\bany\b/);
+assert.doesNotMatch(controllerModelSource, /Partial<ActiveWorkoutControllerState>/);
+assert.doesNotMatch(controllerModelSource, /type:\s*"(?:patch|merge|set_state)"/);
+assert.match(controllerModelSource, /default:\s*\n\s*return assertNever\(action\);/);
+for (const importStatement of controllerModelSource.match(/^import .+;$/gm) ?? []) {
+  assert.match(importStatement, /^import type /, "el modelo solo puede tener imports type-only");
+}
+for (const canonicalType of [
+  "ExerciseDraft",
+  "TrainingReadiness",
+  "PendingWorkoutReadinessLink",
+  "TrainingCompletionSummary",
+]) {
+  assert.match(
+    controllerModelSource,
+    new RegExp(`import type \\{ ${canonicalType} \\}`),
+    `${canonicalType} debe reutilizar su definición canónica`,
+  );
+  assert.doesNotMatch(
+    controllerModelSource,
+    new RegExp(`(?:interface|type) ${canonicalType}\\b`),
+    `${canonicalType} no debe duplicarse en el modelo`,
+  );
+}
+for (const forbidden of [
+  "repository",
+  "Supabase",
+  "localStorage",
+  "sessionStorage",
+  "SessionOperationOwner",
+  "SessionDataRequestToken",
+  "setScreen",
+]) {
+  assert.doesNotMatch(controllerModelSource, new RegExp(forbidden, "i"));
+}
 
 function assertNoForbiddenImports(source: string, label: string) {
   const importPaths = [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]);
@@ -83,4 +506,4 @@ for (const prop of [
 const registration = "tsx src/features/active-workout/active-workout-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);
 
-console.log("active-workout visual static integration contract tests passed");
+console.log("active-workout controller runtime and visual static integration contract tests passed");
