@@ -788,7 +788,6 @@ async function run() {
     assert.ok(activeWorkoutResetSource.includes(resetContract), `El reset central conserva ${resetContract}`);
   }
   for (const resetRef of [
-    "isSavingTrainingRef.current = null",
     "workoutStartInFlightRef.current = null",
     "dailyReadinessSaveInFlightRef.current = null",
     "workoutCompletionInFlightRef.current = null",

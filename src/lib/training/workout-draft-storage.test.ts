@@ -900,6 +900,11 @@ async function run() {
     const completionEnd = appSource.indexOf("  function clearAuthForms", completionStart);
     const completionBlock = completionStart >= 0 && completionEnd > completionStart ? appSource.slice(completionStart, completionEnd) : "";
     assert.match(completionBlock, /const operationOwner = tryAcquireActiveWorkoutOperation\(workoutCompletionInFlightRef\);[\s\S]*if \(!operationOwner\) return;/, "completion adquiere lock con owner antes de operar");
+    assert.equal(
+      (completionBlock.match(/tryAcquireActiveWorkoutOperation\(/g) ?? []).length,
+      1,
+      "completion usa un unico owner productivo",
+    );
     const completionLockIndex = completionBlock.indexOf("tryAcquireActiveWorkoutOperation(workoutCompletionInFlightRef)");
     for (const operation of ["pendingReadinessLinkRef.current", "createTrainingSessionWithCycleEntries", "saveTrainingSessionWithEntries", "confirmTrainingWorkoutReadinessLink"]) {
       const operationIndex = completionBlock.indexOf(operation);

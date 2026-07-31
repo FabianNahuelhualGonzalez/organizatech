@@ -248,6 +248,7 @@ import {
   buildCurrentWorkoutSavePlan,
   incompleteCurrentWorkoutMessage,
   isExerciseRegisteredInCurrentWorkout,
+  resolveCurrentExerciseRegistration,
 } from "@/lib/training/workout-registration";
 import {
   type ActiveWorkoutReadinessContext,
@@ -426,8 +427,6 @@ export function OrganizatechApp({
     () => resolveInitialAuthState(getPasswordRecoveryRouteState()).isAuthLoading,
   );
   const [isBusy, setIsBusy] = useState(false);
-  // P3-31: lock secundario redundante con completion; se conserva hasta consolidar locks.
-  const isSavingTrainingRef = useRef<SessionOperationOwner | null>(null);
   const passwordUpdateSuccessRef = useRef(false);
   const [exercises, setExercises] = useState<ExerciseTemplate[]>([]);
   const [cycleScopedPlan, setCycleScopedPlan] = useState<CycleScopedTrainingPlan | null>(null);
@@ -511,11 +510,8 @@ export function OrganizatechApp({
   }, []);
 
   const resetActiveWorkoutSessionState = useCallback(() => {
-    const hadActiveWorkoutBusyOwner = Boolean(
-      isSavingTrainingRef.current || workoutCompletionInFlightRef.current,
-    );
+    const hadActiveWorkoutBusyOwner = Boolean(workoutCompletionInFlightRef.current);
 
-    isSavingTrainingRef.current = null;
     workoutStartInFlightRef.current = null;
     dailyReadinessSaveInFlightRef.current = null;
     workoutCompletionInFlightRef.current = null;
@@ -3164,26 +3160,29 @@ export function OrganizatechApp({
   }
 
   function registerCurrentExercise() {
-    if (isBusy) return;
+    const decision = resolveCurrentExerciseRegistration({
+      isBusy,
+      exercises: dayExercises,
+      activeExerciseIndex,
+      drafts: exerciseDrafts,
+    });
 
-    const exercise = dayExercises[activeExerciseIndex];
-    if (!exercise) return;
-    if (isExerciseRegisteredInCurrentWorkout(exercise, exerciseDrafts)) {
-      const nextPendingIndex = dayExercises.findIndex((item, index) =>
-        index > activeExerciseIndex &&
-        !isExerciseRegisteredInCurrentWorkout(item, exerciseDrafts));
-      if (nextPendingIndex >= 0) setActiveExerciseIndex(nextPendingIndex);
-      return;
+    switch (decision.kind) {
+      case "busy":
+      case "missing_exercise":
+      case "already_registered_complete":
+        return;
+      case "already_registered_advance":
+        setActiveExerciseIndex(decision.nextExerciseIndex);
+        return;
+      case "invalid_draft":
+        setRoutineNotice(decision.message);
+        return;
+      case "register":
+        setRoutineNotice("");
+        updateExerciseDraft(decision.exercise, decision.draft);
+        setActiveExerciseIndex(decision.nextExerciseIndex);
     }
-    const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
-    const requiredReps = draft.reps.slice(0, exercise.targetSets);
-    if (draft.weight.trim() === "" || parseDecimalWeightInput(draft.weight) === null || requiredReps.some((value) => value === "")) {
-      setRoutineNotice("Completa peso y series antes de registrar el ejercicio.");
-      return;
-    }
-    setRoutineNotice("");
-    updateExerciseDraft(exercise, { ...draft, registered: true });
-    setActiveExerciseIndex((index) => Math.min(index + 1, Math.max(0, dayExercises.length - 1)));
   }
 
   async function confirmTrainingWorkoutReadinessLink(
@@ -3348,13 +3347,10 @@ export function OrganizatechApp({
   async function saveCompletedTraining() {
     const operationOwner = tryAcquireActiveWorkoutOperation(workoutCompletionInFlightRef);
     if (!operationOwner) return;
-    let saveOperationOwner: SessionOperationOwner | null = null;
     let ownsBusyState = false;
 
     try {
       if (isBusy) return;
-      saveOperationOwner = tryAcquireActiveWorkoutOperation(isSavingTrainingRef);
-      if (!saveOperationOwner) return;
 
       const recoveredPendingLink = pendingReadinessLinkRef.current;
       if (recoveredPendingLink) {
@@ -3667,9 +3663,6 @@ export function OrganizatechApp({
         workoutCompletionInFlightRef,
         operationOwner,
       );
-      if (saveOperationOwner) {
-        finalizeActiveWorkoutOperation(isSavingTrainingRef, saveOperationOwner);
-      }
       if (ownsBusyState && canFinalize) {
         setIsBusy(false);
       }
