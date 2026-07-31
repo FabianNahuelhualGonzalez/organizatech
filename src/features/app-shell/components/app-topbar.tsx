@@ -1,4 +1,5 @@
 import { Bell } from "lucide-react";
+import { IconButton } from "@/ui/buttons/icon-button";
 import { AppMenuButton } from "./app-menu-button";
 
 export interface AppTopbarTrainingMeta {
@@ -49,8 +50,8 @@ export function AppTopbar({
         )}
       </div>
       <div className="notification-shell">
-        <button
-          className="icon-button notification-trigger"
+        <IconButton
+          className="notification-trigger"
           aria-label="Ver notificaciones"
           aria-expanded={isNotificationPanelOpen}
           onClick={onToggleNotifications}
@@ -61,7 +62,7 @@ export function AppTopbar({
               {notificationBadgeText}
             </span>
           ) : null}
-        </button>
+        </IconButton>
       </div>
     </header>
   );

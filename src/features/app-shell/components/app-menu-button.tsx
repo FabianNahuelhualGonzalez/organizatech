@@ -1,3 +1,5 @@
+import { IconButton } from "@/ui/buttons/icon-button";
+
 export interface AppMenuButtonProps {
   isOpen: boolean;
   onToggle: () => void;
@@ -5,8 +7,8 @@ export interface AppMenuButtonProps {
 
 export function AppMenuButton({ isOpen, onToggle }: AppMenuButtonProps) {
   return (
-    <button
-      className={`icon-button menu-trigger ${isOpen ? "active" : ""}`}
+    <IconButton
+      className={`menu-trigger ${isOpen ? "active" : ""}`}
       aria-label="Abrir menú"
       aria-expanded={isOpen}
       onClick={onToggle}
@@ -14,6 +16,6 @@ export function AppMenuButton({ isOpen, onToggle }: AppMenuButtonProps) {
       <span className="hamburger-line" />
       <span className="hamburger-line" />
       <span className="hamburger-line" />
-    </button>
+    </IconButton>
   );
 }

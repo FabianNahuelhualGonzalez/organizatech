@@ -95,6 +95,47 @@ assert.match(personalDataSection, /\{isSaving \? "Guardando\.\.\." : "Guardar ca
 // Los botones que NO mapean a una variante autorizada permanecen nativos en P3-47A.
 assert.match(profileScreenStaticSource, /<button\s+className="profile-edit-button"/);
 
+// CONTRATO ESTATICO 3C (P3-47B — comprobaciones SOURCE-BASED, no cobertura de render): Profile
+// consume la primitive compartida TextInput solo en los cuatro controles autorizados, conservando
+// intactos value, onChange, maxLength, placeholder, inputMode, autoComplete, readOnly y
+// aria-readonly.
+const textInputStaticSource = readFileSync("src/ui/forms/text-input.tsx", "utf8");
+assert.equal(
+  (textInputStaticSource.match(/^export function TextInput\b/gm) ?? []).length,
+  1,
+  "existe una sola definicion productiva de TextInput",
+);
+assert.match(textInputStaticSource, /InputHTMLAttributes<HTMLInputElement>/);
+assert.match(textInputStaticSource, /type = "text"/, "default explicito y seguro para texto");
+// La primitive no aporta label, error, validacion ni estado: eso lo compone FormField/el consumidor.
+const textInputStaticCode = textInputStaticSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+for (const forbidden of [/<label/, /\buseState\b|\buseEffect\b/, /\berror\b/, /dangerouslySetInnerHTML/]) {
+  assert.doesNotMatch(textInputStaticCode, forbidden, `TextInput no debe incorporar ${forbidden}`);
+}
+
+assert.match(profileScreenStaticSource, /import \{ TextInput \} from "@\/ui\/forms\/text-input";/);
+assert.equal(
+  (profileScreenStaticSource.match(/<TextInput\b/g) ?? []).length,
+  4,
+  "solo los cuatro controles autorizados migran a TextInput",
+);
+assert.match(profileScreenStaticSource, /<TextInput\s+value=\{values\.firstName\}[\s\S]*?maxLength=\{80\}/);
+assert.match(profileScreenStaticSource, /<TextInput\s+value=\{values\.lastName\}[\s\S]*?maxLength=\{120\}/);
+assert.match(
+  profileScreenStaticSource,
+  /<TextInput\s+value=\{values\.phoneNumber\}[\s\S]*?maxLength=\{30\}[\s\S]*?placeholder="\+56 9 1234 5678"[\s\S]*?inputMode="tel"[\s\S]*?autoComplete="tel"/,
+);
+assert.match(
+  profileScreenStaticSource,
+  /<TextInput value=\{profile\.email \?\? "No disponible"\} readOnly aria-readonly="true" \/>/,
+);
+// Fecha y genero permanecen NATIVOS en P3-47B.
+assert.match(profileScreenStaticSource, /<input\s+type="date"\s+value=\{values\.birthDate\}/, "el input de fecha sigue nativo");
+assert.doesNotMatch(profileScreenStaticSource, /<TextInput[^>]*type="date"/, "la fecha no debe migrar en P3-47B");
+assert.match(profileScreenStaticSource, /<select\s+value=\{values\.gender\}/, "el select de genero sigue nativo");
+// El input de archivo del avatar tampoco entra en alcance.
+assert.match(profileScreenStaticSource, /<input\s+ref=\{fileInputRef\}[\s\S]*?type="file"/);
+
 // CONTRATO ESTATICO 4: el source conserva el wiring de validacion, transformacion y fallback.
 assert.match(profileScreenStaticSource, /validateAvatarSourceFile\(file\)/);
 assert.match(avatarEditorStaticSource, /exportAvatarImage\(\{/);

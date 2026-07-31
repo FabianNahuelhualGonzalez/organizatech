@@ -159,4 +159,51 @@ assert.match(components.drawer, /onClick={\(\) => onNavigate\(item\.id\)}/);
 assert.match(appSource, /screenHeader={canGoBackFromScreen\(screen\) \? <AppScreenHeader onBack={goBack} \/> : null}/);
 assert.doesNotMatch(components.screenHeader, /screen !== "dashboard"|canGoBackFromScreen/, "AppScreenHeader no debe reimplementar el gating, lo recibe del root");
 
+// ---------------------------------------------------------------------------------------------
+// P3-47B — IconButton compartido.
+//
+// (a) COMPROBACIONES ESTATICAS / SOURCE-BASED: leen el codigo fuente, no renderizan React.
+// ---------------------------------------------------------------------------------------------
+const iconButtonSource = readSource("src/ui/buttons/icon-button.tsx");
+assert.equal(
+  (iconButtonSource.match(/^export function IconButton\b/gm) ?? []).length,
+  1,
+  "existe una sola definicion productiva de IconButton",
+);
+// `aria-label` obligatorio POR TIPO (no por convencion): se omite del tipo nativo y se redeclara
+// como requerido.
+assert.match(iconButtonSource, /Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label">/);
+assert.match(iconButtonSource, /"aria-label": string;/);
+assert.doesNotMatch(iconButtonSource, /"aria-label"\?:/, "aria-label no puede ser opcional");
+// Se evalua el CODIGO real, sin comentarios: la documentacion del modulo menciona estos nombres
+// precisamente para declarar que quedan fuera de alcance.
+const iconButtonCode = iconButtonSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+for (const forbidden of [/dangerouslySetInnerHTML/, /\bisBusy\b/, /\buseState\b|\buseEffect\b/]) {
+  assert.doesNotMatch(iconButtonCode, forbidden, `IconButton no debe incorporar ${forbidden}`);
+}
+
+// Ambos consumidores autorizados importan la primitive real y ya no declaran <button> propios.
+for (const [label, source] of [["menuButton", components.menuButton], ["topbar", components.topbar]] as const) {
+  assert.match(source, /import \{ IconButton \} from "@\/ui\/buttons\/icon-button";/, label);
+  assert.doesNotMatch(source, /<button\b/, `${label}: no deben quedar <button> locales`);
+}
+assert.match(components.menuButton, /<IconButton\s+className=\{`menu-trigger \$\{isOpen \? "active" : ""\}`\}/);
+assert.match(components.menuButton, /onClick=\{onToggle\}/);
+assert.match(components.topbar, /<IconButton\s+className="notification-trigger"/);
+assert.match(components.topbar, /onClick=\{onToggleNotifications\}/);
+// La clase base ya no se repite en el consumidor: la aporta la primitive.
+assert.doesNotMatch(
+  `${components.menuButton}\n${components.topbar}`,
+  /className="icon-button|icon-button menu-trigger|icon-button notification-trigger/,
+  "la clase base la compone la primitive, no el consumidor",
+);
+
+// NOTA SOBRE COBERTURA RUNTIME (P3-47B): NO se agrega aqui. `tsconfig.json` declara
+// `"jsx": "preserve"` porque Next aplica su runtime automatico en build; el CLI `tsx` que ejecuta
+// esta suite cae entonces al runtime clasico y exige `React` en scope dentro de la primitive.
+// Habilitarlo requeriria modificar `tsconfig.json`, el comando de `package.json` o importar React
+// en el modulo productivo — los tres fuera del alcance autorizado de esta tarea. Por eso TODAS las
+// comprobaciones de este bloque son ESTATICAS/SOURCE-BASED y no deben presentarse como cobertura
+// de render.
+
 console.log("app-shell-visual-integration contract tests passed");
