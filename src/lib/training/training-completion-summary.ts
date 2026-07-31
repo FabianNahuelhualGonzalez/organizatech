@@ -1,5 +1,10 @@
 import { formatDecimalEs, formatKg, roundDecimal } from "@/lib/progress/weight-format";
+import type { ExerciseTemplate } from "@/lib/progress/types";
 import type { LatestExercisePerformance } from "@/lib/training/exercise-last-performance-repository";
+import {
+  normalizeExerciseDraft,
+  type ExerciseDraft,
+} from "@/lib/training/training-exercise-draft";
 
 export type TrainingCompletionComparisonStatus = "ready" | "first_reference" | "unavailable";
 export type TrainingCompletionTone = "positive" | "danger" | "neutral";
@@ -76,6 +81,64 @@ export interface TrainingCompletionExerciseSummary {
 export interface TrainingCompletionResultLine {
   label: string;
   tone: TrainingCompletionTone;
+}
+
+export async function loadTrainingCompletionHistoricalInputs(input: {
+  currentSessionId: string;
+  exercises: readonly Pick<ExerciseTemplate, "id" | "exerciseLineageId">[];
+  loadLatestByLineage: (input: {
+    exerciseLineageId: string;
+    currentSessionId: string;
+  }) => Promise<LatestExercisePerformance | null>;
+}): Promise<Record<string, TrainingCompletionHistoricalInput>> {
+  const settled = await Promise.allSettled(input.exercises.map(async (exercise) => {
+    if (!exercise.exerciseLineageId) {
+      return {
+        exerciseId: exercise.id,
+        historical: { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput,
+      };
+    }
+
+    const latest = await input.loadLatestByLineage({
+      exerciseLineageId: exercise.exerciseLineageId,
+      currentSessionId: input.currentSessionId,
+    });
+    return {
+      exerciseId: exercise.id,
+      historical: latest
+        ? { status: "ready", latest } satisfies TrainingCompletionHistoricalInput
+        : { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput,
+    };
+  }));
+
+  return Object.fromEntries(settled.map((result, index) => {
+    if (result.status === "fulfilled") {
+      return [result.value.exerciseId, result.value.historical];
+    }
+    return [
+      input.exercises[index]?.id ?? "",
+      { status: "unavailable", latest: null } satisfies TrainingCompletionHistoricalInput,
+    ];
+  }).filter(([exerciseId]) => exerciseId !== ""));
+}
+
+export function buildTrainingCompletionExerciseInputs(input: {
+  exercises: readonly ExerciseTemplate[];
+  drafts: Readonly<Record<string, ExerciseDraft | undefined>>;
+}): TrainingCompletionExerciseInput[] {
+  return input.exercises.map((exercise) => {
+    const draft = normalizeExerciseDraft(exercise, input.drafts[exercise.id]);
+    return {
+      exerciseId: exercise.id,
+      exerciseLineageId: exercise.exerciseLineageId ?? null,
+      exerciseName: exercise.name,
+      targetSets: exercise.targetSets,
+      draft: {
+        weight: draft.weight,
+        reps: [...draft.reps],
+      },
+    };
+  });
 }
 
 export function buildTrainingCompletionSummary(

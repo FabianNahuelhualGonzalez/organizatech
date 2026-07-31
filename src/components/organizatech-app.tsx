@@ -223,15 +223,21 @@ import { getLatestExercisePerformanceByLineage } from "@/lib/training/exercise-l
 import { createStableWorkoutStartedAt } from "@/lib/training/exercise-last-performance-loader";
 import {
   createExerciseDraft,
-  normalizeExerciseDraft,
   type ExerciseDraft,
 } from "@/lib/training/training-exercise-draft";
 import {
-  buildCurrentWorkoutSavePlan,
-  incompleteCurrentWorkoutMessage,
   isExerciseRegisteredInCurrentWorkout,
   resolveCurrentExerciseRegistration,
 } from "@/lib/training/workout-registration";
+import {
+  buildCycleScopedWorkoutCompletionEntries,
+  buildLegacyWorkoutCompletionEntries,
+  captureActiveWorkoutCompletionContext,
+  prepareActiveWorkoutCompletion,
+  resolveActiveWorkoutCompletionMode,
+  resolveActiveWorkoutCompletionStart,
+  resolveWorkoutReadinessLinkConfirmation,
+} from "@/lib/training/active-workout-completion";
 import {
   type ActiveWorkoutReadinessContext,
   type PendingWorkoutReadinessLink,
@@ -270,7 +276,6 @@ import {
   getCycleScopedTrainingPlan,
   type CycleScopedDay,
   type CycleScopedPlanInput,
-  type CycleScopedTrainingSessionEntryInput,
   type CycleScopedTrainingPlan,
 } from "@/lib/training/cycle-scoped-training-repository";
 import {
@@ -328,8 +333,9 @@ import {
   buildTrainingTopbarMeta,
 } from "@/lib/training/training-carousel-card-presentation";
 import {
+  buildTrainingCompletionExerciseInputs,
   buildTrainingCompletionSummary,
-  type TrainingCompletionHistoricalInput,
+  loadTrainingCompletionHistoricalInputs,
   type TrainingCompletionSummary,
 } from "@/lib/training/training-completion-summary";
 
@@ -3080,13 +3086,12 @@ export function OrganizatechApp({
     );
     if (linkResult.kind === "stale") return false;
     if (linkResult.kind === "error") throw linkResult.error;
-    const result = linkResult.value;
-
-    if (result.trainingSessionId !== pendingLink.trainingSessionId) {
-      throw new TrainingWorkoutReadinessLinkFlowError("La vinculacion del formulario no coincide con la sesion guardada.");
-    }
-    if (!result.linked && !result.alreadyLinked) {
-      throw new TrainingWorkoutReadinessLinkFlowError("No pudimos confirmar la vinculacion del formulario con la sesion guardada.");
+    const confirmation = resolveWorkoutReadinessLinkConfirmation({
+      pendingLink,
+      result: linkResult.value,
+    });
+    if (confirmation.kind === "blocked") {
+      throw new TrainingWorkoutReadinessLinkFlowError(confirmation.message);
     }
     return true;
   }
@@ -3147,38 +3152,15 @@ export function OrganizatechApp({
     const historicalResult = await settleActiveWorkoutOperation(
       workoutCompletionInFlightRef,
       operationOwner,
-      Promise.allSettled(input.validExercises.map(async (exercise) => {
-        if (!exercise.exerciseLineageId) {
-          return [exercise.id, { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput] as const;
-        }
-
-        const latest = await getLatestExercisePerformanceByLineage({
-          exerciseLineageId: exercise.exerciseLineageId,
-          currentSessionId: input.sessionId,
-        });
-
-        return [
-          exercise.id,
-          latest
-            ? { status: "ready", latest } satisfies TrainingCompletionHistoricalInput
-            : { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput,
-        ] as const;
-      })),
+      loadTrainingCompletionHistoricalInputs({
+        currentSessionId: input.sessionId,
+        exercises: input.validExercises,
+        loadLatestByLineage: getLatestExercisePerformanceByLineage,
+      }),
     );
     if (historicalResult.kind === "stale") return null;
     if (historicalResult.kind === "error") throw historicalResult.error;
-    const historicalEntries = historicalResult.value;
-
-    const historicalByExerciseId: Record<string, TrainingCompletionHistoricalInput> = {};
-    historicalEntries.forEach((result, index) => {
-      const exercise = input.validExercises[index];
-      if (!exercise) return;
-      if (result.status === "fulfilled") {
-        historicalByExerciseId[result.value[0]] = result.value[1];
-      } else {
-        historicalByExerciseId[exercise.id] = { status: "unavailable", latest: null };
-      }
-    });
+    const historicalByExerciseId = historicalResult.value;
     const plannedDaysCount = hasRoutinePlan ? dashboardCarouselDays.length : routineDays.length;
     const completedDaysAfterSave = Math.min(
       plannedDaysCount,
@@ -3208,18 +3190,9 @@ export function OrganizatechApp({
       workoutStartedAt: input.workoutStartedAt,
       savedAt: input.savedAt,
       currentDate: input.trainedDate,
-      exercises: input.validExercises.map((exercise) => {
-        const draft = normalizeExerciseDraft(exercise, input.capturedExerciseDrafts[exercise.id]);
-        return {
-          exerciseId: exercise.id,
-          exerciseLineageId: exercise.exerciseLineageId ?? null,
-          exerciseName: exercise.name,
-          targetSets: exercise.targetSets,
-          draft: {
-            weight: draft.weight,
-            reps: draft.reps,
-          },
-        };
+      exercises: buildTrainingCompletionExerciseInputs({
+        exercises: input.validExercises,
+        drafts: input.capturedExerciseDrafts,
       }),
       historicalByExerciseId,
     });
@@ -3233,14 +3206,16 @@ export function OrganizatechApp({
     try {
       if (isBusy) return;
 
-      const recoveredPendingLink = pendingReadinessLinkRef.current;
-      if (recoveredPendingLink) {
+      const completionStart = resolveActiveWorkoutCompletionStart(
+        pendingReadinessLinkRef.current,
+      );
+      if (completionStart.kind === "retry_pending_link") {
         setIsBusy(true);
         ownsBusyState = true;
         setRoutineNotice("");
         try {
           const linked = await confirmTrainingWorkoutReadinessLink(
-            recoveredPendingLink,
+            completionStart.pendingLink,
             operationOwner,
           );
           if (!linked || !isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
@@ -3263,98 +3238,71 @@ export function OrganizatechApp({
         return;
       }
 
-      const isCycleScopedSave = Boolean(
-        isTrainingCyclesRepositoryActive &&
-        persistedActiveCycle &&
-        isCycleScopedTrainingCycle(persistedActiveCycle),
-      );
+      const completionMode = resolveActiveWorkoutCompletionMode({
+        repositoryActive: isTrainingCyclesRepositoryActive,
+        hasPersistedActiveCycle: Boolean(persistedActiveCycle),
+        cycleScopedActiveCycle: isCycleScopedActiveCycle,
+      });
       const shouldLinkWorkoutReadiness = readinessMode === "attempt_v2";
       const readinessContext = activeWorkoutReadinessContextRef.current;
       const capturedWorkoutAttemptId = activeWorkoutAttemptIdRef.current;
-
-      if (shouldLinkWorkoutReadiness) {
-        if (!readinessContext || !isNonEmptyString(capturedWorkoutAttemptId)) {
-          setRoutineNotice("No pudimos recuperar la identidad del entrenamiento. Recarga e intenta nuevamente.");
-          return;
-        }
-      }
-
-      const savePlan = buildCurrentWorkoutSavePlan(dayExercises, exerciseDrafts);
-      const { validExercises } = savePlan;
-      if (!savePlan.canSave) {
-        setRoutineNotice(savePlan.message ?? incompleteCurrentWorkoutMessage);
+      const plannedDay = getTrainingDayCode(visibleDay);
+      const preparation = prepareActiveWorkoutCompletion({
+        mode: completionMode,
+        exercises: dayExercises,
+        drafts: exerciseDrafts,
+        shouldLinkWorkoutReadiness,
+        workoutAttemptId: capturedWorkoutAttemptId,
+        readinessContext,
+        cycle: completionMode === "cycle_scoped" && persistedActiveCycle
+          ? {
+            plan: cycleScopedPlan,
+            cycleId: persistedActiveCycle.id,
+            plannedStartDate: persistedActiveCycle.plannedStartDate,
+            plannedDay,
+            trainedDate: todayKey,
+          }
+          : undefined,
+      });
+      if (preparation.kind === "blocked") {
+        setRoutineNotice(preparation.message);
         return;
       }
+      const { validExercises } = preparation;
+      const readinessNote = formatReadinessNote(readiness);
 
-      if (isCycleScopedSave && persistedActiveCycle) {
-        if (!cycleScopedPlan) {
-          setRoutineNotice("No se pudo cargar el plan cycle-scoped del ciclo activo. No se guardaran datos legacy.");
+      if (preparation.mode === "cycle_scoped") {
+        const entriesResult = buildCycleScopedWorkoutCompletionEntries({
+          cycleId: preparation.cycleId,
+          cycleDay: preparation.cycleDay,
+          exercises: validExercises,
+          drafts: exerciseDrafts,
+          entryIds: validExercises.map(() => createId()),
+          dayLabel: visibleDay,
+          readinessNote,
+        });
+        if (entriesResult.kind === "blocked") {
+          setRoutineNotice(entriesResult.message);
           return;
         }
 
-        const trainedDate = todayKey;
-        const plannedDay = getTrainingDayCode(visibleDay);
-        const cycleDay = findCycleScopedDayForTrainingDay(cycleScopedPlan, persistedActiveCycle.id, plannedDay);
-
-        if (!cycleDay) {
-          setRoutineNotice("No se encontro el dia cycle-scoped activo. No se guardaran datos legacy.");
+        const capture = captureActiveWorkoutCompletionContext({
+          shouldLinkWorkoutReadiness,
+          activeRoutineDay,
+          activeExerciseIndex,
+          readiness,
+          exerciseDrafts,
+          workoutAttemptId: capturedWorkoutAttemptId,
+          readinessContext,
+          activeWorkoutStartedAt,
+          fallbackCycleId: preparation.cycleId,
+          fallbackCycleDayId: preparation.cycleDay.id,
+        });
+        if (capture.kind === "blocked") {
+          setRoutineNotice(capture.message);
           return;
         }
-
-        if (!persistedActiveCycle.plannedStartDate) {
-          setRoutineNotice("El ciclo activo no tiene un rango planificado valido. No se guardaran datos legacy.");
-          return;
-        }
-
-        let plannedDate: string;
-        let effectiveWeekNumber: number;
-        try {
-          effectiveWeekNumber = getCycleCalendarWeekNumber(persistedActiveCycle.plannedStartDate, trainedDate);
-          plannedDate = getCycleCalendarPlannedDate({
-            plannedStartDate: persistedActiveCycle.plannedStartDate,
-            weekNumber: effectiveWeekNumber,
-            plannedDay: cycleDay.dayCode,
-          });
-        } catch {
-          setRoutineNotice("No se pudo resolver la fecha planificada dentro del rango del ciclo. No se guardaran datos legacy.");
-          return;
-        }
-
-        const entriesInput: CycleScopedTrainingSessionEntryInput[] = [];
-        for (const exercise of validExercises) {
-          const cycleExercise = cycleDay.exercises.find((item) => item.id === exercise.id);
-          if (!cycleExercise) {
-            setRoutineNotice("No se encontro el ejercicio cycle-scoped planificado. No se guardaran datos legacy.");
-            return;
-          }
-
-          const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
-          entriesInput.push({
-            id: createId(),
-            trainingCycleExerciseId: cycleExercise.id,
-            exerciseId: cycleExercise.sourceLegacyExerciseId ?? null,
-            exerciseLineageId: cycleExercise.exerciseLineageId,
-            weight: readRequiredWeight(draft.weight),
-            previousWeight: exercise.baseWeight,
-            reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
-            rir: draft.rir,
-            notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
-            observation: draft.observation,
-          });
-        }
-
-        const capturedActiveRoutineDay = activeRoutineDay;
-        const capturedActiveExerciseIndex = activeExerciseIndex;
-        const capturedReadiness = readiness;
-        const capturedExerciseDrafts = exerciseDrafts;
-        const capturedStartedAt = readinessContext?.workoutStartedAt ?? activeWorkoutStartedAt;
-        const capturedCycleId = readinessContext?.cycleId ?? persistedActiveCycle.id;
-        const capturedCycleDayId = readinessContext?.cycleDayId ?? cycleDay.id;
-
-        if (shouldLinkWorkoutReadiness && !isNonEmptyString(capturedStartedAt)) {
-          setRoutineNotice("No pudimos recuperar la identidad temporal del entrenamiento. Recarga e intenta nuevamente.");
-          return;
-        }
+        const captured = capture.context;
 
         setIsBusy(true);
         ownsBusyState = true;
@@ -3363,15 +3311,15 @@ export function OrganizatechApp({
           workoutCompletionInFlightRef,
           operationOwner,
           createTrainingSessionWithCycleEntries({
-            cycleId: persistedActiveCycle.id,
-            cycleDayId: cycleDay.id,
-            plannedDay,
-            plannedDate,
-            trainedDate,
-            weekNumber: effectiveWeekNumber,
+            cycleId: preparation.cycleId,
+            cycleDayId: preparation.cycleDay.id,
+            plannedDay: preparation.plannedDay,
+            plannedDate: preparation.plannedDate,
+            trainedDate: preparation.trainedDate,
+            weekNumber: preparation.weekNumber,
             status: "completed",
-            notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${formatReadinessNote(readiness)}`,
-            entries: entriesInput,
+            notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${readinessNote}`,
+            entries: entriesResult.entries,
           }),
         );
         if (sessionSaveResult.kind === "stale") return;
@@ -3389,7 +3337,7 @@ export function OrganizatechApp({
             const createdPendingLink = createWorkoutReadinessPendingLink({
               enabled: trainingWorkoutReadinessV2Enabled,
               cycleScoped: true,
-              workoutAttemptId: capturedWorkoutAttemptId,
+              workoutAttemptId: captured.workoutAttemptId,
               trainingSessionId: savedTrainingSessionId,
             });
             if (!createdPendingLink) throw new TrainingWorkoutReadinessLinkFlowError();
@@ -3402,15 +3350,15 @@ export function OrganizatechApp({
           persistWorkoutDraftWithPendingLink({
             pendingLink: nextPendingLink,
             workoutAttemptId: nextPendingLink.workoutAttemptId,
-            activeWorkoutStartedAt: capturedStartedAt ?? createStableWorkoutStartedAt(),
-            plannedDay,
-            plannedDate,
-            cycleId: capturedCycleId,
-            cycleDayId: capturedCycleDayId,
-            activeRoutineDay: capturedActiveRoutineDay,
-            activeExerciseIndex: capturedActiveExerciseIndex,
-            readiness: capturedReadiness,
-            exerciseDrafts: capturedExerciseDrafts,
+            activeWorkoutStartedAt: captured.workoutStartedAt ?? createStableWorkoutStartedAt(),
+            plannedDay: preparation.plannedDay,
+            plannedDate: preparation.plannedDate,
+            cycleId: captured.cycleId,
+            cycleDayId: captured.cycleDayId,
+            activeRoutineDay: captured.activeRoutineDay,
+            activeExerciseIndex: captured.activeExerciseIndex,
+            readiness: captured.readiness,
+            exerciseDrafts: captured.exerciseDrafts,
           });
 
           try {
@@ -3429,10 +3377,10 @@ export function OrganizatechApp({
         const summarySnapshot = await buildCompletedTrainingSummarySnapshot({
           sessionId: savedTrainingSessionId,
           validExercises,
-          capturedExerciseDrafts,
-          workoutStartedAt: capturedStartedAt,
+          capturedExerciseDrafts: captured.exerciseDrafts,
+          workoutStartedAt: captured.workoutStartedAt,
           savedAt: new Date().toISOString(),
-          trainedDate,
+          trainedDate: preparation.trainedDate,
         }, operationOwner);
         if (!summarySnapshot || !isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
         setTrainingCompletionSummary(summarySnapshot);
@@ -3453,7 +3401,7 @@ export function OrganizatechApp({
         const scopedSessionResult = await settleActiveWorkoutOperation(
           workoutCompletionInFlightRef,
           operationOwner,
-          getCycleScopedTrainingSessionData(persistedActiveCycle.id, cycleScopedPlan),
+          getCycleScopedTrainingSessionData(preparation.cycleId, preparation.cyclePlan),
         );
         if (scopedSessionResult.kind === "stale") return;
         if (scopedSessionResult.kind === "error") {
@@ -3470,41 +3418,46 @@ export function OrganizatechApp({
       setRoutineNotice("");
       try {
         const currentWeekDates = getCurrentSantiagoWeekDates();
-        const plannedDate = currentWeekDates[visibleDay] ?? todayKey;
+        const legacyPlannedDate = currentWeekDates[visibleDay] ?? todayKey;
         const trainedDate = todayKey;
-        const plannedDay = getTrainingDayCode(visibleDay);
         const trainingWeek = getLegacyWeekNumberForTrainingDate(trainingSessions, entries, trainedDate);
-        const capturedExerciseDrafts = exerciseDrafts;
-        const capturedStartedAt = activeWorkoutStartedAt;
+        const capture = captureActiveWorkoutCompletionContext({
+          shouldLinkWorkoutReadiness: false,
+          activeRoutineDay,
+          activeExerciseIndex,
+          readiness,
+          exerciseDrafts,
+          workoutAttemptId: capturedWorkoutAttemptId,
+          readinessContext,
+          activeWorkoutStartedAt,
+          fallbackCycleId: null,
+          fallbackCycleDayId: null,
+        });
+        if (capture.kind === "blocked") {
+          setRoutineNotice(capture.message);
+          return;
+        }
+        const captured = capture.context;
+        const legacyEntries = buildLegacyWorkoutCompletionEntries({
+          exercises: validExercises,
+          drafts: captured.exerciseDrafts,
+          previousEntries: metrics,
+          entryIds: validExercises.map(() => createId()),
+          dayLabel: visibleDay,
+          readinessNote,
+        });
         const sessionSaveResult = await settleActiveWorkoutOperation(
           workoutCompletionInFlightRef,
           operationOwner,
           saveTrainingSessionWithEntries({
             routine: visibleRoutine,
             plannedDay,
-            plannedDate,
+            plannedDate: legacyPlannedDate,
             trainedDate,
             weekNumber: trainingWeek,
             status: "completed",
-            notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${formatReadinessNote(readiness)}`,
-            entries: validExercises.map((exercise) => {
-              const draft = normalizeExerciseDraft(exercise, exerciseDrafts[exercise.id]);
-              const previous = metrics.filter((entry) => entry.exerciseId === exercise.id).at(-1);
-              return {
-                id: createId(),
-                exerciseId: exercise.id,
-                exerciseName: exercise.name,
-                routine: exercise.routine,
-                targetSets: exercise.targetSets,
-                targetReps: exercise.targetReps,
-                weight: readRequiredWeight(draft.weight),
-                previousWeight: previous?.weight ?? exercise.baseWeight,
-                reps: draft.reps.slice(0, exercise.targetSets).map((value) => Number(value) || 0),
-                rir: draft.rir,
-                notes: `Entrenamiento ${visibleDay}: ${exercise.routine}. ${formatReadinessNote(readiness)}`,
-                observation: draft.observation,
-              };
-            }),
+            notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${readinessNote}`,
+            entries: legacyEntries,
           }, dataMode),
         );
         if (sessionSaveResult.kind === "stale") return;
@@ -3514,8 +3467,8 @@ export function OrganizatechApp({
         const summarySnapshot = await buildCompletedTrainingSummarySnapshot({
           sessionId: savedSession.id,
           validExercises,
-          capturedExerciseDrafts,
-          workoutStartedAt: capturedStartedAt,
+          capturedExerciseDrafts: captured.exerciseDrafts,
+          workoutStartedAt: captured.workoutStartedAt,
           savedAt: new Date().toISOString(),
           trainedDate,
         }, operationOwner);
