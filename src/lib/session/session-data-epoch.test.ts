@@ -17,6 +17,10 @@ import {
   tryAcquireSessionOperationOwner,
   type SessionOperationOwner,
 } from "@/lib/session/active-workout-session-boundary";
+import {
+  resolveActiveWorkoutHistoryCommit,
+  runActiveWorkoutHistoryLoad,
+} from "@/lib/training/active-workout-history-load";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -764,10 +768,14 @@ async function run() {
     "SIGNED_OUT resetea memoria y luego conserva la limpieza del scope que se cierra",
   );
 
+  // P3-32: el reset central pasó a declararse después del coordinador de historial (necesita su
+  // `resetExerciseHistory`), por lo que el delimitador de cierre ya no puede ser
+  // `clearCycleScopedPlanState`. Se ancla al cierre real del propio useCallback, que es estable e
+  // independiente de qué declaración lo siga.
   const activeWorkoutResetSource = extractBetween(
     componentSource,
     "const resetActiveWorkoutSessionState = useCallback",
-    "function clearCycleScopedPlanState",
+    "}, [resetExerciseHistory]);",
   );
   for (const resetContract of [
     "setActiveExerciseIndex(0)",
@@ -782,11 +790,41 @@ async function run() {
     "setPendingWorkoutReadinessLink(null)",
     "setHasRecoverableWorkoutStart(false)",
     "setTrainingCompletionSummary(null)",
-    "setLatestExercisePerformance",
-    "setLatestExerciseObservation",
+    // P3-32: performance y observación ya no se resetean con setters sueltos del root; el reset
+    // central delega en la API del coordinador, único dueño de ambos estados y de sus request keys.
+    "resetExerciseHistory()",
   ]) {
     assert.ok(activeWorkoutResetSource.includes(resetContract), `El reset central conserva ${resetContract}`);
   }
+  // La garantía de que ese reset deja AMBOS flujos en idle se verifica en la fuente del coordinador
+  // (no basta con que el root lo invoque) y en runtime sobre los idle states de ambos loaders.
+  const historyHookSource = readFileSync(
+    new URL("../../features/active-workout/hooks/useActiveWorkoutExerciseHistory.ts", import.meta.url),
+    "utf8",
+  );
+  const historyResetSource = extractBetween(
+    historyHookSource,
+    "const resetExerciseHistory = useCallback",
+    "}, []);",
+  );
+  for (const coordinatorResetContract of [
+    "latestExercisePerformanceRequestKeyRef.current = null",
+    "latestExerciseObservationRequestKeyRef.current = null",
+    "getLatestExercisePerformanceIdleState()",
+    "getLatestExerciseObservationIdleState()",
+    "setLatestExerciseObservationDidQuery(false)",
+  ]) {
+    assert.ok(
+      historyResetSource.includes(coordinatorResetContract),
+      `El reset del coordinador conserva ${coordinatorResetContract}`,
+    );
+  }
+  // Ninguna request key de historial puede quedar fuera del coordinador.
+  assert.doesNotMatch(
+    componentSource,
+    /latestExercisePerformanceRequestKeyRef|latestExerciseObservationRequestKeyRef/,
+    "las request keys de historial son propiedad exclusiva de useActiveWorkoutExerciseHistory",
+  );
   for (const resetRef of [
     "workoutStartInFlightRef.current = null",
     "dailyReadinessSaveInFlightRef.current = null",
@@ -847,13 +885,39 @@ async function run() {
   assert.match(profileEffectSource, /captureSessionDataRequestToken\(\)/);
   assert.match(profileEffectSource, /isSessionDataRequestCurrent\(requestToken\)/);
 
+  // P3-32: los dos effects de historial se movieron al coordinador. La garantía se verifica ahora
+  // sobre su fuente real y para AMBOS flujos (antes sólo se comprobaba el de performance): cada uno
+  // captura su token ANTES del await y lo valida después, vía el guard compartido.
   const latestPerformanceSource = extractBetween(
-    componentSource,
-    "const requestToken = captureSessionDataRequestToken();\n\n    if (activeWorkoutExerciseLineageId",
-    'if (screen !== "perfil" || !canEditProfilePersonalData)',
+    historyHookSource,
+    "if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {\n      latestExercisePerformanceRequestKeyRef",
+    "if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {\n      latestExerciseObservationRequestKeyRef",
   );
-  assert.match(latestPerformanceSource, /captureSessionDataRequestToken\(\)/);
-  assert.match(latestPerformanceSource, /isSessionDataRequestCurrent\(requestToken\)/);
+  const latestObservationSource = historyHookSource.slice(
+    historyHookSource.indexOf(
+      "if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {\n      latestExerciseObservationRequestKeyRef",
+    ),
+  );
+  for (const [label, historyFlowSource] of [
+    ["performance", latestPerformanceSource],
+    ["observation", latestObservationSource],
+  ] as const) {
+    assert.match(historyFlowSource, /getCurrentRequestKey: \(\) => latestExercise\w+RequestKeyRef\.current/, label);
+    assert.match(historyFlowSource, /isRequestTokenCurrent: \(\) => isSessionDataRequestCurrent\(requestToken\)/, label);
+    assert.match(historyFlowSource, /isMounted: \(\) => isMounted/, label);
+    assert.match(historyFlowSource, /if \(!decision\.commit\) return;/, label);
+  }
+  assert.equal(
+    (historyHookSource.match(/const requestToken = captureSessionDataRequestToken\(\);/g) ?? []).length,
+    2,
+    "cada flujo captura su propio token antes del await",
+  );
+  // Independencia: nunca se acoplan ambos errores en una sola espera (se evalua el codigo real,
+  // sin comentarios, porque la documentacion del modulo si menciona Promise.all para prohibirlo).
+  const historyHookCode = historyHookSource
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(historyHookCode, /Promise\.all/, "performance y observacion deben fallar por separado");
 
   const profileSource = extractBetween(
     componentSource,
@@ -924,6 +988,175 @@ async function run() {
     handleAuthSource,
     /finally \{\s*if \(!appliedIdentityToken \|\| isSessionDataRequestCurrent\(appliedIdentityToken\)\) \{\s*setIsBusy\(false\);/,
   );
+
+  // ---------------------------------------------------------------------------------------------
+  // P3-32 — guard compartido de historial (RUNTIME, no source-based): combina la staleness por
+  // request key que ya resuelve cada loader con el SessionDataRequestToken y el desmontaje.
+  // Se ejercita el helper productivo real; no se reimplementa su lógica aquí.
+  // ---------------------------------------------------------------------------------------------
+  {
+    // Matriz completa de la decisión sincrónica, con su precedencia.
+    assert.deepEqual(
+      resolveActiveWorkoutHistoryCommit({ stale: false, isMounted: true, isRequestTokenCurrent: true }),
+      { commit: true, reason: "commit" },
+    );
+    assert.deepEqual(
+      resolveActiveWorkoutHistoryCommit({ stale: false, isMounted: false, isRequestTokenCurrent: true }),
+      { commit: false, reason: "unmounted" },
+    );
+    assert.deepEqual(
+      resolveActiveWorkoutHistoryCommit({ stale: true, isMounted: true, isRequestTokenCurrent: true }),
+      { commit: false, reason: "stale_request_key" },
+    );
+    assert.deepEqual(
+      resolveActiveWorkoutHistoryCommit({ stale: false, isMounted: true, isRequestTokenCurrent: false }),
+      { commit: false, reason: "stale_session_epoch" },
+    );
+    // El desmontaje tiene precedencia sobre cualquier otra causa, igual que el guard previo del root.
+    assert.equal(
+      resolveActiveWorkoutHistoryCommit({ stale: true, isMounted: false, isRequestTokenCurrent: false }).reason,
+      "unmounted",
+    );
+
+    const epochA = advanceSessionDataEpoch(createSessionDataEpoch(), identityA);
+    const tokenA = captureSessionDataRequestToken(epochA);
+
+    // Success vigente: misma identidad, misma request key, montado.
+    let epoch: SessionDataEpoch = epochA;
+    const vigente = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: false, value: "performance-a" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => isSessionDataRequestTokenCurrent(epoch, tokenA),
+    });
+    assert.equal(vigente.decision.commit, true);
+    assert.equal(vigente.result.value, "performance-a");
+
+    // Error vigente: un resultado con error tambien se compromete (el loader ya lo tradujo).
+    const errorVigente = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: false, error: "No pudimos cargar el historial anterior del ejercicio." }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => isSessionDataRequestTokenCurrent(epoch, tokenA),
+    });
+    assert.equal(errorVigente.decision.commit, true);
+    assert.equal(errorVigente.result.error, "No pudimos cargar el historial anterior del ejercicio.");
+
+    // A→B: el ejercicio A responde despues de cambiar a B (stale por request key).
+    const staleKeySuccess = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: true, value: "ejercicio-a" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => isSessionDataRequestTokenCurrent(epoch, tokenA),
+    });
+    assert.equal(staleKeySuccess.decision.commit, false);
+    assert.equal(staleKeySuccess.decision.reason, "stale_request_key");
+
+    const staleKeyError = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: true, error: "fallo de A" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => isSessionDataRequestTokenCurrent(epoch, tokenA),
+    });
+    assert.equal(staleKeyError.decision.commit, false);
+    assert.equal(staleKeyError.decision.reason, "stale_request_key");
+
+    // Usuario A responde despues de iniciar sesion como B, con request key IDENTICA por accidente:
+    // la key sola no basta, el token es el que invalida.
+    epoch = advanceSessionDataEpoch(epoch, identityB);
+    const staleEpochSuccess = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: false, value: "dato-de-a" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => isSessionDataRequestTokenCurrent(epoch, tokenA),
+    });
+    assert.equal(staleEpochSuccess.decision.commit, false);
+    assert.equal(
+      staleEpochSuccess.decision.reason,
+      "stale_session_epoch",
+      "una respuesta de A nunca puede escribirse tras cambiar a B aunque la request key coincida",
+    );
+
+    const staleEpochError = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: false, error: "fallo de A" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => isSessionDataRequestTokenCurrent(epoch, tokenA),
+    });
+    assert.equal(staleEpochError.decision.commit, false);
+    assert.equal(staleEpochError.decision.reason, "stale_session_epoch");
+
+    // SIGNED_OUT durante una request en vuelo.
+    const signedOutEpoch = advanceSessionDataEpoch(epoch, { userId: null, scope: null });
+    const afterSignedOut = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: false, value: "dato-de-b" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => isSessionDataRequestTokenCurrent(signedOutEpoch, captureSessionDataRequestToken(epoch)),
+    });
+    assert.equal(afterSignedOut.decision.commit, false);
+    assert.equal(afterSignedOut.decision.reason, "stale_session_epoch");
+
+    // TOKEN_REFRESHED de la MISMA identidad: no invalida, la respuesta sigue siendo vigente.
+    const refreshedEpoch = advanceSessionDataEpoch(epochA, identityA);
+    assert.equal(refreshedEpoch, epochA, "un refresh sin cambio de identidad no avanza el epoch");
+    const afterRefresh = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: false, value: "sigue-siendo-a" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => isSessionDataRequestTokenCurrent(refreshedEpoch, tokenA),
+    });
+    assert.equal(afterRefresh.decision.commit, true);
+    assert.equal(afterRefresh.result.value, "sigue-siendo-a");
+
+    // Cleanup/unmount durante la request.
+    let mounted = true;
+    const afterUnmount = await runActiveWorkoutHistoryLoad({
+      load: async () => {
+        mounted = false;
+        return { stale: false, value: "llega-tarde" };
+      },
+      isMounted: () => mounted,
+      isRequestTokenCurrent: () => true,
+    });
+    assert.equal(afterUnmount.decision.commit, false);
+    assert.equal(afterUnmount.decision.reason, "unmounted");
+
+    // Independencia: performance vigente con observacion stale, y el caso inverso. Cada flujo
+    // decide por separado; el fallo o staleness de uno no altera al otro.
+    const performanceOk = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: false, value: "performance" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => true,
+    });
+    const observationStale = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: true, value: "observacion" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => true,
+    });
+    assert.equal(performanceOk.decision.commit, true);
+    assert.equal(observationStale.decision.commit, false);
+
+    const performanceStale = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: true, value: "performance" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => true,
+    });
+    const observationOk = await runActiveWorkoutHistoryLoad({
+      load: async () => ({ stale: false, value: "observacion" }),
+      isMounted: () => true,
+      isRequestTokenCurrent: () => true,
+    });
+    assert.equal(performanceStale.decision.commit, false);
+    assert.equal(observationOk.decision.commit, true);
+
+    // El helper no muta ni el input ni el resultado que devuelve.
+    const originalResult = Object.freeze({ stale: false, value: "intacto" });
+    const guardInput = Object.freeze({ stale: false, isMounted: true, isRequestTokenCurrent: true });
+    const passthrough = await runActiveWorkoutHistoryLoad({
+      load: async () => originalResult,
+      isMounted: () => true,
+      isRequestTokenCurrent: () => true,
+    });
+    assert.equal(passthrough.result, originalResult, "el resultado del loader se propaga sin copiarse ni mutarse");
+    assert.deepEqual(guardInput, { stale: false, isMounted: true, isRequestTokenCurrent: true });
+    assert.deepEqual(
+      resolveActiveWorkoutHistoryCommit(guardInput),
+      { commit: true, reason: "commit" },
+    );
+  }
 
   console.log("session-data-epoch tests passed");
 }
