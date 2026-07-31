@@ -24,3 +24,20 @@ export interface TrainingReadiness {
   energy?: number;
   skipped: boolean;
 }
+
+export function normalizeTrainingReadiness(value: unknown): TrainingReadiness | null {
+  if (!value || typeof value !== "object") return null;
+  const parsed = value as Partial<TrainingReadiness>;
+  return {
+    motivation: normalizeReadinessScore(parsed.motivation),
+    hydration: normalizeReadinessScore(parsed.hydration),
+    sleep: normalizeReadinessScore(parsed.sleep),
+    energy: normalizeReadinessScore(parsed.energy),
+    skipped: Boolean(parsed.skipped),
+  };
+}
+
+function normalizeReadinessScore(value: unknown) {
+  const score = Number(value);
+  return Number.isInteger(score) && score >= 1 && score <= 7 ? score : undefined;
+}

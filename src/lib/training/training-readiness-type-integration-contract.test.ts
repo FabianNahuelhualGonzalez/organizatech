@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
  * exports, imports, existing call-sites and source boundaries.
  */
 const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+const activeDraftStaticSource = readFileSync("src/lib/training/active-workout-draft.ts", "utf8");
 const readinessDraftStaticSource = readFileSync(
   "src/lib/training/training-readiness-draft.ts",
   "utf8",
@@ -27,6 +28,11 @@ assert.match(
   /export interface TrainingReadiness \{\s*motivation\?: number;\s*hydration\?: number;\s*sleep\?: number;\s*energy\?: number;\s*skipped: boolean;\s*\}/,
   "training-readiness-draft debe exportar el shape exacto de TrainingReadiness",
 );
+assert.match(
+  readinessDraftStaticSource,
+  /export function normalizeTrainingReadiness\(value: unknown\): TrainingReadiness \| null/,
+  "el normalizador runtime debe vivir junto al tipo canonico",
+);
 
 assert.match(
   appStaticSource,
@@ -40,8 +46,8 @@ assert.doesNotMatch(
 );
 
 assert.match(
-  appStaticSource,
-  /type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness \| null, Record<string, ExerciseDraft>>;/,
+  activeDraftStaticSource,
+  /WorkoutDraftStorageRecord<TrainingReadiness \| null, Record<string, ExerciseDraft>>/,
   "WorkoutDraft debe conservar el generico de readiness",
 );
 assert.match(
@@ -59,7 +65,6 @@ for (const functionContract of [
   /function persistCurrentWorkoutDraftSnapshot\(nextReadiness: TrainingReadiness \| null\)/,
   /async function submitDailyReadiness\(value: Omit<TrainingReadiness, "skipped">\)/,
   /async function persistDailyReadiness\(value: TrainingReadiness\)/,
-  /function normalizeTrainingReadiness\(value: unknown\): TrainingReadiness \| null/,
   /function formatReadinessNote\(value: TrainingReadiness \| null\)/,
 ]) {
   assert.match(
@@ -68,6 +73,16 @@ for (const functionContract of [
     "las funciones preexistentes deben conservar sus contratos con TrainingReadiness",
   );
 }
+assert.doesNotMatch(
+  appStaticSource,
+  /function normalizeTrainingReadiness\(/,
+  "el root no debe mantener un normalizador duplicado",
+);
+assert.match(
+  activeDraftStaticSource,
+  /normalizeReadiness: normalizeTrainingReadiness/,
+  "la carga concreta debe usar el normalizador productivo",
+);
 
 assert.doesNotMatch(
   readinessDraftStaticSource,

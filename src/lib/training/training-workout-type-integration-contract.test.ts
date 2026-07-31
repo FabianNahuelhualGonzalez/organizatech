@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
  * assertions only guard exports, imports, call-sites and source boundaries.
  */
 const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+const activeDraftStaticSource = readFileSync("src/lib/training/active-workout-draft.ts", "utf8");
 const workoutStorageStaticSource = readFileSync("src/lib/training/workout-draft-storage.ts", "utf8");
 const exerciseDraftStaticSource = readFileSync("src/lib/training/training-exercise-draft.ts", "utf8");
 const packageStaticSource = readFileSync("package.json", "utf8");
@@ -23,6 +24,18 @@ assert.match(
   /export interface ExerciseDraft \{/,
   "training-exercise-draft debe exportar ExerciseDraft",
 );
+for (const helper of ["createExerciseDraft", "normalizeExerciseDraft", "normalizeExerciseDrafts"]) {
+  assert.match(
+    exerciseDraftStaticSource,
+    new RegExp(`export function ${helper}\\(`),
+    `training-exercise-draft debe exportar ${helper}`,
+  );
+}
+assert.match(
+  activeDraftStaticSource,
+  /export type ActiveWorkoutDraft = Omit</,
+  "active-workout-draft debe ser la fuente del tipo concreto",
+);
 
 assert.match(
   appStaticSource,
@@ -31,8 +44,8 @@ assert.match(
 );
 assert.match(
   appStaticSource,
-  /import type \{ ExerciseDraft \} from "@\/lib\/training\/training-exercise-draft";/,
-  "React debe importar ExerciseDraft como tipo",
+  /import \{[^}]*createExerciseDraft,[^}]*normalizeExerciseDraft,[^}]*type ExerciseDraft,[^}]*\} from "@\/lib\/training\/training-exercise-draft";/,
+  "React debe importar los helpers productivos y ExerciseDraft desde su modulo canonico",
 );
 
 assert.doesNotMatch(appStaticSource, /^\s*type ActiveWorkoutReadinessContext\s*=/m);
@@ -43,16 +56,13 @@ assert.match(
   /activeWorkoutReadinessContextRef = useRef<ActiveWorkoutReadinessContext \| null>\(null\)/,
   "el useRef preexistente debe conservarse literalmente",
 );
-assert.match(
-  appStaticSource,
-  /type WorkoutDraft = WorkoutDraftStorageRecord<TrainingReadiness \| null, Record<string, ExerciseDraft>>;/,
-);
+assert.match(activeDraftStaticSource, /WorkoutDraftStorageRecord<TrainingReadiness \| null, Record<string, ExerciseDraft>>/);
 assert.match(appStaticSource, /useState<Record<string, ExerciseDraft>>\(\{\}\)/);
 assert.match(appStaticSource, /patch: Partial<ExerciseDraft>/);
 assert.match(appStaticSource, /drafts: Record<string, ExerciseDraft>/);
-assert.match(appStaticSource, /function createExerciseDraft\(exercise: ExerciseTemplate\): ExerciseDraft/);
-assert.match(appStaticSource, /function normalizeExerciseDraft\(exercise: ExerciseTemplate, draft\?: ExerciseDraft\): ExerciseDraft/);
-assert.match(appStaticSource, /function normalizeExerciseDrafts\(value: unknown\): Record<string, ExerciseDraft>/);
+assert.doesNotMatch(appStaticSource, /function createExerciseDraft\(/);
+assert.doesNotMatch(appStaticSource, /function normalizeExerciseDraft\(/);
+assert.doesNotMatch(appStaticSource, /function normalizeExerciseDrafts\(/);
 
 for (const testRegistration of [
   "tsx src/lib/training/training-exercise-draft.test.ts",
