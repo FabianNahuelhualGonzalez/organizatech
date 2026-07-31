@@ -1,4 +1,4 @@
-import { Button } from "@/ui/buttons/button";
+import { ConfirmDialog } from "@/ui/modals/confirm-dialog";
 
 export interface ConfirmNewCycleModalProps {
   isBusy: boolean;
@@ -8,17 +8,19 @@ export interface ConfirmNewCycleModalProps {
 
 export function ConfirmNewCycleModal({ isBusy, onCancel, onConfirm }: ConfirmNewCycleModalProps) {
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirmar nuevo ciclo">
-      <div className="card confirm-modal">
-        <h2>¿Estas seguro?</h2>
-        <p>Si decides crear un nuevo ciclo de entrenamiento, finalizaremos el ciclo actual que tienes registrado.</p>
-        <div className="modal-actions">
-          <Button variant="danger" type="button" onClick={onCancel} disabled={isBusy}>No</Button>
-          <Button variant="success" type="button" onClick={onConfirm} disabled={isBusy}>
-            {isBusy ? "Finalizando..." : "Si"}
-          </Button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      ariaLabel="Confirmar nuevo ciclo"
+      title="¿Estas seguro?"
+      cancelLabel="No"
+      cancelVariant="danger"
+      onCancel={onCancel}
+      confirmLabel="Si"
+      confirmBusyLabel="Finalizando..."
+      confirmVariant="success"
+      onConfirm={onConfirm}
+      isBusy={isBusy}
+    >
+      <p>Si decides crear un nuevo ciclo de entrenamiento, finalizaremos el ciclo actual que tienes registrado.</p>
+    </ConfirmDialog>
   );
 }

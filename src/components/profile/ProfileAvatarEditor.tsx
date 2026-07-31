@@ -8,6 +8,7 @@ import {
   getAvatarEditorInitialState,
   loadAvatarImage,
 } from "@/lib/profile/profile-avatar-image";
+import { StatusMessage } from "@/ui/feedback/status-message";
 
 export function ProfileAvatarEditor({
   file,
@@ -167,7 +168,7 @@ export function ProfileAvatarEditor({
           />
         </label>
 
-        {error && <p className="profile-avatar-status">{error}</p>}
+        {error && <StatusMessage tone="error" className="profile-avatar-status">{error}</StatusMessage>}
         <div className="profile-avatar-editor-actions">
           <button className="button secondary" type="button" onClick={onCancel} disabled={busy}>
             Cancelar

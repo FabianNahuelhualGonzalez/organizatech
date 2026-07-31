@@ -17,6 +17,7 @@ import { validateAvatarSourceFile } from "@/lib/profile/profile-avatar-image";
 import { Button } from "@/ui/buttons/button";
 import { FormField } from "@/ui/forms/form-field";
 import { TextInput } from "@/ui/forms/text-input";
+import { StatusMessage } from "@/ui/feedback/status-message";
 import type { ProfilePersonalData } from "@/lib/profile/profile-repository";
 import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
 import { ProfileAvatarEditor } from "./ProfileAvatarEditor";
@@ -195,7 +196,7 @@ function ProfileAvatarControls({
         <p className="profile-avatar-help">Inicia sesión para guardar tu foto de perfil.</p>
       )}
       {(statusMessage || externalError) && (
-        <p className="profile-avatar-status">{statusMessage || externalError}</p>
+        <StatusMessage className="profile-avatar-status">{statusMessage || externalError}</StatusMessage>
       )}
       <ProfileAvatarEditor
         file={selectedFile}
@@ -369,7 +370,7 @@ function PersonalDataSection({
             <TextInput value={profile.email ?? "No disponible"} readOnly aria-readonly="true" />
           </FormField>
 
-          {statusMessage && <p className="profile-form-status">{statusMessage}</p>}
+          {statusMessage && <StatusMessage className="profile-form-status">{statusMessage}</StatusMessage>}
           <div className="profile-form-actions">
             <Button variant="secondary" type="button" onClick={cancelEdition} disabled={isSaving}>
               Cancelar
@@ -389,15 +390,15 @@ function PersonalDataSection({
               </div>
             ))}
           </dl>
-          {isLoading && <p className="profile-form-status">Cargando datos personales...</p>}
+          {isLoading && <StatusMessage className="profile-form-status">Cargando datos personales...</StatusMessage>}
           {loadError && (
             <div className="profile-inline-notice">
               <span>{loadError}</span>
               {canEdit && <button type="button" onClick={onReload}>Reintentar</button>}
             </div>
           )}
-          {!canEdit && <p className="profile-form-status">Inicia sesión para guardar tu perfil.</p>}
-          {statusMessage && <p className="profile-form-status">{statusMessage}</p>}
+          {!canEdit && <StatusMessage className="profile-form-status">Inicia sesión para guardar tu perfil.</StatusMessage>}
+          {statusMessage && <StatusMessage className="profile-form-status">{statusMessage}</StatusMessage>}
         </>
       )}
     </section>

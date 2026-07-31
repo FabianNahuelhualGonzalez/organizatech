@@ -49,7 +49,27 @@ assert.match(panelSource, /className="notification-panel-header"/);
 assert.match(panelSource, /<strong>Notificaciones<\/strong>/);
 assert.match(panelSource, /totalNotificationsCount > 0 \? \(/);
 assert.match(panelSource, /className="notification-list"/);
-assert.match(panelSource, /<p className="notification-empty">\{emptyMessage\}<\/p>/);
+// P3-48B (COMPROBACIONES ESTATICAS / SOURCE-BASED: leen el codigo fuente; NO renderizan React ni
+// verifican el anuncio real de un lector de pantalla): el estado vacio pasa a la primitive
+// compartida, conservando clase, texto y condicion.
+assert.match(panelSource, /import \{ EmptyState \} from "@\/ui\/feedback\/empty-state";/);
+assert.match(panelSource, /<EmptyState className="notification-empty" message=\{emptyMessage\} \/>/);
+assert.equal((panelSource.match(/<EmptyState\b/g) ?? []).length, 1, "un unico estado vacio");
+assert.doesNotMatch(panelSource, /<p className="notification-empty"/, "no debe quedar el markup local migrado");
+// La condicion de vacio no cambia.
+assert.match(panelSource, /totalNotificationsCount > 0 \? \([\s\S]*?\) : \(\s*<EmptyState/);
+// `drawer-empty` NO se migra: es un backdrop/boton, no un estado vacio.
+assert.doesNotMatch(panelSource, /drawer-empty/);
+
+// Semantica accesible de la primitive real (source-based).
+const emptyStateSource = readSource("src/ui/feedback/empty-state.tsx");
+assert.equal((emptyStateSource.match(/^export function EmptyState\b/gm) ?? []).length, 1, "una sola definicion de EmptyState");
+assert.match(emptyStateSource, /role="status"/, "el estado vacio se anuncia tras la carga");
+const emptyStateCode = emptyStateSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+for (const forbidden of [/useState|useEffect/, /dangerouslySetInnerHTML/, /onClick/, /lucide-react/]) {
+  assert.doesNotMatch(emptyStateCode, forbidden, `EmptyState no debe incorporar ${forbidden}`);
+}
+
 assert.doesNotMatch(panelSource, /data-section=/, "el JSX original no tenia data-section y el componente tampoco debe tenerlo");
 
 // 5. Grupos: reutilización de NotificationGroup (exactamente 2 usos), Nuevas antes de Historial.

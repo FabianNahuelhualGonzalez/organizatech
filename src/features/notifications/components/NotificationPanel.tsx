@@ -3,6 +3,8 @@ import type {
   SeenNotificationRecord,
 } from "@/lib/notifications/notification-types";
 
+import { EmptyState } from "@/ui/feedback/empty-state";
+
 import { NotificationGroup } from "./NotificationGroup";
 
 export interface NotificationPanelProps {
@@ -62,7 +64,7 @@ export function NotificationPanel({
             ) : null}
           </div>
         ) : (
-          <p className="notification-empty">{emptyMessage}</p>
+          <EmptyState className="notification-empty" message={emptyMessage} />
         )}
       </div>
     </>
