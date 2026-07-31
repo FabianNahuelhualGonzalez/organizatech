@@ -104,16 +104,33 @@ export interface CycleHistoryDataSource {
   loadPersonalData(): Promise<CycleHistoryPersonalData>;
 }
 
-export function createRepositoryCycleHistoryDataSource(): CycleHistoryDataSource {
+export interface CycleHistoryRepositoryDependencies extends CycleHistoryCycleListDependencies {
+  getTrainingPlan: typeof getCycleScopedTrainingPlan;
+  getTrainingSessionData: typeof getCycleScopedTrainingSessionData;
+  getPersonalData: typeof getProfilePersonalData;
+}
+
+const cycleHistoryRepositoryDependencies: CycleHistoryRepositoryDependencies = {
+  getActiveCycle: getActiveTrainingCycle,
+  getHistoricalCycles: getTrainingCycleHistory,
+  getTrainingDayCounts: getCycleScopedTrainingDayCounts,
+  getTrainingPlan: getCycleScopedTrainingPlan,
+  getTrainingSessionData: getCycleScopedTrainingSessionData,
+  getPersonalData: getProfilePersonalData,
+};
+
+export function createRepositoryCycleHistoryDataSource(
+  dependencies: CycleHistoryRepositoryDependencies = cycleHistoryRepositoryDependencies,
+): CycleHistoryDataSource {
   return {
-    listCycles: loadRepositoryCycles,
+    listCycles: () => loadRepositoryCycles(dependencies),
     async loadCycle(selectedCycleId) {
-      const cycles = await loadRepositoryCycles();
+      const cycles = await loadRepositoryCycles(dependencies);
       return cycles.find((cycle) => cycle.id === selectedCycleId) ?? null;
     },
     async loadCycleData(selectedCycleId) {
-      const repositoryPlan = await getCycleScopedTrainingPlan(selectedCycleId);
-      const repositorySessionData = await getCycleScopedTrainingSessionData(
+      const repositoryPlan = await dependencies.getTrainingPlan(selectedCycleId);
+      const repositorySessionData = await dependencies.getTrainingSessionData(
         selectedCycleId,
         repositoryPlan,
       );
@@ -172,7 +189,7 @@ export function createRepositoryCycleHistoryDataSource(): CycleHistoryDataSource
       };
     },
     async loadPersonalData() {
-      const profile = await getProfilePersonalData();
+      const profile = await dependencies.getPersonalData();
       return {
         firstName: profile.firstName,
         lastName: profile.lastName,
@@ -185,7 +202,7 @@ export function createRepositoryCycleHistoryDataSource(): CycleHistoryDataSource
   };
 }
 
-interface CycleHistoryCycleListDependencies {
+export interface CycleHistoryCycleListDependencies {
   getActiveCycle: typeof getActiveTrainingCycle;
   getHistoricalCycles: typeof getTrainingCycleHistory;
   getTrainingDayCounts: typeof getCycleScopedTrainingDayCounts;

@@ -5,6 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { createCycleHistoryAppController } from "@/lib/training/cycle-history/cycle-history-app-controller";
 import { createCycleHistoryLoadCoordinator } from "@/lib/training/cycle-history/cycle-history-coordinator";
 import { createRepositoryCycleHistoryDataSource } from "@/lib/training/cycle-history/cycle-history-data-source";
+import {
+  createLegacyCycleHistoryServiceAdapter,
+  type LegacyCycleHistorySnapshot,
+} from "@/lib/training/cycle-history/cycle-history-legacy-adapter";
 import { createCycleHistoryPdfActionController } from "@/lib/training/cycle-history/cycle-history-pdf-action";
 import { createCycleHistoryService } from "@/lib/training/cycle-history/cycle-history-service";
 
@@ -13,32 +17,39 @@ import { CycleHistoryScreen } from "./CycleHistoryScreen";
 export interface CycleHistoryProductiveContainerProps {
   enabled: boolean;
   identityKey: string | null;
+  legacySnapshots: readonly LegacyCycleHistorySnapshot[];
 }
 
 /**
  * Capa productiva por identidad. Los repositorios obtienen el usuario desde la
  * sesión Supabase; identityKey solo delimita el ciclo de vida de caché/estado.
+ * Cuando esa ruta no está habilitada, el adaptador local conserva el fallback
+ * demo sin consultar repositories ni convertir snapshots en datos Supabase.
  */
 export function CycleHistoryProductiveContainer({
   enabled,
   identityKey,
+  legacySnapshots,
 }: CycleHistoryProductiveContainerProps) {
   const lifecycle = useMemo(() => {
-    const accessEnabled = enabled && Boolean(identityKey);
-    const service = createCycleHistoryService({
-      trainingCyclesRepositoryEnabled: accessEnabled,
-      dataSource: createRepositoryCycleHistoryDataSource(),
-    });
+    const repositoryAccessEnabled = enabled && Boolean(identityKey);
+    const legacyModeEnabled = !enabled;
+    const service = legacyModeEnabled
+      ? createLegacyCycleHistoryServiceAdapter({ snapshots: legacySnapshots })
+      : createCycleHistoryService({
+          trainingCyclesRepositoryEnabled: repositoryAccessEnabled,
+          dataSource: createRepositoryCycleHistoryDataSource(),
+        });
     const coordinator = createCycleHistoryLoadCoordinator(service);
     return {
       controller: createCycleHistoryAppController({
-        enabled: accessEnabled,
+        enabled: repositoryAccessEnabled || legacyModeEnabled,
         service,
         coordinator,
       }),
       pdfActionController: createCycleHistoryPdfActionController(),
     };
-  }, [enabled, identityKey]);
+  }, [enabled, identityKey, legacySnapshots]);
   const { controller, pdfActionController } = lifecycle;
   const [snapshot, setSnapshot] = useState(() => ({
     controller,
