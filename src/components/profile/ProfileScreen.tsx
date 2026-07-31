@@ -321,42 +321,54 @@ function PersonalDataSection({
 
       {isEditing ? (
         <form className="profile-form" onSubmit={handleSubmit}>
-          <FormField className="profile-field" label="Nombre" error={fieldErrors.firstName}>
+          <FormField className="profile-field" label="Nombre" controlId="profile-first-name" error={fieldErrors.firstName}>
             <TextInput
               value={values.firstName}
               onChange={(event) => setValues((current) => ({ ...current, firstName: event.target.value }))}
               maxLength={80}
+              id="profile-first-name"
+              aria-invalid={Boolean(fieldErrors.firstName)}
+              aria-describedby={fieldErrors.firstName ? "profile-first-name-error" : undefined}
             />
           </FormField>
-          <FormField className="profile-field" label="Apellido" error={fieldErrors.lastName}>
+          <FormField className="profile-field" label="Apellido" controlId="profile-last-name" error={fieldErrors.lastName}>
             <TextInput
               value={values.lastName}
               onChange={(event) => setValues((current) => ({ ...current, lastName: event.target.value }))}
               maxLength={120}
+              id="profile-last-name"
+              aria-invalid={Boolean(fieldErrors.lastName)}
+              aria-describedby={fieldErrors.lastName ? "profile-last-name-error" : undefined}
             />
           </FormField>
-          <FormField className="profile-field" label="Fecha de nacimiento" error={fieldErrors.birthDate}>
+          <FormField className="profile-field" label="Fecha de nacimiento" controlId="profile-birth-date" error={fieldErrors.birthDate}>
             <input
               type="date"
               value={values.birthDate}
               onChange={(event) => setValues((current) => ({ ...current, birthDate: event.target.value }))}
+              id="profile-birth-date"
+              aria-invalid={Boolean(fieldErrors.birthDate)}
+              aria-describedby={fieldErrors.birthDate ? "profile-birth-date-error" : undefined}
             />
           </FormField>
           <div className="profile-info-row profile-readonly-row">
             <dt>Edad</dt>
             <dd>{formatProfileAgeLabel(values.birthDate)}</dd>
           </div>
-          <FormField className="profile-field" label="Género" error={fieldErrors.gender}>
+          <FormField className="profile-field" label="Género" controlId="profile-gender" error={fieldErrors.gender}>
             <select
               value={values.gender}
               onChange={(event) => setValues((current) => ({ ...current, gender: event.target.value as ProfileFormValues["gender"] }))}
+              id="profile-gender"
+              aria-invalid={Boolean(fieldErrors.gender)}
+              aria-describedby={fieldErrors.gender ? "profile-gender-error" : undefined}
             >
               {profileGenderValues.map((gender) => (
                 <option value={gender} key={gender}>{profileGenderLabels[gender]}</option>
               ))}
             </select>
           </FormField>
-          <FormField className="profile-field" label="Celular" error={fieldErrors.phoneNumber}>
+          <FormField className="profile-field" label="Celular" controlId="profile-phone-number" error={fieldErrors.phoneNumber}>
             <TextInput
               value={values.phoneNumber}
               onChange={(event) => setValues((current) => ({ ...current, phoneNumber: event.target.value }))}
@@ -364,10 +376,13 @@ function PersonalDataSection({
               placeholder="+56 9 1234 5678"
               inputMode="tel"
               autoComplete="tel"
+              id="profile-phone-number"
+              aria-invalid={Boolean(fieldErrors.phoneNumber)}
+              aria-describedby={fieldErrors.phoneNumber ? "profile-phone-number-error" : undefined}
             />
           </FormField>
-          <FormField className="profile-field" label="Correo">
-            <TextInput value={profile.email ?? "No disponible"} readOnly aria-readonly="true" />
+          <FormField className="profile-field" label="Correo" controlId="profile-email">
+            <TextInput value={profile.email ?? "No disponible"} readOnly aria-readonly="true" id="profile-email" />
           </FormField>
 
           {statusMessage && <StatusMessage className="profile-form-status">{statusMessage}</StatusMessage>}
