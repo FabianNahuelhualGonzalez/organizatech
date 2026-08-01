@@ -20,7 +20,7 @@ import { TextInput } from "@/ui/forms/text-input";
 import { StatusMessage } from "@/ui/feedback/status-message";
 import type { ProfilePersonalData } from "@/lib/profile/profile-repository";
 import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
-import { ProfileAvatarEditor } from "./ProfileAvatarEditor";
+import { PROFILE_AVATAR_EDITOR_ID, ProfileAvatarEditor } from "./ProfileAvatarEditor";
 import { UserAvatar } from "./UserAvatar";
 
 const preferenceRows = [
@@ -129,6 +129,7 @@ function ProfileAvatarControls({
   onUpload: (file: File) => Promise<void>;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const avatarEditorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [isWorking, setIsWorking] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -181,11 +182,15 @@ function ProfileAvatarControls({
           <p className="profile-avatar-help">Elige una foto para tu perfil.</p>
           <div className="profile-avatar-actions">
             <button
+              ref={avatarEditorTriggerRef}
               className="profile-edit-button"
               type="button"
               disabled={isBusy}
               onClick={() => fileInputRef.current?.click()}
               aria-label={hasAvatar ? "Cambiar foto de perfil" : "Subir foto de perfil"}
+              aria-controls={PROFILE_AVATAR_EDITOR_ID}
+              aria-haspopup="dialog"
+              aria-expanded={Boolean(selectedFile)}
             >
               <Plus size={20} aria-hidden="true" />
               {hasAvatar ? "Cambiar foto" : "Subir foto"}
@@ -204,6 +209,7 @@ function ProfileAvatarControls({
         isSaving={isWorking}
         onCancel={() => setSelectedFile(null)}
         onConfirm={handleConfirmAvatar}
+        restoreFocusRef={avatarEditorTriggerRef}
       />
     </div>
   );

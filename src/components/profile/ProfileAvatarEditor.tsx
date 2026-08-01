@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type RefObject } from "react";
 import { Check, X } from "lucide-react";
 
 import {
@@ -9,6 +9,12 @@ import {
   loadAvatarImage,
 } from "@/lib/profile/profile-avatar-image";
 import { StatusMessage } from "@/ui/feedback/status-message";
+import {
+  OVERLAY_INITIAL_FOCUS_ATTRIBUTE,
+  useOverlayFocusManagement,
+} from "@/ui/overlays/use-overlay-focus-management";
+
+export const PROFILE_AVATAR_EDITOR_ID = "profile-avatar-editor";
 
 export function ProfileAvatarEditor({
   file,
@@ -16,12 +22,14 @@ export function ProfileAvatarEditor({
   isSaving = false,
   onCancel,
   onConfirm,
+  restoreFocusRef,
 }: {
   file: File | null;
   isOpen: boolean;
   isSaving?: boolean;
   onCancel: () => void;
   onConfirm: (file: File) => Promise<void> | void;
+  restoreFocusRef: RefObject<HTMLElement | null>;
 }) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
@@ -34,6 +42,16 @@ export function ProfileAvatarEditor({
   }));
   const [error, setError] = useState("");
   const [isPreparing, setIsPreparing] = useState(false);
+  const busy = isSaving || isPreparing;
+
+  // El hook debe conservar su orden entre renders; `isActive` limita el motor al editor visible
+  // que ya tiene una imagen seleccionada.
+  const dialogRef = useOverlayFocusManagement<HTMLDivElement>({
+    isActive: isOpen && Boolean(file),
+    onClose: onCancel,
+    canClose: !busy,
+    restoreFocusRef,
+  });
 
   useEffect(() => {
     if (!isOpen || !file) return undefined;
@@ -123,13 +141,25 @@ export function ProfileAvatarEditor({
     }
   }
 
-  const busy = isSaving || isPreparing;
-
   return (
-    <div className="profile-avatar-editor-overlay" role="dialog" aria-modal="true" aria-label="Ajustar foto de perfil">
+    <div
+      ref={dialogRef}
+      id={PROFILE_AVATAR_EDITOR_ID}
+      className="profile-avatar-editor-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Ajustar foto de perfil"
+      tabIndex={-1}
+    >
       <div className="profile-avatar-editor">
         <div className="profile-avatar-editor-header">
-          <button type="button" aria-label="Cerrar editor de foto" onClick={onCancel} disabled={busy}>
+          <button
+            type="button"
+            aria-label="Cerrar editor de foto"
+            onClick={onCancel}
+            disabled={busy}
+            {...{ [OVERLAY_INITIAL_FOCUS_ATTRIBUTE]: "" }}
+          >
             <X size={18} aria-hidden="true" />
           </button>
           <h3>Foto de perfil</h3>
