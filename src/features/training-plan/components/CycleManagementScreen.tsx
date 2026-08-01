@@ -1,5 +1,6 @@
 import { Pencil, Trash2 } from "lucide-react";
 
+import { Card } from "@/ui/layout/card";
 import { calculateWeeklyComparison, calculateWeeklySummary } from "@/lib/progress/calculations";
 import type { ExerciseEntry, ExerciseTemplate } from "@/lib/progress/types";
 import { formatKg } from "@/lib/progress/weight-format";
@@ -53,7 +54,7 @@ export function CycleManagementScreen({
 
   return (
     <section className="screen">
-      <div className="card wide cycle-management-card">
+      <Card wide className="cycle-management-card">
         <p className="eyebrow">Ciclo activo</p>
         <h2>{activeCycleName ?? `Ciclo ${cycleNumber}`} - {cycleTitle}</h2>
         <p className="eyebrow">{getCycleDurationLabel(trainingPlan)} - {activeDays.length} dias - {targetSummary.exerciseCount} ejercicios</p>
@@ -72,15 +73,15 @@ export function CycleManagementScreen({
             Eliminar ciclo
           </button>
         </div>
-      </div>
+      </Card>
 
-      <div className="card wide new-cycle-card">
+      <Card wide className="new-cycle-card">
         <p className="eyebrow">Crear nuevo ciclo de entrenamiento</p>
         <h3>Finalizaremos tu ciclo actual y guardaremos su resumen en Historial ciclo de entrenamiento para que puedas revisarlo cuando quieras.</h3>
         <button className="start-button compact" type="button" onClick={requestNewCycle}>
           Crear nuevo ciclo de entrenamiento
         </button>
-      </div>
+      </Card>
 
     </section>
   );

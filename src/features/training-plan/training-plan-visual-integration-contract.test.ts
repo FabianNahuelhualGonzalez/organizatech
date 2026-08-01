@@ -57,7 +57,7 @@ assert.deepEqual(
   [...catalogSource.matchAll(/\bid: "(macro|meso|micro|session)"/g)].map((match) => match[1]),
   ["macro", "meso", "micro", "session"],
 );
-assert.match(files.cycleManagement, /className="card wide cycle-management-card"/);
+assert.match(files.cycleManagement, /<Card wide className="cycle-management-card">/);
 assert.match(files.deleteModal, /ariaLabel="Eliminar ciclo actual"/);
 assert.match(files.newModal, /ariaLabel="Confirmar nuevo ciclo"/);
 
@@ -331,6 +331,154 @@ assert.doesNotMatch(readinessScreenSource, /@\/ui\/layout\/section-heading/, "Ac
 assert.doesNotMatch(readinessScreenSource, /<SectionHeading/, "Active Workout no debe usar la primitive");
 // El root tampoco la adopta en esta fase.
 assert.doesNotMatch(appSource, /@\/ui\/layout\/section-heading/, "el root no adopta la primitive en P3-49A");
+
+// -------------------------------------------------------------------------------------------
+// P3-49B — Card compartida, slice aislado de Training Plan.
+//
+// CONTRATO ESTATICO / SOURCE-BASED: protege la API y la integracion declaradas en la fuente. NO
+// monta React ni sustituye el QA visual del DOM renderizado en navegador.
+// -------------------------------------------------------------------------------------------
+function stripCardScanComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+}
+
+const cardSource = readSource("src/ui/layout/card.tsx");
+const cardCode = stripCardScanComments(cardSource);
+const cardConsumerCode = {
+  cycleManagement: stripCardScanComments(files.cycleManagement),
+  planBlocker: stripCardScanComments(files.planBlocker),
+};
+
+// Una sola definicion productiva, import type unico y API exacta.
+assert.equal((cardCode.match(/^export function Card\b/gm) ?? []).length, 1, "una sola definicion de Card");
+assert.match(cardCode, /^import type \{ ReactNode \} from "react";/m);
+assert.equal((cardCode.match(/^import /gm) ?? []).length, 1, "Card solo importa ReactNode como type");
+assert.match(
+  cardCode,
+  /export interface CardProps \{\s*wide\?: boolean;\s*className\?: string;\s*children: ReactNode;\s*\}/,
+  "API exacta de CardProps",
+);
+
+// Raiz div fija y composicion determinista: card -> wide -> clase de feature.
+assert.match(
+  cardCode,
+  /const composedClassName = `card\$\{wide \? " wide" : ""\}\$\{className \? ` \$\{className\}` : ""\}`;/,
+);
+assert.match(cardCode, /return <div className=\{composedClassName\}>\{children\}<\/div>;/, "raiz div fija");
+
+// Sin API universal, eventos, polimorfismo, hooks ni dependencias de negocio/plataforma.
+for (const forbidden of [
+  /HTMLAttributes/,
+  /\{\.\.\./,
+  /\bas\??:/,
+  /\bvariant\b/,
+  /\brole\b/,
+  /\bonClick\b/,
+  /\btabIndex\b/,
+  /\bref\b/,
+  /forwardRef/,
+  /\buse(?:State|Effect|Ref|Memo|Callback|Reducer|Context)\b/,
+  /\bwindow\b|\bdocument\b|\blocalStorage\b|\bsessionStorage\b/,
+  /dangerouslySetInnerHTML/,
+  /@\/features\//,
+  /@\/lib\//,
+  /repository|Supabase|supabase|storage/,
+]) {
+  assert.doesNotMatch(cardCode, forbidden, `Card no debe incorporar ${forbidden}`);
+}
+
+// Consumidores productivos exactos: dos archivos y tres instancias, todas wide.
+const cardConsumers: string[] = [];
+const cardInstances: string[] = [];
+(function collectCardConsumers(directory: string) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) {
+      collectCardConsumers(entryPath);
+      continue;
+    }
+    if (!entry.name.endsWith(".tsx") && !entry.name.endsWith(".ts")) continue;
+    if (entryPath.endsWith(".test.ts") || entryPath === "src/ui/layout/card.tsx") continue;
+    const source = stripCardScanComments(readSource(entryPath));
+    if (source.includes("@/ui/layout/card")) cardConsumers.push(entryPath);
+    if (/<Card\b/.test(source)) cardInstances.push(...Array.from(source.matchAll(/<Card\b/g), () => entryPath));
+  }
+})("src");
+assert.deepEqual(
+  cardConsumers.sort(),
+  [
+    "src/features/training-plan/components/CycleManagementScreen.tsx",
+    "src/features/training-plan/components/CycleScopedPlanBlocker.tsx",
+  ],
+  "Card tiene exactamente los dos consumidores autorizados",
+);
+assert.equal(cardInstances.length, 3, "Card tiene exactamente tres instancias productivas");
+assert.equal((cardConsumerCode.cycleManagement.match(/<Card wide\b/g) ?? []).length, 2);
+assert.equal((cardConsumerCode.planBlocker.match(/<Card wide\b/g) ?? []).length, 1);
+assert.equal(
+  (cardConsumerCode.cycleManagement.match(/className="cycle-management-card"/g) ?? []).length
+    + (cardConsumerCode.planBlocker.match(/className="cycle-management-card"/g) ?? []).length,
+  2,
+  "cycle-management-card se usa dos veces",
+);
+assert.equal((cardConsumerCode.cycleManagement.match(/className="new-cycle-card"/g) ?? []).length, 1);
+
+// Los wrappers inline desaparecen y el contenido interno permanece literal, en el mismo orden.
+for (const source of [cardConsumerCode.cycleManagement, cardConsumerCode.planBlocker]) {
+  assert.doesNotMatch(source, /<div className="card wide (?:cycle-management-card|new-cycle-card)">/);
+  assert.match(source, /import \{ Card \} from "@\/ui\/layout\/card";/);
+}
+assert.ok(files.cycleManagement.includes(`      <Card wide className="cycle-management-card">
+        <p className="eyebrow">Ciclo activo</p>
+        <h2>{activeCycleName ?? \`Ciclo \${cycleNumber}\`} - {cycleTitle}</h2>
+        <p className="eyebrow">{getCycleDurationLabel(trainingPlan)} - {activeDays.length} dias - {targetSummary.exerciseCount} ejercicios</p>
+        <div className="cycle-summary-line">
+          <div><span>Volumen registrado</span><strong>{formatKg(summary.volumeTotal)}</strong></div>
+          <div><span>Reps registradas</span><strong>{summary.totalReps}</strong></div>
+          <div><span>Semanas</span><strong>{weeksRegistered}</strong></div>
+        </div>
+        <div className="cycle-management-actions">
+          <button className="button secondary" type="button" onClick={editCurrentCycle}>
+            <Pencil size={16} />
+            Modificar ciclo actual
+          </button>
+          <button className="button danger-solid" type="button" onClick={requestDeleteCycle}>
+            <Trash2 size={16} />
+            Eliminar ciclo
+          </button>
+        </div>
+      </Card>`), "contenido de ciclo activo preservado");
+assert.ok(files.cycleManagement.includes(`      <Card wide className="new-cycle-card">
+        <p className="eyebrow">Crear nuevo ciclo de entrenamiento</p>
+        <h3>Finalizaremos tu ciclo actual y guardaremos su resumen en Historial ciclo de entrenamiento para que puedas revisarlo cuando quieras.</h3>
+        <button className="start-button compact" type="button" onClick={requestNewCycle}>
+          Crear nuevo ciclo de entrenamiento
+        </button>
+      </Card>`), "contenido de nuevo ciclo preservado");
+assert.ok(files.planBlocker.includes(`      <Card wide className="cycle-management-card">
+        <p className="eyebrow">Plan cycle-scoped</p>
+        <h2>Plan operativo no disponible</h2>
+        <p>{message}</p>
+      </Card>`), "contenido y mensaje del blocker preservados");
+
+// Root, Active Workout y Dashboard permanecen fuera de alcance.
+assert.doesNotMatch(stripCardScanComments(appSource), /@\/ui\/layout\/card/, "el root no adopta Card");
+for (const [label, directory] of [
+  ["Active Workout", "src/features/active-workout"],
+  ["Dashboard", "src/features/dashboard"],
+] as const) {
+  const imports: string[] = [];
+  (function collectForbiddenImports(currentDirectory: string) {
+    for (const entry of readdirSync(currentDirectory, { withFileTypes: true })) {
+      const entryPath = `${currentDirectory}/${entry.name}`;
+      if (entry.isDirectory()) collectForbiddenImports(entryPath);
+      else if ((entry.name.endsWith(".tsx") || entry.name.endsWith(".ts")) && !entryPath.endsWith(".test.ts")) {
+        if (stripCardScanComments(readSource(entryPath)).includes("@/ui/layout/card")) imports.push(entryPath);
+      }
+    }
+  })(directory);
+  assert.deepEqual(imports, [], `${label} no adopta Card`);
+}
 
 const registration = "tsx src/features/training-plan/training-plan-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);
