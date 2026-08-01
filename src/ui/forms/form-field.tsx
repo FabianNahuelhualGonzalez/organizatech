@@ -12,24 +12,27 @@ import type { ReactNode } from "react";
  * input/select/textarea: el control lo sigue proveyendo el consumidor, con sus propios eventos,
  * valores, `readOnly`, `inputMode` y `autoComplete` intactos.
  *
- * El label sigue siendo IMPLÍCITO (sin `htmlFor`/`id`), igual que antes. Migrar a label explícito
- * con `aria-describedby`/`aria-invalid` cambiaría la API (exigiría un `id` por campo) y la
- * presentación del error, por lo que pertenece a P3-50 y no se adelanta aquí.
+ * `controlId` mantiene asociada la etiqueta explicita al control provisto por el consumidor. El
+ * mensaje opcional recibe un id determinista para que el consumidor pueda referenciarlo sin que
+ * la primitive inspeccione o modifique `children`.
  */
 
 export interface FormFieldProps {
+  controlId: string;
   label: string;
   error?: string;
   className?: string;
   children: ReactNode;
 }
 
-export function FormField({ label, error, className, children }: FormFieldProps) {
+export function FormField({ controlId, label, error, className, children }: FormFieldProps) {
+  const errorId = `${controlId}-error`;
+
   return (
-    <label className={className}>
+    <label className={className} htmlFor={controlId}>
       <span>{label}</span>
       {children}
-      {error && <small>{error}</small>}
+      {error && <small id={errorId}>{error}</small>}
     </label>
   );
 }

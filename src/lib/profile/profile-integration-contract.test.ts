@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
  */
 const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
 const profileScreenStaticSource = readFileSync("src/components/profile/ProfileScreen.tsx", "utf8");
+const formFieldStaticSource = readFileSync("src/ui/forms/form-field.tsx", "utf8");
 const avatarEditorStaticSource = readFileSync("src/components/profile/ProfileAvatarEditor.tsx", "utf8");
 const userAvatarStaticSource = readFileSync("src/components/profile/UserAvatar.tsx", "utf8");
 const profileAvatarStaticSource = readFileSync("src/lib/profile/profile-avatar.ts", "utf8");
@@ -94,6 +95,82 @@ assert.match(
 assert.match(personalDataSection, /\{isSaving \? "Guardando\.\.\." : "Guardar cambios"\}/);
 // Los botones que NO mapean a una variante autorizada permanecen nativos en P3-47A.
 assert.match(profileScreenStaticSource, /<button\s+className="profile-edit-button"/);
+
+// CONTRATO ESTATICO 3E (P3-50A — SOURCE-BASED): valida asociaciones declaradas en el source.
+// No renderiza React, no inspecciona el DOM y no prueba el anuncio real de un lector de pantalla.
+const formFieldStaticCode = formFieldStaticSource
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/\/\/.*$/gm, "");
+assert.match(formFieldStaticSource, /controlId: string;/, "FormField exige un id explicito del control");
+assert.match(formFieldStaticSource, /const errorId = `\$\{controlId\}-error`;/);
+assert.match(formFieldStaticSource, /<label className=\{className\} htmlFor=\{controlId\}>/);
+assert.match(formFieldStaticSource, /\{error && <small id=\{errorId\}>\{error\}<\/small>\}/);
+for (const forbidden of [/\bcloneElement\b/, /\buseState\b|\buseEffect\b/, /role="alert"/, /aria-live=/]) {
+  assert.doesNotMatch(formFieldStaticCode, forbidden, `FormField no debe incorporar ${forbidden}`);
+}
+
+const validatableProfileFields = [
+  { label: "Nombre", id: "profile-first-name", errorKey: "firstName" },
+  { label: "Apellido", id: "profile-last-name", errorKey: "lastName" },
+  { label: "Fecha de nacimiento", id: "profile-birth-date", errorKey: "birthDate" },
+  { label: "Género", id: "profile-gender", errorKey: "gender" },
+  { label: "Celular", id: "profile-phone-number", errorKey: "phoneNumber" },
+] as const;
+const expectedProfileControlIds = [
+  ...validatableProfileFields.map(({ id }) => id),
+  "profile-email",
+];
+const declaredProfileControlIds = [
+  ...profileScreenStaticSource.matchAll(
+    /<FormField className="profile-field" label="[^"]+" controlId="([^"]+)"/g,
+  ),
+].map((match) => match[1]);
+assert.deepEqual(
+  declaredProfileControlIds,
+  expectedProfileControlIds,
+  "los seis controlId son literales, unicos y conservan el orden de los campos",
+);
+assert.equal(new Set(declaredProfileControlIds).size, 6, "los seis controlId deben ser unicos");
+
+for (const { label, id, errorKey } of validatableProfileFields) {
+  const fieldMatch = profileScreenStaticSource.match(new RegExp(
+    `<FormField className="profile-field" label="${label}" controlId="${id}" error=\\{fieldErrors\\.${errorKey}\\}>([\\s\\S]*?)<\\/FormField>`,
+  ));
+  assert.ok(fieldMatch, `el campo ${label} debe conservar su error y controlId exactos`);
+  const fieldSource = fieldMatch[1];
+  assert.match(fieldSource, new RegExp(`\\bid="${id}"`), `${label}: controlId e id deben coincidir`);
+  assert.match(
+    fieldSource,
+    new RegExp(`aria-invalid=\\{Boolean\\(fieldErrors\\.${errorKey}\\)\\}`),
+    `${label}: aria-invalid depende solo de su error`,
+  );
+  assert.match(
+    fieldSource,
+    new RegExp(`aria-describedby=\\{fieldErrors\\.${errorKey} \\? "${id}-error" : undefined\\}`),
+    `${label}: aria-describedby solo existe cuando hay error y apunta al small determinista`,
+  );
+}
+
+const emailFieldMatch = profileScreenStaticSource.match(
+  /<FormField className="profile-field" label="Correo" controlId="profile-email">([\s\S]*?)<\/FormField>/,
+);
+assert.ok(emailFieldMatch, "Correo conserva FormField con controlId literal");
+assert.match(emailFieldMatch[1], /\bid="profile-email"/);
+assert.match(emailFieldMatch[1], /\breadOnly\b/);
+assert.match(emailFieldMatch[1], /aria-readonly="true"/);
+assert.doesNotMatch(emailFieldMatch[1], /\berror=|aria-describedby|aria-invalid|fieldErrors/);
+
+const renderedProfileControlIds = [
+  ...profileScreenStaticSource.matchAll(
+    /\bid="(profile-(?:first-name|last-name|birth-date|gender|phone-number|email))"/g,
+  ),
+].map((match) => match[1]);
+assert.deepEqual(
+  renderedProfileControlIds,
+  expectedProfileControlIds,
+  "cada control renderizado declara exactamente el mismo id literal que su FormField",
+);
+assert.equal(new Set(renderedProfileControlIds).size, 6, "los seis id de controles deben ser unicos");
 
 // CONTRATO ESTATICO 3D (P3-48B — COMPROBACIONES SOURCE-BASED: leen el codigo fuente; NO renderizan
 // React ni verifican el anuncio real de un lector de pantalla). Los mensajes dinamicos pasan a la
@@ -183,7 +260,7 @@ assert.match(
 );
 assert.match(
   profileScreenStaticSource,
-  /<TextInput value=\{profile\.email \?\? "No disponible"\} readOnly aria-readonly="true" \/>/,
+  /<TextInput value=\{profile\.email \?\? "No disponible"\} readOnly aria-readonly="true" id="profile-email" \/>/,
 );
 // Fecha y genero permanecen NATIVOS en P3-47B.
 assert.match(profileScreenStaticSource, /<input\s+type="date"\s+value=\{values\.birthDate\}/, "el input de fecha sigue nativo");
