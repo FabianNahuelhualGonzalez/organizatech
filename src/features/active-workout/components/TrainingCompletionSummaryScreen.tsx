@@ -1,4 +1,30 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+
+import { ShareWorkoutCard } from "@/features/progress/components/share-workout-card";
+import {
+  executeWorkoutShareAction,
+  type WorkoutShareActionResult,
+} from "@/lib/training/workout-share-action";
+import {
+  buildWorkoutShareCardModel,
+  buildWorkoutShareTextPayload,
+} from "@/lib/training/workout-share-model";
 import type { TrainingCompletionSummary } from "@/lib/training/training-completion-summary";
+
+const workoutShareStatusByResult = {
+  shared: { message: "Entrenamiento compartido.", tone: "polite" },
+  copied: { message: "Resumen copiado al portapapeles.", tone: "polite" },
+  cancelled: { message: "Compartir cancelado.", tone: "polite" },
+  unavailable: { message: "No se pudo compartir ni copiar en este dispositivo.", tone: "error" },
+  failed: { message: "No se pudo compartir el entrenamiento. Inténtalo nuevamente.", tone: "error" },
+} as const satisfies Record<WorkoutShareActionResult["kind"], {
+  readonly message: string;
+  readonly tone: "polite" | "error";
+}>;
+
+type WorkoutShareStatus = (typeof workoutShareStatusByResult)[keyof typeof workoutShareStatusByResult];
 
 export interface TrainingCompletionSummaryScreenProps {
   summary: TrainingCompletionSummary;
@@ -6,8 +32,57 @@ export interface TrainingCompletionSummaryScreenProps {
 }
 
 export function TrainingCompletionSummaryScreen({ summary, onDashboard }: TrainingCompletionSummaryScreenProps) {
+  const shareModel = buildWorkoutShareCardModel(summary);
+  const shareInFlightRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareStatus, setShareStatus] = useState<WorkoutShareStatus | null>(null);
   const previousDateLabel = summary.exercises.find((exercise) => exercise.comparisonStatus === "ready" && exercise.previousDateLabel)?.previousDateLabel ?? "";
   const currentDateLabel = summary.exercises[0]?.currentDateLabel ?? "";
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  async function handleShareWorkout() {
+    if (!shareModel || shareInFlightRef.current) return;
+
+    shareInFlightRef.current = true;
+    setIsSharing(true);
+    setShareStatus(null);
+
+    try {
+      const payload = buildWorkoutShareTextPayload(shareModel);
+      const canUseNavigator = typeof navigator !== "undefined";
+      const result = await executeWorkoutShareAction(payload, {
+        share: canUseNavigator && typeof navigator.share === "function"
+          ? () => navigator.share({
+            title: payload.title,
+            text: payload.text,
+          })
+          : undefined,
+        copyText: canUseNavigator && typeof navigator.clipboard?.writeText === "function"
+          ? () => navigator.clipboard.writeText(payload.text)
+          : undefined,
+      });
+
+      if (isMountedRef.current) {
+        setShareStatus(workoutShareStatusByResult[result.kind]);
+      }
+    } catch {
+      if (isMountedRef.current) {
+        setShareStatus(workoutShareStatusByResult.failed);
+      }
+    } finally {
+      shareInFlightRef.current = false;
+      if (isMountedRef.current) {
+        setIsSharing(false);
+      }
+    }
+  }
 
   return (
     <section className="training-completion-screen">
@@ -67,6 +142,16 @@ export function TrainingCompletionSummaryScreen({ summary, onDashboard }: Traini
             ))}
           </div>
         </div>
+
+        {shareModel ? (
+          <ShareWorkoutCard
+            model={shareModel}
+            onShare={handleShareWorkout}
+            isSharing={isSharing}
+            statusMessage={shareStatus?.message}
+            statusTone={shareStatus?.tone}
+          />
+        ) : null}
 
         <button className="button training-completion-button" type="button" onClick={onDashboard}>
           Ir al panel principal
