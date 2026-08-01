@@ -571,9 +571,6 @@ function readSource(path: string): string {
 
 const appSource = readSource("src/components/organizatech-app.tsx");
 const packageSource = readSource("package.json");
-const comparisonSource = readSource("src/features/progress/components/comparison-screen-v2.tsx");
-const shareCardSource = readSource("src/features/progress/components/share-workout-card.tsx");
-const shareActionSource = readSource("src/lib/training/workout-share-action.ts");
 const controllerModelSource = readSource(
   "src/features/active-workout/model/active-workout-controller-state.ts",
 );
@@ -794,115 +791,41 @@ assert.match(files.performancePanel, /className="exercise-observation-textarea"/
 assert.match(files.seriesResult, /className={`series-result session-summary \$\{result\.tone\}`}/);
 
 // =============================================================================================
-// ESTÁTICO/SOURCE-BASED P3-39B: valida wiring textual de compartir. No renderiza React/DOM, no
-// ejecuta Web Share ni clipboard y no sustituye los tests runtime de workout-share-action.
+// ESTÁTICO/SOURCE-BASED HOTFIX: el resumen de cierre debe conservar una única presentación. La
+// infraestructura de compartir puede permanecer aislada, pero no se monta en esta pantalla.
+// No renderiza React/DOM y no sustituye la QA manual en navegador.
 // =============================================================================================
 
-assert.match(files.completion, /^"use client";/);
-assert.equal(
-  (files.completion.match(
-    /import \{ ShareWorkoutCard \} from "@\/features\/progress\/components\/share-workout-card";/g,
-  ) ?? []).length,
-  1,
-  "TrainingCompletionSummaryScreen integra una sola fuente visual ShareWorkoutCard",
-);
-assert.match(files.completion, /buildWorkoutShareCardModel/);
-assert.match(files.completion, /buildWorkoutShareTextPayload/);
-assert.match(files.completion, /executeWorkoutShareAction/);
-assert.equal((files.completion.match(/buildWorkoutShareCardModel\(summary\)/g) ?? []).length, 1);
-assert.equal((files.completion.match(/<ShareWorkoutCard\b/g) ?? []).length, 1);
-assert.match(files.completion, /\{shareModel \? \(\s*<ShareWorkoutCard/);
+for (const forbiddenShareIntegration of [
+  /ShareWorkoutCard/,
+  /buildWorkoutShareCardModel/,
+  /buildWorkoutShareTextPayload/,
+  /executeWorkoutShareAction/,
+  /handleShareWorkout/,
+  /shareModel/,
+  /\bnavigator\b/,
+  /Compartiendo\.\.\./,
+]) {
+  assert.doesNotMatch(
+    files.completion,
+    forbiddenShareIntegration,
+    "TrainingCompletionSummaryScreen no debe montar un segundo resumen ni acciones de compartir",
+  );
+}
+
+assert.doesNotMatch(files.completion, /^"use client";/);
+assert.doesNotMatch(files.completion, /\buseEffect\b|\buseRef\b|\buseState\b/);
 
 const completionTableIndex = files.completion.indexOf("<div className=\"training-completion-table\"");
-const shareCardIndex = files.completion.indexOf("{shareModel ? (");
 const dashboardButtonIndex = files.completion.indexOf(
   "<button className=\"button training-completion-button\" type=\"button\" onClick={onDashboard}>",
 );
-assert.ok(completionTableIndex >= 0 && completionTableIndex < shareCardIndex);
-assert.ok(shareCardIndex < dashboardButtonIndex, "la tarjeta queda antes del boton Dashboard");
+assert.ok(completionTableIndex >= 0 && completionTableIndex < dashboardButtonIndex);
 assert.match(
   files.completion,
   /<button className="button training-completion-button" type="button" onClick=\{onDashboard\}>\s*Ir al panel principal\s*<\/button>/,
   "el boton Dashboard conserva clase, tipo, handler y texto",
 );
-
-const shareHandlerStart = files.completion.indexOf("  async function handleShareWorkout()");
-const shareHandlerEnd = files.completion.indexOf("\n\n  return (", shareHandlerStart);
-assert.ok(shareHandlerStart >= 0 && shareHandlerEnd > shareHandlerStart);
-const shareHandlerSource = files.completion.slice(shareHandlerStart, shareHandlerEnd);
-const completionOutsideShareHandler = files.completion.slice(0, shareHandlerStart)
-  + files.completion.slice(shareHandlerEnd);
-assert.doesNotMatch(completionOutsideShareHandler, /\bnavigator\b/);
-assert.match(shareHandlerSource, /if \(!shareModel \|\| shareInFlightRef\.current\) return;/);
-assert.match(shareHandlerSource, /shareInFlightRef\.current = true;/);
-assert.match(shareHandlerSource, /shareInFlightRef\.current = false;/);
-assert.match(shareHandlerSource, /setIsSharing\(true\);\s*setShareStatus\(null\);/);
-assert.match(shareHandlerSource, /const payload = buildWorkoutShareTextPayload\(shareModel\);/);
-assert.ok(
-  shareHandlerSource.indexOf("buildWorkoutShareTextPayload(shareModel)")
-    < shareHandlerSource.indexOf("executeWorkoutShareAction(payload"),
-  "el payload se deriva exclusivamente del modelo sanitizado antes de ejecutar la accion",
-);
-assert.match(shareHandlerSource, /const canUseNavigator = typeof navigator !== "undefined";/);
-assert.match(
-  shareHandlerSource,
-  /navigator\.share\(\{\s*title: payload\.title,\s*text: payload\.text,\s*\}\)/,
-);
-assert.match(shareHandlerSource, /navigator\.clipboard\.writeText\(payload\.text\)/);
-assert.doesNotMatch(shareHandlerSource, /\burl\s*:|\bfiles\s*:/);
-assert.equal((shareHandlerSource.match(/if \(isMountedRef\.current\)/g) ?? []).length, 3);
-assert.match(files.completion, /const shareInFlightRef = useRef\(false\);/);
-assert.match(files.completion, /const isMountedRef = useRef\(true\);/);
-assert.match(files.completion, /isMountedRef\.current = false;/);
-
-for (const [kind, message, tone] of [
-  ["shared", "Entrenamiento compartido.", "polite"],
-  ["copied", "Resumen copiado al portapapeles.", "polite"],
-  ["cancelled", "Compartir cancelado.", "polite"],
-  ["unavailable", "No se pudo compartir ni copiar en este dispositivo.", "error"],
-  ["failed", "No se pudo compartir el entrenamiento. Inténtalo nuevamente.", "error"],
-] as const) {
-  assert.match(
-    files.completion,
-    new RegExp(`${kind}: \\{ message: "${message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}", tone: "${tone}" \\}`),
-    `${kind} conserva mensaje y tono exactos`,
-  );
-}
-assert.match(files.completion, /isSharing=\{isSharing\}/);
-assert.match(files.completion, /statusMessage=\{shareStatus\?\.message\}/);
-assert.match(files.completion, /statusTone=\{shareStatus\?\.tone\}/);
-assert.match(shareCardSource, /disabled=\{isSharing\}/);
-assert.match(shareCardSource, /\{isSharing \? "Compartiendo\.\.\." : "Compartir"\}/);
-
-const shareActionCode = shareActionSource
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/\/\/.*$/gm, "");
-assert.match(shareActionSource, /^import type \{ WorkoutShareTextPayload \}/m);
-assert.match(
-  shareActionSource,
-  /await ports\.share\(\{\s*title: payload\.title,\s*text: payload\.text,\s*\}\);/,
-);
-assert.equal(
-  (shareActionSource.match(/copyWorkoutShareText\(payload\.text, ports\.copyText\)/g) ?? []).length,
-  2,
-  "clipboard cubre ausencia de share y fallo no-Abort",
-);
-assert.match(shareActionSource, /if \(isAbortError\(error\)\) return \{ kind: "cancelled" \};/);
-assert.doesNotMatch(shareActionCode, /\bnavigator\b|\bwindow\b|\bdocument\b/);
-assert.doesNotMatch(shareActionCode, /console\.|return\s*\{[^}]*\berror\b/);
-
-for (const source of [files.completion, shareActionSource]) {
-  assert.doesNotMatch(
-    source,
-    /buildWorkoutShareImageFilename|\bBlob\b|\bFile\b|\bcanvas\b|html2canvas|createObjectURL|\bfiles\s*:/,
-    "P3-39B no incorpora APIs PNG ni files de Web Share",
-  );
-}
-assert.doesNotMatch(appSource, /ShareWorkoutCard/);
-assert.doesNotMatch(comparisonSource, /ShareWorkoutCard/);
-
-const workoutShareTestGroup = "tsx --test src/lib/training/training-completion-summary.test.ts src/lib/training/workout-share-model.test.ts src/lib/training/workout-share-action.test.ts";
-assert.equal(packageSource.split(workoutShareTestGroup).length - 1, 1);
 assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 122);
 
 // GuidedTrainingScreen (P3-30): extraccion mecanica. Conserva el contrato de props, reutiliza el
