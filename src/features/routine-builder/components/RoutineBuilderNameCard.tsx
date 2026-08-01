@@ -16,6 +16,7 @@
  */
 
 import { TextInput } from "@/ui/forms/text-input";
+import { SectionHeading } from "@/ui/layout/section-heading";
 
 export interface RoutineBuilderNameCardProps {
   day: string;
@@ -30,10 +31,11 @@ export function RoutineBuilderNameCard({
 }: RoutineBuilderNameCardProps) {
   return (
     <div className="setup-card routine-name-card">
-      <div className="setup-section-heading">
-        <p className="eyebrow">Rutina del día {day}</p>
-        <h3>Nombre de la rutina</h3>
-      </div>
+      <SectionHeading
+        className="setup-section-heading"
+        eyebrow={<>Rutina del día {day}</>}
+        title="Nombre de la rutina"
+      />
       <TextInput
         className="setup-name-input"
         placeholder="Ej: Empuje, Jalón, Piernas"

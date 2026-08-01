@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 /**
  * Contrato ESTÁTICO de integración visual. No renderiza React, no simula clicks
@@ -135,46 +135,80 @@ assert.equal((files.deleteModal.match(/<p>/g) ?? []).length, 2, "conserva exacta
 assert.match(files.newModal, /cancelLabel="No"[\s\S]*?cancelVariant="danger"/);
 assert.match(files.newModal, /confirmLabel="Si"[\s\S]*?confirmBusyLabel="Finalizando\.\.\."[\s\S]*?confirmVariant="success"/);
 
-// P3-48A (COMPROBACIONES ESTATICAS / SOURCE-BASED sobre la fuente PRODUCTIVA de las primitives).
+// P3-48A + P3-50B0 (COMPROBACIONES ESTATICAS / SOURCE-BASED sobre la fuente PRODUCTIVA).
 // IMPORTANTE: verifican que el CODIGO DECLARA cada garantia; NO ejecutan foco, teclado ni DOM. El
-// comportamiento en runtime (foco real, orden de listeners, aislamiento efectivo del evento) no se
-// ejecuta en esta suite y requiere QA manual — ver informe.
+// comportamiento en runtime (foco real, orden de listeners, aislamiento efectivo del evento) NO se
+// ejecuta en esta suite y requiere QA manual en navegador — ver informe.
+//
+// P3-50B0: el motor de ownership/foco/teclado se extrajo a `useOverlayFocusManagement`. Las
+// garantias se verifican ahora sobre esa fuente unica; `ModalShell` solo debe delegar.
 const modalShellSource = readSource("src/ui/modals/modal-shell.tsx");
 const confirmDialogSource = readSource("src/ui/modals/confirm-dialog.tsx");
+const overlayFocusSource = readSource("src/ui/overlays/use-overlay-focus-management.ts");
 const modalShellCode = modalShellSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+const overlayFocusCode = overlayFocusSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 assert.equal((modalShellSource.match(/^export function ModalShell\b/gm) ?? []).length, 1, "una sola definicion de ModalShell");
 assert.equal((confirmDialogSource.match(/^export function ConfirmDialog\b/gm) ?? []).length, 1, "una sola definicion de ConfirmDialog");
-assert.match(modalShellSource, /role="dialog" aria-modal="true" aria-label=\{ariaLabel\}/);
+assert.equal(
+  (overlayFocusSource.match(/^export function useOverlayFocusManagement\b/gm) ?? []).length,
+  1,
+  "una sola definicion del motor compartido",
+);
 
-// (1) Stack/ownership de modal activo: solo el superior procesa Tab/Escape.
-assert.match(modalShellCode, /const activeModalOwners: ModalShellOwner\[\] = \[\];/);
-assert.match(modalShellCode, /function isTopModalOwner\(owner: ModalShellOwner\): boolean/);
-assert.match(modalShellCode, /if \(!isTopModalOwner\(owner\)\) return;/);
+// API publica y markup de ModalShell intactos.
+assert.match(modalShellSource, /role="dialog" aria-modal="true" aria-label=\{ariaLabel\}/);
+assert.match(modalShellSource, /className=\{cardClassName\} tabIndex=\{-1\}/);
+assert.match(modalShellSource, /ariaLabel: string;/);
+assert.match(modalShellSource, /onClose: \(\) => void;/);
+assert.match(modalShellSource, /canClose\?: boolean;/);
+assert.match(modalShellSource, /cardClassName: string;/);
+assert.match(modalShellSource, /children: ReactNode;/);
+// Marcador anterior compatible: mismo valor de atributo, re-exportado desde el motor.
+assert.match(modalShellSource, /export const MODAL_INITIAL_FOCUS_ATTRIBUTE = OVERLAY_INITIAL_FOCUS_ATTRIBUTE;/);
+assert.match(overlayFocusSource, /export const OVERLAY_INITIAL_FOCUS_ATTRIBUTE = "data-modal-initial-focus";/);
+// ModalShell DELEGA: usa el hook y no conserva implementacion duplicada.
+assert.match(modalShellSource, /import \{\s*OVERLAY_INITIAL_FOCUS_ATTRIBUTE,\s*useOverlayFocusManagement,\s*\} from "@\/ui\/overlays\/use-overlay-focus-management";/);
+assert.match(modalShellCode, /useOverlayFocusManagement<HTMLDivElement>\(\{ isActive: true, onClose, canClose \}\)/);
+for (const duplicated of [
+  /activeModalOwners|activeOverlayOwners/,
+  /addEventListener|removeEventListener/,
+  /FOCUSABLE_SELECTOR|querySelectorAll/,
+  /\buseEffect\b/,
+  /document\.activeElement/,
+  /isConnected/,
+]) {
+  assert.doesNotMatch(modalShellCode, duplicated, `ModalShell no debe conservar copia local de ${duplicated}`);
+}
+
+// (1) UN SOLO stack productivo, en el motor compartido; solo el owner superior procesa Tab/Escape.
+assert.match(overlayFocusCode, /const activeOverlayOwners: OverlayFocusOwner\[\] = \[\];/);
+assert.match(overlayFocusCode, /function isTopOverlayOwner\(owner: OverlayFocusOwner\): boolean/);
+assert.match(overlayFocusCode, /if \(!isTopOverlayOwner\(owner\)\) return;/);
 // (2) Alta idempotente por identidad y baja por identidad exacta (Strict Mode y orden imperfecto).
-assert.match(modalShellCode, /const ownerRef = useRef<ModalShellOwner>\(\{\}\);/);
-assert.match(modalShellCode, /if \(!activeModalOwners\.includes\(owner\)\) activeModalOwners\.push\(owner\);/);
-assert.match(modalShellCode, /const ownerIndex = activeModalOwners\.indexOf\(owner\);/);
-assert.match(modalShellCode, /if \(ownerIndex !== -1\) activeModalOwners\.splice\(ownerIndex, 1\);/);
-assert.doesNotMatch(modalShellCode, /Math\.random|Date\.now|globalThis\./, "sin ids globales predecibles ni dependencias externas");
-// (3) Listener en fase CAPTURE, registrado y retirado con el mismo flag.
-assert.match(modalShellCode, /document\.addEventListener\("keydown", handleKeyDown, true\);/);
-assert.match(modalShellCode, /document\.removeEventListener\("keydown", handleKeyDown, true\);/);
-// (11) Sin listeners acumulados: exactamente un alta y una baja de keydown en todo el modulo.
-assert.equal((modalShellCode.match(/addEventListener\(/g) ?? []).length, 1, "un unico addEventListener");
-assert.equal((modalShellCode.match(/removeEventListener\(/g) ?? []).length, 1, "un unico removeEventListener");
+assert.match(overlayFocusCode, /const ownerRef = useRef<OverlayFocusOwner>\(\{\}\);/);
+assert.match(overlayFocusCode, /if \(!activeOverlayOwners\.includes\(owner\)\) activeOverlayOwners\.push\(owner\);/);
+assert.match(overlayFocusCode, /const ownerIndex = activeOverlayOwners\.indexOf\(owner\);/);
+assert.match(overlayFocusCode, /if \(ownerIndex !== -1\) activeOverlayOwners\.splice\(ownerIndex, 1\);/);
+assert.doesNotMatch(overlayFocusCode, /Math\.random|Date\.now|globalThis\.|crypto\./, "sin ids globales predecibles ni contador");
+// (3) Listener en fase CAPTURE, alta y baja simetricas.
+assert.match(overlayFocusCode, /document\.addEventListener\("keydown", handleKeyDown, true\);/);
+assert.match(overlayFocusCode, /document\.removeEventListener\("keydown", handleKeyDown, true\);/);
+// (11) Sin listeners acumulados: exactamente un alta y una baja en todo el modulo.
+assert.equal((overlayFocusCode.match(/addEventListener\(/g) ?? []).length, 1, "un unico addEventListener");
+assert.equal((overlayFocusCode.match(/removeEventListener\(/g) ?? []).length, 1, "un unico removeEventListener");
 // (4)(5) Escape aislado SIEMPRE (pueda cerrar o no) y solo despues se decide el cierre.
-assert.match(modalShellCode, /event\.preventDefault\(\);\s*\n\s*event\.stopImmediatePropagation\(\);\s*\n\s*if \(!canCloseRef\.current\) return;\s*\n\s*onCloseRef\.current\(\);/);
+assert.match(overlayFocusCode, /event\.preventDefault\(\);\s*\n\s*event\.stopImmediatePropagation\(\);\s*\n\s*if \(!canCloseRef\.current\) return;\s*\n\s*onCloseRef\.current\(\);/);
 // (6) Callback y canClose vigentes mediante refs: el listener no se re-registra al cambiarlos.
-assert.match(modalShellCode, /const onCloseRef = useRef\(onClose\);/);
-assert.match(modalShellCode, /const canCloseRef = useRef\(canClose\);/);
-assert.match(modalShellCode, /onCloseRef\.current = onClose;/);
-assert.match(modalShellCode, /canCloseRef\.current = canClose;/);
-assert.doesNotMatch(modalShellCode, /\}, \[canClose, onClose\]\);/, "el listener no debe depender de onClose/canClose");
+assert.match(overlayFocusCode, /const onCloseRef = useRef\(onClose\);/);
+assert.match(overlayFocusCode, /const canCloseRef = useRef\(canClose\);/);
+assert.match(overlayFocusCode, /onCloseRef\.current = onClose;/);
+assert.match(overlayFocusCode, /canCloseRef\.current = canClose;/);
+assert.doesNotMatch(overlayFocusCode, /\}, \[canClose, onClose\]\);/, "el listener no debe depender de onClose/canClose");
 // (7) Recuperacion inmediata del foco en la transicion hacia busy, sin robarlo si sigue siendo valido.
-assert.match(modalShellCode, /const previousCanCloseRef = useRef\(canClose\);/);
-assert.match(modalShellCode, /if \(canClose \|\| wasClosable === false\) return;/);
-assert.match(modalShellCode, /if \(focusIsStillUsable\) return;/);
-assert.match(modalShellCode, /dialogNode\.focus\(\);\s*\n\s*\}, \[canClose\]\);/);
+assert.match(overlayFocusCode, /const previousCanCloseRef = useRef\(canClose\);/);
+assert.match(overlayFocusCode, /if \(canClose \|\| wasClosable === false\) return;/);
+assert.match(overlayFocusCode, /if \(focusIsStillUsable\) return;/);
+assert.match(overlayFocusCode, /containerNode\.focus\(\);\s*\n\s*\}, \[canClose, isActive\]\);/);
 // (8) Selector: tipos exigidos + exclusion de hidden/aria-hidden, incluyendo ancestros.
 for (const focusableSelector of [
   'button:not([disabled])',
@@ -184,29 +218,119 @@ for (const focusableSelector of [
   'textarea:not([disabled])',
   '[tabindex]:not([tabindex="-1"])',
 ]) {
-  assert.ok(modalShellSource.includes(focusableSelector), `el focus trap debe cubrir ${focusableSelector}`);
+  assert.ok(overlayFocusSource.includes(focusableSelector), `el focus trap debe cubrir ${focusableSelector}`);
 }
-assert.match(modalShellCode, /:not\(\[hidden\]\):not\(\[aria-hidden="true"\]\)/, "excluye hidden y aria-hidden");
-assert.match(modalShellCode, /element\.closest\('\[hidden\], \[aria-hidden="true"\]'\)/, "considera ancestros ocultos");
-assert.match(modalShellCode, /checkVisibility/, "usa checkVisibility cuando existe");
-assert.doesNotMatch(modalShellCode, /offsetParent/, "no debe usar offsetParent: romperia position: fixed");
+assert.match(overlayFocusCode, /:not\(\[hidden\]\):not\(\[aria-hidden="true"\]\)/, "excluye hidden y aria-hidden");
+assert.match(overlayFocusCode, /element\.closest\('\[hidden\], \[aria-hidden="true"\]'\)/, "considera ancestros ocultos");
+assert.match(overlayFocusCode, /checkVisibility/, "usa checkVisibility cuando existe");
+assert.doesNotMatch(overlayFocusCode, /offsetParent/, "no debe usar offsetParent: romperia position: fixed");
 // (9) Restauracion solo si el elemento sigue conectado, sin fallback artificial sobre body.
-assert.match(modalShellCode, /previous instanceof HTMLElement && previous\.isConnected\) previous\.focus\(\);/);
-assert.doesNotMatch(modalShellCode, /document\.body\.focus/, "sin fallback artificial sobre body");
+assert.match(overlayFocusCode, /previous instanceof HTMLElement && previous\.isConnected\) previous\.focus\(\);/);
+assert.doesNotMatch(overlayFocusCode, /document\.body\.focus/, "sin fallback artificial sobre body");
 // Foco inicial: marcado explicito -> primer control habilitado -> contenedor.
-assert.match(modalShellCode, /getFocusableElements\(dialogNode\)\[0\]\s*\n?\s*\?\? dialogNode/);
+assert.match(overlayFocusCode, /getFocusableElements\(containerNode\)\[0\]\s*\n?\s*\?\? containerNode/);
 // Focus trap en ambos sentidos.
-assert.match(modalShellCode, /if \(event\.key !== "Tab"\) return;/);
-assert.match(modalShellCode, /if \(event\.shiftKey\)/);
-// (10) Sin cierre por backdrop y sin efectos globales prohibidos.
+assert.match(overlayFocusCode, /if \(event\.key !== "Tab"\) return;/);
+assert.match(overlayFocusCode, /if \(event\.shiftKey\)/);
+// (10) Sin cierre por backdrop, sin scroll lock, sin navegacion ni efectos globales prohibidos.
 assert.doesNotMatch(modalShellCode, /onClick/, "el backdrop no debe cerrar al pulsarlo");
-assert.doesNotMatch(modalShellCode, /document\.body|dangerouslySetInnerHTML|overflow/);
+assert.doesNotMatch(overlayFocusCode, /onClick/);
+for (const forbidden of [/document\.body/, /dangerouslySetInnerHTML/, /overflow/, /@\/lib\/navigation\//, /@\/lib\/(?:storage|supabase|data)\//, /-repository/]) {
+  assert.doesNotMatch(overlayFocusCode, forbidden, `el motor no debe incorporar ${forbidden}`);
+  assert.doesNotMatch(modalShellCode, forbidden, `ModalShell no debe incorporar ${forbidden}`);
+}
+// P3-50B0 no migra Drawer ni NotificationPanel: el motor tiene un unico consumidor productivo.
+const overlayEngineConsumers: string[] = [];
+(function collectOverlayEngineConsumers(directory: string) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) {
+      collectOverlayEngineConsumers(entryPath);
+      continue;
+    }
+    if (!entry.name.endsWith(".tsx") && !entry.name.endsWith(".ts")) continue;
+    if (entryPath === "src/ui/overlays/use-overlay-focus-management.ts") continue;
+    if (entryPath.endsWith(".test.ts")) continue;
+    if (readFileSync(entryPath, "utf8").includes("@/ui/overlays/use-overlay-focus-management")) {
+      overlayEngineConsumers.push(entryPath);
+    }
+  }
+})("src");
+// P3-50B1 conecto Drawer y NotificationPanel al MISMO motor. La garantia sigue siendo una lista
+// EXACTA (no un "al menos"): un cuarto consumidor inesperado debe hacer fallar este contrato. Se
+// ordena para que el resultado no dependa del orden de recorrido del directorio.
+assert.deepEqual(
+  overlayEngineConsumers.sort(),
+  [
+    "src/features/app-shell/components/app-navigation-drawer.tsx",
+    "src/features/notifications/components/NotificationPanel.tsx",
+    "src/ui/modals/modal-shell.tsx",
+  ],
+  "los consumidores del motor compartido son exactamente ModalShell, Drawer y NotificationPanel",
+);
+
 // ConfirmDialog bloquea Escape durante busy y enfoca la accion segura.
 assert.match(confirmDialogSource, /canClose=\{!isBusy\}/);
 assert.match(confirmDialogSource, /disabled=\{isBusy\}/);
 assert.match(confirmDialogSource, /MODAL_INITIAL_FOCUS_ATTRIBUTE\]: isBusy \? undefined : ""/);
 // P3-47A no adopta la primitive en el root ni en Active Workout.
 assert.doesNotMatch(appSource, /from ["']@\/ui\/buttons\/button["']/, "el root no adopta la primitive en P3-47A");
+
+// -------------------------------------------------------------------------------------------
+// P3-49A — SectionHeading compartido.
+//
+// COMPROBACIONES ESTATICAS / SOURCE-BASED: leen el codigo fuente. NO renderizan React, no montan
+// el componente y no sustituyen QA manual del render real.
+// -------------------------------------------------------------------------------------------
+const sectionHeadingSource = readSource("src/ui/layout/section-heading.tsx");
+const sectionHeadingCode = sectionHeadingSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+
+// (1) Una sola definicion productiva.
+assert.equal(
+  (sectionHeadingSource.match(/^export function SectionHeading\b/gm) ?? []).length,
+  1,
+  "una unica definicion productiva de SectionHeading",
+);
+// API exacta, sin extras de configuracion.
+assert.match(sectionHeadingCode, /className: string;/);
+assert.match(sectionHeadingCode, /eyebrow: ReactNode;/);
+assert.match(sectionHeadingCode, /title: ReactNode;/);
+for (const forbiddenProp of [/\bvariant\b/, /\bheadingLevel\b/, /\baction\b/, /\bicon\b/, /\bsubtitle\b/, /\bas\?:/]) {
+  assert.doesNotMatch(sectionHeadingCode, forbiddenProp, `SectionHeading no debe aceptar ${forbiddenProp}`);
+}
+// (6)(7) Orden eyebrow -> h3 y jerarquia h3 preservada.
+assert.match(
+  sectionHeadingCode,
+  /<div className=\{className\}>\s*<p className="eyebrow">\{eyebrow\}<\/p>\s*<h3>\{title\}<\/h3>\s*<\/div>/,
+  "markup exacto: div > p.eyebrow > h3, en ese orden",
+);
+// (9) Primitive sin hooks, efectos, dominio ni APIs prohibidas; solo importa ReactNode como type.
+assert.match(sectionHeadingSource, /^import type \{ ReactNode \} from "react";/m);
+assert.equal((sectionHeadingSource.match(/^import /gm) ?? []).length, 1, "la primitive solo importa ReactNode como type");
+for (const forbidden of [
+  /\buseState\b/, /\buseEffect\b/, /\buseRef\b/, /\buseMemo\b/, /\buseCallback\b/, /\buseReducer\b/,
+  /dangerouslySetInnerHTML/, /\{\.\.\./, /@\/features\//, /@\/lib\/(?:storage|supabase|data|navigation)\//,
+  /-repository/, /process\.env/, /className="setup-/,
+]) {
+  assert.doesNotMatch(sectionHeadingCode, forbidden, `SectionHeading no debe incorporar ${forbidden}`);
+}
+
+// (3)(4)(5) Consumidor de Training Plan: import canonico, clase y contenido exactos.
+assert.match(files.setupCard, /import \{ SectionHeading \} from "@\/ui\/layout\/section-heading";/);
+assert.match(
+  files.setupCard,
+  /<SectionHeading\s+className="setup-section-heading"\s+eyebrow="Planificación deportiva"\s+title="Selecciona tu ciclo de entrenamiento"\s*\/>/,
+);
+// (8) Sin bloque inline residual en el consumidor migrado.
+assert.doesNotMatch(files.setupCard, /<div className="setup-section-heading">/, "el bloque inline debe haberse eliminado");
+
+// (11) Active Workout permanece FUERA de alcance: conserva su bloque inline y no adopta la primitive.
+const readinessScreenSource = readSource("src/features/active-workout/components/TrainingReadinessScreen.tsx");
+assert.match(readinessScreenSource, /<div className="setup-section-heading">/, "Active Workout no se migra en P3-49A");
+assert.doesNotMatch(readinessScreenSource, /@\/ui\/layout\/section-heading/, "Active Workout no debe importar la primitive");
+assert.doesNotMatch(readinessScreenSource, /<SectionHeading/, "Active Workout no debe usar la primitive");
+// El root tampoco la adopta en esta fase.
+assert.doesNotMatch(appSource, /@\/ui\/layout\/section-heading/, "el root no adopta la primitive en P3-49A");
 
 const registration = "tsx src/features/training-plan/training-plan-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);

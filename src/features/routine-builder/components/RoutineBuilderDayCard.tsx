@@ -10,6 +10,7 @@
  * preparación): el bloque original permanece en el root hasta la integración.
  */
 
+import { SectionHeading } from "@/ui/layout/section-heading";
 export interface RoutineBuilderDayCardProps {
   plannedDays: readonly string[];
   activeDay: string;
@@ -28,10 +29,11 @@ export function RoutineBuilderDayCard({
 
   return (
     <div className="setup-card routine-day-builder-card">
-      <div className="setup-section-heading">
-        <p className="eyebrow">Configura tus rutinas por día</p>
-        <h3>Rutina {currentStep} de {plannedDays.length} · {activeDay}</h3>
-      </div>
+      <SectionHeading
+        className="setup-section-heading"
+        eyebrow="Configura tus rutinas por día"
+        title={<>Rutina {currentStep} de {plannedDays.length} · {activeDay}</>}
+      />
       <div className="routine-build-progress">
         <span>{completedDaysCount} de {plannedDays.length} días completados</span>
         <div className="mini-progress-track">

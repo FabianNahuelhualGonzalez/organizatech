@@ -1,6 +1,7 @@
 import { TRAINING_CYCLE_PRESENTATIONS } from "@/features/training-plan/model/training-cycle-presentation";
 import type { TrainingCycleId } from "@/lib/training/training-cycle-id";
 import { TRAINING_DAY_LABELS } from "@/lib/training/training-day-order";
+import { SectionHeading } from "@/ui/layout/section-heading";
 
 export interface TrainingPlanSetupCardProps {
   cycleType: TrainingCycleId;
@@ -41,10 +42,11 @@ export function TrainingPlanSetupCard({
 
   return (
     <div className="setup-card training-cycles-card">
-      <div className="setup-section-heading">
-        <p className="eyebrow">Planificación deportiva</p>
-        <h3>Selecciona tu ciclo de entrenamiento</h3>
-      </div>
+      <SectionHeading
+        className="setup-section-heading"
+        eyebrow="Planificación deportiva"
+        title="Selecciona tu ciclo de entrenamiento"
+      />
       <div className="cycle-flow-card">
         <label className="cycle-select-field">
           <span>Ciclo de entrenamiento</span>

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 /**
  * Contrato ESTÁTICO de integración visual. No renderiza React, no simula
@@ -87,31 +87,44 @@ assert.match(successSource, /className="success-icon"/);
 assert.match(successSource, /onClose=\{onConfirm\}/);
 assert.match(successSource, /MODAL_INITIAL_FOCUS_ATTRIBUTE\]: ""/);
 
-// P3-48A remediación (COMPROBACIONES ESTATICAS / SOURCE-BASED — NO ejecutan foco, teclado ni DOM;
-// el comportamiento runtime no se ejecuta en esta suite y requiere QA manual):
-// el shell que consume RoutineSuccessModal aisla Escape y respeta el modal superior, de modo que
-// cerrar este modal no cierre tambien un overlay subyacente (p. ej. el keydown en burbuja de
-// `src/app/mobile-menu.tsx`).
+// P3-48A remediación + P3-50B0 (COMPROBACIONES ESTATICAS / SOURCE-BASED — NO ejecutan foco,
+// teclado ni DOM; el comportamiento runtime no se ejecuta en esta suite y requiere QA manual):
+// el shell que consume RoutineSuccessModal delega en el motor unico compartido, que aisla Escape y
+// respeta el overlay superior, de modo que cerrar este modal no cierre tambien un overlay
+// subyacente (p. ej. el keydown en burbuja de `src/app/mobile-menu.tsx`).
 const modalShellSharedSource = readSource("src/ui/modals/modal-shell.tsx");
 const modalShellSharedCode = modalShellSharedSource
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .replace(/\/\/.*$/gm, "");
-// Ownership: solo el modal superior del stack procesa Tab/Escape.
-assert.match(modalShellSharedCode, /const activeModalOwners: ModalShellOwner\[\] = \[\];/);
-assert.match(modalShellSharedCode, /if \(!isTopModalOwner\(owner\)\) return;/);
+const overlayFocusSharedSource = readSource("src/ui/overlays/use-overlay-focus-management.ts");
+const overlayFocusSharedCode = overlayFocusSharedSource
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/\/\/.*$/gm, "");
+
+// ModalShell delega y NO conserva una copia local del motor.
+assert.match(modalShellSharedSource, /useOverlayFocusManagement/, "ModalShell debe usar el motor compartido");
+assert.doesNotMatch(modalShellSharedCode, /activeModalOwners|activeOverlayOwners/, "sin segundo stack en ModalShell");
+assert.doesNotMatch(modalShellSharedCode, /addEventListener|removeEventListener/, "sin listener propio en ModalShell");
+assert.doesNotMatch(modalShellSharedCode, /querySelectorAll/, "sin segundo selector de foco en ModalShell");
+// Marcador anterior compatible para los consumidores ya migrados en P3-48A.
+assert.match(modalShellSharedSource, /export const MODAL_INITIAL_FOCUS_ATTRIBUTE = OVERLAY_INITIAL_FOCUS_ATTRIBUTE;/);
+
+// Ownership: solo el overlay superior del stack procesa Tab/Escape.
+assert.match(overlayFocusSharedCode, /const activeOverlayOwners: OverlayFocusOwner\[\] = \[\];/);
+assert.match(overlayFocusSharedCode, /if \(!isTopOverlayOwner\(owner\)\) return;/);
 // Alta/baja por identidad, tolerante a Strict Mode y a cleanups fuera de orden.
-assert.match(modalShellSharedCode, /if \(!activeModalOwners\.includes\(owner\)\) activeModalOwners\.push\(owner\);/);
-assert.match(modalShellSharedCode, /if \(ownerIndex !== -1\) activeModalOwners\.splice\(ownerIndex, 1\);/);
+assert.match(overlayFocusSharedCode, /if \(!activeOverlayOwners\.includes\(owner\)\) activeOverlayOwners\.push\(owner\);/);
+assert.match(overlayFocusSharedCode, /if \(ownerIndex !== -1\) activeOverlayOwners\.splice\(ownerIndex, 1\);/);
 // Listener en capture, con alta y baja simetricas y sin acumulacion.
-assert.match(modalShellSharedCode, /document\.addEventListener\("keydown", handleKeyDown, true\);/);
-assert.match(modalShellSharedCode, /document\.removeEventListener\("keydown", handleKeyDown, true\);/);
-assert.equal((modalShellSharedCode.match(/addEventListener\(/g) ?? []).length, 1);
-assert.equal((modalShellSharedCode.match(/removeEventListener\(/g) ?? []).length, 1);
+assert.match(overlayFocusSharedCode, /document\.addEventListener\("keydown", handleKeyDown, true\);/);
+assert.match(overlayFocusSharedCode, /document\.removeEventListener\("keydown", handleKeyDown, true\);/);
+assert.equal((overlayFocusSharedCode.match(/addEventListener\(/g) ?? []).length, 1);
+assert.equal((overlayFocusSharedCode.match(/removeEventListener\(/g) ?? []).length, 1);
 // Escape aislado siempre; el cierre solo ocurre si canClose vigente lo permite.
-assert.match(modalShellSharedCode, /event\.stopImmediatePropagation\(\);/);
-assert.match(modalShellSharedCode, /if \(!canCloseRef\.current\) return;/);
+assert.match(overlayFocusSharedCode, /event\.stopImmediatePropagation\(\);/);
+assert.match(overlayFocusSharedCode, /if \(!canCloseRef\.current\) return;/);
 // Restauracion solo si el elemento previo sigue conectado.
-assert.match(modalShellSharedCode, /previous\.isConnected\) previous\.focus\(\);/);
+assert.match(overlayFocusSharedCode, /previous\.isConnected\) previous\.focus\(\);/);
 // Sin cierre por backdrop.
 assert.doesNotMatch(modalShellSharedCode, /onClick/, "el backdrop no debe cerrar al pulsarlo");
 
@@ -331,5 +344,58 @@ for (const command of [
 ]) {
   assert.equal(testCommands.filter((item) => item === command).length, 1, `${command} registrado una vez`);
 }
+
+// -------------------------------------------------------------------------------------------
+// P3-49A — SectionHeading compartido (consumidores de Routine Builder).
+//
+// COMPROBACIONES ESTATICAS / SOURCE-BASED: leen el codigo fuente. NO renderizan React ni montan
+// los componentes; no sustituyen QA manual del render real.
+// -------------------------------------------------------------------------------------------
+
+// (3)(4)(5) Los tres consumidores de Routine Builder: import canonico, clase y contenido exactos.
+for (const [label, cardSource] of [
+  ["dayCard", cards.dayCard],
+  ["nameCard", cards.nameCard],
+  ["exerciseCard", cards.exerciseCard],
+] as const) {
+  assert.match(cardSource, /import \{ SectionHeading \} from "@\/ui\/layout\/section-heading";/, label);
+  assert.match(cardSource, /<SectionHeading\s+className="setup-section-heading"/, label);
+  // (8) Sin bloque inline residual.
+  assert.doesNotMatch(cardSource, /<div className="setup-section-heading">/, `${label}: el bloque inline debe haberse eliminado`);
+}
+assert.match(
+  cards.dayCard,
+  /eyebrow="Configura tus rutinas por día"\s+title=\{<>Rutina \{currentStep\} de \{plannedDays\.length\} · \{activeDay\}<\/>\}/,
+);
+assert.match(cards.nameCard, /eyebrow=\{<>Rutina del día \{day\}<\/>\}\s+title="Nombre de la rutina"/);
+assert.match(cards.exerciseCard, /eyebrow=\{<>Rutina del día \{day\}<\/>\}\s+title="Ejercicios a programar"/);
+
+// (2)(10) EXACTAMENTE cuatro consumidores en todo `src`. Este contrato SI recorre el arbol a
+// proposito: P3-49A cierra el alcance, por lo que un quinto consumidor debe hacerlo fallar.
+const sectionHeadingConsumers: string[] = [];
+(function collectSectionHeadingConsumers(directory: string) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) {
+      collectSectionHeadingConsumers(entryPath);
+      continue;
+    }
+    if (!entry.name.endsWith(".tsx")) continue;
+    if (entryPath === "src/ui/layout/section-heading.tsx") continue;
+    if (readFileSync(entryPath, "utf8").includes("@/ui/layout/section-heading")) {
+      sectionHeadingConsumers.push(entryPath);
+    }
+  }
+})("src");
+assert.deepEqual(
+  sectionHeadingConsumers.sort(),
+  [
+    "src/features/routine-builder/components/RoutineBuilderDayCard.tsx",
+    "src/features/routine-builder/components/RoutineBuilderNameCard.tsx",
+    "src/features/routine-builder/components/RoutineExerciseBuilderCard.tsx",
+    "src/features/training-plan/components/TrainingPlanSetupCard.tsx",
+  ],
+  "P3-49A migra exactamente los cuatro consumidores autorizados, ni uno mas",
+);
 
 console.log("routine-builder visual static integration contract tests passed");

@@ -94,9 +94,54 @@ assert.match(components.topbar, /notification-badge/);
 assert.match(components.menuButton, /aria-label="Abrir menú"/);
 assert.match(components.menuButton, /aria-expanded={isOpen}/);
 assert.equal((components.menuButton.match(/hamburger-line/g) ?? []).length, 3, "el hamburger debe conservar exactamente 3 spans");
-assert.match(components.drawer, /role="dialog" aria-label="Menú de navegación"/);
+assert.match(components.drawer, /role="dialog"/);
+assert.match(components.drawer, /aria-label="Menú de navegación"/);
 assert.equal((components.drawer.match(/drawer-x-line/g) ?? []).length, 2, "el boton de cierre debe conservar exactamente 2 spans");
 assert.match(components.drawer, /role="menuitem" onClick={onLogout} disabled={isLogoutDisabled}/);
+
+// -------------------------------------------------------------------------------------------
+// P3-50B1 — Drawer conectado al motor compartido de foco.
+//
+// COMPROBACIONES ESTATICAS / SOURCE-BASED: leen el codigo fuente. NO ejecutan foco, teclado ni
+// DOM, y NO sustituyen la QA manual en navegador (ver informe).
+// -------------------------------------------------------------------------------------------
+const overlayEngineImport = /import \{[\s\S]*?useOverlayFocusManagement,?[\s\S]*?\} from "@\/ui\/overlays\/use-overlay-focus-management";|import \{ useOverlayFocusManagement \} from "@\/ui\/overlays\/use-overlay-focus-management";/;
+assert.match(components.drawer, overlayEngineImport, "el Drawer debe usar el motor compartido");
+// Aserciones estructurales sobre el CODIGO sin comentarios, para que la documentacion del
+// componente no pueda satisfacerlas por accidente.
+const drawerCode = components.drawer.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+// (2) El hook se invoca ANTES del return condicional por isOpen.
+const drawerHookIndex = components.drawer.indexOf("useOverlayFocusManagement<HTMLDivElement>(");
+const drawerEarlyReturnIndex = components.drawer.indexOf("if (!isOpen) return null;");
+assert.ok(drawerHookIndex >= 0 && drawerEarlyReturnIndex > drawerHookIndex, "el hook debe llamarse antes del early return");
+// (3)(4) Ref conectado, isActive={isOpen}, id estable, aria-modal y tabIndex fallback.
+assert.match(components.drawer, /isActive: isOpen,\s*\n\s*onClose,\s*\n\s*canClose: true,/);
+assert.match(drawerCode, /ref=\{drawerRef\}/);
+assert.match(components.drawer, /export const APP_NAVIGATION_DRAWER_ID = "app-navigation-drawer";/);
+assert.match(drawerCode, /id=\{APP_NAVIGATION_DRAWER_ID\}/);
+assert.match(drawerCode, /aria-modal="true"/);
+assert.match(drawerCode, /tabIndex=\{-1\}/);
+// (9) El boton Cerrar recibe el marcador de foco inicial exportado por el motor.
+assert.match(components.drawer, /className="drawer-close"[\s\S]*?\{\.\.\.\{ \[OVERLAY_INITIAL_FOCUS_ATTRIBUTE\]: "" \}\}/);
+// (8) aria-controls coincidente en el trigger.
+assert.match(components.menuButton, /aria-controls=\{APP_NAVIGATION_DRAWER_ID\}/);
+assert.match(components.menuButton, /import \{ APP_NAVIGATION_DRAWER_ID \} from "\.\/app-navigation-drawer";/);
+// (11) Sin listeners, stacks ni selectores locales: todo proviene del motor.
+for (const forbiddenLocal of [
+  /addEventListener|removeEventListener/,
+  /useEffect/,
+  /querySelectorAll/,
+  /activeOverlayOwners|activeModalOwners/,
+  /dangerouslySetInnerHTML/,
+]) {
+  assert.doesNotMatch(drawerCode, forbiddenLocal, `el Drawer no debe implementar ${forbiddenLocal}`);
+}
+// (12) Backdrops y callbacks intactos.
+assert.match(components.drawer, /<button className="menu-backdrop" type="button" aria-label="Cerrar menú" onClick=\{onClose\} \/>/);
+assert.match(components.drawer, /<button className="drawer-empty" type="button" aria-label="Cerrar menú" onClick=\{onClose\} \/>/);
+// Roles de navegacion intactos.
+assert.match(components.drawer, /role="menu" aria-label="Menú principal"/);
+assert.equal((components.drawer.match(/role="menuitem"/g) ?? []).length, 2, "menuitem en items y logout");
 assert.match(components.screenHeader, /section-back-button/);
 assert.match(components.screenHeader, />\s*Volver\s*</);
 
