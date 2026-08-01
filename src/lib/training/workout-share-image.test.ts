@@ -10,7 +10,8 @@ import {
   type WorkoutShareImageCanvas,
   type WorkoutShareImageCanvasContext,
 } from "@/lib/training/workout-share-image";
-import type { WorkoutShareCardModel } from "@/lib/training/workout-share-model";
+import { buildWorkoutShareCardModel, type WorkoutShareCardModel } from "@/lib/training/workout-share-model";
+import { buildTrainingCompletionSummary } from "@/lib/training/training-completion-summary";
 
 const baseModel: WorkoutShareCardModel = {
   title: "Piernas y zona media",
@@ -87,6 +88,64 @@ function testExtremeUnicodeTruncationEndsAtSafeBoundary() {
       detailLines: baseModel.detailLines,
     });
     for (const line of layout.titleLines) assertSafeGraphemeBoundary(line);
+  }
+
+  const malformedLayout = buildWorkoutShareImageLayout({
+    title: "A\ud83dB\ude00C",
+    periodLabel: baseModel.periodLabel,
+    detailLines: baseModel.detailLines,
+  });
+  assert.deepEqual(malformedLayout.titleLines, ["ABC"]);
+  for (const line of malformedLayout.titleLines) assertNoIsolatedSurrogates(line);
+}
+
+async function testSummaryToFillTextUnicodeBoundaryComposition() {
+  const boundaryTitle = `A${"\u0001".repeat(4094)}😀`;
+  assert.equal(boundaryTitle.length, 4097, "el fixture cruza 4096 unidades UTF-16");
+  assert.equal(
+    Array.from(new Intl.Segmenter("es", { granularity: "grapheme" }).segment(boundaryTitle)).length,
+    4096,
+    "el emoji completo ocupa el grapheme 4096",
+  );
+
+  const summary = buildTrainingCompletionSummary({
+    sessionId: "private-session-id",
+    dayLabel: "Lunes",
+    workoutName: boundaryTitle,
+    cycleLabel: "Mesociclo",
+    weekLabel: "Semana 1",
+    progressLabel: "1 de 5 días",
+    workoutStartedAt: "2026-08-01T10:00:00.000Z",
+    savedAt: "2026-08-01T10:45:00.000Z",
+    currentDate: "2026-08-01",
+    exercises: [{
+      exerciseId: "private-exercise-id",
+      exerciseLineageId: "private-lineage-id",
+      exerciseName: "Press banca",
+      targetSets: 1,
+      draft: { reps: [10], weight: "80" },
+    }],
+  });
+  const summaryBeforeShare = structuredClone(summary);
+  const model = buildWorkoutShareCardModel(summary);
+  assert.ok(model);
+  assert.equal(model.title, "A", "el emoji que cruza el limite UTF-16 se descarta como grapheme completo");
+
+  const layout = buildWorkoutShareImageLayout(model);
+  assert.deepEqual(layout.titleLines, ["A"]);
+  const calls: string[] = [];
+  const canvas = createCanvas(createContext(calls), (callback) => {
+    callback(new Blob(["png"], { type: "image/png" }));
+  });
+  await renderWorkoutShareImagePng(model, { createCanvas: () => canvas });
+
+  assert.deepEqual(summary, summaryBeforeShare, "summary → shareModel → layout → fillText no muta el summary");
+  assert.ok(calls.some((call) => call.startsWith("fillText:A:")), "fillText recibe solo graphemes completos");
+  assert.equal(calls.some((call) => call.includes("😀")), false, "fillText no recibe el grapheme fuera de limite");
+  assert.equal(JSON.stringify(model).includes("private-session-id"), false);
+  assert.equal(JSON.stringify(layout).includes("private-session-id"), false);
+  for (const value of [model.title, ...layout.titleLines, ...calls]) {
+    assertNoIsolatedSurrogates(value);
   }
 }
 
@@ -260,6 +319,9 @@ function testStaticSourceBoundary() {
   assert.match(source, /const PNG_MIME_TYPE = "image\/png";/);
   assert.match(source, /textAlign: CanvasTextAlign;/);
   assert.match(source, /textBaseline: CanvasTextBaseline;/);
+  assert.match(source, /\.normalize\("NFKC"\)\s*\.replace\(ISOLATED_SURROGATE_PATTERN, ""\)/);
+  assert.match(source, /for \(const grapheme of splitGraphemes\(normalized\)\)/);
+  assert.match(source, /utf16Length \+ grapheme\.length > maxLength/);
 }
 
 function assertRealCanvasCompatibility(
@@ -294,12 +356,22 @@ function createCanvas(
 }
 
 function assertSafeGraphemeBoundary(value: string): void {
-  for (const character of Array.from(value)) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    assert.equal(codePoint >= 0xd800 && codePoint <= 0xdfff, false);
-  }
+  assertNoIsolatedSurrogates(value);
   assert.doesNotMatch(value, /^[\p{Mark}\u200d\ufe0f]/u);
   assert.doesNotMatch(value, /\u200d$/u);
+}
+
+function assertNoIsolatedSurrogates(value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const nextCodeUnit = value.charCodeAt(index + 1);
+      assert.ok(nextCodeUnit >= 0xdc00 && nextCodeUnit <= 0xdfff, "high surrogate debe tener low surrogate");
+      index += 1;
+      continue;
+    }
+    assert.equal(codeUnit >= 0xdc00 && codeUnit <= 0xdfff, false, "low surrogate debe tener high surrogate");
+  }
 }
 
 function assertPublicImageError(error: unknown): boolean {
@@ -314,6 +386,7 @@ async function runTests() {
   testDetailLimitAndOverflowIndicator();
   testUnicodeAndLongTextWrapSafely();
   testExtremeUnicodeTruncationEndsAtSafeBoundary();
+  await testSummaryToFillTextUnicodeBoundaryComposition();
   testProjectionExcludesContaminatedFieldsAndReferences();
   await testVisibleFieldsRedactSensitiveValuesBeforeFillText();
   testLayoutDoesNotMutateInput();

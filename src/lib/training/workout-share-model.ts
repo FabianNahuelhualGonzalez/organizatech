@@ -47,6 +47,8 @@ const REDACTION_PATTERN = /\[redactado\]/giu;
 const USEFUL_TEXT_PATTERN = /[\p{L}\p{N}]/u;
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const ISO_DATETIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))?$/;
+const ISOLATED_SURROGATE_PATTERN = /[\uD800-\uDFFF]/gu;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter("es", { granularity: "grapheme" });
 
 export function buildWorkoutShareCardModel(
   summary: Readonly<TrainingCompletionSummary>,
@@ -137,9 +139,7 @@ function sanitizeUsefulText(value: unknown, maxLength: number): string | null {
 function sanitizeText(value: unknown, maxLength: number): string {
   if (typeof value !== "string") return "";
 
-  const normalized = value
-    .slice(0, MAX_SANITIZATION_INPUT_LENGTH)
-    .normalize("NFKC")
+  const normalized = normalizeAndTruncateGraphemes(value, MAX_SANITIZATION_INPUT_LENGTH)
     .replace(CONTROL_CHARACTER_PATTERN, " ")
     .replace(BIDI_CHARACTER_PATTERN, "")
     .replace(EMAIL_PATTERN, REDACTED_TEXT)
@@ -152,7 +152,37 @@ function sanitizeText(value: unknown, maxLength: number): string {
     .replace(/\s+/g, " ")
     .trim();
 
-  return Array.from(normalized).slice(0, maxLength).join("").trim();
+  return truncateGraphemes(normalized, maxLength).trim();
+}
+
+function normalizeAndTruncateGraphemes(value: string, maxLength: number): string {
+  const normalized = value
+    .normalize("NFKC")
+    .replace(ISOLATED_SURROGATE_PATTERN, "");
+  return truncateGraphemesByUtf16Length(normalized, maxLength);
+}
+
+function truncateGraphemes(value: string, maxLength: number): string {
+  const visibleGraphemes: string[] = [];
+  let codePointLength = 0;
+  for (const { segment } of GRAPHEME_SEGMENTER.segment(value)) {
+    const graphemeCodePointLength = Array.from(segment).length;
+    if (codePointLength + graphemeCodePointLength > maxLength) break;
+    visibleGraphemes.push(segment);
+    codePointLength += graphemeCodePointLength;
+  }
+  return visibleGraphemes.join("");
+}
+
+function truncateGraphemesByUtf16Length(value: string, maxLength: number): string {
+  const visibleGraphemes: string[] = [];
+  let utf16Length = 0;
+  for (const { segment } of GRAPHEME_SEGMENTER.segment(value)) {
+    if (utf16Length + segment.length > maxLength) break;
+    visibleGraphemes.push(segment);
+    utf16Length += segment.length;
+  }
+  return visibleGraphemes.join("");
 }
 
 function sanitizeQuantity(value: unknown): number {
