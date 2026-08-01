@@ -239,7 +239,7 @@ for (const forbidden of [/document\.body/, /dangerouslySetInnerHTML/, /overflow/
   assert.doesNotMatch(overlayFocusCode, forbidden, `el motor no debe incorporar ${forbidden}`);
   assert.doesNotMatch(modalShellCode, forbidden, `ModalShell no debe incorporar ${forbidden}`);
 }
-// P3-50B0 no migra Drawer ni NotificationPanel: el motor tiene un unico consumidor productivo.
+// Lista exacta de consumidores productivos del unico motor compartido.
 const overlayEngineConsumers: string[] = [];
 (function collectOverlayEngineConsumers(directory: string) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -256,17 +256,18 @@ const overlayEngineConsumers: string[] = [];
     }
   }
 })("src");
-// P3-50B1 conecto Drawer y NotificationPanel al MISMO motor. La garantia sigue siendo una lista
-// EXACTA (no un "al menos"): un cuarto consumidor inesperado debe hacer fallar este contrato. Se
-// ordena para que el resultado no dependa del orden de recorrido del directorio.
+// P3-50B1 conecto Drawer y NotificationPanel; P3-50B2 conecta ProfileAvatarEditor. La garantia
+// sigue siendo una lista EXACTA (no un "al menos"): un quinto consumidor inesperado debe hacer
+// fallar este contrato. Se ordena para que el resultado no dependa del recorrido del directorio.
 assert.deepEqual(
   overlayEngineConsumers.sort(),
   [
+    "src/components/profile/ProfileAvatarEditor.tsx",
     "src/features/app-shell/components/app-navigation-drawer.tsx",
     "src/features/notifications/components/NotificationPanel.tsx",
     "src/ui/modals/modal-shell.tsx",
   ],
-  "los consumidores del motor compartido son exactamente ModalShell, Drawer y NotificationPanel",
+  "los consumidores son exactamente ProfileAvatarEditor, ModalShell, Drawer y NotificationPanel",
 );
 
 // ConfirmDialog bloquea Escape durante busy y enfoca la accion segura.

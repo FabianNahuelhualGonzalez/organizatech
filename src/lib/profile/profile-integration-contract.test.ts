@@ -12,6 +12,7 @@ const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf
 const profileScreenStaticSource = readFileSync("src/components/profile/ProfileScreen.tsx", "utf8");
 const formFieldStaticSource = readFileSync("src/ui/forms/form-field.tsx", "utf8");
 const avatarEditorStaticSource = readFileSync("src/components/profile/ProfileAvatarEditor.tsx", "utf8");
+const overlayFocusStaticSource = readFileSync("src/ui/overlays/use-overlay-focus-management.ts", "utf8");
 const userAvatarStaticSource = readFileSync("src/components/profile/UserAvatar.tsx", "utf8");
 const profileAvatarStaticSource = readFileSync("src/lib/profile/profile-avatar.ts", "utf8");
 const profileViewModelStaticSource = readFileSync("src/lib/profile/profile-view-model.ts", "utf8");
@@ -227,6 +228,102 @@ assert.match(profileScreenStaticSource, /<div className="profile-inline-notice">
 // La logica de negocio y los payloads no cambian con esta migracion.
 assert.match(profileScreenStaticSource, /buildProfilePersonalDataPayload\(/);
 assert.match(profileScreenStaticSource, /validateAvatarSourceFile\(file\)/);
+
+// CONTRATO ESTATICO 3F (P3-50B2 — SOURCE-BASED): valida la declaracion de la integracion del
+// editor con el motor compartido. NO renderiza React, NO ejecuta DOM y NO demuestra por si solo el
+// movimiento real del foco ni el comportamiento del selector de archivos en un navegador.
+const avatarEditorStaticCode = avatarEditorStaticSource
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/\/\/.*$/gm, "");
+const overlayFocusStaticCode = overlayFocusStaticSource
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/\/\/.*$/gm, "");
+const avatarControlsStaticSection = extractStaticSourceSection(
+  profileScreenStaticSource,
+  "function ProfileAvatarControls",
+  "function PersonalDataSection",
+);
+
+// El editor consume directamente el motor y lo activa antes del early return sólo cuando existe
+// una apertura efectiva con archivo. Busy gobierna `canClose`, por lo que Escape queda contenido.
+assert.match(
+  avatarEditorStaticSource,
+  /import \{\s*OVERLAY_INITIAL_FOCUS_ATTRIBUTE,\s*useOverlayFocusManagement,\s*\} from "@\/ui\/overlays\/use-overlay-focus-management";/,
+);
+const avatarEditorActivationSection = extractStaticSourceSection(
+  avatarEditorStaticCode,
+  "  const busy = isSaving || isPreparing;",
+  "  if (!isOpen || !file) return null;",
+);
+assertStaticMarkersInOrder(avatarEditorActivationSection, [
+  "const busy = isSaving || isPreparing;",
+  "const dialogRef = useOverlayFocusManagement<HTMLDivElement>({",
+  "isActive: isOpen && Boolean(file)",
+  "onClose: onCancel",
+  "canClose: !busy",
+  "restoreFocusRef",
+]);
+assert.ok(
+  avatarEditorStaticCode.indexOf("const dialogRef = useOverlayFocusManagement<HTMLDivElement>({")
+    < avatarEditorStaticCode.indexOf("if (!isOpen || !file) return null;"),
+  "el hook debe ejecutarse antes del early return",
+);
+
+// El contenedor conserva su nombre accesible y recibe toda la superficie exigida por el motor.
+assert.match(avatarEditorStaticSource, /export const PROFILE_AVATAR_EDITOR_ID = "profile-avatar-editor";/);
+assert.match(
+  avatarEditorStaticCode,
+  /<div\s+ref=\{dialogRef\}\s+id=\{PROFILE_AVATAR_EDITOR_ID\}\s+className="profile-avatar-editor-overlay"\s+role="dialog"\s+aria-modal="true"\s+aria-label="Ajustar foto de perfil"\s+tabIndex=\{-1\}/,
+);
+assert.match(
+  avatarEditorStaticCode,
+  /aria-label="Cerrar editor de foto"[\s\S]*?disabled=\{busy\}[\s\S]*?\{\.\.\.\{ \[OVERLAY_INITIAL_FOCUS_ATTRIBUTE\]: "" \}\}/,
+  "el cierre es el foco inicial explicito",
+);
+
+// Tab/Escape se delegan exclusivamente: el unico useEffect local sigue siendo el preexistente para
+// crear/revocar la URL y cargar la imagen; no aparece infraestructura local de foco o teclado.
+assert.equal((avatarEditorStaticCode.match(/\buseEffect\(/g) ?? []).length, 1, "no se anaden efectos al editor");
+for (const forbiddenFocusImplementation of [
+  /addEventListener|removeEventListener/,
+  /querySelectorAll/,
+  /activeOverlayOwners|activeModalOwners/,
+  /handleKeyDown|onKeyDown=/,
+  /event\.key\s*===?\s*["'](?:Tab|Escape)["']/,
+]) {
+  assert.doesNotMatch(
+    avatarEditorStaticCode,
+    forbiddenFocusImplementation,
+    `el editor no debe implementar foco o teclado local: ${forbiddenFocusImplementation}`,
+  );
+}
+
+// La restauracion pertenece al motor y apunta al trigger visible. El trigger queda asociado al id
+// estable del dialogo, declara su tipo y expone si el editor tiene un archivo seleccionado. Estas
+// comprobaciones siguen siendo SOURCE-BASED: no renderizan ni inspeccionan DOM real.
+assert.match(overlayFocusStaticSource, /restoreFocusRef\?: RefObject<HTMLElement \| null>;/);
+assert.match(
+  overlayFocusStaticCode,
+  /previouslyFocusedRef\.current = restoreFocusRef\?\.current \?\? document\.activeElement;/,
+);
+assert.match(profileScreenStaticSource, /import \{ PROFILE_AVATAR_EDITOR_ID, ProfileAvatarEditor \} from "\.\/ProfileAvatarEditor";/);
+assert.match(avatarControlsStaticSection, /const avatarEditorTriggerRef = useRef<HTMLButtonElement \| null>\(null\);/);
+assert.match(
+  avatarControlsStaticSection,
+  /<button\s+ref=\{avatarEditorTriggerRef\}[\s\S]*?aria-controls=\{PROFILE_AVATAR_EDITOR_ID\}[\s\S]*?aria-haspopup="dialog"[\s\S]*?aria-expanded=\{Boolean\(selectedFile\)\}/,
+);
+assert.equal(
+  (avatarControlsStaticSection.match(/aria-expanded=\{Boolean\(selectedFile\)\}/g) ?? []).length,
+  1,
+  "el trigger declara exactamente una vez aria-expanded derivado de selectedFile",
+);
+assert.match(avatarControlsStaticSection, /restoreFocusRef=\{avatarEditorTriggerRef\}/);
+
+// El contrato sigue protegiendo el pipeline de imagen que esta fase no modifica.
+assert.match(avatarEditorStaticSource, /URL\.createObjectURL\(file\)/);
+assert.match(avatarEditorStaticSource, /URL\.revokeObjectURL\(objectUrl\)/);
+assert.match(avatarEditorStaticSource, /loadAvatarImage\(file\)/);
+assert.match(avatarEditorStaticSource, /exportAvatarImage\(\{/);
 
 // CONTRATO ESTATICO 3C (P3-47B — comprobaciones SOURCE-BASED, no cobertura de render): Profile
 // consume la primitive compartida TextInput solo en los cuatro controles autorizados, conservando

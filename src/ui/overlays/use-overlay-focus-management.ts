@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 /**
  * Motor ÚNICO de ownership, foco y teclado para overlays (P3-50B0). Extrae, sin cambios de
- * comportamiento, el algoritmo ya auditado en `ModalShell` (P3-48A y su remediación de foco), para
- * que fases posteriores puedan conectar Drawer y NotificationPanel al MISMO stack.
+ * comportamiento, el algoritmo ya auditado en `ModalShell` (P3-48A y su remediación de foco) y lo
+ * comparte con Drawer, NotificationPanel y ProfileAvatarEditor mediante el MISMO stack.
  *
- * En P3-50B0 el único consumidor productivo es `ModalShell`; Drawer y NotificationPanel NO se
- * migran aquí.
+ * Los consumidores productivos exactos son `ModalShell`, Drawer, NotificationPanel y
+ * `ProfileAvatarEditor`.
  *
  * Debe existir un solo stack productivo en toda la app: este módulo. Ningún consumidor puede
  * conservar una copia local del stack, del selector de enfocables ni del listener.
@@ -83,12 +83,15 @@ export interface UseOverlayFocusManagementInput {
   onClose: () => void;
   /** Cuando es `false`, `Escape` no cierra (p. ej. mientras una operación está en curso). */
   canClose?: boolean;
+  /** Control explícito al que debe volver el foco al cerrar; por defecto usa el foco previo. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
 }
 
 export function useOverlayFocusManagement<TElement extends HTMLElement = HTMLElement>({
   isActive = true,
   onClose,
   canClose = true,
+  restoreFocusRef,
 }: UseOverlayFocusManagementInput) {
   const containerRef = useRef<TElement | null>(null);
   const previouslyFocusedRef = useRef<Element | null>(null);
@@ -111,7 +114,7 @@ export function useOverlayFocusManagement<TElement extends HTMLElement = HTMLEle
     const containerNode = containerRef.current;
     if (!containerNode) return;
 
-    previouslyFocusedRef.current = document.activeElement;
+    previouslyFocusedRef.current = restoreFocusRef?.current ?? document.activeElement;
 
     // Foco inicial: elemento marcado explícitamente → primer control habilitado → contenedor.
     const explicitTarget = containerNode.querySelector<HTMLElement>(`[${OVERLAY_INITIAL_FOCUS_ATTRIBUTE}]`);
@@ -126,7 +129,7 @@ export function useOverlayFocusManagement<TElement extends HTMLElement = HTMLEle
       // ningún fallback artificial sobre `body`.
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
-  }, [isActive]);
+  }, [isActive, restoreFocusRef]);
 
   // Ownership del stack + listener de teclado. Se registra una sola vez por activación.
   useEffect(() => {
