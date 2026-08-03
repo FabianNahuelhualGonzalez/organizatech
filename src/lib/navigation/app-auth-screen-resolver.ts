@@ -2,11 +2,9 @@ import type { Screen } from "@/lib/navigation/app-navigation";
 
 /**
  * Resolución pura del estado inicial de autenticación a partir del estado de recuperación de
- * contraseña YA CALCULADO. Reproducía exactamente las tres derivaciones que antes eran
- * independientes en `organizatech-app.tsx` — la extinta `getInitialAuthScreen()`, el
- * inicializador lazy de `statusMessage` y el de `isAuthLoading` —, que llamaban a
- * `getPasswordRecoveryRouteState()` por separado para derivar tres valores relacionados del mismo
- * estado.
+ * contraseña YA CALCULADO. Reúne pantalla, mensaje y loading para que compartan un único snapshot
+ * de `getPasswordRecoveryRouteState()`. Esto es obligatorio porque esa lectura puede purgar
+ * storage inválido y por lo tanto no es repetible.
  *
  * Deliberadamente NO incluye `getPasswordRecoveryRouteState()` en sí: esa función lee
  * `window.location.search`/`window.location.hash`, `localStorage` (vía
@@ -16,10 +14,9 @@ import type { Screen } from "@/lib/navigation/app-navigation";
  * de la app.
  *
  * Puro: sin React, sin DOM, sin storage, sin Supabase. Integrado en organizatech-app.tsx a través
- * de `resolveInitialAuthState`: los tres `useState` iniciales de
- * screen/statusMessage/isAuthLoading llaman `resolveInitialAuthState(getPasswordRecoveryRouteState())`
- * cada uno por separado (se preserva el conteo de llamadas de hoy a la función impura;
- * `getInitialAuthScreen()` quedó redundante y fue eliminada del root).
+ * de `resolveInitialAuthState`: el root captura una sola vez el estado impuro y reutiliza el
+ * resultado puro en los tres `useState` iniciales. `getInitialAuthScreen()` quedó redundante y
+ * fue eliminada del root.
  */
 
 export type PasswordRecoveryRouteState = "none" | "active" | "expired";
@@ -44,9 +41,9 @@ export function resolveInitialAuthStatusMessage(routeState: PasswordRecoveryRout
   return "Validando sesión...";
 }
 
-/** Mantiene auth loading únicamente cuando no hay un flujo de recuperación activo o expirado. */
+/** Mantiene el gate de carga hasta que Supabase confirme una recuperación activa. */
 export function resolveInitialAuthLoading(routeState: PasswordRecoveryRouteState): boolean {
-  return routeState === "none";
+  return routeState !== "expired";
 }
 
 /** Combina las tres derivaciones anteriores en un único resultado, para una única lectura del estado de ruta. */

@@ -10,10 +10,9 @@ import {
 
 /**
  * Pruebas de caracterización: demuestran paridad con la extinta `getInitialAuthScreen()` y con
- * los inicializadores lazy que antes derivaban `statusMessage` e `isAuthLoading` por separado —
- * para los tres estados posibles de `getPasswordRecoveryRouteState()`. Desde P3-07A el root usa
- * `resolveInitialAuthState` directamente; no se toca ni se caracteriza `getPasswordRecoveryRouteState`
- * en sí (impura, permanece en React) — solo la derivación pura a partir de su resultado.
+ * los inicializadores que derivan `statusMessage` e `isAuthLoading` desde el mismo snapshot —
+ * para los tres estados posibles de `getPasswordRecoveryRouteState()`. No se caracteriza aquí la
+ * lectura impura; el contrato de integración fija que el root la ejecute una sola vez.
  */
 
 const routeStates: PasswordRecoveryRouteState[] = ["none", "active", "expired"];
@@ -28,9 +27,9 @@ assert.equal(resolveInitialAuthStatusMessage("expired"), "El enlace de recuperac
 assert.equal(resolveInitialAuthStatusMessage("active"), "Crea una nueva contraseña para continuar.");
 assert.equal(resolveInitialAuthStatusMessage("none"), "Validando sesión...");
 
-// CASO — isAuthLoading solo es true cuando el estado de ruta es "none".
+// CASO — una intención active permanece bajo loading hasta que Supabase confirme la sesión.
 assert.equal(resolveInitialAuthLoading("none"), true);
-assert.equal(resolveInitialAuthLoading("active"), false);
+assert.equal(resolveInitialAuthLoading("active"), true);
 assert.equal(resolveInitialAuthLoading("expired"), false);
 
 // CASO — combinación: resolveInitialAuthState agrupa las tres derivaciones para una sola lectura.

@@ -9,6 +9,7 @@ import {
   PASSWORD_RECOVERY_TTL_MS,
   clearBrowserStorageScope,
   clearPasswordRecoveryStorage,
+  confirmPasswordRecoveryFlow,
   getBrowserLocalStorage,
   getBrowserSessionStorage,
   getBrowserStorageScope,
@@ -18,6 +19,7 @@ import {
   loadSeenNotificationRecords,
   loadSeenNotificationRecordsFromBrowser,
   migrateLegacyBrowserStorageToDemo,
+  normalizePasswordRecoveryUserId,
   readScopedJson,
   removeScopedBrowserStorage,
   saveSeenNotificationRecords,
@@ -30,6 +32,7 @@ import { SEEN_NOTIFICATIONS_MAX_RECORDS } from "@/lib/notifications/notification
 
 const USER_A = "11111111-1111-4111-8111-111111111111";
 const USER_B = "22222222-2222-4222-8222-222222222222";
+const USER_UPPER = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
 
 function createStorage(
   initial: Record<string, string> = {},
@@ -352,9 +355,21 @@ function run() {
     assert.equal(hasStoredPasswordRecoveryFlow(sessionStorage), true);
     assert.deepEqual(loadPasswordRecoveryFlow(sessionStorage, localStorage, startedAt + 1), {
       version: PASSWORD_RECOVERY_STORAGE_VERSION,
+      status: "pending",
       startedAt,
       expiresAt: startedAt + PASSWORD_RECOVERY_TTL_MS,
     });
+    assert.equal(confirmPasswordRecoveryFlow(USER_A, sessionStorage, localStorage, startedAt + 2), true);
+    assert.deepEqual(loadPasswordRecoveryFlow(sessionStorage, localStorage, startedAt + 3), {
+      version: PASSWORD_RECOVERY_STORAGE_VERSION,
+      status: "confirmed",
+      startedAt,
+      expiresAt: startedAt + PASSWORD_RECOVERY_TTL_MS,
+      userId: USER_A,
+    });
+
+    startPasswordRecoveryFlow(sessionStorage, localStorage, startedAt + 4);
+    assert.equal(loadPasswordRecoveryFlow(sessionStorage, localStorage, startedAt + 5)?.status, "confirmed");
     assert.equal(loadPasswordRecoveryFlow(sessionStorage, localStorage, startedAt + PASSWORD_RECOVERY_TTL_MS), null);
     assert.equal(sessionValues.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
 
@@ -362,6 +377,8 @@ function run() {
     clearPasswordRecoveryStorage(sessionStorage, localStorage);
     assert.equal(sessionValues.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
     assert.equal(localValues.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
+    assert.equal(normalizePasswordRecoveryUserId(USER_UPPER), USER_UPPER.toLowerCase());
+    assert.equal(normalizePasswordRecoveryUserId("not-a-user-id"), null);
   }
 
   {
@@ -374,6 +391,97 @@ function run() {
     assert.equal(values.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
     assert.doesNotThrow(() => startPasswordRecoveryFlow(null, null));
     assert.equal(loadPasswordRecoveryFlow(null, null), null);
+  }
+
+  {
+    const legacyV1 = createStorage({
+      [PASSWORD_RECOVERY_STORAGE_KEY]: JSON.stringify({
+        version: 1,
+        startedAt: 1_000,
+        expiresAt: 2_000,
+      }),
+    });
+    assert.equal(loadPasswordRecoveryFlow(legacyV1.storage, null, 1_500), null);
+    assert.equal(legacyV1.values.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
+
+    const corruptRecord = createStorage({
+      [PASSWORD_RECOVERY_STORAGE_KEY]: "{not-valid-json",
+    });
+    assert.equal(loadPasswordRecoveryFlow(corruptRecord.storage, null, 1_500), null);
+    assert.equal(corruptRecord.values.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
+
+    const tokenBearingRecord = createStorage({
+      [PASSWORD_RECOVERY_STORAGE_KEY]: JSON.stringify({
+        version: PASSWORD_RECOVERY_STORAGE_VERSION,
+        status: "confirmed",
+        startedAt: 1_000,
+        expiresAt: 2_000,
+        userId: USER_A,
+        accessToken: "must-not-be-accepted",
+      }),
+    });
+    assert.equal(loadPasswordRecoveryFlow(tokenBearingRecord.storage, null, 1_500), null);
+    assert.equal(tokenBearingRecord.values.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
+    assert.equal(confirmPasswordRecoveryFlow("not-a-user-id", tokenBearingRecord.storage, null, 1_500), false);
+  }
+
+  {
+    const invalidRecoveryRecords = [
+      {
+        label: "pending con clave extra",
+        record: {
+          version: PASSWORD_RECOVERY_STORAGE_VERSION,
+          status: "pending",
+          startedAt: 1_000,
+          expiresAt: 2_000,
+          extra: true,
+        },
+      },
+      {
+        label: "confirmed sin userId",
+        record: {
+          version: PASSWORD_RECOVERY_STORAGE_VERSION,
+          status: "confirmed",
+          startedAt: 1_000,
+          expiresAt: 2_000,
+        },
+      },
+      {
+        label: "confirmed con userId no string",
+        record: {
+          version: PASSWORD_RECOVERY_STORAGE_VERSION,
+          status: "confirmed",
+          startedAt: 1_000,
+          expiresAt: 2_000,
+          userId: [USER_A],
+        },
+      },
+      {
+        label: "confirmed con UUID inválido",
+        record: {
+          version: PASSWORD_RECOVERY_STORAGE_VERSION,
+          status: "confirmed",
+          startedAt: 1_000,
+          expiresAt: 2_000,
+          userId: "not-a-uuid",
+        },
+      },
+    ];
+
+    invalidRecoveryRecords.forEach(({ label, record }) => {
+      const candidate = createStorage({
+        [PASSWORD_RECOVERY_STORAGE_KEY]: JSON.stringify(record),
+      });
+      assert.equal(loadPasswordRecoveryFlow(candidate.storage, null, 1_500), null, label);
+      assert.equal(candidate.values.has(PASSWORD_RECOVERY_STORAGE_KEY), false, `${label}: debe purgar`);
+    });
+
+    const uppercaseConfirmation = createStorage();
+    assert.equal(confirmPasswordRecoveryFlow(USER_UPPER, uppercaseConfirmation.storage, null, 1_000), true);
+    assert.equal(
+      loadPasswordRecoveryFlow(uppercaseConfirmation.storage, null, 1_001)?.userId,
+      USER_UPPER.toLowerCase(),
+    );
   }
 
   {

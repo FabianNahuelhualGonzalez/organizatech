@@ -32,6 +32,14 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 }
 
+function sourceSection(source: string, startMarker: string, endMarker: string): string {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.ok(start >= 0, `No se encontró el inicio: ${startMarker}`);
+  assert.ok(end > start, `No se encontró el final: ${endMarker}`);
+  return source.slice(start, end);
+}
+
 const appSource = readSource("src/components/organizatech-app.tsx");
 
 const modules = {
@@ -139,15 +147,28 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(appSource, /setScreen\("training-summary"\)/, "no quedan setters directos hacia training-summary (P3-07B)");
 
-// 7. app-auth-screen-resolver: solo resolveInitialAuthState se integra; getPasswordRecoveryRouteState
-//    sigue siendo la unica fuente de datos, sin moverse ni modificarse.
-assert.equal(
-  (appSource.match(/resolveInitialAuthState\(getPasswordRecoveryRouteState\(\)\)/g) ?? []).length,
-  3,
-  "screen/statusMessage/isAuthLoading deben derivar los tres de resolveInitialAuthState, cada uno con su propia lectura de ruta (preserva el conteo de llamadas de hoy)",
+// 7. app-auth-screen-resolver: una sola lectura impura alimenta screen/status/loading. La lectura
+//    puede purgar records inválidos, por lo que repetirla produciría snapshots incoherentes.
+const initialAuthSource = sourceSection(
+  appSource,
+  "export function OrganizatechApp",
+  "  const [sessionName, setSessionName]",
 );
+assert.equal(
+  (initialAuthSource.match(/getPasswordRecoveryRouteState\(\)/g) ?? []).length,
+  1,
+  "el estado inicial de recovery debe resolverse exactamente una vez",
+);
+assert.equal(
+  (initialAuthSource.match(/resolveInitialAuthState\(/g) ?? []).length,
+  1,
+  "el snapshot único debe derivarse exactamente una vez",
+);
+assert.match(initialAuthSource, /useState<Screen>\(initialAuthState\.screen\)/);
+assert.match(appSource, /useState\(initialAuthState\.statusMessage\)/);
+assert.match(appSource, /useState\(initialAuthState\.isAuthLoading\)/);
 assert.doesNotMatch(appSource, /function getInitialAuthScreen\(\): Screen \{/, "getInitialAuthScreen quedo redundante tras integrar resolveInitialAuthState y fue eliminado");
-assert.match(appSource, /function getPasswordRecoveryRouteState\(\): "none" \| "active" \| "expired" \{/, "getPasswordRecoveryRouteState (impura) permanece intacta en el root");
+assert.match(appSource, /function getPasswordRecoveryRouteState\(\): "none" \| "active" \| "expired" \{/, "getPasswordRecoveryRouteState (impura) permanece en el root");
 assert.doesNotMatch(appSource, /if \(recoveryState === "expired"\) return "recovery-expired";/, "la derivacion inline duplicada debe haberse eliminado del root");
 assert.doesNotMatch(appSource, /return "Validando sesión\.\.\.";/, "la derivacion inline duplicada de statusMessage debe haberse eliminado del root");
 
