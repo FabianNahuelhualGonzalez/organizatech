@@ -36,16 +36,24 @@ export const LEGACY_BROWSER_STORAGE_KEYS = {
 } as const;
 
 export const PASSWORD_RECOVERY_STORAGE_KEY = "organizatech:password-recovery-flow";
-export const PASSWORD_RECOVERY_STORAGE_VERSION = 1;
+export const PASSWORD_RECOVERY_STORAGE_VERSION = 2;
 export const PASSWORD_RECOVERY_TTL_MS = 60 * 60 * 1000;
 
-interface PasswordRecoveryStorageRecord {
+export type PasswordRecoveryStorageStatus = "pending" | "confirmed";
+
+export interface PasswordRecoveryStorageRecord {
   version: number;
+  status: PasswordRecoveryStorageStatus;
   startedAt: number;
   expiresAt: number;
+  userId?: string;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function normalizePasswordRecoveryUserId(value: unknown): string | null {
+  return typeof value === "string" && UUID_PATTERN.test(value) ? value.toLowerCase() : null;
+}
 
 const legacyDemoMigrations: Array<{
   legacyKey: string;
@@ -239,8 +247,29 @@ export function startPasswordRecoveryFlow(
   if (current) return;
   writeScopedJson(sessionStorage, PASSWORD_RECOVERY_STORAGE_KEY, {
     version: PASSWORD_RECOVERY_STORAGE_VERSION,
+    status: "pending",
     startedAt: now,
     expiresAt: now + PASSWORD_RECOVERY_TTL_MS,
+  } satisfies PasswordRecoveryStorageRecord);
+}
+
+export function confirmPasswordRecoveryFlow(
+  userId: string,
+  sessionStorage: BrowserStorageLike | null = getBrowserSessionStorage(),
+  localStorage: BrowserStorageLike | null = getBrowserLocalStorage(),
+  now = Date.now(),
+): boolean {
+  const normalizedUserId = normalizePasswordRecoveryUserId(userId);
+  if (!sessionStorage || !normalizedUserId) return false;
+  if (localStorage) removeBrowserStorageItem(localStorage, PASSWORD_RECOVERY_STORAGE_KEY);
+
+  const current = loadPasswordRecoveryFlow(sessionStorage, null, now);
+  return writeScopedJson(sessionStorage, PASSWORD_RECOVERY_STORAGE_KEY, {
+    version: PASSWORD_RECOVERY_STORAGE_VERSION,
+    status: "confirmed",
+    startedAt: current?.startedAt ?? now,
+    expiresAt: current?.expiresAt ?? now + PASSWORD_RECOVERY_TTL_MS,
+    userId: normalizedUserId,
   } satisfies PasswordRecoveryStorageRecord);
 }
 
@@ -351,12 +380,27 @@ function isLegacySeenNotificationArray(value: unknown): boolean {
 }
 
 function isPasswordRecoveryRecord(value: unknown): value is PasswordRecoveryStorageRecord {
-  return isPlainObject(value)
-    && value.version === PASSWORD_RECOVERY_STORAGE_VERSION
-    && typeof value.startedAt === "number"
-    && Number.isFinite(value.startedAt)
-    && typeof value.expiresAt === "number"
-    && Number.isFinite(value.expiresAt);
+  if (!isPlainObject(value)) return false;
+  if (
+    value.version !== PASSWORD_RECOVERY_STORAGE_VERSION
+    || typeof value.startedAt !== "number"
+    || !Number.isFinite(value.startedAt)
+    || typeof value.expiresAt !== "number"
+    || !Number.isFinite(value.expiresAt)
+  ) return false;
+
+  const commonKeys = ["version", "status", "startedAt", "expiresAt"];
+  if (value.status === "pending") {
+    return Object.keys(value).length === commonKeys.length
+      && commonKeys.every((key) => key in value);
+  }
+
+  return value.status === "confirmed"
+    && typeof value.userId === "string"
+    && UUID_PATTERN.test(value.userId)
+    && Object.keys(value).length === commonKeys.length + 1
+    && commonKeys.every((key) => key in value)
+    && "userId" in value;
 }
 
 function isUnknownArray(value: unknown): value is unknown[] {

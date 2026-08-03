@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
  * 2. Sin setters ocultos mediante aliases: el número total de ocurrencias del identificador
  *    coincide con declaración + usos autorizados — cualquier alias (`const x = setScreen`)
  *    aumentaría el conteo y rompería este contrato.
- * 3. Todos los call sites de transición usan el controlador (31 llamadas a
+ * 3. Todos los call sites de transición usan el controlador (25 llamadas a
  *    applyScreenTransition + la navegación contextual vía applyContextualNavigation).
  * 4. La finalización de entrenamiento separa persistencia (finishCompletedWorkout, limpieza
  *    pura), decisión (resolveWorkoutCompletionTransition) y aplicación (applyScreenTransition)
@@ -82,11 +82,12 @@ assert.match(screenTransitionSource, /applyContextualNavigation\(resetContextual
 assert.match(screenTransitionSource, /setScreen\(transition\.screen\);/);
 assert.doesNotMatch(screenTransitionSource, /setScreenHistory\(/, "la politica preserve no debe tocar el historial");
 
-// 3. Todos los call sites usan el controlador: 1 definición + 31 sitios migrados.
+// 3. Todos los call sites usan el controlador: 1 definición + 25 sitios. El cierre exitoso de
+//    password recovery delega en clearUserSessionState, la fuente canónica del logout.
 assert.equal(
   (appSource.match(/applyScreenTransition\(/g) ?? []).length,
-  32,
-  "1 definicion + 31 call sites de transicion canonica (los 31 setScreen directos previos)",
+  26,
+  "1 definicion + 25 call sites de transicion canonica",
 );
 // La navegación contextual (navigateTo/goBack/restauraciones/logout) sigue en su fuente única.
 assert.equal(
