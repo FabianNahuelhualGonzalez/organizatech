@@ -16,7 +16,8 @@ const JWT_PATTERN = /\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+\b/giu;
 const BEARER_PATTERN = /\bbearer\s+[a-z0-9._~+/=-]+/giu;
 const SENSITIVE_ASSIGNMENT_PATTERN = /\b(?:owner[_ -]?id|user[_ -]?id|profile[_ -]?id|session[_ -]?id|exercise[_ -]?id|exercise[_ -]?lineage[_ -]?id|cycle[_ -]?id|cycle[_ -]?day[_ -]?id|training[_ -]?cycle[_ -]?id|training[_ -]?cycle[_ -]?exercise[_ -]?id)\b\s*(?::|=|\s)\s*[^\s,;|]+/giu;
 const SECRET_ASSIGNMENT_PATTERN = /\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|token|secret)\b\s*(?::|=|\s)\s*[^\s,;|]+/giu;
-const TRAILING_UNSAFE_CODE_POINT_PATTERN = /^(?:\p{Mark}|\u200d|\ufe0e|\ufe0f)$/u;
+const ISOLATED_SURROGATE_PATTERN = /[\uD800-\uDFFF]/gu;
+const UNSAFE_STANDALONE_GRAPHEME_PATTERN = /^(?:\p{Mark}|\u200d|\ufe0e|\ufe0f)+$/u;
 const REDACTED_TEXT = "[redactado]";
 const GRAPHEME_SEGMENTER = new Intl.Segmenter("es", { granularity: "grapheme" });
 
@@ -212,8 +213,7 @@ function splitGraphemes(value: string): string[] {
 
 function projectText(value: unknown, fallback: string): string {
   if (typeof value !== "string") return fallback;
-  const projected = sliceAtSafeTextBoundary(value, MAX_RENDER_INPUT_LENGTH)
-    .normalize("NFKC")
+  const projected = normalizeAndTruncateGraphemes(value, MAX_RENDER_INPUT_LENGTH)
     .replace(CONTROL_CHARACTER_PATTERN, " ")
     .replace(BIDI_CHARACTER_PATTERN, "")
     .replace(EMAIL_PATTERN, REDACTED_TEXT)
@@ -227,17 +227,23 @@ function projectText(value: unknown, fallback: string): string {
   return projected || fallback;
 }
 
-function sliceAtSafeTextBoundary(value: string, maxLength: number): string {
-  const codePoints = Array.from(value.slice(0, maxLength)).filter((codePoint) => {
-    const numericValue = codePoint.codePointAt(0) ?? 0;
-    return numericValue < 0xd800 || numericValue > 0xdfff;
-  });
-  while (codePoints.length > 0) {
-    const lastCodePoint = codePoints[codePoints.length - 1] ?? "";
-    if (!TRAILING_UNSAFE_CODE_POINT_PATTERN.test(lastCodePoint)) break;
-    codePoints.pop();
+function normalizeAndTruncateGraphemes(value: string, maxLength: number): string {
+  const normalized = value
+    .normalize("NFKC")
+    .replace(ISOLATED_SURROGATE_PATTERN, "");
+  const graphemes: string[] = [];
+  let utf16Length = 0;
+  for (const grapheme of splitGraphemes(normalized)) {
+    if (utf16Length + grapheme.length > maxLength) break;
+    graphemes.push(grapheme);
+    utf16Length += grapheme.length;
   }
-  return codePoints.join("");
+  while (graphemes.length > 0) {
+    const lastGrapheme = graphemes[graphemes.length - 1] ?? "";
+    if (!UNSAFE_STANDALONE_GRAPHEME_PATTERN.test(lastGrapheme)) break;
+    graphemes.pop();
+  }
+  return graphemes.join("");
 }
 
 function canvasToPngBlob(canvas: WorkoutShareImageCanvas): Promise<Blob> {

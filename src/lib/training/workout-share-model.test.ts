@@ -273,6 +273,31 @@ import {
   assert.ok(model.footer && Array.from(model.footer).length <= 160);
 }
 
+{
+  const nfkcExpansionAtLimit = `${"A".repeat(95)}㍿`;
+  const model = buildWorkoutShareCardModel(createSummary({ workoutName: nfkcExpansionAtLimit }));
+  assert.ok(model);
+  assert.equal(model.title, `${"A".repeat(95)}株`);
+  assert.equal(
+    Array.from(new Intl.Segmenter("es", { granularity: "grapheme" }).segment(model.title)).length,
+    96,
+    "NFKC se aplica antes del limite final de graphemes",
+  );
+}
+
+{
+  const model = buildWorkoutShareCardModel(createSummary({
+    workoutName: "\ud83dRutina\ude00 segura",
+    exercises: [createExercise({ exerciseName: "Press\ud83d banca\ude00" })],
+  }));
+  assert.ok(model);
+  assert.equal(model.title, "Rutina segura");
+  assert.equal(model.detailLines[2]?.label, "Press banca");
+  for (const value of [model.title, ...model.detailLines.flatMap((line) => [line.label, line.value])]) {
+    assert.doesNotMatch(value, /[\uD800-\uDFFF]/u, "el modelo elimina surrogates aislados de entrada");
+  }
+}
+
 assert.equal(
   buildWorkoutShareImageFilename({ generatedAt: "2026-07-31" }),
   "organizatech-entrenamiento-2026-07-31.png",
@@ -324,7 +349,10 @@ function runStaticSourceContract() {
   assert.doesNotMatch(source, /\b(?:useState|useEffect|useMemo|useCallback|useRef)\b/);
   assert.doesNotMatch(source, /(?:html2canvas|clipboard|canvas|web\s*share)/i);
   assert.doesNotMatch(source, /(?:supabase|repositories|storage|navigation|auth|process\.env)/i);
-  assert.match(source, /\.normalize\("NFKC"\)/);
+  assert.match(source, /\.normalize\("NFKC"\)\s*\.replace\(ISOLATED_SURROGATE_PATTERN, ""\)/);
+  assert.match(source, /for \(const \{ segment \} of GRAPHEME_SEGMENTER\.segment\(value\)\)/);
+  assert.match(source, /utf16Length \+ segment\.length > maxLength/);
+  assert.match(source, /codePointLength \+ graphemeCodePointLength > maxLength/);
   assert.match(source, /const MAX_TITLE_LENGTH = \d+;/);
   assert.match(source, /const MAX_DETAIL_VALUE_LENGTH = \d+;/);
   assert.match(source, /const MAX_SANITIZATION_INPUT_LENGTH = \d+;/);
