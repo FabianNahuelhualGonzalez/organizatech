@@ -5,6 +5,23 @@
 - Objetivo:
 - Fuera de alcance:
 
+## Composition root
+
+<!-- Marca exactamente una opción. Completa las declaraciones y el checklist si el PR modifica src/components/organizatech-app.tsx. -->
+
+- [ ] No modifica `src/components/organizatech-app.tsx`
+- [ ] Modifica `src/components/organizatech-app.tsx` y completa este bloque
+
+- Responsabilidad que entra al root: <!-- nombre, owner y justificación transversal; “Ninguna” si no aplica -->
+- Responsabilidad que sale del root: <!-- destino, owner nuevo y contrato preservado; “Ninguna” si no aplica -->
+- Justificación de lógica agregada: <!-- por qué es wiring mínimo y no lógica de feature/dominio -->
+- Dependencias, estado y writes: <!-- consumidores reales, fuente canónica, lifecycle, allowlists y ownership -->
+
+- [ ] El root queda limitado a composición, providers/boundaries globales, controllers ya definidos, sesión y navegación transversal
+- [ ] No se creó un store universal ni una dependencia cruzada entre features
+- [ ] No se conectó UI como efecto lateral de infraestructura o refactor
+- [ ] El cambio cumple [`docs/architecture/composition-root-policy.md`](../docs/architecture/composition-root-policy.md)
+
 ## Clasificación visual obligatoria
 
 <!--
