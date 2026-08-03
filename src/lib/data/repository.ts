@@ -71,7 +71,10 @@ export interface SaveTrainingSessionInput {
   entries: TrainingSessionEntryInput[];
 }
 
-export async function loadAppData(mode: RepositoryMode = "demo"): Promise<AppData> {
+export async function loadAppData(
+  mode: RepositoryMode = "demo",
+  expectedUserId?: string | null,
+): Promise<AppData> {
   if (mode === "demo") return loadLocalData();
 
   const supabase = getSupabaseBrowserClient();
@@ -84,16 +87,21 @@ export async function loadAppData(mode: RepositoryMode = "demo"): Promise<AppDat
   const user = userData.user;
   const userId = user?.id;
   if (!userId) throw createSessionRequiredError();
+  if (expectedUserId && userId !== expectedUserId) throw createSessionExpiredError();
 
-  await ensureProfile(userId, user.email ?? "");
+  await ensureProfile(userId, user.email ?? "", expectedUserId ?? userId);
   const exercises = await fetchExercises(userId);
   const sessions = await fetchTrainingSessions(userId);
   const entries = sessions.flatMap((session) => session.entries);
   return { exercises, entries, sessions, source: "supabase" };
 }
 
-export async function saveExercise(exercise: ExerciseTemplate, mode: RepositoryMode = "demo"): Promise<ExerciseTemplate> {
-  const auth = await getRepositoryAuth(mode);
+export async function saveExercise(
+  exercise: ExerciseTemplate,
+  mode: RepositoryMode = "demo",
+  expectedUserId?: string,
+): Promise<ExerciseTemplate> {
+  const auth = await getRepositoryAuth(mode, expectedUserId);
 
   if (auth.mode === "demo") {
     const local = loadLocalData();
@@ -106,7 +114,8 @@ export async function saveExercise(exercise: ExerciseTemplate, mode: RepositoryM
   }
 
   const { supabase, userId } = auth;
-  const routineId = await upsertRoutine(userId, exercise.routine);
+  const routineId = await upsertRoutine(userId, exercise.routine, expectedUserId ?? userId);
+  await assertExpectedRepositoryUser(supabase, expectedUserId ?? userId);
   const payload = {
     id: exercise.id,
     user_id: userId,
@@ -123,6 +132,7 @@ export async function saveExercise(exercise: ExerciseTemplate, mode: RepositoryM
   let { data, error } = await supabase.from("exercises").upsert(payload).select("id").single();
   if (isMissingDayColumnError(error)) {
     const { day: _day, ...payloadWithoutDay } = payload;
+    await assertExpectedRepositoryUser(supabase, expectedUserId ?? userId);
     const retry = await supabase.from("exercises").upsert(payloadWithoutDay).select("id").single();
     data = retry.data;
     error = retry.error;
@@ -131,8 +141,12 @@ export async function saveExercise(exercise: ExerciseTemplate, mode: RepositoryM
   return { ...exercise, id: data!.id };
 }
 
-export async function deleteExercise(exerciseId: string, mode: RepositoryMode = "demo"): Promise<void> {
-  const auth = await getRepositoryAuth(mode);
+export async function deleteExercise(
+  exerciseId: string,
+  mode: RepositoryMode = "demo",
+  expectedUserId?: string,
+): Promise<void> {
+  const auth = await getRepositoryAuth(mode, expectedUserId);
 
   if (auth.mode === "demo") {
     const local = loadLocalData();
@@ -160,13 +174,16 @@ export async function deleteExercise(exerciseId: string, mode: RepositoryMode = 
   }
 }
 
-export async function deactivateActiveCycle(mode: RepositoryMode = "demo"): Promise<void> {
+export async function deactivateActiveCycle(
+  mode: RepositoryMode = "demo",
+  expectedUserId?: string,
+): Promise<void> {
   if (mode === "demo") {
     replaceLocalData([], []);
     return;
   }
 
-  const auth = await getRepositoryAuth(mode);
+  const auth = await getRepositoryAuth(mode, expectedUserId);
   if (auth.mode === "demo") return;
 
   const { supabase, userId } = auth;
@@ -183,6 +200,7 @@ export async function deactivateActiveCycle(mode: RepositoryMode = "demo"): Prom
   );
 
   for (const row of activeRows) {
+    await assertExpectedRepositoryUser(supabase, expectedUserId ?? userId);
     const nextNotes = appendInactiveCycleNote(row.notes, inactiveAt);
     const { error: updateError } = await supabase
       .from("exercises")
@@ -196,9 +214,11 @@ export async function deactivateActiveCycle(mode: RepositoryMode = "demo"): Prom
 
 export async function saveTrainingSessionWithEntries(
   input: SaveTrainingSessionInput,
-  mode: RepositoryMode = "demo",
+  mode: RepositoryMode,
+  expectedUserId: string,
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
 ): Promise<TrainingSession> {
-  const auth = await getRepositoryAuth(mode);
+  const auth = await getRepositoryAuth(mode, expectedUserId, getClient);
   const routineId = createIdFromRoutine(input.routine);
   const sessionId = crypto.randomUUID();
   const calendarWeekStart = getCalendarWeekStart(input.trainedDate);
@@ -245,7 +265,14 @@ export async function saveTrainingSessionWithEntries(
   }
 
   const { supabase, userId } = auth;
-  const persistedRoutineId = await upsertRoutine(userId, input.routine);
+  await assertExpectedRepositoryUser(supabase, expectedUserId);
+  const persistedRoutineId = await upsertRoutine(
+    userId,
+    input.routine,
+    expectedUserId,
+    getClient,
+  );
+  await assertExpectedRepositoryUser(supabase, expectedUserId);
   const { data, error } = await supabase.rpc("create_training_session_with_entries", {
     p_routine_id: persistedRoutineId,
     p_planned_day: input.plannedDay,
@@ -285,10 +312,14 @@ export function replaceLocalData(exercises: ExerciseTemplate[], entries: Exercis
   saveLocalData(exercises, entries, deriveLegacyTrainingSessions(entries));
 }
 
-async function getRepositoryAuth(mode: RepositoryMode) {
+async function getRepositoryAuth(
+  mode: RepositoryMode,
+  expectedUserId?: string,
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+) {
   if (mode === "demo") return { mode: "demo" as const };
 
-  const supabase = getSupabaseBrowserClient();
+  const supabase = getClient();
 
   if (!supabase) {
     throw createSessionRequiredError();
@@ -301,8 +332,17 @@ async function getRepositoryAuth(mode: RepositoryMode) {
   if (!userId) {
     throw createSessionRequiredError();
   }
+  if (expectedUserId && userId !== expectedUserId) throw createSessionExpiredError();
 
   return { mode: "supabase" as const, supabase, userId };
+}
+
+async function assertExpectedRepositoryUser(
+  supabase: NonNullable<ReturnType<typeof getSupabaseBrowserClient>>,
+  expectedUserId: string,
+) {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || data.user?.id !== expectedUserId) throw createSessionExpiredError();
 }
 
 function createSessionRequiredError() {
@@ -341,7 +381,7 @@ function isUnknownArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
 }
 
-async function ensureProfile(userId: string, email: string) {
+async function ensureProfile(userId: string, email: string, expectedUserId: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return;
 
@@ -360,6 +400,7 @@ async function ensureProfile(userId: string, email: string) {
   });
 
   if (decision.type === "update-email") {
+    await assertExpectedRepositoryUser(supabase, expectedUserId);
     const { error } = await supabase
       .from("profiles")
       .update({ email: decision.email })
@@ -369,6 +410,7 @@ async function ensureProfile(userId: string, email: string) {
   }
 
   if (decision.type === "insert") {
+    await assertExpectedRepositoryUser(supabase, expectedUserId);
     const { error } = await supabase
       .from("profiles")
       .insert(decision.payload);
@@ -376,10 +418,16 @@ async function ensureProfile(userId: string, email: string) {
   }
 }
 
-async function upsertRoutine(userId: string, routine: RoutineName) {
-  const supabase = getSupabaseBrowserClient();
+async function upsertRoutine(
+  userId: string,
+  routine: RoutineName,
+  expectedUserId: string,
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+) {
+  const supabase = getClient();
   if (!supabase) throw new Error("No pudimos completar la acción. Intenta nuevamente.");
 
+  await assertExpectedRepositoryUser(supabase, expectedUserId);
   const existing = await supabase
     .from("routines")
     .select("id")
@@ -387,6 +435,7 @@ async function upsertRoutine(userId: string, routine: RoutineName) {
     .eq("name", routine)
     .maybeSingle();
 
+  await assertExpectedRepositoryUser(supabase, expectedUserId);
   if (existing.data?.id) return existing.data.id as string;
 
   const { data, error } = await supabase

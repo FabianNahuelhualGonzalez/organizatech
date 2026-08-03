@@ -213,9 +213,15 @@ export class CycleScopedTrainingRepositoryError extends PublicError {
   }
 }
 
-export async function createTrainingCycleWithPlan(input: CycleScopedTrainingCycleInput): Promise<string> {
+export async function createTrainingCycleWithPlan(
+  input: CycleScopedTrainingCycleInput,
+  expectedUserId: string | undefined = undefined,
+): Promise<string> {
   validatePlanInput(input);
-  const { supabase } = await getAuthenticatedCycleScopedRepository();
+  const { supabase } = await getAuthenticatedCycleScopedRepository(
+    getSupabaseBrowserClient,
+    expectedUserId,
+  );
   const rpcPlan = toCreateTrainingCycleWithPlanPayload(input.plan);
 
   const { data, error } = await supabase.rpc("create_training_cycle_with_plan", {
@@ -240,10 +246,15 @@ export async function createTrainingCycleWithPlan(input: CycleScopedTrainingCycl
   return data;
 }
 
-export async function createTrainingSessionWithCycleEntries(input: CycleScopedTrainingSessionInput): Promise<string> {
+export async function createTrainingSessionWithCycleEntries(
+  input: CycleScopedTrainingSessionInput,
+  expectedUserId: string,
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+): Promise<string> {
   validateTrainingSessionInput(input);
-  const { supabase } = await getAuthenticatedCycleScopedRepository();
+  const { supabase } = await getAuthenticatedCycleScopedRepository(getClient, expectedUserId);
 
+  await assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId);
   const { data, error } = await supabase.rpc("create_training_session_with_cycle_entries", {
     p_cycle_id: input.cycleId,
     p_cycle_day_id: input.cycleDayId,
@@ -346,6 +357,7 @@ export const getCycleScopedTrainingDayCounts =
 
 export async function addCycleScopedTrainingDaysAndExercises(
   input: AddCycleScopedTrainingPlanInput,
+  expectedUserId: string | undefined = undefined,
 ): Promise<AddCycleScopedTrainingPlanResult> {
   if (!input.cycleId || input.days.length === 0) {
     throw new CycleScopedTrainingRepositoryError(
@@ -354,7 +366,10 @@ export async function addCycleScopedTrainingDaysAndExercises(
     );
   }
 
-  const { supabase, userId } = await getAuthenticatedCycleScopedRepository();
+  const { supabase, userId } = await getAuthenticatedCycleScopedRepository(
+    getSupabaseBrowserClient,
+    expectedUserId,
+  );
 
   const { data: activeCycle, error: cycleError } = await supabase
     .from("training_cycles")
@@ -427,6 +442,7 @@ export async function addCycleScopedTrainingDaysAndExercises(
   );
   let insertedDays: Array<{ id: string; routine_id: string; week_index: number; day_code: string }> = [];
   if (missingDays.length > 0) {
+    await assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId ?? userId);
     const { data, error } = await supabase
       .from("training_cycle_days")
       .insert(missingDays.map((day) => ({
@@ -601,6 +617,7 @@ export async function addCycleScopedTrainingDaysAndExercises(
   const updatedExercises: Array<{ id: string }> = [];
   if (updates.length > 0) {
     for (const update of updates) {
+      await assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId ?? userId);
       const { data, error } = await supabase
         .from("training_cycle_exercises")
         .update({
@@ -637,10 +654,16 @@ export async function addCycleScopedTrainingDaysAndExercises(
       additionsWithLineage.push({
         ...addition,
         exerciseLineageId: addition.exerciseLineageId ??
-          await createTrainingExerciseLineage(supabase, userId, null),
+          await createTrainingExerciseLineage(
+            supabase,
+            userId,
+            null,
+            expectedUserId ?? userId,
+          ),
       });
     }
 
+    await assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId ?? userId);
     const { data, error } = await supabase
       .from("training_cycle_exercises")
       .insert(additionsWithLineage.map((addition) => ({
@@ -679,6 +702,7 @@ export async function addCycleScopedTrainingDaysAndExercises(
       const updatePayload = hasEntries
         ? { notes: createCycleScopedRetiredExerciseNotes(current.notes ?? null, retiredAt) }
         : { deleted_at: retiredAt };
+      await assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId ?? userId);
       const { data, error } = await supabase
         .from("training_cycle_exercises")
         .update(updatePayload)
@@ -841,6 +865,7 @@ function toCreateTrainingCycleWithPlanPayload(plan: CycleScopedPlanInput) {
 
 async function getAuthenticatedCycleScopedRepository(
   getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+  expectedUserId?: string,
 ) {
   const supabase = getClient();
   if (!supabase) {
@@ -866,14 +891,35 @@ async function getAuthenticatedCycleScopedRepository(
       "Debes iniciar sesion para gestionar el plan del ciclo.",
     );
   }
+  if (expectedUserId && userId !== expectedUserId) {
+    throw new CycleScopedTrainingRepositoryError(
+      "session_expired",
+      "Tu sesion cambio. Intenta nuevamente con la cuenta activa.",
+    );
+  }
 
   return { supabase, userId };
+}
+
+async function assertExpectedCycleScopedRepositoryUser(
+  supabase: NonNullable<ReturnType<typeof getSupabaseBrowserClient>>,
+  expectedUserId: string,
+) {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || data.user?.id !== expectedUserId) {
+    throw new CycleScopedTrainingRepositoryError(
+      "session_expired",
+      "Tu sesion cambio. Intenta nuevamente con la cuenta activa.",
+      error,
+    );
+  }
 }
 
 async function createTrainingExerciseLineage(
   supabase: ReturnType<typeof getSupabaseBrowserClient>,
   userId: string,
   sourceLegacyExerciseId: string | null,
+  expectedUserId: string,
 ) {
   if (!supabase) {
     throw new CycleScopedTrainingRepositoryError(
@@ -894,6 +940,7 @@ async function createTrainingExerciseLineage(
     if (existing?.id) return existing.id as string;
   }
 
+  await assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId);
   const { data, error } = await supabase
     .from("training_exercise_lineages")
     .insert(createExerciseLineageInsertPayload({ userId, sourceLegacyExerciseId }))

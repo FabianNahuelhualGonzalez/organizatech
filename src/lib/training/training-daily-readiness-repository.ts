@@ -105,10 +105,16 @@ export async function getDailyTrainingReadiness(
 
 export async function saveDailyTrainingReadiness(
   payload: TrainingDailyReadinessPayload,
+  expectedUserId: string,
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
 ): Promise<TrainingDailyReadinessRecord> {
   const normalizedPayload = normalizeDailyReadinessPayload(payload);
-  const { supabase } = await getAuthenticatedDailyReadinessRepository();
+  const { supabase } = await getAuthenticatedDailyReadinessRepository(
+    getClient,
+    expectedUserId,
+  );
 
+  await assertExpectedDailyReadinessUser(supabase, expectedUserId);
   const { data, error } = await supabase.rpc("save_daily_training_readiness", {
     p_payload: normalizedPayload,
   });
@@ -164,8 +170,11 @@ function getCalendarDateFormatter(timeZone: string) {
   return formatter;
 }
 
-async function getAuthenticatedDailyReadinessRepository() {
-  const supabase = getSupabaseBrowserClient();
+async function getAuthenticatedDailyReadinessRepository(
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+  expectedUserId?: string,
+) {
+  const supabase = getClient();
   if (!supabase) {
     throw new TrainingDailyReadinessRepositoryError(
       "session_required",
@@ -182,14 +191,34 @@ async function getAuthenticatedDailyReadinessRepository() {
     );
   }
 
-  if (!data.user?.id) {
+  const userId = data.user?.id;
+  if (!userId) {
     throw new TrainingDailyReadinessRepositoryError(
       "session_required",
       "Inicia sesion para registrar tu formulario diario.",
     );
   }
+  if (expectedUserId && userId !== expectedUserId) {
+    throw new TrainingDailyReadinessRepositoryError(
+      "session_expired",
+      "Tu sesión expiró. Inicia sesión nuevamente.",
+    );
+  }
 
   return { supabase };
+}
+
+async function assertExpectedDailyReadinessUser(
+  supabase: NonNullable<ReturnType<typeof getSupabaseBrowserClient>>,
+  expectedUserId: string,
+) {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || data.user?.id !== expectedUserId) {
+    throw new TrainingDailyReadinessRepositoryError(
+      "session_expired",
+      "Tu sesión expiró. Inicia sesión nuevamente.",
+    );
+  }
 }
 
 function mapTrainingDailyReadinessRow(row: TrainingDailyReadinessRow): TrainingDailyReadinessRecord {

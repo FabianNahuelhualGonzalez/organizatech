@@ -294,8 +294,13 @@ function testStaticProductiveIntegrationContract() {
   assert.doesNotMatch(appSource, /\bsetComparisonDay\b/);
   assert.doesNotMatch(comparisonSource, /\bcomparisonDay\b|\bsetComparisonDay\b/);
 
-  assert.equal((appSource.match(/dispatchProgressController\(/g) ?? []).length, 9);
-  assert.equal((appSource.match(/type: "selection_reset"/g) ?? []).length, 4);
+  assert.equal((appSource.match(/dispatchProgressController\(/g) ?? []).length, 10);
+  assert.equal((appSource.match(/type: "selection_reset"/g) ?? []).length, 5);
+  assert.match(
+    appSource,
+    /function resetUserScopedTransientState\([\s\S]*dispatchProgressController\(\{ type: "selection_reset" \}\)/,
+    "SIGNED_OUT/cambio de identidad resetea la seleccion de Progress",
+  );
   assert.equal((appSource.match(/type: "day_selected"/g) ?? []).length, 3);
   assert.equal((appSource.match(/type: "exercise_selected"/g) ?? []).length, 1);
   assert.equal((appSource.match(/type: "week_selected"/g) ?? []).length, 1);

@@ -51,6 +51,7 @@ export interface LinkTrainingWorkoutReadinessSessionResult {
 
 export type TrainingWorkoutReadinessRepositoryErrorCode =
   | "session_required"
+  | "session_expired"
   | "empty_response"
   | "multiple_rows"
   | "invalid_response"
@@ -70,6 +71,7 @@ export class TrainingWorkoutReadinessRepositoryError extends Error {
 export function translateTrainingWorkoutReadinessError(error: unknown) {
   if (error instanceof TrainingWorkoutReadinessRepositoryError) {
     if (error.code === "session_required") return "Inicia sesion para confirmar tu formulario de entrenamiento.";
+    if (error.code === "session_expired") return "Tu sesión expiró. Inicia sesión nuevamente.";
     if (error.code === "empty_response" || error.code === "multiple_rows" || error.code === "invalid_response") {
       return "La respuesta del formulario de entrenamiento no tiene el formato esperado.";
     }
@@ -82,7 +84,13 @@ export function translateTrainingWorkoutReadinessError(error: unknown) {
 }
 
 export interface TrainingWorkoutReadinessRpcClient {
-  rpc(functionName: string, args: Record<string, unknown>): Promise<{ data: unknown; error: unknown }>;
+  auth: {
+    getUser(): Promise<{
+      data: { user: { id: string } | null };
+      error: unknown;
+    }>;
+  };
+  rpc(functionName: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>;
 }
 
 export interface TrainingWorkoutReadinessRepositoryOptions {
@@ -91,9 +99,14 @@ export interface TrainingWorkoutReadinessRepositoryOptions {
 
 export async function saveTrainingWorkoutReadiness(
   input: SaveTrainingWorkoutReadinessInput,
+  expectedUserId: string,
   options: TrainingWorkoutReadinessRepositoryOptions = {},
 ): Promise<SaveTrainingWorkoutReadinessResult> {
   const supabase = getTrainingWorkoutReadinessClient(options);
+  // La primera validacion vincula la operacion al owner capturado; como esa comprobacion
+  // contiene un await, la segunda se mantiene inmediatamente antes del RPC.
+  await assertExpectedTrainingWorkoutReadinessUser(supabase, expectedUserId);
+  await assertExpectedTrainingWorkoutReadinessUser(supabase, expectedUserId);
   const { data, error } = await supabase.rpc("save_training_workout_readiness_v2", {
     p_workout_attempt_id: input.workoutAttemptId,
     p_cycle_id: input.cycleId,
@@ -108,9 +121,13 @@ export async function saveTrainingWorkoutReadiness(
 
 export async function linkTrainingWorkoutReadinessSession(
   input: LinkTrainingWorkoutReadinessSessionInput,
+  expectedUserId: string,
   options: TrainingWorkoutReadinessRepositoryOptions = {},
 ): Promise<LinkTrainingWorkoutReadinessSessionResult> {
   const supabase = getTrainingWorkoutReadinessClient(options);
+  // Linking aplica el mismo doble guard para no asociar bajo B un pending creado por A.
+  await assertExpectedTrainingWorkoutReadinessUser(supabase, expectedUserId);
+  await assertExpectedTrainingWorkoutReadinessUser(supabase, expectedUserId);
   const { data, error } = await supabase.rpc("link_training_workout_readiness_session_v2", {
     p_workout_attempt_id: input.workoutAttemptId,
     p_training_session_id: input.trainingSessionId,
@@ -129,6 +146,19 @@ function getTrainingWorkoutReadinessClient(options: TrainingWorkoutReadinessRepo
     );
   }
   return supabase;
+}
+
+async function assertExpectedTrainingWorkoutReadinessUser(
+  supabase: TrainingWorkoutReadinessRpcClient,
+  expectedUserId: string,
+) {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || data.user?.id !== expectedUserId) {
+    throw new TrainingWorkoutReadinessRepositoryError(
+      "session_expired",
+      "Tu sesión expiró. Inicia sesión nuevamente.",
+    );
+  }
 }
 
 function readSingleRpcRow(data: unknown) {
@@ -224,5 +254,3 @@ function mapTrainingWorkoutReadinessError(error: unknown) {
     error,
   );
 }
-
-

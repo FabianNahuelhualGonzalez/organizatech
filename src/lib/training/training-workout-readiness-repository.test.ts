@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 
 import { createPublicRepositoryError } from "@/lib/errors/public-error";
 import {
-  linkTrainingWorkoutReadinessSession,
-  saveTrainingWorkoutReadiness,
+  linkTrainingWorkoutReadinessSession as linkTrainingWorkoutReadinessSessionWithOwner,
+  saveTrainingWorkoutReadiness as saveTrainingWorkoutReadinessWithOwner,
   translateTrainingWorkoutReadinessError,
   TrainingWorkoutReadinessRepositoryError,
   type TrainingWorkoutReadinessPayload,
@@ -42,6 +42,21 @@ const saveInput = {
   workoutStartedAt: "2026-06-25T10:30:00.000Z",
   payload: normalPayload,
 };
+const expectedUserId = "user-1";
+
+function saveTrainingWorkoutReadiness(
+  input: Parameters<typeof saveTrainingWorkoutReadinessWithOwner>[0],
+  options: Parameters<typeof saveTrainingWorkoutReadinessWithOwner>[2] = {},
+) {
+  return saveTrainingWorkoutReadinessWithOwner(input, expectedUserId, options);
+}
+
+function linkTrainingWorkoutReadinessSession(
+  input: Parameters<typeof linkTrainingWorkoutReadinessSessionWithOwner>[0],
+  options: Parameters<typeof linkTrainingWorkoutReadinessSessionWithOwner>[2] = {},
+) {
+  return linkTrainingWorkoutReadinessSessionWithOwner(input, expectedUserId, options);
+}
 
 function createSaveRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -72,9 +87,21 @@ function createLinkRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function createRpcClient(data: unknown, error: unknown = null) {
+function createRpcClient(
+  data: unknown,
+  error: unknown = null,
+  userIds: readonly string[] = [expectedUserId, expectedUserId],
+) {
   const calls: RpcCall[] = [];
+  let userIndex = 0;
   const client: TrainingWorkoutReadinessRpcClient = {
+    auth: {
+      async getUser() {
+        const userId = userIds[Math.min(userIndex, userIds.length - 1)];
+        userIndex += 1;
+        return { data: { user: userId ? { id: userId } : null }, error: null };
+      },
+    },
     async rpc(functionName, args) {
       calls.push({ functionName, args });
       return { data, error };
@@ -203,6 +230,101 @@ async function run() {
     await rejectCode(() => linkTrainingWorkoutReadinessSession({ workoutAttemptId: "attempt-1", trainingSessionId: "session-1" }, { supabase: createRpcClient(invalidData).client }), "invalid_response");
   }
 
+  const otherUserId = "user-2-private";
+  const frozenWorkoutPayload = Object.freeze({ ...normalPayload });
+  const frozenWorkoutInput = Object.freeze({
+    ...saveInput,
+    payload: frozenWorkoutPayload,
+  });
+  const frozenWorkoutInputSnapshot = structuredClone(frozenWorkoutInput);
+  const frozenLinkInput = Object.freeze({
+    workoutAttemptId: "attempt-1",
+    trainingSessionId: "session-1",
+  });
+  const frozenLinkInputSnapshot = structuredClone(frozenLinkInput);
+
+  {
+    const { client, calls } = createRpcClient(
+      [createSaveRow()],
+      null,
+      [expectedUserId, expectedUserId],
+    );
+    await saveTrainingWorkoutReadinessWithOwner(
+      frozenWorkoutInput,
+      expectedUserId,
+      { supabase: client },
+    );
+    assert.equal(calls.length, 1, "workout readiness A estable ejecuta exactamente un RPC");
+  }
+
+  {
+    const { client, calls } = createRpcClient(
+      [createSaveRow()],
+      null,
+      [expectedUserId, otherUserId],
+    );
+    await assert.rejects(
+      saveTrainingWorkoutReadinessWithOwner(
+        frozenWorkoutInput,
+        expectedUserId,
+        { supabase: client },
+      ),
+      assertSanitizedOwnerMismatch,
+    );
+    assert.equal(calls.length, 0, "workout readiness A→B antes del RPC ejecuta cero RPC");
+  }
+
+  {
+    const { client, calls } = createRpcClient(
+      [createLinkRow()],
+      null,
+      [expectedUserId, expectedUserId],
+    );
+    await linkTrainingWorkoutReadinessSessionWithOwner(
+      frozenLinkInput,
+      expectedUserId,
+      { supabase: client },
+    );
+    assert.equal(calls.length, 1, "linking A estable ejecuta exactamente un RPC");
+  }
+
+  {
+    const { client, calls } = createRpcClient(
+      [createLinkRow()],
+      null,
+      [expectedUserId, otherUserId],
+    );
+    await assert.rejects(
+      linkTrainingWorkoutReadinessSessionWithOwner(
+        frozenLinkInput,
+        expectedUserId,
+        { supabase: client },
+      ),
+      assertSanitizedOwnerMismatch,
+    );
+    assert.equal(calls.length, 0, "linking A→B antes del RPC ejecuta cero RPC");
+  }
+
+  function assertSanitizedOwnerMismatch(error: unknown) {
+    assert.ok(error instanceof TrainingWorkoutReadinessRepositoryError);
+    assert.equal(error.code, "session_expired");
+    assert.doesNotMatch(
+      error.message,
+      new RegExp(`${expectedUserId}|${otherUserId}|token|rpc|getUser|session_id`, "i"),
+    );
+    return true;
+  }
+
+  assert.deepEqual(frozenWorkoutInput, frozenWorkoutInputSnapshot, "workout readiness no muta input congelado");
+  assert.deepEqual(frozenLinkInput, frozenLinkInputSnapshot, "linking no muta input congelado");
+
+  if (false) {
+    // @ts-expect-error expectedUserId es obligatorio en workout readiness.
+    void saveTrainingWorkoutReadinessWithOwner(frozenWorkoutInput);
+    // @ts-expect-error expectedUserId es obligatorio en linking.
+    void linkTrainingWorkoutReadinessSessionWithOwner(frozenLinkInput);
+  }
+
   const repositorySource = readFileSync("src/lib/training/training-workout-readiness-repository.ts", "utf8");
   const legacyRepositorySource = readFileSync("src/lib/training/training-daily-readiness-repository.ts", "utf8");
   const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
@@ -224,6 +346,10 @@ async function run() {
   assert.equal(
     translateTrainingWorkoutReadinessError(new TrainingWorkoutReadinessRepositoryError("session_required", "x")),
     "Inicia sesion para confirmar tu formulario de entrenamiento.",
+  );
+  assert.equal(
+    translateTrainingWorkoutReadinessError(new TrainingWorkoutReadinessRepositoryError("session_expired", "x")),
+    "Tu sesión expiró. Inicia sesión nuevamente.",
   );
   for (const code of ["empty_response", "multiple_rows", "invalid_response"] as const) {
     assert.equal(
@@ -253,6 +379,3 @@ run().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-
-
-

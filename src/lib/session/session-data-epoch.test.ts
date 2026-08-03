@@ -1,16 +1,23 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   advanceSessionDataEpoch,
   captureSessionDataRequestToken,
   createSessionDataEpoch,
   isSessionDataRequestTokenCurrent,
+  resolveEffectiveAuthenticatedUser,
+  shouldContinueAuthenticatedFlowAfterRefresh,
   type SessionDataEpoch,
   type SessionDataRequestToken,
 } from "@/lib/session/session-data-epoch";
+import { translateAuthError, translatePersistenceError } from "@/lib/supabase/auth-errors";
 import {
   finalizeSessionOperationOwner,
+  invalidateSessionOperationOwners,
+  isSessionOperationOwnerCurrent,
   resolveActiveWorkoutSessionBoundary,
   resolveIncomingWorkoutDraftRecoveryScope,
   settleSessionOperationPromise,
@@ -21,6 +28,15 @@ import {
   resolveActiveWorkoutHistoryCommit,
   runActiveWorkoutHistoryLoad,
 } from "@/lib/training/active-workout-history-load";
+import {
+  saveTrainingSessionWithEntries,
+  type SaveTrainingSessionInput,
+} from "@/lib/data/repository";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import {
+  createTrainingSessionWithCycleEntries,
+  type CycleScopedTrainingSessionInput,
+} from "@/lib/training/cycle-scoped-training-repository";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -59,6 +75,103 @@ function createDeferred<T>(): Deferred<T> {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function createLegacyTrainingSessionWriteHarness(input: {
+  initialUserId: string;
+  deferredRoutineLookup?: boolean;
+  existingRoutineId?: string | null;
+}) {
+  let currentUserId = input.initialUserId;
+  const routineLookupStarted = createDeferred<void>();
+  const routineLookup = createDeferred<{
+    data: { id: string } | null;
+    error: null;
+  }>();
+  const counts = {
+    getUser: 0,
+    routineLookup: 0,
+    routineInsert: 0,
+    rpc: 0,
+  };
+  const routineQuery = {
+    select() {
+      return routineQuery;
+    },
+    eq() {
+      return routineQuery;
+    },
+    maybeSingle() {
+      counts.routineLookup += 1;
+      routineLookupStarted.resolve();
+      if (input.deferredRoutineLookup) return routineLookup.promise;
+      return Promise.resolve({
+        data: input.existingRoutineId ? { id: input.existingRoutineId } : null,
+        error: null,
+      });
+    },
+    insert() {
+      counts.routineInsert += 1;
+      return routineQuery;
+    },
+    single() {
+      return Promise.resolve({ data: { id: "routine-created" }, error: null });
+    },
+  };
+  const client = {
+    auth: {
+      async getUser() {
+        counts.getUser += 1;
+        return { data: { user: { id: currentUserId } }, error: null };
+      },
+    },
+    from(table: string) {
+      assert.equal(table, "routines");
+      return routineQuery;
+    },
+    async rpc(name: string) {
+      assert.equal(name, "create_training_session_with_entries");
+      counts.rpc += 1;
+      return { data: "legacy-session-a", error: null };
+    },
+  };
+
+  return {
+    counts,
+    getClient: (() => client) as unknown as typeof getSupabaseBrowserClient,
+    routineLookupStarted: routineLookupStarted.promise,
+    resolveRoutineLookup(data: { id: string } | null) {
+      routineLookup.resolve({ data, error: null });
+    },
+    setCurrentUserId(userId: string) {
+      currentUserId = userId;
+    },
+  };
+}
+
+function createCycleScopedTrainingSessionWriteHarness(userIds: readonly string[]) {
+  let nextUserIndex = 0;
+  const counts = { getUser: 0, rpc: 0 };
+  const client = {
+    auth: {
+      async getUser() {
+        const userId = userIds[Math.min(nextUserIndex, userIds.length - 1)];
+        nextUserIndex += 1;
+        counts.getUser += 1;
+        return { data: { user: userId ? { id: userId } : null }, error: null };
+      },
+    },
+    async rpc(name: string) {
+      assert.equal(name, "create_training_session_with_cycle_entries");
+      counts.rpc += 1;
+      return { data: "cycle-session-a", error: null };
+    },
+  };
+
+  return {
+    counts,
+    getClient: (() => client) as unknown as typeof getSupabaseBrowserClient,
+  };
 }
 
 async function settleDeferredLoad(input: {
@@ -113,6 +226,398 @@ function extractBetween(source: string, startMarker: string, endMarker: string):
   assert.notEqual(start, -1, `No se encontro el inicio: ${startMarker}`);
   assert.notEqual(end, -1, `No se encontro el final: ${endMarker}`);
   return source.slice(start, end);
+}
+
+function assertMarkersInOrder(source: string, markers: readonly string[], label: string) {
+  const indices = markers.map((marker) => source.indexOf(marker));
+  for (const [index, marker] of indices.map((value, position) => [value, markers[position]] as const)) {
+    assert.ok(index >= 0, `${label}: falta ${marker}`);
+  }
+  for (let index = 1; index < indices.length; index += 1) {
+    assert.ok(indices[index] > indices[index - 1], `${label}: orden invalido para ${markers[index]}`);
+  }
+}
+
+function collectActiveWorkoutRepositoryWrites(appSource: string, activeWorkoutSource: string) {
+  const repositoryWriteImports = new Set<string>();
+  const repositoryImport = /import\s*\{([^}]*)\}\s*from\s*"@\/lib\/[^"]*repository";/g;
+  let match: RegExpExecArray | null;
+  while ((match = repositoryImport.exec(appSource)) !== null) {
+    for (const rawImport of match[1].split(",")) {
+      const normalized = rawImport.trim().replace(/^type\s+/, "");
+      if (!normalized) continue;
+      const [importedName, localAlias] = normalized.split(/\s+as\s+/);
+      const localName = localAlias ?? importedName;
+      if (/^(save|create|link)[A-Z]/.test(localName)) {
+        repositoryWriteImports.add(localName);
+      }
+    }
+  }
+
+  return Array.from(repositoryWriteImports)
+    .filter((name) => new RegExp(`\\b${name}\\s*\\(`).test(activeWorkoutSource))
+    .sort();
+}
+
+interface P341ContractSources {
+  app: string;
+  sessionEpoch: string;
+  operationOwner: string;
+  profileRepository: string;
+  avatarRepository: string;
+  dataRepository: string;
+  cyclesRepository: string;
+  cycleScopedRepository: string;
+  dailyReadinessRepository: string;
+  workoutReadinessRepository: string;
+  completion: string;
+}
+
+/** Contrato estrictamente source-based; no renderiza React ni sustituye los casos runtime. */
+function assertP341StaticContracts(sources: P341ContractSources) {
+  assert.equal((sources.app.match(/useRef\(createSessionDataEpoch\(\)\)/g) ?? []).length, 1);
+  assert.doesNotMatch(sources.app, /from ["']zustand["']|createContext\(/);
+  assert.match(sources.app, /resolveEffectiveAuthenticatedUser\(authState\.session, authState\.user\)/);
+  assert.match(
+    sources.app,
+    /const canEditProfilePersonalData = Boolean\(hasSupabaseSession && getSupabaseBrowserClient\(\)\)/,
+  );
+
+  const applySession = extractBetween(
+    sources.app,
+    "function applySessionState",
+    "function clearUserSessionState",
+  );
+  assertMarkersInOrder(applySession, [
+    "advanceSessionDataIdentity",
+    "resetUserScopedTransientState()",
+    "setSupabaseUser(authenticatedUser)",
+  ], "invalidacion antes de publicar identidad");
+  const identityProfileReset = extractBetween(
+    applySession,
+    "if (identityChanged)",
+    "setIsSupabaseConfiguredState",
+  );
+  assert.match(identityProfileReset, /setProfilePersonalData\(null\)/);
+  assert.doesNotMatch(
+    applySession.slice(applySession.indexOf("setIsSupabaseConfiguredState")),
+    /setProfilePersonalData\(null\)|setProfileAvatar\(createEmptyProfileAvatarState\(\)\)/,
+  );
+
+  const transientReset = extractBetween(
+    sources.app,
+    "function resetUserScopedTransientState",
+    "function applySessionState",
+  );
+  for (const marker of [
+    "setIsMenuOpen(false)",
+    "setIsNotificationPanelOpen(false)",
+    "setIsTopbarHidden(false)",
+    "setIsNewCycleConfirmOpen(false)",
+    "setIsDeleteCycleConfirmOpen(false)",
+    "setIsRoutineSuccessOpen(false)",
+    "setIsRoutineUpdateConfirmOpen(false)",
+    "setRoutineEditorReturnScreen(null)",
+    "setRoutineNotice(\"\")",
+    "setDashboardDayOverride(\"\")",
+    'dispatchProgressController({ type: "selection_reset" })',
+  ]) assert.ok(transientReset.includes(marker), `reset user-scoped incompleto: ${marker}`);
+
+  const profileSave = extractBetween(
+    sources.app,
+    "async function handleSaveProfilePersonalData",
+    "async function handleUploadProfileAvatar",
+  );
+  assertMarkersInOrder(profileSave, [
+    "tryAcquireUserScopedOperation(profileSaveInFlightRef)",
+    "updateProfilePersonalData(input, operationOwner.userId)",
+    'if (result.kind === "stale") return null;',
+    "setProfilePersonalData(result.value)",
+  ], "Profile save owner");
+  assert.match(profileSave, /finally[\s\S]*finalizeUserScopedOperation\(profileSaveInFlightRef, operationOwner\)/);
+
+  const avatarSave = extractBetween(
+    sources.app,
+    "async function handleUploadProfileAvatar",
+    "async function refreshPersistedTrainingCycles",
+  );
+  assertMarkersInOrder(avatarSave, [
+    "tryAcquireUserScopedOperation(profileAvatarUploadInFlightRef)",
+    "uploadProfileAvatar(file, operationOwner.userId)",
+    'if (result.kind === "stale") return false;',
+    "setProfileAvatar(avatar)",
+  ], "Avatar owner");
+
+  const routineSave = extractBetween(
+    sources.app,
+    "async function saveInitialRoutine",
+    "async function handleLogout",
+  );
+  assert.match(routineSave, /tryAcquireUserScopedOperation\(routineSaveInFlightRef\)/);
+  assert.match(routineSave, /deleteExercise\([\s\S]*operationOwner\.userId \?\? undefined/);
+  assert.match(routineSave, /saveExercise\([\s\S]*operationOwner\.userId \?\? undefined/);
+  assert.match(routineSave, /if \(deleteResult\.kind === "stale"\) return;/);
+  assert.match(routineSave, /if \(saveResult\.kind === "stale"\) return;/);
+  assert.equal(
+    (routineSave.match(
+      /if \(finalizeUserScopedOperation\(routineSaveInFlightRef, operationOwner\)\)/g,
+    ) ?? []).length,
+    2,
+    "ambos finally de Routine deben estar gobernados por su owner",
+  );
+
+  for (const [start, end, lock] of [
+    ["async function startNewTrainingCycle", "async function deleteCurrentTrainingCycle", "trainingCycleCreateInFlightRef"],
+    ["async function deleteCurrentTrainingCycle", "function updateExerciseDraft", "trainingCycleDeleteInFlightRef"],
+  ] as const) {
+    const operation = extractBetween(sources.app, start, end);
+    assert.match(operation, new RegExp(`tryAcquireUserScopedOperation\\(${lock}\\)`));
+    assert.match(operation, /settleUserScopedOperation\(/);
+    assert.match(operation, new RegExp(`finalizeUserScopedOperation\\(${lock}, operationOwner\\)`));
+    assert.match(operation, /operationOwner\.userId \?\? undefined/);
+  }
+
+  const logout = extractBetween(sources.app, "async function handleLogout", "function openRoutineDay");
+  assert.doesNotMatch(logout, /clearBrowserStorageScope|clearPasswordRecoveryFlow/);
+  assertMarkersInOrder(logout, [
+    "await supabase.auth.signOut()",
+    "if (error) throw error;",
+    "clearUserSessionState",
+  ], "signOut antes de cleanup");
+  const passwordUpdate = extractBetween(
+    sources.app,
+    "async function handleUpdatePassword",
+    "function prepareRoutineBuilderStateFromExercises",
+  );
+  assert.match(passwordUpdate, /const \{ error: signOutError \} = await supabase\.auth\.signOut\(\)/);
+  assert.match(passwordUpdate, /if \(signOutError\)/);
+  assert.doesNotMatch(passwordUpdate, /setStatusMessage\("Contrase\\u00f1a actualizada/);
+
+  const refresh = extractBetween(
+    sources.app,
+    "async function refreshData",
+    "async function refreshProfilePersonalData",
+  );
+  for (const kind of ["success", "stale", "error"]) assert.ok(refresh.includes(`kind: "${kind}"`));
+  assert.match(refresh, /handlePersistenceError\(error, \{ preserveSession: true \}\)/);
+  assert.match(
+    sources.sessionEpoch,
+    /export function shouldContinueAuthenticatedFlowAfterRefresh\([\s\S]*?return kind !== "stale";/,
+  );
+  const authenticatedRefreshFlows = [
+    extractBetween(sources.app, "async function bootstrapSession", "void bootstrapSession();"),
+    extractBetween(
+      sources.app,
+      'if (event === "SIGNED_IN" || (event === "INITIAL_SESSION" && session))',
+      'if (event === "INITIAL_SESSION" && !session)',
+    ),
+    extractBetween(
+      sources.app,
+      "const session = result.data.session;",
+      "} catch (error) {",
+    ),
+  ];
+  for (const flow of authenticatedRefreshFlows) {
+    assert.match(
+      flow,
+      /if \(!shouldContinueAuthenticatedFlowAfterRefresh\(refreshResult\.kind\)\) return;/,
+    );
+    assert.doesNotMatch(flow, /refreshResult\.kind !== "success"/);
+  }
+  const tokenRefreshed = extractBetween(
+    sources.app,
+    'if (event === "TOKEN_REFRESHED")',
+    "}).data.subscription;",
+  );
+  assert.doesNotMatch(tokenRefreshed, /advanceSessionDataIdentity|setProfilePersonalData\(null\)/);
+
+  assert.match(sources.operationOwner, /readonly operationId: string/);
+  assert.match(sources.operationOwner, /readonly dataMode: SessionOperationDataMode/);
+  assert.match(sources.operationOwner, /invalidateSessionOperationOwners/);
+  assert.equal((sources.operationOwner.match(/interface SessionOperationOwner\b/g) ?? []).length, 1);
+  assert.match(sources.profileRepository, /expectedUserId && userId !== expectedUserId/);
+  assert.match(sources.avatarRepository, /assertExpectedProfileAvatarUser\(supabase, userId\)/);
+  assert.match(sources.dataRepository, /assertExpectedRepositoryUser\(supabase, expectedUserId \?\? userId\)/);
+  assert.match(sources.cyclesRepository, /assertExpectedCycleRepositoryUser\(supabase, expectedUserId \?\? userId\)/);
+  assert.match(sources.cycleScopedRepository, /assertExpectedCycleScopedRepositoryUser/);
+
+  const legacySessionWrite = extractBetween(
+    sources.dataRepository,
+    "export async function saveTrainingSessionWithEntries",
+    "export function replaceLocalData",
+  );
+  assert.match(
+    legacySessionWrite,
+    /mode: RepositoryMode,\s*expectedUserId: string,/,
+    "expectedUserId es obligatorio y no tiene fallback en el write legacy",
+  );
+  assert.match(
+    legacySessionWrite,
+    /getRepositoryAuth\(mode, expectedUserId, getClient\)[\s\S]*?await assertExpectedRepositoryUser\(supabase, expectedUserId\);[\s\S]*?await upsertRoutine\([\s\S]*?expectedUserId,[\s\S]*?getClient,[\s\S]*?\);[\s\S]*?await assertExpectedRepositoryUser\(supabase, expectedUserId\);[\s\S]*?supabase\.rpc\("create_training_session_with_entries"/,
+    "legacy revalida el owner antes de upsertRoutine y otra vez antes del RPC",
+  );
+  const upsertRoutine = extractBetween(
+    sources.dataRepository,
+    "async function upsertRoutine",
+    "async function fetchExercises",
+  );
+  assert.match(upsertRoutine, /expectedUserId: string,/);
+  assert.doesNotMatch(upsertRoutine, /expectedUserId\s*=\s*userId/);
+  assert.match(
+    upsertRoutine,
+    /await assertExpectedRepositoryUser\(supabase, expectedUserId\);[\s\S]*?\.from\("routines"\)[\s\S]*?\.maybeSingle\(\);[\s\S]*?await assertExpectedRepositoryUser\(supabase, expectedUserId\);[\s\S]*?if \(existing\.data\?\.id\)/,
+    "upsertRoutine recibe y revalida el mismo expectedUserId alrededor de su await",
+  );
+
+  const cycleScopedSessionWrite = extractBetween(
+    sources.cycleScopedRepository,
+    "export async function createTrainingSessionWithCycleEntries",
+    "export interface CycleScopedTrainingDayCountRow",
+  );
+  assert.match(
+    cycleScopedSessionWrite,
+    /expectedUserId: string,/,
+    "expectedUserId es obligatorio y no tiene fallback en el write cycle-scoped",
+  );
+  assert.match(
+    cycleScopedSessionWrite,
+    /getAuthenticatedCycleScopedRepository\(getClient, expectedUserId\)[\s\S]*?await assertExpectedCycleScopedRepositoryUser\(supabase, expectedUserId\);[\s\S]*?supabase\.rpc\("create_training_session_with_cycle_entries"/,
+    "cycle-scoped revalida el owner inmediatamente antes del RPC",
+  );
+
+  const activeWorkoutCompletion = extractBetween(
+    sources.app,
+    "async function saveCompletedTraining",
+    "function clearAuthForms",
+  );
+  assert.match(
+    activeWorkoutCompletion,
+    /createTrainingSessionWithCycleEntries\(\{[\s\S]*?\}, operationOwner\.userId\)/,
+    "el caller cycle-scoped pasa exactamente operationOwner.userId",
+  );
+  assert.match(
+    activeWorkoutCompletion,
+    /saveTrainingSessionWithEntries\(\s*legacySessionInput,\s*operationOwner\.dataMode,\s*operationOwner\.userId,\s*\)/,
+    "el caller legacy Supabase pasa exactamente operationOwner.userId",
+  );
+
+  // Inventario source-based P3-41: descubre writes importados desde repositorios y usados por
+  // Active Workout. No sustituye los casos runtime; impide que un write nuevo quede fuera de tabla.
+  const activeWorkoutWritesSource = extractBetween(
+    sources.app,
+    "async function persistDailyReadiness",
+    "function clearAuthForms",
+  );
+  const activeWorkoutWriteInventory = [
+    {
+      name: "saveTrainingSessionWithEntries",
+      source: sources.dataRepository,
+      start: "export async function saveTrainingSessionWithEntries",
+      end: "export function replaceLocalData",
+      rpc: 'supabase.rpc("create_training_session_with_entries"',
+      validation: "assertExpectedRepositoryUser(supabase, expectedUserId)",
+      caller: /saveTrainingSessionWithEntries\(\s*legacySessionInput,\s*operationOwner\.dataMode,\s*operationOwner\.userId,\s*\)/,
+      callCount: 2,
+    },
+    {
+      name: "createTrainingSessionWithCycleEntries",
+      source: sources.cycleScopedRepository,
+      start: "export async function createTrainingSessionWithCycleEntries",
+      end: "export interface CycleScopedTrainingDayCountRow",
+      rpc: 'supabase.rpc("create_training_session_with_cycle_entries"',
+      validation: "assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId)",
+      caller: /createTrainingSessionWithCycleEntries\(\{[\s\S]*?\}, operationOwner\.userId\)/,
+      callCount: 1,
+    },
+    {
+      name: "saveDailyTrainingReadiness",
+      source: sources.dailyReadinessRepository,
+      start: "export async function saveDailyTrainingReadiness",
+      end: "export function normalizeDailyReadinessPayload",
+      rpc: 'supabase.rpc("save_daily_training_readiness"',
+      validation: "assertExpectedDailyReadinessUser(supabase, expectedUserId)",
+      caller: /saveDailyTrainingReadiness\(value, operationOwner\.userId\)/,
+      callCount: 1,
+    },
+    {
+      name: "saveTrainingWorkoutReadiness",
+      source: sources.workoutReadinessRepository,
+      start: "export async function saveTrainingWorkoutReadiness",
+      end: "export async function linkTrainingWorkoutReadinessSession",
+      rpc: 'supabase.rpc("save_training_workout_readiness_v2"',
+      validation: "assertExpectedTrainingWorkoutReadinessUser(supabase, expectedUserId)",
+      caller: /saveTrainingWorkoutReadiness\(\{[\s\S]*?\}, operationOwner\.userId\)/,
+      callCount: 1,
+    },
+    {
+      name: "linkTrainingWorkoutReadinessSession",
+      source: sources.workoutReadinessRepository,
+      start: "export async function linkTrainingWorkoutReadinessSession",
+      end: "function getTrainingWorkoutReadinessClient",
+      rpc: 'supabase.rpc("link_training_workout_readiness_session_v2"',
+      validation: "assertExpectedTrainingWorkoutReadinessUser(supabase, expectedUserId)",
+      caller: /linkTrainingWorkoutReadinessSession\(\{\s*workoutAttemptId: pendingLink\.workoutAttemptId,\s*trainingSessionId: pendingLink\.trainingSessionId,\s*\}, operationOwner\.userId\)/,
+      callCount: 1,
+    },
+  ] as const;
+
+  const discoveredActiveWorkoutWrites = collectActiveWorkoutRepositoryWrites(
+    sources.app,
+    activeWorkoutWritesSource,
+  );
+  const inventoriedActiveWorkoutWrites = activeWorkoutWriteInventory
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(
+    discoveredActiveWorkoutWrites,
+    inventoriedActiveWorkoutWrites,
+    "toda persistencia user-scoped de Active Workout debe estar inventariada con owner",
+  );
+
+  for (const entry of activeWorkoutWriteInventory) {
+    const repositoryFunction = extractBetween(entry.source, entry.start, entry.end);
+    assert.match(
+      repositoryFunction,
+      /expectedUserId: string,/,
+      `${entry.name}: expectedUserId obligatorio sin default`,
+    );
+    assert.doesNotMatch(repositoryFunction, /expectedUserId\s*[?=]/);
+    assert.match(activeWorkoutWritesSource, entry.caller, `${entry.name}: caller sin operationOwner.userId`);
+    assert.equal(
+      (activeWorkoutWritesSource.match(new RegExp(`\\b${entry.name}\\s*\\(`, "g")) ?? []).length,
+      entry.callCount,
+      `${entry.name}: cantidad de callers productivos inventariados`,
+    );
+
+    const rpcIndex = repositoryFunction.indexOf(entry.rpc);
+    const validationIndex = repositoryFunction.lastIndexOf(entry.validation, rpcIndex);
+    assert.ok(rpcIndex >= 0, `${entry.name}: RPC declarado no encontrado`);
+    assert.ok(validationIndex >= 0, `${entry.name}: falta revalidacion antes del RPC`);
+    assert.ok(validationIndex < rpcIndex, `${entry.name}: revalidacion debe preceder al RPC`);
+    const validationEnd = repositoryFunction.indexOf(";", validationIndex) + 1;
+    const rpcAwaitIndex = repositoryFunction.lastIndexOf("await ", rpcIndex);
+    assert.ok(validationEnd > validationIndex, `${entry.name}: revalidacion incompleta`);
+    assert.ok(rpcAwaitIndex >= validationEnd, `${entry.name}: RPC no esperado inmediatamente despues del guard`);
+    assert.doesNotMatch(
+      repositoryFunction.slice(validationEnd, rpcAwaitIndex),
+      /\bawait\b/,
+      `${entry.name}: existe otro await sin revalidacion antes del RPC`,
+    );
+    const rpcPayloadEnd = repositoryFunction.indexOf("});", rpcIndex);
+    assert.ok(rpcPayloadEnd > rpcIndex, `${entry.name}: payload RPC no encontrado`);
+    assert.doesNotMatch(
+      repositoryFunction.slice(rpcIndex, rpcPayloadEnd),
+      /\b(?:user_id|owner_id|profile_id)\b/,
+      `${entry.name}: ownership no puede venir del caller`,
+    );
+  }
+  assert.match(
+    activeWorkoutWritesSource,
+    /saveTrainingSessionWithEntries\(\s*legacySessionInput,\s*"demo",\s*"demo",\s*\)/,
+    "completion legacy conserva un caller local explicito, separado del owner Supabase",
+  );
+  assert.doesNotMatch(sources.app, /ShareWorkoutCard|workout-share/);
+  assert.doesNotMatch(sources.completion, /ShareWorkoutCard|workout-share|navigator|useState|useEffect|useRef/);
 }
 
 async function run() {
@@ -697,23 +1202,984 @@ async function run() {
     "una sesion entrante protege su draft hasta intentar recuperarlo",
   );
 
+  // P3-41 RUNTIME: matriz A -> SIGNED_OUT -> B con deferred promises reales.
+  async function runStaleSuccessScenario(surface: string) {
+    let currentEpoch = createSessionDataEpoch(identityA);
+    const lock: { current: SessionOperationOwner | null } = { current: null };
+    const ownerA = tryAcquireSessionOperationOwner(
+      lock.current,
+      captureSessionDataRequestToken(currentEpoch),
+      { dataMode: "supabase", operationId: `${surface}-a` },
+    );
+    assert.ok(ownerA);
+    lock.current = ownerA;
+    assert.equal(Object.isFrozen(ownerA), true, `${surface}: owner inmutable`);
+    assert.deepEqual(
+      {
+        userId: ownerA.userId,
+        scope: ownerA.scope,
+        dataMode: ownerA.dataMode,
+        operationId: ownerA.operationId,
+      },
+      {
+        userId: identityA.userId,
+        scope: identityA.scope,
+        dataMode: "supabase",
+        operationId: `${surface}-a`,
+      },
+    );
+
+    const deferred = createDeferred<string>();
+    const pending = settleSessionOperationPromise({
+      request: deferred.promise,
+      owner: ownerA,
+      getCurrentOwner: () => lock.current,
+      isRequestCurrent: (token) => isSessionDataRequestTokenCurrent(currentEpoch, token),
+    });
+    const state = {
+      value: `${surface}-b`,
+      error: "",
+      busy: "b",
+      loading: "b",
+      lockReleasedByA: false,
+      screen: "dashboard-b",
+      drafts: [] as string[],
+    };
+
+    currentEpoch = advanceSessionDataEpoch(
+      currentEpoch,
+      { userId: null, scope: null },
+      { force: true },
+    );
+    invalidateSessionOperationOwners([lock]);
+    currentEpoch = advanceSessionDataEpoch(currentEpoch, identityB);
+    const ownerB = tryAcquireSessionOperationOwner(
+      lock.current,
+      captureSessionDataRequestToken(currentEpoch),
+      { dataMode: "supabase", operationId: `${surface}-b` },
+    );
+    assert.ok(ownerB);
+    lock.current = ownerB;
+
+    deferred.resolve(`${surface}-a-late`);
+    const resultA = await pending;
+    if (resultA.kind === "success") {
+      state.value = resultA.value;
+      state.screen = "screen-a";
+      state.drafts.push(ownerA.scope ?? "");
+    }
+    if (resultA.kind === "error") state.error = String(resultA.error);
+    const finalizationA = finalizeSessionOperationOwner({
+      currentOwner: lock.current,
+      owner: ownerA,
+      isRequestCurrent: (token) => isSessionDataRequestTokenCurrent(currentEpoch, token),
+    });
+    if (finalizationA.canFinalize) {
+      state.busy = "";
+      state.loading = "";
+    }
+    state.lockReleasedByA = finalizationA.released;
+    lock.current = finalizationA.nextOwner;
+
+    assert.deepEqual(resultA, { kind: "stale" }, `${surface}: resultado A descartado`);
+    assert.deepEqual(state, {
+      value: `${surface}-b`,
+      error: "",
+      busy: "b",
+      loading: "b",
+      lockReleasedByA: false,
+      screen: "dashboard-b",
+      drafts: [],
+    });
+    assert.equal(lock.current, ownerB, `${surface}: finally A no libera lock B`);
+  }
+
+  await runStaleSuccessScenario("profile-save");
+  await runStaleSuccessScenario("avatar-upload");
+  await runStaleSuccessScenario("cycle-create");
+  await runStaleSuccessScenario("cycle-delete");
+
+  {
+    let currentEpoch = createSessionDataEpoch(identityA);
+    const lock: { current: SessionOperationOwner | null } = { current: null };
+    const ownerA = tryAcquireSessionOperationOwner(
+      lock.current,
+      captureSessionDataRequestToken(currentEpoch),
+      { dataMode: "supabase", operationId: "profile-rejection-a" },
+    );
+    assert.ok(ownerA);
+    lock.current = ownerA;
+    const rejection = createDeferred<string>();
+    const pending = settleSessionOperationPromise({
+      request: rejection.promise,
+      owner: ownerA,
+      getCurrentOwner: () => lock.current,
+      isRequestCurrent: (token) => isSessionDataRequestTokenCurrent(currentEpoch, token),
+    });
+    currentEpoch = advanceSessionDataEpoch(currentEpoch, { userId: null, scope: null }, { force: true });
+    invalidateSessionOperationOwners([lock]);
+    currentEpoch = advanceSessionDataEpoch(currentEpoch, identityB);
+    const ownerB = tryAcquireSessionOperationOwner(
+      lock.current,
+      captureSessionDataRequestToken(currentEpoch),
+      { dataMode: "supabase", operationId: "profile-save-b" },
+    );
+    assert.ok(ownerB);
+    lock.current = ownerB;
+    const state = { error: "", busy: "b" };
+    rejection.reject(new Error("fallo tardio de A"));
+    const result = await pending;
+    if (result.kind === "error") state.error = "error-a";
+    const finalization = finalizeSessionOperationOwner({
+      currentOwner: lock.current,
+      owner: ownerA,
+      isRequestCurrent: (token) => isSessionDataRequestTokenCurrent(currentEpoch, token),
+    });
+    if (finalization.canFinalize) state.busy = "";
+    assert.deepEqual(result, { kind: "stale" });
+    assert.deepEqual(state, { error: "", busy: "b" });
+    assert.equal(finalization.released, false);
+    assert.equal(finalization.nextOwner, ownerB);
+  }
+
+  {
+    let currentEpoch = createSessionDataEpoch(identityA);
+    const lock: { current: SessionOperationOwner | null } = { current: null };
+    const ownerA = tryAcquireSessionOperationOwner(
+      lock.current,
+      captureSessionDataRequestToken(currentEpoch),
+      { dataMode: "supabase", operationId: "routine-batch-a" },
+    );
+    assert.ok(ownerA);
+    lock.current = ownerA;
+    const firstWrite = createDeferred<string>();
+    const writes: string[] = [];
+    let nextWriteStarted = false;
+    const batch = (async () => {
+      const firstResult = await settleSessionOperationPromise({
+        request: firstWrite.promise,
+        owner: ownerA,
+        getCurrentOwner: () => lock.current,
+        isRequestCurrent: (token) => isSessionDataRequestTokenCurrent(currentEpoch, token),
+      });
+      if (firstResult.kind !== "success") return firstResult.kind;
+      writes.push(firstResult.value);
+      nextWriteStarted = true;
+      return "success";
+    })();
+    currentEpoch = advanceSessionDataEpoch(currentEpoch, { userId: null, scope: null }, { force: true });
+    invalidateSessionOperationOwners([lock]);
+    currentEpoch = advanceSessionDataEpoch(currentEpoch, identityB);
+    firstWrite.resolve("write-a-1");
+    assert.equal(await batch, "stale");
+    assert.deepEqual(writes, []);
+    assert.equal(nextWriteStarted, false, "el batch A se detiene antes del siguiente write");
+  }
+
+  {
+    let currentEpoch = createSessionDataEpoch(identityA);
+    const lock: { current: SessionOperationOwner | null } = { current: null };
+    const owner = tryAcquireSessionOperationOwner(
+      lock.current,
+      captureSessionDataRequestToken(currentEpoch),
+      { dataMode: "supabase", operationId: "token-refresh-owner" },
+    );
+    assert.ok(owner);
+    lock.current = owner;
+    const request = createDeferred<string>();
+    const pending = settleSessionOperationPromise({
+      request: request.promise,
+      owner,
+      getCurrentOwner: () => lock.current,
+      isRequestCurrent: (token) => isSessionDataRequestTokenCurrent(currentEpoch, token),
+    });
+    const refreshed = advanceSessionDataEpoch(currentEpoch, identityA);
+    assert.equal(refreshed, currentEpoch);
+    currentEpoch = refreshed;
+    assert.equal(isSessionOperationOwnerCurrent({
+      currentOwner: lock.current,
+      owner,
+      isRequestCurrent: (token) => isSessionDataRequestTokenCurrent(currentEpoch, token),
+    }), true);
+    request.resolve("vigente");
+    assert.deepEqual(await pending, { kind: "success", value: "vigente" });
+  }
+
+  {
+    const userA = { id: "user-a" };
+    assert.equal(resolveEffectiveAuthenticatedUser(null, userA), null, "signup sin session no autentica");
+    assert.equal(Boolean(resolveEffectiveAuthenticatedUser(null, userA)), false, "signup no habilita Profile write");
+    assert.equal(
+      resolveEffectiveAuthenticatedUser({ user: userA }, { id: "otro-user" }),
+      null,
+      "candidate y session.user deben coincidir",
+    );
+    assert.equal(resolveEffectiveAuthenticatedUser({ user: userA }, userA), userA);
+  }
+
+  {
+    const state: {
+      session: string;
+      scope: string | null;
+      screen: string;
+      cleanupCount: number;
+    } = { session: "A", scope: identityA.scope, screen: "dashboard", cleanupCount: 0 };
+    let cleaned = false;
+    const cleanupOnce = () => {
+      if (cleaned) return;
+      cleaned = true;
+      state.cleanupCount += 1;
+      state.session = "";
+      state.scope = null;
+      state.screen = "login";
+    };
+    const failedSignOut = createDeferred<{ error: Error | null }>();
+    const failed = (async () => {
+      const result = await failedSignOut.promise;
+      if (result.error) return "error";
+      cleanupOnce();
+      return "success";
+    })();
+    failedSignOut.resolve({ error: new Error("network") });
+    assert.equal(await failed, "error");
+    assert.deepEqual(state, {
+      session: "A",
+      scope: identityA.scope,
+      screen: "dashboard",
+      cleanupCount: 0,
+    }, "logout fallido conserva session, scope y navegacion");
+
+    const successfulSignOut = createDeferred<{ error: Error | null }>();
+    const successful = (async () => {
+      const result = await successfulSignOut.promise;
+      if (result.error) return "error";
+      cleanupOnce(); // fallback del handler
+      return "success";
+    })();
+    successfulSignOut.resolve({ error: null });
+    cleanupOnce(); // evento SIGNED_OUT
+    assert.equal(await successful, "success");
+    assert.equal(state.cleanupCount, 1, "logout exitoso limpia una sola vez");
+  }
+
+  {
+    assert.equal(shouldContinueAuthenticatedFlowAfterRefresh("success"), true);
+    assert.equal(shouldContinueAuthenticatedFlowAfterRefresh("error"), true);
+    assert.equal(shouldContinueAuthenticatedFlowAfterRefresh("stale"), false);
+
+    type AuthenticatedRefreshHarnessState = {
+      sessionUserId: string | null;
+      dataMode: "demo" | "supabase";
+      screen: "login" | "dashboard";
+      data: string[];
+      message: string;
+      loading: boolean;
+      formsCleared: boolean;
+      navigations: number;
+    };
+    type HarnessRefreshResult =
+      | { kind: "success"; data: string[] }
+      | { kind: "stale" }
+      | { kind: "error"; error: unknown };
+
+    async function continueAuthenticatedFlowAfterRefresh(input: {
+      request: Promise<HarnessRefreshResult>;
+      token: SessionDataRequestToken;
+      getCurrentEpoch: () => SessionDataEpoch;
+      state: AuthenticatedRefreshHarnessState;
+    }) {
+      const result = await input.request;
+      if (result.kind === "error") {
+        input.state.message = translatePersistenceError(result.error);
+      }
+      if (!shouldContinueAuthenticatedFlowAfterRefresh(result.kind)) return result.kind;
+      if (!isSessionDataRequestTokenCurrent(input.getCurrentEpoch(), input.token)) return "stale";
+      if (result.kind === "success") input.state.data = [...result.data];
+      input.state.loading = false;
+      input.state.formsCleared = true;
+      input.state.screen = "dashboard";
+      input.state.navigations += 1;
+      return result.kind;
+    }
+
+    async function runLoginHarness(input: {
+      signInWithPassword: () => Promise<{
+        data: { session: { user: { id: string } } | null };
+        error: unknown | null;
+      }>;
+      refresh: Promise<HarnessRefreshResult>;
+      state: AuthenticatedRefreshHarnessState;
+    }) {
+      const authResult = await input.signInWithPassword();
+      if (authResult.error) {
+        input.state.message = translateAuthError(authResult.error);
+        input.state.loading = false;
+        return "auth-error";
+      }
+      const session = authResult.data.session;
+      if (!session) return "missing-session";
+
+      const currentEpoch = createSessionDataEpoch({
+        userId: session.user.id,
+        scope: `supabase:${session.user.id}`,
+      });
+      input.state.sessionUserId = session.user.id;
+      input.state.dataMode = "supabase";
+      input.state.data = [];
+      input.state.message = "";
+      return continueAuthenticatedFlowAfterRefresh({
+        request: input.refresh,
+        token: captureSessionDataRequestToken(currentEpoch),
+        getCurrentEpoch: () => currentEpoch,
+        state: input.state,
+      });
+    }
+
+    {
+      let signInWithPasswordCalls = 0;
+      const state: AuthenticatedRefreshHarnessState = {
+        sessionUserId: identityA.userId,
+        dataMode: "supabase",
+        screen: "login",
+        data: ["dato-anterior-a"],
+        message: "",
+        loading: true,
+        formsCleared: false,
+        navigations: 0,
+      };
+      const result = await runLoginHarness({
+        signInWithPassword: async () => {
+          signInWithPasswordCalls += 1;
+          return {
+            data: { session: { user: { id: identityB.userId } } },
+            error: null,
+          };
+        },
+        refresh: Promise.resolve({
+          kind: "error",
+          error: new Error("sensitive supabase internal detail"),
+        }),
+        state,
+      });
+      assert.equal(result, "error");
+      assert.equal(signInWithPasswordCalls, 1);
+      assert.deepEqual(state, {
+        sessionUserId: identityB.userId,
+        dataMode: "supabase",
+        screen: "dashboard",
+        data: [],
+        message: "No pudimos completar la acción. Intenta nuevamente.",
+        loading: false,
+        formsCleared: true,
+        navigations: 1,
+      }, "signIn exitoso + refresh error conserva B, vacia A, sanitiza y navega");
+    }
+
+    for (const surface of ["bootstrap", "SIGNED_IN"] as const) {
+      const currentEpoch = createSessionDataEpoch(identityB);
+      const token = captureSessionDataRequestToken(currentEpoch);
+      const state: AuthenticatedRefreshHarnessState = {
+        sessionUserId: identityB.userId,
+        dataMode: "supabase",
+        screen: "login",
+        data: [],
+        message: "",
+        loading: true,
+        formsCleared: false,
+        navigations: 0,
+      };
+      const refresh = createDeferred<HarnessRefreshResult>();
+      const pending = continueAuthenticatedFlowAfterRefresh({
+        request: refresh.promise,
+        token,
+        getCurrentEpoch: () => currentEpoch,
+        state,
+      });
+      refresh.resolve({ kind: "error", error: new Error("sensitive supabase internal detail") });
+      assert.equal(await pending, "error", `${surface}: error recuperable continua flujo auth`);
+      assert.deepEqual(state, {
+        sessionUserId: identityB.userId,
+        dataMode: "supabase",
+        screen: "dashboard",
+        data: [],
+        message: "No pudimos completar la acción. Intenta nuevamente.",
+        loading: false,
+        formsCleared: true,
+        navigations: 1,
+      }, `${surface}: conserva sesion, vacio previo, mensaje sanitizado y termina loading`);
+      assert.equal(currentEpoch.userId, identityB.userId);
+    }
+
+    {
+      let currentEpoch = createSessionDataEpoch(identityA);
+      const tokenA = captureSessionDataRequestToken(currentEpoch);
+      const state: AuthenticatedRefreshHarnessState = {
+        sessionUserId: identityB.userId,
+        dataMode: "supabase",
+        screen: "login",
+        data: [],
+        message: "",
+        loading: true,
+        formsCleared: false,
+        navigations: 0,
+      };
+      const refreshA = createDeferred<HarnessRefreshResult>();
+      const pendingA = continueAuthenticatedFlowAfterRefresh({
+        request: refreshA.promise,
+        token: tokenA,
+        getCurrentEpoch: () => currentEpoch,
+        state,
+      });
+      currentEpoch = advanceSessionDataEpoch(currentEpoch, identityB);
+      refreshA.resolve({ kind: "stale" });
+      assert.equal(await pendingA, "stale");
+      assert.deepEqual(state, {
+        sessionUserId: identityB.userId,
+        dataMode: "supabase",
+        screen: "login",
+        data: [],
+        message: "",
+        loading: true,
+        formsCleared: false,
+        navigations: 0,
+      }, "refresh stale de A no navega, publica datos ni contamina B");
+    }
+
+    {
+      const invalidCredentialsState: AuthenticatedRefreshHarnessState = {
+        sessionUserId: null,
+        dataMode: "supabase",
+        screen: "login",
+        data: [],
+        message: "",
+        loading: true,
+        formsCleared: false,
+        navigations: 0,
+      };
+      const result = await runLoginHarness({
+        signInWithPassword: async () => ({
+          data: { session: null },
+          error: { message: "Invalid login credentials" },
+        }),
+        refresh: Promise.resolve({ kind: "success", data: ["no-debe-publicarse"] }),
+        state: invalidCredentialsState,
+      });
+      assert.equal(result, "auth-error");
+      assert.deepEqual(invalidCredentialsState, {
+        sessionUserId: null,
+        dataMode: "supabase",
+        screen: "login",
+        data: [],
+        message: "Correo o contraseña incorrectos.",
+        loading: false,
+        formsCleared: false,
+        navigations: 0,
+      }, "credenciales invalidas no crean sesion ni abandonan Login");
+    }
+  }
+
+  {
+    const transient = {
+      drawer: true,
+      notifications: true,
+      topbarHidden: true,
+      cycleModal: true,
+      routineModal: true,
+      progressSelection: "A",
+      dashboardOverride: "A",
+      notice: "A",
+      flow: "A",
+      message: "A",
+      overlay: "A",
+      draftScope: identityA.scope,
+    };
+    Object.assign(transient, {
+      drawer: false,
+      notifications: false,
+      topbarHidden: false,
+      cycleModal: false,
+      routineModal: false,
+      progressSelection: "",
+      dashboardOverride: "",
+      notice: "",
+      flow: "",
+      message: "",
+      overlay: "",
+      draftScope: null,
+    });
+    assert.deepEqual(transient, {
+      drawer: false,
+      notifications: false,
+      topbarHidden: false,
+      cycleModal: false,
+      routineModal: false,
+      progressSelection: "",
+      dashboardOverride: "",
+      notice: "",
+      flow: "",
+      message: "",
+      overlay: "",
+      draftScope: null,
+    }, "matriz A -> SIGNED_OUT -> B sin intents, mensajes, overlays ni drafts cruzados");
+  }
+
+  // P3-41 OWNER WRITE RUNTIME: ejecuta las funciones productivas con clientes Supabase
+  // controlados para demostrar que el repository corta la cadena antes del siguiente write.
+  const legacyWriteInput: SaveTrainingSessionInput = {
+    routine: "Pecho Hombro Tríceps",
+    plannedDay: "monday",
+    plannedDate: "2026-08-03",
+    trainedDate: "2026-08-03",
+    weekNumber: 1,
+    status: "completed",
+    notes: "sesion owner A",
+    entries: [{
+      id: "entry-a",
+      exerciseId: "exercise-a",
+      exerciseName: "Press banca",
+      routine: "Pecho Hombro Tríceps",
+      targetSets: 3,
+      targetReps: 10,
+      weight: 80,
+      previousWeight: 75,
+      reps: [10, 10, 9],
+      rir: "2",
+      notes: "controlado",
+    }],
+  };
+  const cycleWriteInput: CycleScopedTrainingSessionInput = {
+    cycleId: "cycle-a",
+    cycleDayId: "cycle-day-a",
+    plannedDay: "monday",
+    plannedDate: "2026-08-03",
+    trainedDate: "2026-08-03",
+    status: "completed",
+    weekNumber: 1,
+    notes: "sesion cycle owner A",
+    entries: [{
+      id: "entry-cycle-a",
+      trainingCycleExerciseId: "cycle-exercise-a",
+      exerciseId: "exercise-a",
+      exerciseLineageId: "lineage-a",
+      weight: 80,
+      previousWeight: 75,
+      reps: [10, 10, 9],
+      rir: "2",
+      notes: "controlado",
+    }],
+  };
+  const legacyWriteInputSnapshot = structuredClone(legacyWriteInput);
+  const cycleWriteInputSnapshot = structuredClone(cycleWriteInput);
+  const privateOwnerA = "owner-a-private-id";
+  const privateOwnerB = "owner-b-private-id";
+  const privateToken = "private-token-detail";
+
+  function assertSanitizedOwnerMismatch(error: unknown) {
+    assert.ok(error instanceof Error);
+    assert.doesNotMatch(
+      error.message,
+      new RegExp(`${privateOwnerA}|${privateOwnerB}|${privateToken}|getUser|rpc`, "i"),
+      "el error publico de mismatch no expone IDs, tokens ni detalles internos",
+    );
+    assert.match(
+      error.message,
+      /sesión|sesion|inicia sesión|cuenta activa/i,
+      "el mismatch usa un mensaje publico generico",
+    );
+    return true;
+  }
+
+  {
+    const harness = createLegacyTrainingSessionWriteHarness({
+      initialUserId: privateOwnerB,
+    });
+    await assert.rejects(
+      saveTrainingSessionWithEntries(
+        legacyWriteInput,
+        "supabase",
+        privateOwnerA,
+        harness.getClient,
+      ),
+      assertSanitizedOwnerMismatch,
+    );
+    assert.deepEqual(harness.counts, {
+      getUser: 1,
+      routineLookup: 0,
+      routineInsert: 0,
+      rpc: 0,
+    }, "A inicia legacy con auth B: cero upsert y cero RPC");
+  }
+
+  {
+    const harness = createLegacyTrainingSessionWriteHarness({
+      initialUserId: privateOwnerA,
+      deferredRoutineLookup: true,
+    });
+    const pending = saveTrainingSessionWithEntries(
+      legacyWriteInput,
+      "supabase",
+      privateOwnerA,
+      harness.getClient,
+    );
+    await harness.routineLookupStarted;
+    harness.setCurrentUserId(privateOwnerB);
+    harness.resolveRoutineLookup({ id: "routine-a" });
+    await assert.rejects(pending, assertSanitizedOwnerMismatch);
+    assert.equal(harness.counts.routineInsert, 0);
+    assert.equal(harness.counts.rpc, 0, "auth A -> B durante upsertRoutine corta el RPC posterior");
+  }
+
+  {
+    const harness = createLegacyTrainingSessionWriteHarness({
+      initialUserId: privateOwnerA,
+      existingRoutineId: null,
+    });
+    const saved = await saveTrainingSessionWithEntries(
+      legacyWriteInput,
+      "supabase",
+      privateOwnerA,
+      harness.getClient,
+    );
+    assert.equal(saved.id, "legacy-session-a");
+    assert.equal(harness.counts.routineInsert, 1, "owner A puede crear su rutina allowlisted");
+    assert.equal(harness.counts.rpc, 1, "owner A conserva el guardado legacy normal");
+  }
+
+  {
+    const harness = createCycleScopedTrainingSessionWriteHarness([
+      privateOwnerA,
+      privateOwnerB,
+    ]);
+    await assert.rejects(
+      createTrainingSessionWithCycleEntries(
+        cycleWriteInput,
+        privateOwnerA,
+        harness.getClient,
+      ),
+      assertSanitizedOwnerMismatch,
+    );
+    assert.equal(harness.counts.rpc, 0, "cycle-scoped A con auth B antes del RPC ejecuta cero RPC");
+  }
+
+  {
+    const harness = createCycleScopedTrainingSessionWriteHarness([
+      privateOwnerA,
+      privateOwnerA,
+    ]);
+    const sessionId = await createTrainingSessionWithCycleEntries(
+      cycleWriteInput,
+      privateOwnerA,
+      harness.getClient,
+    );
+    assert.equal(sessionId, "cycle-session-a");
+    assert.equal(harness.counts.rpc, 1, "owner A conserva el guardado cycle-scoped normal");
+  }
+
+  assert.deepEqual(legacyWriteInput, legacyWriteInputSnapshot, "legacy no muta su input");
+  assert.deepEqual(cycleWriteInput, cycleWriteInputSnapshot, "cycle-scoped no muta su input");
+
+  if (false) {
+    // @ts-expect-error expectedUserId es obligatorio en el write legacy.
+    void saveTrainingSessionWithEntries(legacyWriteInput, "supabase");
+    // @ts-expect-error expectedUserId es obligatorio en el write cycle-scoped.
+    void createTrainingSessionWithCycleEntries(cycleWriteInput);
+  }
+
   // Contrato estatico/source-based: valida wiring; no renderiza React ni sustituye los casos runtime anteriores.
   const componentSource = readFileSync(
     new URL("../../components/organizatech-app.tsx", import.meta.url),
     "utf8",
   );
+  const p341Sources: P341ContractSources = {
+    app: componentSource,
+    sessionEpoch: readFileSync(
+      new URL("./session-data-epoch.ts", import.meta.url),
+      "utf8",
+    ),
+    operationOwner: readFileSync(
+      new URL("./active-workout-session-boundary.ts", import.meta.url),
+      "utf8",
+    ),
+    profileRepository: readFileSync(
+      new URL("../profile/profile-repository.ts", import.meta.url),
+      "utf8",
+    ),
+    avatarRepository: readFileSync(
+      new URL("../profile/profile-avatar-repository.ts", import.meta.url),
+      "utf8",
+    ),
+    dataRepository: readFileSync(
+      new URL("../data/repository.ts", import.meta.url),
+      "utf8",
+    ),
+    cyclesRepository: readFileSync(
+      new URL("../training/training-cycles-repository.ts", import.meta.url),
+      "utf8",
+    ),
+    cycleScopedRepository: readFileSync(
+      new URL("../training/cycle-scoped-training-repository.ts", import.meta.url),
+      "utf8",
+    ),
+    dailyReadinessRepository: readFileSync(
+      new URL("../training/training-daily-readiness-repository.ts", import.meta.url),
+      "utf8",
+    ),
+    workoutReadinessRepository: readFileSync(
+      new URL("../training/training-workout-readiness-repository.ts", import.meta.url),
+      "utf8",
+    ),
+    completion: readFileSync(
+      new URL("../../features/active-workout/components/TrainingCompletionSummaryScreen.tsx", import.meta.url),
+      "utf8",
+    ),
+  };
+  assertP341StaticContracts(p341Sources);
+
+  // Mutation probes: cada mutacion vive solo en una copia temporal externa y el archivo temporal
+  // se restaura byte a byte antes del siguiente probe. El working tree nunca se modifica aqui.
+  const mutationProbes: Array<{
+    name: string;
+    target: keyof P341ContractSources;
+    mutate: (source: string) => string;
+  }> = [
+    {
+      name: "quitar guard post-await",
+      target: "app",
+      mutate: (source) => source.replace('      if (result.kind === "stale") return null;\n', ""),
+    },
+    {
+      name: "usar supabaseUser dinamico",
+      target: "app",
+      mutate: (source) => source.replace(
+        "updateProfilePersonalData(input, operationOwner.userId)",
+        "updateProfilePersonalData(input, supabaseUser.id)",
+      ),
+    },
+    {
+      name: "permitir finally A sobre B",
+      target: "app",
+      mutate: (source) => source.replace(
+        "if (finalizeUserScopedOperation(routineSaveInFlightRef, operationOwner))",
+        "if (true)",
+      ),
+    },
+    {
+      name: "quitar identidad esperada del repository",
+      target: "profileRepository",
+      mutate: (source) => source.replace(
+        "  if (expectedUserId && userId !== expectedUserId) {",
+        "  if (false) {",
+      ),
+    },
+    {
+      name: "limpiar storage antes de signOut",
+      target: "app",
+      mutate: (source) => source.replace(
+        "      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut();",
+        "      clearBrowserStorageScope(currentStorageScope);\n      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut();",
+      ),
+    },
+    {
+      name: "ignorar error de signOut",
+      target: "app",
+      mutate: (source) => source.replace(
+        "        const { error } = await supabase.auth.signOut();\n        if (error) throw error;",
+        "        await supabase.auth.signOut();",
+      ),
+    },
+    {
+      name: "avanzar epoch en TOKEN_REFRESHED",
+      target: "app",
+      mutate: (source) => source.replace(
+        '      if (event === "TOKEN_REFRESHED") {',
+        '      if (event === "TOKEN_REFRESHED") {\n        advanceSessionDataIdentity(nextState);',
+      ),
+    },
+    {
+      name: "permitir Profile write sin sesion",
+      target: "app",
+      mutate: (source) => source.replace(
+        "const canEditProfilePersonalData = Boolean(hasSupabaseSession && getSupabaseBrowserClient());",
+        "const canEditProfilePersonalData = Boolean(supabaseUser && getSupabaseBrowserClient());",
+      ),
+    },
+    {
+      name: "eliminar reset de overlay/modal",
+      target: "app",
+      mutate: (source) => source.replace("    setIsNotificationPanelOpen(false);\n", ""),
+    },
+    {
+      name: "volver a tratar refresh error como stale en bootstrap",
+      target: "app",
+      mutate: (source) => source.replace(
+        "          if (!shouldContinueAuthenticatedFlowAfterRefresh(refreshResult.kind)) return;",
+        '          if (refreshResult.kind !== "success") return;',
+      ),
+    },
+    {
+      name: "debilitar decision comun de refresh autenticado",
+      target: "sessionEpoch",
+      mutate: (source) => source.replace(
+        '  return kind !== "stale";',
+        '  return kind === "success";',
+      ),
+    },
+    {
+      name: "permitir que refresh error limpie la sesion",
+      target: "app",
+      mutate: (source) => source.replace(
+        "      handlePersistenceError(error, { preserveSession: true });",
+        "      handlePersistenceError(error);",
+      ),
+    },
+    {
+      name: "eliminar expectedUserId obligatorio de firma legacy",
+      target: "dataRepository",
+      mutate: (source) => source.replace(
+        '  mode: RepositoryMode,\n  expectedUserId: string,\n',
+        '  mode: RepositoryMode,\n',
+      ),
+    },
+    {
+      name: "eliminar expectedUserId obligatorio de firma cycle-scoped",
+      target: "cycleScopedRepository",
+      mutate: (source) => source.replace(
+        '  input: CycleScopedTrainingSessionInput,\n  expectedUserId: string,\n',
+        '  input: CycleScopedTrainingSessionInput,\n',
+      ),
+    },
+    {
+      name: "usar getRepositoryAuth sin owner esperado",
+      target: "dataRepository",
+      mutate: (source) => source.replace(
+        "getRepositoryAuth(mode, expectedUserId, getClient)",
+        "getRepositoryAuth(mode)",
+      ),
+    },
+    {
+      name: "quitar revalidacion posterior a upsertRoutine",
+      target: "dataRepository",
+      mutate: (source) => source.replace(
+        "  );\n  await assertExpectedRepositoryUser(supabase, expectedUserId);\n  const { data, error } = await supabase.rpc(\"create_training_session_with_entries\"",
+        "  );\n  const { data, error } = await supabase.rpc(\"create_training_session_with_entries\"",
+      ),
+    },
+    {
+      name: "dejar caller cycle-scoped sin operationOwner.userId",
+      target: "app",
+      mutate: (source) => source.replace(
+        "          }, operationOwner.userId),",
+        "          }),",
+      ),
+    },
+    {
+      name: "reemplazar expectedUserId por usuario actual",
+      target: "dataRepository",
+      mutate: (source) => source.replace(
+        "    expectedUserId,\n    getClient,\n  );",
+        "    userId,\n    getClient,\n  );",
+      ),
+    },
+    {
+      name: "eliminar expectedUserId de firma daily readiness",
+      target: "dailyReadinessRepository",
+      mutate: (source) => source.replace(
+        "  payload: TrainingDailyReadinessPayload,\n  expectedUserId: string,\n",
+        "  payload: TrainingDailyReadinessPayload,\n",
+      ),
+    },
+    {
+      name: "eliminar expectedUserId de firma workout readiness",
+      target: "workoutReadinessRepository",
+      mutate: (source) => source.replace(
+        "  input: SaveTrainingWorkoutReadinessInput,\n  expectedUserId: string,\n",
+        "  input: SaveTrainingWorkoutReadinessInput,\n",
+      ),
+    },
+    {
+      name: "eliminar expectedUserId de firma linking",
+      target: "workoutReadinessRepository",
+      mutate: (source) => source.replace(
+        "  input: LinkTrainingWorkoutReadinessSessionInput,\n  expectedUserId: string,\n",
+        "  input: LinkTrainingWorkoutReadinessSessionInput,\n",
+      ),
+    },
+    {
+      name: "dejar caller linking sin operationOwner.userId",
+      target: "app",
+      mutate: (source) => source.replace(
+        "        trainingSessionId: pendingLink.trainingSessionId,\n      }, operationOwner.userId),",
+        "        trainingSessionId: pendingLink.trainingSessionId,\n      }),",
+      ),
+    },
+    {
+      name: "usar usuario actual en vez del owner readiness",
+      target: "app",
+      mutate: (source) => source.replace(
+        "saveDailyTrainingReadiness(value, operationOwner.userId)",
+        "saveDailyTrainingReadiness(value, supabaseUser.id)",
+      ),
+    },
+    {
+      name: "eliminar validacion inmediata antes del RPC daily",
+      target: "dailyReadinessRepository",
+      mutate: (source) => source.replace(
+        "  await assertExpectedDailyReadinessUser(supabase, expectedUserId);\n  const { data, error } = await supabase.rpc(\"save_daily_training_readiness\"",
+        "  const { data, error } = await supabase.rpc(\"save_daily_training_readiness\"",
+      ),
+    },
+    {
+      name: "introducir persistencia Active Workout sin owner",
+      target: "app",
+      mutate: (source) => `import { saveUnownedActiveWorkoutPersistence } from "@/lib/training/unowned-repository";\n${source.replace(
+        "async function persistDailyReadiness(value: TrainingReadiness) {",
+        "async function persistDailyReadiness(value: TrainingReadiness) {\n    void saveUnownedActiveWorkoutPersistence();",
+      )}`,
+    },
+    {
+      name: "montar ShareWorkoutCard",
+      target: "app",
+      mutate: (source) => `${source}\nShareWorkoutCard\n`,
+    },
+  ];
+  const mutationDirectory = mkdtempSync(join(tmpdir(), "organizatech-p3-41-"));
+  try {
+    for (const probe of mutationProbes) {
+      const original = p341Sources[probe.target];
+      const mutated = probe.mutate(original);
+      assert.notEqual(mutated, original, `probe sin mutacion efectiva: ${probe.name}`);
+      const temporaryPath = join(mutationDirectory, `${probe.target}.probe`);
+      writeFileSync(temporaryPath, mutated, "utf8");
+      const mutatedSources = {
+        ...p341Sources,
+        [probe.target]: readFileSync(temporaryPath, "utf8"),
+      };
+      assert.throws(
+        () => assertP341StaticContracts(mutatedSources),
+        `el contrato debe fallar: ${probe.name}`,
+      );
+      writeFileSync(temporaryPath, original, "utf8");
+      assert.equal(
+        readFileSync(temporaryPath, "utf8"),
+        original,
+        `restauracion byte a byte fallida: ${probe.name}`,
+      );
+    }
+  } finally {
+    rmSync(mutationDirectory, { recursive: true, force: true });
+  }
   assert.match(componentSource, /useRef\(createSessionDataEpoch\(\)\)/);
   assert.match(componentSource, /sessionDataMountedRef = useRef\(true\)/);
   assert.match(componentSource, /const advanceSessionDataIdentity = useCallback/);
   assert.match(componentSource, /if \(event === "SIGNED_OUT"\)[\s\S]*?clearUserSessionState/);
   assert.match(
     componentSource,
-    /function settleActiveWorkoutOperation<[\s\S]*return settleSessionOperationPromise/,
+    /function settleUserScopedOperation<[\s\S]*return settleSessionOperationPromise/,
     "El root delega la resolucion post-await al helper productivo probado en runtime",
   );
   assert.match(
     componentSource,
-    /function finalizeActiveWorkoutOperation\([\s\S]*finalizeSessionOperationOwner/,
+    /function finalizeUserScopedOperation\([\s\S]*finalizeSessionOperationOwner/,
     "El root delega ownership y finally al helper productivo probado en runtime",
   );
 
@@ -737,7 +2203,7 @@ async function run() {
   );
   assert.match(
     applySessionSource,
-    /resolveIncomingWorkoutDraftRecoveryScope\(\{\s*scope: nextStorageScope,\s*willAttemptAutomaticRecovery: Boolean\(authState\.session\),\s*\}\)/,
+    /resolveIncomingWorkoutDraftRecoveryScope\(\{\s*scope: nextStorageScope,\s*willAttemptAutomaticRecovery: Boolean\(effectiveSession\),\s*\}\)/,
     "El bootstrap sin sesion libera explicitamente la proteccion que no tendra recuperacion automatica",
   );
   assert.doesNotMatch(
@@ -949,10 +2415,17 @@ async function run() {
     "appliedIdentityToken = captureSessionDataRequestToken();",
     applyIdentityIndex,
   );
-  const refreshIndex = handleAuthSource.indexOf('await refreshData("supabase");', captureIdentityIndex);
+  const refreshIndex = handleAuthSource.indexOf(
+    'const refreshResult = await refreshData("supabase");',
+    captureIdentityIndex,
+  );
+  const refreshContinuationIndex = handleAuthSource.indexOf(
+    "if (!shouldContinueAuthenticatedFlowAfterRefresh(refreshResult.kind)) return;",
+    refreshIndex,
+  );
   const staleGuardIndex = handleAuthSource.indexOf(
     "if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;",
-    refreshIndex,
+    refreshContinuationIndex,
   );
   const clearFormsIndex = handleAuthSource.indexOf("clearAuthForms();", staleGuardIndex);
   // P3-07B: la navegación final del login pasa por el controlador canónico (transición
@@ -966,6 +2439,7 @@ async function run() {
     applyIdentityIndex,
     captureIdentityIndex,
     refreshIndex,
+    refreshContinuationIndex,
     staleGuardIndex,
     clearFormsIndex,
     dashboardIndex,
@@ -973,7 +2447,7 @@ async function run() {
   assert.equal(
     orderedLoginSteps.every((index, position) => index >= 0 && (position === 0 || index > orderedLoginSteps[position - 1])),
     true,
-    "El login debe aplicar identidad, capturar su token, refrescar, validarlo y solo entonces navegar",
+    "El login debe aplicar identidad, distinguir stale de error, validar el token y solo entonces navegar",
   );
   assert.match(
     handleAuthSource,

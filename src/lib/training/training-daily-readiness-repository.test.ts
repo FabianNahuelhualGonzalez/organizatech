@@ -4,12 +4,14 @@ import { readFileSync } from "node:fs";
 import {
   getCalendarDateInTimeZone,
   normalizeDailyReadinessPayload,
+  saveDailyTrainingReadiness,
   shouldShowDailyReadinessForm,
   translateDailyReadinessError,
   TrainingDailyReadinessRepositoryError,
   type TrainingDailyReadinessPayload,
   type TrainingDailyReadinessRecord,
 } from "./training-daily-readiness-repository";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 const baseMigration = readFileSync("supabase/migrations/20260608_training_daily_readiness.sql", "utf8");
 const ambiguityPatch = readFileSync(
@@ -210,7 +212,97 @@ assert.equal(
   "translatePersistenceError sigue reconociendo sesiones expiradas de Supabase",
 );
 
-console.log("Pruebas de readiness diario OK");
+const expectedReadinessUserId = "daily-owner-a-private";
+const otherReadinessUserId = "daily-owner-b-private";
+const frozenDailyWriteInput = Object.freeze({ skipped: true }) satisfies TrainingDailyReadinessPayload;
+const frozenDailyWriteInputSnapshot = structuredClone(frozenDailyWriteInput);
+
+function createDailyWriteHarness(userIds: readonly string[]) {
+  let userIndex = 0;
+  const rpcCalls: Array<{ functionName: string; args: Record<string, unknown> }> = [];
+  const client = {
+    auth: {
+      async getUser() {
+        const userId = userIds[Math.min(userIndex, userIds.length - 1)];
+        userIndex += 1;
+        return { data: { user: userId ? { id: userId } : null }, error: null };
+      },
+    },
+    async rpc(functionName: string, args: Record<string, unknown>) {
+      rpcCalls.push({ functionName, args });
+      return {
+        data: {
+          id: "daily-readiness-a",
+          local_date: "2026-08-03",
+          payload: { skipped: true },
+          created_at: "2026-08-03T12:00:00.000Z",
+          updated_at: "2026-08-03T12:00:00.000Z",
+        },
+        error: null,
+      };
+    },
+  };
+  return {
+    rpcCalls,
+    getClient: (() => client) as unknown as typeof getSupabaseBrowserClient,
+  };
+}
+
+async function runOwnerWriteTests() {
+{
+  const harness = createDailyWriteHarness([
+    expectedReadinessUserId,
+    expectedReadinessUserId,
+  ]);
+  const result = await saveDailyTrainingReadiness(
+    frozenDailyWriteInput,
+    expectedReadinessUserId,
+    harness.getClient,
+  );
+  assert.equal(result.id, "daily-readiness-a");
+  assert.equal(harness.rpcCalls.length, 1, "daily readiness A estable ejecuta exactamente un RPC");
+  assert.equal(harness.rpcCalls[0]?.functionName, "save_daily_training_readiness");
+  assert.deepEqual(harness.rpcCalls[0]?.args, { p_payload: { skipped: true } });
+}
+
+{
+  const harness = createDailyWriteHarness([
+    expectedReadinessUserId,
+    otherReadinessUserId,
+  ]);
+  await assert.rejects(
+    saveDailyTrainingReadiness(
+      frozenDailyWriteInput,
+      expectedReadinessUserId,
+      harness.getClient,
+    ),
+    (error) => {
+      assert.ok(error instanceof TrainingDailyReadinessRepositoryError);
+      assert.equal(error.code, "session_expired");
+      assert.doesNotMatch(
+        error.message,
+        new RegExp(`${expectedReadinessUserId}|${otherReadinessUserId}|token|rpc|getUser`, "i"),
+      );
+      return true;
+    },
+  );
+  assert.equal(harness.rpcCalls.length, 0, "daily readiness A→B antes del RPC ejecuta cero RPC");
+}
+
+assert.deepEqual(frozenDailyWriteInput, frozenDailyWriteInputSnapshot, "daily readiness no muta input congelado");
+
+if (false) {
+  // @ts-expect-error expectedUserId es obligatorio en daily readiness.
+  void saveDailyTrainingReadiness(frozenDailyWriteInput);
+}
+}
+
+runOwnerWriteTests()
+  .then(() => console.log("Pruebas de readiness diario OK"))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 
 function createInMemoryDailyReadinessStore() {
   const rows = new Map<string, TrainingDailyReadinessRecord>();

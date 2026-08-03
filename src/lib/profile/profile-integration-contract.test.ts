@@ -385,14 +385,29 @@ assertStaticMarkersInOrder(cancelSection, [
   "setIsEditing(false)",
 ]);
 
-// CONTRATO ESTATICO 6: los handlers declaran limpieza antes de exponer otra identidad.
+// CONTRATO ESTATICO 6 (source-based): una identidad efectiva exige session.user coincidente; un
+// cambio real invalida y limpia Profile antes de publicar B. TOKEN_REFRESHED del mismo owner no
+// entra en identityChanged y, por tanto, conserva Profile/avatar.
 const applySessionSection = extractStaticSourceSection(appStaticSource, "  function applySessionState", "  function clearUserSessionState");
 assertStaticMarkersInOrder(applySessionSection, [
+  "resolveEffectiveAuthenticatedUser(authState.session, authState.user)",
   "advanceSessionDataIdentity",
-  "setSupabaseUser(authState.user)",
   "setProfilePersonalData(null)",
   "setProfileAvatar(createEmptyProfileAvatarState())",
+  "setSupabaseUser(authenticatedUser)",
 ]);
+const identityChangedProfileSection = extractStaticSourceSection(
+  applySessionSection,
+  "if (identityChanged)",
+  "setIsSupabaseConfiguredState",
+);
+assert.match(identityChangedProfileSection, /setProfilePersonalData\(null\)/);
+assert.match(identityChangedProfileSection, /setProfileAvatar\(createEmptyProfileAvatarState\(\)\)/);
+assert.doesNotMatch(
+  applySessionSection.slice(applySessionSection.indexOf("setIsSupabaseConfiguredState")),
+  /setProfilePersonalData\(null\)|setProfileAvatar\(createEmptyProfileAvatarState\(\)\)/,
+  "Profile/avatar no se limpian incondicionalmente en TOKEN_REFRESHED",
+);
 const clearSessionSection = extractStaticSourceSection(appStaticSource, "  function clearUserSessionState", "  function clearBrowserStorageScope");
 assertStaticMarkersInOrder(clearSessionSection, [
   "advanceSessionDataIdentity",
@@ -403,8 +418,8 @@ assertStaticMarkersInOrder(clearSessionSection, [
 
 // CONTRATO ESTATICO 7: browser APIs, repositories y side effects permanecen en adaptadores React.
 assert.match(appStaticSource, /getProfilePersonalData\(\)/);
-assert.match(appStaticSource, /updateProfilePersonalData\(input\)/);
-assert.match(appStaticSource, /uploadProfileAvatar\(file\)/);
+assert.match(appStaticSource, /updateProfilePersonalData\(input, operationOwner\.userId\)/);
+assert.match(appStaticSource, /uploadProfileAvatar\(file, operationOwner\.userId\)/);
 assert.match(appStaticSource, /document\.addEventListener\("visibilitychange"/);
 assert.match(appStaticSource, /window\.addEventListener\("focus"/);
 assert.match(profileScreenStaticSource, /useRef<HTMLInputElement \| null>/);

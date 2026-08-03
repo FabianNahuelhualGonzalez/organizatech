@@ -57,8 +57,8 @@ export function ProfileScreen({
   onAvatarImageError?: () => void;
   avatarResetKey?: number;
   onReloadPersonalData: () => void;
-  onSavePersonalData: (input: ProfilePersonalDataInput) => Promise<ProfilePersonalData>;
-  onUploadAvatar: (file: File) => Promise<void>;
+  onSavePersonalData: (input: ProfilePersonalDataInput) => Promise<ProfilePersonalData | null>;
+  onUploadAvatar: (file: File) => Promise<boolean>;
   cycleContextLabel: string;
 }) {
   const ageLabel = formatProfileAgeLabel(personalData?.birthDate ?? null);
@@ -126,7 +126,7 @@ function ProfileAvatarControls({
   canEdit: boolean;
   isLoading: boolean;
   externalError: string;
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File) => Promise<boolean>;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const avatarEditorTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -153,7 +153,8 @@ function ProfileAvatarControls({
     setIsWorking(true);
     setStatusMessage("Subiendo foto...");
     try {
-      await onUpload(file);
+      const uploaded = await onUpload(file);
+      if (!uploaded) return;
       setStatusMessage("Foto actualizada.");
       setSelectedFile(null);
     } catch (error) {
@@ -230,7 +231,7 @@ function PersonalDataSection({
   isLoading: boolean;
   loadError: string;
   onReload: () => void;
-  onSave: (input: ProfilePersonalDataInput) => Promise<ProfilePersonalData>;
+  onSave: (input: ProfilePersonalDataInput) => Promise<ProfilePersonalData | null>;
 }) {
   const initialValues = useMemo(() => buildProfileFormInitialValues({
     displayName: personalData?.displayName ?? profile.displayName,
@@ -280,13 +281,14 @@ function PersonalDataSection({
     setFieldErrors({});
     setStatusMessage("Guardando...");
     try {
-      await onSave({
+      const saved = await onSave({
         firstName: payload.first_name,
         lastName: payload.last_name,
         birthDate: payload.birth_date,
         gender: payload.gender,
         phoneNumber: payload.phone_number,
       });
+      if (!saved) return;
       setIsEditing(false);
       setStatusMessage("Cambios guardados.");
     } catch (error) {
