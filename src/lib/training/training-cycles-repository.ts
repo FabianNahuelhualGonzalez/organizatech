@@ -96,8 +96,11 @@ export async function getNextTrainingCycleNumber(): Promise<number> {
   );
 }
 
-export async function createTrainingCycle(input: CreateTrainingCycleInput): Promise<TrainingCycle> {
-  const { supabase, userId } = await getAuthenticatedCycleRepository();
+export async function createTrainingCycle(
+  input: CreateTrainingCycleInput,
+  expectedUserId: string | undefined = undefined,
+): Promise<TrainingCycle> {
+  const { supabase, userId } = await getAuthenticatedCycleRepository(expectedUserId);
   const { data, error } = await supabase
     .from("training_cycles")
     .insert({
@@ -118,17 +121,30 @@ export async function createTrainingCycle(input: CreateTrainingCycleInput): Prom
   return mapTrainingCycleRow(data as unknown as TrainingCycleRow);
 }
 
-export async function completeTrainingCycle(input: CompleteTrainingCycleInput = {}): Promise<TrainingCycle> {
+export async function completeTrainingCycle(
+  input: CompleteTrainingCycleInput = {},
+  expectedUserId?: string,
+): Promise<TrainingCycle> {
   return finishActiveTrainingCycle(
     "completed",
     input.endedAt,
     input.summarySnapshot ?? {},
     input.explicitlyConfirmed ?? false,
+    expectedUserId,
   );
 }
 
-export async function cancelTrainingCycle(input: CancelTrainingCycleInput = {}): Promise<TrainingCycle> {
-  return finishActiveTrainingCycle("cancelled", input.endedAt, input.summarySnapshot ?? {}, false);
+export async function cancelTrainingCycle(
+  input: CancelTrainingCycleInput = {},
+  expectedUserId?: string,
+): Promise<TrainingCycle> {
+  return finishActiveTrainingCycle(
+    "cancelled",
+    input.endedAt,
+    input.summarySnapshot ?? {},
+    false,
+    expectedUserId,
+  );
 }
 
 export async function getTrainingCycleHistory(): Promise<TrainingCycle[]> {
@@ -151,8 +167,9 @@ async function finishActiveTrainingCycle(
   endedAt = new Date().toISOString(),
   summarySnapshot: TrainingCycleSnapshot,
   explicitlyConfirmed: boolean,
+  expectedUserId?: string,
 ) {
-  const { supabase, userId } = await getAuthenticatedCycleRepository();
+  const { supabase, userId } = await getAuthenticatedCycleRepository(expectedUserId);
   const { data: activeCycleData, error: activeCycleError } = await supabase
     .from("training_cycles")
     .select(TRAINING_CYCLE_COLUMNS)
@@ -178,6 +195,7 @@ async function finishActiveTrainingCycle(
     );
   }
 
+  await assertExpectedCycleRepositoryUser(supabase, expectedUserId ?? userId);
   const { data, error } = await supabase
     .from("training_cycles")
     .update({
@@ -203,7 +221,7 @@ async function finishActiveTrainingCycle(
   return mapTrainingCycleRow(data as unknown as TrainingCycleRow);
 }
 
-async function getAuthenticatedCycleRepository() {
+async function getAuthenticatedCycleRepository(expectedUserId?: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
     throw new TrainingCycleRepositoryError(
@@ -228,8 +246,28 @@ async function getAuthenticatedCycleRepository() {
       "Debes iniciar sesion para gestionar ciclos.",
     );
   }
+  if (expectedUserId && userId !== expectedUserId) {
+    throw new TrainingCycleRepositoryError(
+      "session_expired",
+      "Tu sesion cambio. Intenta nuevamente con la cuenta activa.",
+    );
+  }
 
   return { supabase, userId };
+}
+
+async function assertExpectedCycleRepositoryUser(
+  supabase: NonNullable<ReturnType<typeof getSupabaseBrowserClient>>,
+  expectedUserId: string,
+) {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || data.user?.id !== expectedUserId) {
+    throw new TrainingCycleRepositoryError(
+      "session_expired",
+      "Tu sesion cambio. Intenta nuevamente con la cuenta activa.",
+      error,
+    );
+  }
 }
 
 function mapCycleRepositoryError(error: unknown) {

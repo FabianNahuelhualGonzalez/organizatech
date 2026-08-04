@@ -51,13 +51,16 @@ export function createProfileAvatarRepository(
     return mapProfileAvatarState(row, avatarUrl);
   }
 
-  async function uploadProfileAvatar(file: File): Promise<ProfileAvatarState> {
+  async function uploadProfileAvatar(
+    file: File,
+    expectedUserId: string | undefined = undefined,
+  ): Promise<ProfileAvatarState> {
     const validation = validateProfileAvatarFile(file as ProfileAvatarFileLike);
     if (!validation.ok) {
       throw new ProfileAvatarRepositoryError(validation.error);
     }
 
-    const { supabase, userId } = await getAuthenticatedProfileAvatarClient();
+    const { supabase, userId } = await getAuthenticatedProfileAvatarClient(expectedUserId);
     const avatarPath = buildProfileAvatarPath(userId);
 
     const { error: uploadError } = await supabase
@@ -72,6 +75,7 @@ export function createProfileAvatarRepository(
 
     // Storage and Postgres are separate operations. A complete compensation
     // strategy for failures between them remains explicitly deferred to P1.
+    await assertExpectedProfileAvatarUser(supabase, userId);
     const avatarUpdatedAt = new Date().toISOString();
     const updatePayload = buildProfileAvatarUpdatePayload(userId, avatarUpdatedAt);
     const { data, error: updateError } = await supabase
@@ -87,8 +91,10 @@ export function createProfileAvatarRepository(
     return mapProfileAvatarState(data as ProfileAvatarRow, avatarUrl);
   }
 
-  async function deleteProfileAvatar(): Promise<ProfileAvatarState> {
-    const { supabase, userId } = await getAuthenticatedProfileAvatarClient();
+  async function deleteProfileAvatar(
+    expectedUserId: string | undefined = undefined,
+  ): Promise<ProfileAvatarState> {
+    const { supabase, userId } = await getAuthenticatedProfileAvatarClient(expectedUserId);
     const avatarPath = buildProfileAvatarPath(userId);
 
     const { error: removeError } = await supabase
@@ -100,6 +106,7 @@ export function createProfileAvatarRepository(
 
     // If this database update fails after Storage succeeds, the profile can
     // temporarily reference a missing object. Distributed compensation is P1.
+    await assertExpectedProfileAvatarUser(supabase, userId);
     const { error: updateError } = await supabase
       .from("profiles")
       .update(buildProfileAvatarDeletePayload())
@@ -114,7 +121,7 @@ export function createProfileAvatarRepository(
     };
   }
 
-  async function getAuthenticatedProfileAvatarClient() {
+  async function getAuthenticatedProfileAvatarClient(expectedUserId?: string) {
     const supabase = getClient();
     if (!supabase) throw new ProfileAvatarRepositoryError("Inicia sesión para guardar tu foto de perfil.");
 
@@ -123,6 +130,9 @@ export function createProfileAvatarRepository(
 
     const userId = data.user?.id;
     if (!userId) throw new ProfileAvatarRepositoryError("Inicia sesión para guardar tu foto de perfil.");
+    if (expectedUserId && userId !== expectedUserId) {
+      throw new ProfileAvatarRepositoryError("Tu sesión cambió. Vuelve a intentar con la cuenta activa.");
+    }
 
     return { supabase, userId };
   }
@@ -133,6 +143,17 @@ export function createProfileAvatarRepository(
     uploadProfileAvatar,
     deleteProfileAvatar,
   };
+}
+
+async function assertExpectedProfileAvatarUser(
+  supabase: SupabaseClient,
+  expectedUserId: string,
+) {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw new ProfileAvatarRepositoryError("Tu sesión expiró. Vuelve a iniciar sesión.", error);
+  if (data.user?.id !== expectedUserId) {
+    throw new ProfileAvatarRepositoryError("Tu sesión cambió. Vuelve a intentar con la cuenta activa.");
+  }
 }
 
 async function createCanonicalSignedUrl(supabase: SupabaseClient, avatarPath: string) {

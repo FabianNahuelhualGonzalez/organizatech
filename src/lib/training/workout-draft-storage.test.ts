@@ -784,20 +784,20 @@ async function run() {
     assert.match(appSource, /linkTrainingWorkoutReadinessSession/, "organizatech-app integra link readiness v2 solo desde repositorio");
     assert.match(appSource, /resolveActiveWorkoutReentryDecision/, "organizatech-app usa una decision explicita de reentrada");
     assert.match(appSource, /shouldRetainActiveWorkoutAttemptState/, "organizatech-app distingue dashboard pausado de cancelacion");
-    assert.match(appSource, /async function confirmTrainingWorkoutReadinessLink\([\s\S]*pendingLink: PendingWorkoutReadinessLink,[\s\S]*operationOwner: SessionOperationOwner,[\s\S]*linkTrainingWorkoutReadinessSession\(\{[\s\S]*workoutAttemptId: pendingLink\.workoutAttemptId,[\s\S]*trainingSessionId: pendingLink\.trainingSessionId/, "confirm link usa exclusivamente IDs del pending y ownership de sesion");
+    assert.match(appSource, /async function confirmTrainingWorkoutReadinessLink\([\s\S]*pendingLink: PendingWorkoutReadinessLink,[\s\S]*operationOwner: SessionOperationOwner,[\s\S]*linkTrainingWorkoutReadinessSession\(\{[\s\S]*workoutAttemptId: pendingLink\.workoutAttemptId,[\s\S]*trainingSessionId: pendingLink\.trainingSessionId,[\s\S]*\}, operationOwner\.userId\)/, "confirm link usa exclusivamente IDs del pending y pasa el owner capturado");
     assert.doesNotMatch(appSource, /save_training_workout_readiness_v2|link_training_workout_readiness_session_v2/, "organizatech-app no contiene nombres RPC v2 directos");
     assert.match(appSource, /workoutStartInFlightRef = useRef<SessionOperationOwner \| null>\(null\)/, "organizatech-app declara lock con owner de inicio");
     assert.match(appSource, /dailyReadinessSaveInFlightRef = useRef<SessionOperationOwner \| null>\(null\)/, "organizatech-app declara lock con owner del save readiness");
     assert.match(appSource, /workoutCompletionInFlightRef = useRef<SessionOperationOwner \| null>\(null\)/, "organizatech-app declara lock con owner de completion");
     assert.match(appSource, /pendingReadinessLinkRef = useRef<PendingWorkoutReadinessLink \| null>\(null\)/, "organizatech-app declara ref sincronico del pending link");
-    assert.match(appSource, /const operationOwner = tryAcquireActiveWorkoutOperation\(workoutStartInFlightRef\);[\s\S]*if \(!operationOwner\) return;[\s\S]*prepareWorkoutStartSnapshot/, "el lock con owner se adquiere antes de preparar snapshot o generar UUID");
-    assert.match(appSource, /finally \{[\s\S]*finalizeActiveWorkoutOperation\(workoutStartInFlightRef, operationOwner\)/, "el lock de inicio finaliza solo a su owner mediante el helper productivo");
+    assert.match(appSource, /const operationOwner = tryAcquireUserScopedOperation\(workoutStartInFlightRef\);[\s\S]*if \(!operationOwner\) return;[\s\S]*prepareWorkoutStartSnapshot/, "el lock con owner se adquiere antes de preparar snapshot o generar UUID");
+    assert.match(appSource, /finally \{[\s\S]*finalizeUserScopedOperation\(workoutStartInFlightRef, operationOwner\)/, "el lock de inicio finaliza solo a su owner mediante el helper productivo");
     const persistReadinessStart = appSource.indexOf("async function persistDailyReadiness(value: TrainingReadiness)");
     const persistReadinessEnd = appSource.indexOf("  function registerCurrentExercise", persistReadinessStart);
     const persistReadinessBlock = persistReadinessStart >= 0 && persistReadinessEnd > persistReadinessStart ? appSource.slice(persistReadinessStart, persistReadinessEnd) : "";
-    assert.match(persistReadinessBlock, /const operationOwner = tryAcquireActiveWorkoutOperation\(dailyReadinessSaveInFlightRef\);[\s\S]*if \(!operationOwner\) return;/, "save readiness adquiere lock con owner antes de operar");
-    assert.match(persistReadinessBlock, /finally \{[\s\S]*finalizeActiveWorkoutOperation\(dailyReadinessSaveInFlightRef, operationOwner\)/, "save readiness finaliza solo a su owner mediante el helper productivo");
-    const saveLockIndex = persistReadinessBlock.indexOf("tryAcquireActiveWorkoutOperation(dailyReadinessSaveInFlightRef)");
+    assert.match(persistReadinessBlock, /const operationOwner = tryAcquireUserScopedOperation\(dailyReadinessSaveInFlightRef\);[\s\S]*if \(!operationOwner\) return;/, "save readiness adquiere lock con owner antes de operar");
+    assert.match(persistReadinessBlock, /finally \{[\s\S]*finalizeUserScopedOperation\(dailyReadinessSaveInFlightRef, operationOwner\)/, "save readiness finaliza solo a su owner mediante el helper productivo");
+    const saveLockIndex = persistReadinessBlock.indexOf("tryAcquireUserScopedOperation(dailyReadinessSaveInFlightRef)");
     for (const operation of ["savingDailyReadiness", "activeWorkoutActions.publishDailyReadinessError", "resolveCurrentReadinessMode", "toTrainingWorkoutReadinessPayload", "saveDailyTrainingReadiness", "saveTrainingWorkoutReadiness"]) {
       const operationIndex = persistReadinessBlock.indexOf(operation);
       assert.ok(saveLockIndex >= 0 && operationIndex > saveLockIndex, `${operation} ocurre despues del lock sincronico de readiness`);
@@ -813,16 +813,16 @@ async function run() {
     assert.doesNotMatch(recoverableBranch, /clearWorkoutDraft|resetWorkoutAttemptState|abortWorkoutStartState|clearPendingReadinessLink/, "la rama recuperable no destruye el snapshot");
     const attemptStartBranch = appSource.match(/if \(readinessMode === "attempt_v2"\) \{[\s\S]*?return;\s*\}/)?.[0] ?? "";
     assert.doesNotMatch(attemptStartBranch, /getDailyTrainingReadiness/, "modo attempt_v2 no consulta readiness legacy al iniciar");
-    assert.match(appSource, /settleActiveWorkoutOperation\([\s\S]*workoutStartInFlightRef,[\s\S]*operationOwner,[\s\S]*getDailyTrainingReadiness\(\)/, "rama legacy conserva lookup readiness diario dentro del boundary productivo");
+    assert.match(appSource, /settleUserScopedOperation\([\s\S]*workoutStartInFlightRef,[\s\S]*operationOwner,[\s\S]*getDailyTrainingReadiness\(\)/, "rama legacy conserva lookup readiness diario dentro del boundary productivo");
     const attemptPersistStart = appSource.indexOf("const context = activeWorkoutReadinessContextRef.current;");
     const attemptPersistEnd = appSource.indexOf("  function registerCurrentExercise", attemptPersistStart);
     const attemptPersistBranch = attemptPersistStart >= 0 && attemptPersistEnd > attemptPersistStart
       ? appSource.slice(attemptPersistStart, attemptPersistEnd)
       : "";
-    assert.match(attemptPersistBranch, /saveTrainingWorkoutReadiness/, "modo attempt_v2 guarda con repository v2");
+    assert.match(attemptPersistBranch, /saveTrainingWorkoutReadiness\(\{[\s\S]*?\}, operationOwner\.userId\)/, "modo attempt_v2 guarda con repository v2 y owner capturado");
     assert.match(attemptPersistBranch, /activeWorkoutReadinessContextRef\.current/, "save v2 usa contexto inmutable");
     assert.doesNotMatch(attemptPersistBranch, /saveDailyTrainingReadiness/, "modo attempt_v2 no ejecuta save legacy");
-    assert.match(appSource, /settleActiveWorkoutOperation\([\s\S]*dailyReadinessSaveInFlightRef,[\s\S]*operationOwner,[\s\S]*saveDailyTrainingReadiness\(value\)/, "rama legacy conserva save diario dentro del boundary productivo");
+    assert.match(appSource, /settleUserScopedOperation\([\s\S]*dailyReadinessSaveInFlightRef,[\s\S]*operationOwner,[\s\S]*saveDailyTrainingReadiness\(value, operationOwner\.userId\)/, "rama legacy conserva save diario con owner dentro del boundary productivo");
     assert.match(appSource, /if \(record\.contextMismatch\) \{[\s\S]*activeWorkoutActions\.publishDailyReadinessError/, "context mismatch bloquea con error controlado");
     const mismatchBranch = appSource.match(/if \(record\.contextMismatch\) \{[\s\S]*?return;\s*\}/)?.[0] ?? "";
     assert.doesNotMatch(mismatchBranch, /clearWorkoutDraft|resetWorkoutAttemptState|abortWorkoutStartState/, "context mismatch conserva draft y attempt");
@@ -839,7 +839,11 @@ async function run() {
     assert.match(autosaveBlock, /plannedDay: activeWorkoutReadinessContextRef\.current\?\.plannedDay \?\? null/, "autosave preserva plannedDay del contexto v2");
     assert.match(autosaveBlock, /plannedDate: activeWorkoutReadinessContextRef\.current\?\.plannedDate \?\? null/, "autosave preserva plannedDate del contexto v2");
     assert.doesNotMatch(autosaveBlock, /plannedDay: getTrainingDayCode\(visibleDay\)|plannedDate: null/, "autosave no reconstruye contexto v2 desde estado visual");
-    assert.match(appSource, /await cancelTrainingCycle[\s\S]*clearWorkoutDraft\(dataMode, supabaseUser\?\.id\)/, "deleteCurrentTrainingCycle limpia solo despues del cancel exitoso");
+    assert.match(
+      appSource,
+      /const cancellationResult = await settleUserScopedOperation\([\s\S]*cancelTrainingCycle\([\s\S]*cancellationResult\.kind === "stale"[\s\S]*cancellationResult\.kind === "error"[\s\S]*clearWorkoutDraft\(operationOwner\.dataMode, operationOwner\.userId \?\? undefined\)/,
+      "deleteCurrentTrainingCycle limpia solo despues del cancel exitoso y vigente",
+    );
     assert.match(appSource, /workoutAttemptId: start\.value\.activeWorkoutAttemptId/, "organizatech-app guarda el attempt validado en el draft inicial");
     assert.match(appSource, /pendingReadinessLink: start\.value\.pendingReadinessLink/, "organizatech-app guarda el pending link validado en el draft inicial");
     assert.match(appSource, /pendingReadinessLink: pendingReadinessLinkRef\.current/, "autosave usa pending ref como fuente primaria");
@@ -919,13 +923,13 @@ async function run() {
       assert.match(completionBlock, new RegExp(`${helper}\\(`), `el root consume ${helper}`);
     }
     assert.match(appSource, /async function confirmTrainingWorkoutReadinessLink[\s\S]*resolveWorkoutReadinessLinkConfirmation\(/, "confirm link delega la validacion del resultado al helper productivo");
-    assert.match(completionBlock, /const operationOwner = tryAcquireActiveWorkoutOperation\(workoutCompletionInFlightRef\);[\s\S]*if \(!operationOwner\) return;/, "completion adquiere lock con owner antes de operar");
+    assert.match(completionBlock, /const operationOwner = tryAcquireUserScopedOperation\(workoutCompletionInFlightRef\);[\s\S]*if \(!operationOwner\) return;/, "completion adquiere lock con owner antes de operar");
     assert.equal(
-      (completionBlock.match(/tryAcquireActiveWorkoutOperation\(/g) ?? []).length,
+      (completionBlock.match(/tryAcquireUserScopedOperation\(/g) ?? []).length,
       1,
       "completion usa un unico owner productivo",
     );
-    const completionLockIndex = completionBlock.indexOf("tryAcquireActiveWorkoutOperation(workoutCompletionInFlightRef)");
+    const completionLockIndex = completionBlock.indexOf("tryAcquireUserScopedOperation(workoutCompletionInFlightRef)");
     for (const operation of ["pendingReadinessLinkRef.current", "createTrainingSessionWithCycleEntries", "saveTrainingSessionWithEntries", "confirmTrainingWorkoutReadinessLink"]) {
       const operationIndex = completionBlock.indexOf(operation);
       assert.ok(completionLockIndex >= 0 && operationIndex > completionLockIndex, `${operation} ocurre despues del lock sincronico de completion`);
@@ -943,24 +947,25 @@ async function run() {
     const retryPendingEnd = completionBlock.indexOf("let readinessMode", retryPendingStart);
     const retryPendingBranch = retryPendingStart >= 0 && retryPendingEnd > retryPendingStart ? completionBlock.slice(retryPendingStart, retryPendingEnd) : "";
     assert.match(retryPendingBranch, /confirmTrainingWorkoutReadinessLink\([\s\S]*completionStart\.pendingLink,[\s\S]*operationOwner/, "retry usa exclusivamente el pending capturado y su owner");
-    assert.match(retryPendingBranch, /isActiveWorkoutOperationCurrent\(workoutCompletionInFlightRef, operationOwner\)/, "retry pending valida identidad y owner despues del await");
+    assert.match(retryPendingBranch, /isUserScopedOperationCurrent\(workoutCompletionInFlightRef, operationOwner\)/, "retry pending valida identidad y owner despues del await");
     assert.doesNotMatch(retryPendingBranch, /createTrainingSessionWithCycleEntries|saveTrainingSessionWithEntries/, "retry con pending no guarda otra sesion");
-    const legacyCompletionStart = completionBlock.lastIndexOf("const sessionSaveResult = await settleActiveWorkoutOperation");
+    const legacyCompletionStart = completionBlock.lastIndexOf("const legacySessionInput");
     const legacyCompletionEnd = completionBlock.indexOf("    } finally {", legacyCompletionStart);
     const legacyCompletionBranch = legacyCompletionStart >= 0 && legacyCompletionEnd > legacyCompletionStart
       ? completionBlock.slice(legacyCompletionStart, legacyCompletionEnd)
       : "";
     assert.doesNotMatch(legacyCompletionBranch, /createWorkoutReadinessPendingLink|linkTrainingWorkoutReadinessSession|pendingReadinessLinkRef/, "rama legacy no crea pending ni llama link");
-    assert.match(legacyCompletionBranch, /settleActiveWorkoutOperation\([\s\S]*saveTrainingSessionWithEntries[\s\S]*sessionSaveResult\.kind === "stale"[\s\S]*await buildCompletedTrainingSummarySnapshot/, "rama legacy usa el boundary productivo en save y summary");
-    assert.match(completionBlock, /settleActiveWorkoutOperation\([\s\S]*createTrainingSessionWithCycleEntries[\s\S]*sessionSaveResult\.kind === "stale"/, "cycle-scoped descarta save stale mediante el helper productivo");
-    assert.match(completionBlock, /settleActiveWorkoutOperation\([\s\S]*getCycleScopedTrainingSessionData[\s\S]*scopedSessionResult\.kind === "stale"/, "recarga cycle-scoped descarta resultados stale antes de publicar datos");
+    assert.match(legacyCompletionBranch, /saveTrainingSessionWithEntries\(\s*legacySessionInput,\s*operationOwner\.dataMode,\s*operationOwner\.userId,\s*\)[\s\S]*settleUserScopedOperation\([\s\S]*legacySessionRequest[\s\S]*sessionSaveResult\.kind === "stale"[\s\S]*await buildCompletedTrainingSummarySnapshot/, "rama legacy pasa el owner exacto y usa el boundary productivo en save y summary");
+    assert.match(completionBlock, /settleUserScopedOperation\([\s\S]*createTrainingSessionWithCycleEntries[\s\S]*sessionSaveResult\.kind === "stale"/, "cycle-scoped descarta save stale mediante el helper productivo");
+    assert.match(completionBlock, /createTrainingSessionWithCycleEntries\(\{[\s\S]*?\}, operationOwner\.userId\)/, "cycle-scoped pasa exactamente el owner capturado al repository");
+    assert.match(completionBlock, /settleUserScopedOperation\([\s\S]*getCycleScopedTrainingSessionData[\s\S]*scopedSessionResult\.kind === "stale"/, "recarga cycle-scoped descarta resultados stale antes de publicar datos");
     assert.doesNotMatch(completionBlock, /const entriesInput:|validExercises\.map\(\(exercise\) => \{\s*const draft = normalizeExerciseDraft/, "el root no reconstruye payloads de completion inline");
     const summaryStart = appSource.indexOf("async function buildCompletedTrainingSummarySnapshot");
     const summaryEnd = appSource.indexOf("  async function saveCompletedTraining", summaryStart);
     const summaryBlock = summaryStart >= 0 && summaryEnd > summaryStart ? appSource.slice(summaryStart, summaryEnd) : "";
-    assert.match(summaryBlock, /settleActiveWorkoutOperation\([\s\S]*loadTrainingCompletionHistoricalInputs\(/, "summary historico sigue dentro del boundary de owner");
+    assert.match(summaryBlock, /settleUserScopedOperation\([\s\S]*loadTrainingCompletionHistoricalInputs\(/, "summary historico sigue dentro del boundary de owner");
     assert.doesNotMatch(summaryBlock, /Promise\.allSettled|historicalEntries\.forEach/, "el root delega first-reference y unavailable al helper runtime probado");
-    assert.match(completionBlock, /const canFinalize = finalizeActiveWorkoutOperation\([\s\S]*workoutCompletionInFlightRef,[\s\S]*operationOwner,[\s\S]*if \(ownsBusyState && canFinalize\)/, "finally solo limpia busy cuando el helper confirma identidad y ownership");
+    assert.match(completionBlock, /const canFinalize = finalizeUserScopedOperation\([\s\S]*workoutCompletionInFlightRef,[\s\S]*operationOwner,[\s\S]*if \(ownsBusyState && canFinalize\)/, "finally solo limpia busy cuando el helper confirma identidad y ownership");
     const useEffectBlocks = appSource.match(/useEffect\(\(\) => \{[\s\S]*?\n  \}, \[.*?\]\);/g) ?? [];
     assert.equal(useEffectBlocks.some((block) => block.includes("linkTrainingWorkoutReadinessSession")), false, "no existe link automatico en useEffect");
     assert.match(loginPageSource, /process\.env\.ENABLE_TRAINING_WORKOUT_READINESS_V2 === "true"/, "login/page.tsx activa readiness v2 solo con true exacto");

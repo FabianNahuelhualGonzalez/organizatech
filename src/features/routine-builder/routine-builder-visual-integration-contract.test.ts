@@ -316,8 +316,14 @@ assert.match(savePreparationSource, /confirmation !== "confirmed_routine_update"
 assert.match(appSource, /if \(isTrainingCyclesRepositoryActive\)/);
 assert.match(appSource, /addCycleScopedTrainingDaysAndExercises\(\{/);
 assert.match(appSource, /for \(const dayToPersist of daysToPersist\)/);
-assert.match(appSource, /await deleteExercise\(exerciseId, dataMode\)/);
-assert.match(appSource, /await saveExercise\(\{/);
+assert.match(
+  appSource,
+  /deleteExercise\(\s*exerciseId,\s*operationOwner\.dataMode,\s*operationOwner\.userId \?\? undefined,\s*\)/,
+);
+assert.match(
+  appSource,
+  /saveExercise\(\{[\s\S]*?\}, operationOwner\.dataMode, operationOwner\.userId \?\? undefined\)/,
+);
 assert.doesNotMatch(
   stripComments(savePreparationSource),
   /saveExercise|deleteExercise|addCycleScopedTrainingDaysAndExercises|repository|supabase|storage/,

@@ -202,18 +202,23 @@ import {
   captureSessionDataRequestToken as createSessionDataRequestToken,
   createSessionDataEpoch,
   isSessionDataRequestTokenCurrent,
+  resolveEffectiveAuthenticatedUser,
+  shouldContinueAuthenticatedFlowAfterRefresh,
   type SessionDataIdentity,
   type SessionDataRequestToken,
 } from "@/lib/session/session-data-epoch";
 import {
   finalizeSessionOperationOwner,
+  invalidateSessionOperationOwners,
   isSessionOperationOwner,
+  isSessionOperationOwnerCurrent,
   releaseSessionOperationOwner,
   resolveActiveWorkoutSessionBoundary,
   resolveIncomingWorkoutDraftRecoveryScope,
   settleSessionOperationPromise,
   tryAcquireSessionOperationOwner,
   type SessionOperationOwner,
+  type SessionOperationOwnerLock,
 } from "@/lib/session/active-workout-session-boundary";
 import { translateTrainingCycleRepositoryError } from "@/lib/training/training-cycle-error";
 import {
@@ -401,6 +406,11 @@ interface OrganizatechAppProps {
   trainingWorkoutReadinessV2Enabled?: boolean;
 }
 
+type RefreshDataResult =
+  | { kind: "success"; data: Awaited<ReturnType<typeof loadAppData>> }
+  | { kind: "stale" }
+  | { kind: "error"; error: unknown };
+
 export function OrganizatechApp({
   trainingCyclesRepositoryEnabled = false,
   trainingCyclesSnapshotSource = "ui-main-qa",
@@ -485,6 +495,11 @@ export function OrganizatechApp({
   const workoutStartInFlightRef = useRef<SessionOperationOwner | null>(null);
   const dailyReadinessSaveInFlightRef = useRef<SessionOperationOwner | null>(null);
   const workoutCompletionInFlightRef = useRef<SessionOperationOwner | null>(null);
+  const profileSaveInFlightRef = useRef<SessionOperationOwner | null>(null);
+  const profileAvatarUploadInFlightRef = useRef<SessionOperationOwner | null>(null);
+  const routineSaveInFlightRef = useRef<SessionOperationOwner | null>(null);
+  const trainingCycleCreateInFlightRef = useRef<SessionOperationOwner | null>(null);
+  const trainingCycleDeleteInFlightRef = useRef<SessionOperationOwner | null>(null);
   const lastProfileAvatarRefreshAtRef = useRef(0);
   const profileAvatarBootstrapUserIdRef = useRef<string | null>(null);
   const lastProfileAvatarErrorRefreshAtRef = useRef(0);
@@ -499,7 +514,6 @@ export function OrganizatechApp({
   const [persistedCycleHistory, setPersistedCycleHistory] = useState<PersistedTrainingCycle[]>([]);
   const [isPersistedCyclesLoading, setIsPersistedCyclesLoading] = useState(false);
   const [isNewCycleConfirmOpen, setIsNewCycleConfirmOpen] = useState(false);
-  const isNewCycleTransitionRef = useRef(false);
   const [isDeleteCycleConfirmOpen, setIsDeleteCycleConfirmOpen] = useState(false);
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
@@ -537,7 +551,18 @@ export function OrganizatechApp({
     const next = createAdvancedSessionDataEpoch(current, identity, options);
     if (next === current) return false;
 
+    invalidateSessionOperationOwners([
+      workoutStartInFlightRef,
+      dailyReadinessSaveInFlightRef,
+      workoutCompletionInFlightRef,
+      profileSaveInFlightRef,
+      profileAvatarUploadInFlightRef,
+      routineSaveInFlightRef,
+      trainingCycleCreateInFlightRef,
+      trainingCycleDeleteInFlightRef,
+    ]);
     sessionDataEpochRef.current = next;
+    setIsBusy(false);
     profileAvatarRefreshInFlightRef.current = false;
     profileAvatarBootstrapUserIdRef.current = null;
     lastProfileAvatarRefreshAtRef.current = 0;
@@ -558,28 +583,32 @@ export function OrganizatechApp({
       isSessionDataRequestTokenCurrent(sessionDataEpochRef.current, token);
   }, []);
 
-  function tryAcquireActiveWorkoutOperation(
-    lockRef: { current: SessionOperationOwner | null },
+  function tryAcquireUserScopedOperation(
+    lockRef: SessionOperationOwnerLock,
   ): SessionOperationOwner | null {
     const owner = tryAcquireSessionOperationOwner(
       lockRef.current,
       captureSessionDataRequestToken(),
+      { dataMode },
     );
     if (!owner) return null;
     lockRef.current = owner;
     return owner;
   }
 
-  function isActiveWorkoutOperationCurrent(
-    lockRef: { current: SessionOperationOwner | null },
+  function isUserScopedOperationCurrent(
+    lockRef: SessionOperationOwnerLock,
     owner: SessionOperationOwner,
   ): boolean {
-    return isSessionOperationOwner(lockRef.current, owner) &&
-      isSessionDataRequestCurrent(owner.requestToken);
+    return isSessionOperationOwnerCurrent({
+      currentOwner: lockRef.current,
+      owner,
+      isRequestCurrent: isSessionDataRequestCurrent,
+    });
   }
 
-  function settleActiveWorkoutOperation<T>(
-    lockRef: { current: SessionOperationOwner | null },
+  function settleUserScopedOperation<T>(
+    lockRef: SessionOperationOwnerLock,
     owner: SessionOperationOwner,
     request: Promise<T>,
   ) {
@@ -591,8 +620,8 @@ export function OrganizatechApp({
     });
   }
 
-  function finalizeActiveWorkoutOperation(
-    lockRef: { current: SessionOperationOwner | null },
+  function finalizeUserScopedOperation(
+    lockRef: SessionOperationOwnerLock,
     owner: SessionOperationOwner,
   ): boolean {
     const finalization = finalizeSessionOperationOwner({
@@ -603,6 +632,12 @@ export function OrganizatechApp({
     lockRef.current = finalization.nextOwner;
     return finalization.canFinalize;
   }
+
+  // Compatibility names retained for the password-recovery hotfix contract;
+  // all ownership semantics remain delegated to the canonical P3-41 helpers.
+  const tryAcquireActiveWorkoutOperation = tryAcquireUserScopedOperation;
+  const isActiveWorkoutOperationCurrent = isUserScopedOperationCurrent;
+  const finalizeActiveWorkoutOperation = finalizeUserScopedOperation;
 
   useEffect(() => {
     sessionDataMountedRef.current = true;
@@ -713,7 +748,8 @@ export function OrganizatechApp({
         }
         if (authState.session) {
           setStatusMessage("");
-          await refreshData(authState.dataMode);
+          const refreshResult = await refreshData(authState.dataMode);
+          if (!shouldContinueAuthenticatedFlowAfterRefresh(refreshResult.kind)) return;
           if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
           if (!restoreActiveFlowForSession(authState.dataMode, authState.user?.id)) {
             applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));
@@ -806,7 +842,8 @@ export function OrganizatechApp({
       if (event === "SIGNED_IN" || (event === "INITIAL_SESSION" && session)) {
         passwordRecoveryUpdateOwnerRef.current = null;
         setStatusMessage("");
-        void refreshData(nextState.dataMode).then(() => {
+        void refreshData(nextState.dataMode).then((refreshResult) => {
+          if (!shouldContinueAuthenticatedFlowAfterRefresh(refreshResult.kind)) return;
           if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
           setIsAuthLoading(false);
           if (!restoreActiveFlowForSession(nextState.dataMode, nextState.user?.id)) {
@@ -896,7 +933,7 @@ export function OrganizatechApp({
 
     function persistFlow() {
       const userKey = getBrowserStorageScope(dataMode, supabaseUser?.id);
-      if (!userKey) return;
+      if (!userKey || activeBrowserStorageScopeRef.current !== userKey) return;
       saveActiveFlow({
         version: ACTIVE_FLOW_VERSION,
         updatedAt: Date.now(),
@@ -922,7 +959,7 @@ export function OrganizatechApp({
 
     function persistDraft() {
       const userKey = getBrowserStorageScope(dataMode, supabaseUser?.id);
-      if (!userKey) return;
+      if (!userKey || activeBrowserStorageScopeRef.current !== userKey) return;
       saveRoutineDraft({
         version: ROUTINE_DRAFT_VERSION,
         updatedAt: Date.now(),
@@ -952,8 +989,10 @@ export function OrganizatechApp({
     const isWorkoutDraftActive = screen === "entrenamiento" && hasStartedTraining;
     if (!isWorkoutDraftActive || !activeWorkoutStartedAt) return;
     const stableWorkoutStartedAt = activeWorkoutStartedAt;
+    const workoutScope = getBrowserStorageScope(dataMode, supabaseUser?.id);
 
     function persistWorkoutDraft() {
+      if (!workoutScope || activeBrowserStorageScopeRef.current !== workoutScope) return;
       saveActiveWorkoutDraft({
         updatedAt: Date.now(),
         dataMode,
@@ -1012,8 +1051,10 @@ export function OrganizatechApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, trainingCompletionSummary]);
 
-  const hasSupabaseSession = Boolean(supabaseSession && supabaseUser);
-  const canEditProfilePersonalData = Boolean(supabaseUser && getSupabaseBrowserClient());
+  const hasSupabaseSession = Boolean(
+    supabaseSession && supabaseUser && supabaseSession.user.id === supabaseUser.id,
+  );
+  const canEditProfilePersonalData = Boolean(hasSupabaseSession && getSupabaseBrowserClient());
   const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
   const persistedActiveCyclePlan = useMemo(
     () => isTrainingCyclesRepositoryActive && persistedActiveCycle
@@ -1362,10 +1403,30 @@ export function OrganizatechApp({
     };
   }, [refreshProfileAvatar]);
 
+  function resetUserScopedTransientState() {
+    setIsMenuOpen(false);
+    setIsNotificationPanelOpen(false);
+    setIsTopbarHidden(false);
+    setIsNewCycleConfirmOpen(false);
+    setIsDeleteCycleConfirmOpen(false);
+    setIsRoutineSuccessOpen(false);
+    setIsRoutineUpdateConfirmOpen(false);
+    setIsEditingRoutinePlan(false);
+    setRoutineEditorReturnScreen(null);
+    setRoutineNotice("");
+    setDashboardDayOverride("");
+    dispatchProgressController({ type: "selection_reset" });
+    clearAuthForms();
+    setStatusMessage("");
+  }
+
   function applySessionState(authState: SupabaseSessionState) {
-    const nextStorageScope = getBrowserStorageScope(authState.dataMode, authState.user?.id);
+    const authenticatedUser = resolveEffectiveAuthenticatedUser(authState.session, authState.user);
+    const effectiveSession = authenticatedUser ? authState.session : null;
+    const effectiveDataMode: DataMode = effectiveSession ? authState.dataMode : "demo";
+    const nextStorageScope = getBrowserStorageScope(effectiveDataMode, authenticatedUser?.id);
     const nextIdentity = {
-      userId: authState.user?.id ?? null,
+      userId: authenticatedUser?.id ?? null,
       scope: nextStorageScope,
     };
     const sessionBoundary = resolveActiveWorkoutSessionBoundary({
@@ -1379,9 +1440,10 @@ export function OrganizatechApp({
     if (sessionBoundary.resetActiveWorkoutMemory) {
       incomingWorkoutDraftRecoveryScopeRef.current = resolveIncomingWorkoutDraftRecoveryScope({
         scope: nextStorageScope,
-        willAttemptAutomaticRecovery: Boolean(authState.session),
+        willAttemptAutomaticRecovery: Boolean(effectiveSession),
       });
       resetActiveWorkoutSessionState();
+      resetUserScopedTransientState();
     }
     const hasStorageScopeChanged = activeBrowserStorageScopeRef.current !== nextStorageScope;
     if (hasStorageScopeChanged) {
@@ -1412,22 +1474,32 @@ export function OrganizatechApp({
       }
     }
     if (identityChanged) {
+      setProfilePersonalData(null);
       setProfilePersonalDataLoading(false);
+      setProfilePersonalDataError("");
+      setProfileAvatar(createEmptyProfileAvatarState());
+      setProfileAvatarResetKey((current) => current + 1);
       setProfileAvatarLoading(false);
+      setProfileAvatarError("");
     }
     setIsSupabaseConfiguredState(authState.isConfigured);
-    setDataMode(authState.dataMode);
-    setSupabaseSession(authState.session);
-    setSupabaseUser(authState.user);
-    setProfilePersonalData(null);
-    setProfilePersonalDataError("");
-    setProfileAvatar(createEmptyProfileAvatarState());
-    setProfileAvatarResetKey((current) => current + 1);
-    setProfileAvatarError("");
-    if (authState.user) setSessionName(getSessionDisplayName(authState.user));
+    setDataMode(effectiveDataMode);
+    setSupabaseSession(effectiveSession);
+    setSupabaseUser(authenticatedUser);
+    if (authenticatedUser) setSessionName(getSessionDisplayName(authenticatedUser));
   }
 
-  function clearUserSessionState(message: string, storageScope = activeBrowserStorageScopeRef.current) {
+  function clearUserSessionState(
+    message: string,
+    storageScope = activeBrowserStorageScopeRef.current,
+    options: { navigate?: boolean } = {},
+  ) {
+    if (
+      activeBrowserStorageScopeRef.current === null &&
+      sessionDataEpochRef.current.userId === null &&
+      sessionDataEpochRef.current.scope === null
+    ) return false;
+
     const signedOutIdentity = { userId: null, scope: null };
     const sessionBoundary = resolveActiveWorkoutSessionBoundary({
       currentIdentity: sessionDataEpochRef.current,
@@ -1441,6 +1513,7 @@ export function OrganizatechApp({
       incomingWorkoutDraftRecoveryScopeRef.current = null;
       resetActiveWorkoutSessionState();
     }
+    resetUserScopedTransientState();
     if (sessionBoundary.clearClosingStorageScope) {
       clearBrowserStorageScope(storageScope);
     }
@@ -1472,9 +1545,11 @@ export function OrganizatechApp({
     setPersistedCycleHistory([]);
     setIsPersistedCyclesLoading(false);
     clearCycleScopedPlanState();
-    applyContextualNavigation(resetContextualNavigation("login"));
-    setIsMenuOpen(false);
+    if (options.navigate !== false) {
+      applyContextualNavigation(resetContextualNavigation("login"));
+    }
     setStatusMessage(message);
+    return true;
   }
 
   function clearBrowserStorageScope(scope: BrowserStorageScope | null) {
@@ -1631,14 +1706,16 @@ export function OrganizatechApp({
     return false;
   }
 
-  async function refreshData(mode = dataMode) {
+  async function refreshData(mode = dataMode): Promise<RefreshDataResult> {
     const requestToken = captureSessionDataRequestToken();
     const requestScope = getBrowserStorageScope(mode, requestToken.userId);
-    if (!isSessionDataRequestCurrent(requestToken) || !requestScope || requestScope !== requestToken.scope) return null;
+    if (!isSessionDataRequestCurrent(requestToken) || !requestScope || requestScope !== requestToken.scope) {
+      return { kind: "stale" };
+    }
     setIsBusy(true);
     try {
-      const next = await loadAppData(mode);
-      if (!isSessionDataRequestCurrent(requestToken)) return null;
+      const next = await loadAppData(mode, requestToken.userId);
+      if (!isSessionDataRequestCurrent(requestToken)) return { kind: "stale" };
       const shouldPreserveCycleScopedDisplay =
         mode === "supabase" &&
         trainingCyclesRepositoryEnabled &&
@@ -1652,11 +1729,11 @@ export function OrganizatechApp({
       }
       setDataSource(next.source);
       setStatusMessage(next.source === "supabase" ? "Progreso actualizado." : "Modo de prueba activo.");
-      return next;
+      return { kind: "success", data: next };
     } catch (error) {
-      if (!isSessionDataRequestCurrent(requestToken)) return null;
-      handlePersistenceError(error);
-      return null;
+      if (!isSessionDataRequestCurrent(requestToken)) return { kind: "stale" };
+      handlePersistenceError(error, { preserveSession: true });
+      return { kind: "error", error };
     } finally {
       if (isSessionDataRequestCurrent(requestToken)) {
         setIsBusy(false);
@@ -1704,19 +1781,47 @@ export function OrganizatechApp({
   }
 
   async function handleSaveProfilePersonalData(input: ProfilePersonalDataInput) {
-    const profile = await updateProfilePersonalData(input);
-    setProfilePersonalData(profile);
-    setSessionName(profile.displayName);
-    return profile;
+    const operationOwner = tryAcquireUserScopedOperation(profileSaveInFlightRef);
+    if (!operationOwner || operationOwner.dataMode !== "supabase" || !operationOwner.userId) return null;
+
+    try {
+      const result = await settleUserScopedOperation(
+        profileSaveInFlightRef,
+        operationOwner,
+        updateProfilePersonalData(input, operationOwner.userId),
+      );
+      if (result.kind === "stale") return null;
+      if (result.kind === "error") throw result.error;
+      setProfilePersonalData(result.value);
+      setSessionName(result.value.displayName);
+      return result.value;
+    } finally {
+      finalizeUserScopedOperation(profileSaveInFlightRef, operationOwner);
+    }
   }
 
   async function handleUploadProfileAvatar(file: File) {
+    const operationOwner = tryAcquireUserScopedOperation(profileAvatarUploadInFlightRef);
+    if (!operationOwner || operationOwner.dataMode !== "supabase" || !operationOwner.userId) return false;
+
     setProfileAvatarError("");
-    const avatar = await uploadProfileAvatar(file);
-    lastProfileAvatarRefreshAtRef.current = Date.now();
-    setProfileAvatar(avatar);
-    setProfileAvatarResetKey((current) => current + 1);
-    setProfilePersonalData((current) => mergeProfileAvatarMetadata(current, avatar));
+    try {
+      const result = await settleUserScopedOperation(
+        profileAvatarUploadInFlightRef,
+        operationOwner,
+        uploadProfileAvatar(file, operationOwner.userId),
+      );
+      if (result.kind === "stale") return false;
+      if (result.kind === "error") throw result.error;
+      const avatar = result.value;
+      lastProfileAvatarRefreshAtRef.current = Date.now();
+      setProfileAvatar(avatar);
+      setProfileAvatarResetKey((current) => current + 1);
+      setProfilePersonalData((current) => mergeProfileAvatarMetadata(current, avatar));
+      return true;
+    } finally {
+      finalizeUserScopedOperation(profileAvatarUploadInFlightRef, operationOwner);
+    }
   }
 
   async function refreshPersistedTrainingCycles() {
@@ -1801,6 +1906,7 @@ export function OrganizatechApp({
     plan: TrainingPlan,
     setupState: Record<string, SetupDayState>,
     activeCycle: PersistedTrainingCycle | null,
+    operationOwner: SessionOperationOwner,
   ) {
     if (activeCycle && isProtectedTrainingCycle(activeCycle)) {
       setStatusMessage(PROTECTED_ACTIVE_CYCLE_MESSAGE);
@@ -1825,6 +1931,7 @@ export function OrganizatechApp({
     const plannedEndDate = addDaysToDateKey(plannedStartDate, durationWeeks * 7 - 1);
     const activeCycleToClose = activeCycle?.status === "active" ? activeCycle : null;
     const nextCycleNumber = await getNextTrainingCycleNumber();
+    if (!isUserScopedOperationCurrent(routineSaveInFlightRef, operationOwner)) return false;
     const endedAt = new Date().toISOString();
 
     if (activeCycleToClose) {
@@ -1838,7 +1945,8 @@ export function OrganizatechApp({
           endedAt,
           trainingCyclesSnapshotSource,
         ),
-      });
+      }, operationOwner.userId ?? undefined);
+      if (!isUserScopedOperationCurrent(routineSaveInFlightRef, operationOwner)) return false;
     }
 
     const cycleId = await createTrainingCycleWithPlan({
@@ -1850,9 +1958,11 @@ export function OrganizatechApp({
       plannedStartDate,
       plannedEndDate,
       plan: planInput,
-    });
+    }, operationOwner.userId ?? undefined);
+    if (!isUserScopedOperationCurrent(routineSaveInFlightRef, operationOwner)) return false;
 
     const scopedPlan = await getCycleScopedTrainingPlan(cycleId);
+    if (!isUserScopedOperationCurrent(routineSaveInFlightRef, operationOwner)) return false;
     const scopedExercises = createExerciseTemplatesFromCycleScopedPlan(scopedPlan);
     isCycleScopedDisplayLockedRef.current = true;
     setTrainingPlan(plan);
@@ -1870,6 +1980,7 @@ export function OrganizatechApp({
     activeWorkoutActions.clearReadiness();
     activeWorkoutActions.markTrainingStopped();
     await refreshPersistedTrainingCycles();
+    if (!isUserScopedOperationCurrent(routineSaveInFlightRef, operationOwner)) return false;
     return true;
   }
 
@@ -1880,10 +1991,17 @@ export function OrganizatechApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTrainingCyclesRepositoryActive, supabaseUser?.id]);
 
-  function handlePersistenceError(error: unknown) {
+  function handlePersistenceError(
+    error: unknown,
+    options: { preserveSession?: boolean } = {},
+  ) {
     const message = translatePersistenceError(error);
     setStatusMessage(message);
-    if (dataMode === "supabase" && (isSessionExpiredError(error) || message.includes("iniciar sesión"))) {
+    if (
+      !options.preserveSession &&
+      dataMode === "supabase" &&
+      (isSessionExpiredError(error) || message.includes("iniciar sesión"))
+    ) {
       clearUserSessionState(message);
     }
     return message;
@@ -1954,7 +2072,8 @@ export function OrganizatechApp({
       });
       appliedIdentityToken = captureSessionDataRequestToken();
       setStatusMessage(getMissingSupabaseMessage());
-      await refreshData("demo");
+      const refreshResult = await refreshData("demo");
+      if (refreshResult.kind !== "success") return;
       if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
       setStatusMessage(getMissingSupabaseMessage());
       clearAuthForms();
@@ -1986,7 +2105,7 @@ export function OrganizatechApp({
         isConfigured: true,
         dataMode: session ? "supabase" : "demo",
         session,
-        user: session?.user ?? result.data.user ?? null,
+        user: session?.user ?? null,
       });
       appliedIdentityToken = captureSessionDataRequestToken();
 
@@ -1998,7 +2117,8 @@ export function OrganizatechApp({
       }
 
       setStatusMessage("");
-      await refreshData("supabase");
+      const refreshResult = await refreshData("supabase");
+      if (!shouldContinueAuthenticatedFlowAfterRefresh(refreshResult.kind)) return;
       if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
       clearAuthForms();
       applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));
@@ -2106,7 +2226,11 @@ export function OrganizatechApp({
         auth: {
           getSession: () => supabase.auth.getSession(),
           updateUser: (attributes) => supabase.auth.updateUser(attributes),
-          signOut: () => supabase.auth.signOut(),
+          signOut: async () => {
+            const { error: signOutError } = await supabase.auth.signOut();
+            if (signOutError) return { error: signOutError };
+            return { error: null };
+          },
         },
         isRecoveryCurrent: (userId) => (
           passwordRecoveryStateRef.current === "confirmed"
@@ -2430,6 +2554,9 @@ export function OrganizatechApp({
       return;
     }
 
+    const operationOwner = tryAcquireUserScopedOperation(routineSaveInFlightRef);
+    if (!operationOwner) return;
+
     if (isTrainingCyclesRepositoryActive) {
       setIsRoutineUpdateConfirmOpen(false);
       dispatchRoutineBuilder({
@@ -2449,7 +2576,14 @@ export function OrganizatechApp({
 
       setIsBusy(true);
       try {
-        const activeCycle = await getActiveTrainingCycle();
+        const activeCycleResult = await settleUserScopedOperation(
+          routineSaveInFlightRef,
+          operationOwner,
+          getActiveTrainingCycle(),
+        );
+        if (activeCycleResult.kind === "stale") return;
+        if (activeCycleResult.kind === "error") throw activeCycleResult.error;
+        const activeCycle = activeCycleResult.value;
         if (activeCycle && isCycleScopedTrainingCycle(activeCycle)) {
           if (!cycleScopedPlan || activeCycle.id !== persistedActiveCycle?.id) {
             setStatusMessage("No se pudo cargar el plan cycle-scoped activo. No se guardaron cambios.");
@@ -2584,16 +2718,28 @@ export function OrganizatechApp({
             return;
           }
 
-          const result = await addCycleScopedTrainingDaysAndExercises({
-            cycleId: activeCycle.id,
-            days,
-          });
-          await loadCycleScopedPlanIntoState(activeCycle.id);
-          clearRoutineDraft(dataMode, supabaseUser?.id);
+          const saveResult = await settleUserScopedOperation(
+            routineSaveInFlightRef,
+            operationOwner,
+            addCycleScopedTrainingDaysAndExercises({
+              cycleId: activeCycle.id,
+              days,
+            }, operationOwner.userId ?? undefined),
+          );
+          if (saveResult.kind === "stale") return;
+          if (saveResult.kind === "error") throw saveResult.error;
+          const loadResult = await settleUserScopedOperation(
+            routineSaveInFlightRef,
+            operationOwner,
+            loadCycleScopedPlanIntoState(activeCycle.id),
+          );
+          if (loadResult.kind === "stale") return;
+          if (loadResult.kind === "error") throw loadResult.error;
+          clearRoutineDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
           setIsEditingRoutinePlan(false);
           setActiveRoutineDay(setupDay);
           setRoutineNotice(
-            `${result.daysAdded} dia${result.daysAdded === 1 ? "" : "s"}, ${result.exercisesAdded} ejercicio${result.exercisesAdded === 1 ? "" : "s"} nuevo${result.exercisesAdded === 1 ? "" : "s"}, ${result.exercisesUpdated} editado${result.exercisesUpdated === 1 ? "" : "s"} y ${result.exercisesRetired} retirado${result.exercisesRetired === 1 ? "" : "s"}.`,
+            `${saveResult.value.daysAdded} dia${saveResult.value.daysAdded === 1 ? "" : "s"}, ${saveResult.value.exercisesAdded} ejercicio${saveResult.value.exercisesAdded === 1 ? "" : "s"} nuevo${saveResult.value.exercisesAdded === 1 ? "" : "s"}, ${saveResult.value.exercisesUpdated} editado${saveResult.value.exercisesUpdated === 1 ? "" : "s"} y ${saveResult.value.exercisesRetired} retirado${saveResult.value.exercisesRetired === 1 ? "" : "s"}.`,
           );
           setStatusMessage("Plan cycle-scoped actualizado. El historial anterior se conserva.");
           setIsRoutineSuccessOpen(true);
@@ -2601,10 +2747,21 @@ export function OrganizatechApp({
           return;
         }
 
-        const created = await createCycleScopedTrainingCycleFromSetup(trainingPlan, nextSetupByDay, activeCycle);
-        if (!created) return;
+        const createdResult = await settleUserScopedOperation(
+          routineSaveInFlightRef,
+          operationOwner,
+          createCycleScopedTrainingCycleFromSetup(
+            trainingPlan,
+            nextSetupByDay,
+            activeCycle,
+            operationOwner,
+          ),
+        );
+        if (createdResult.kind === "stale") return;
+        if (createdResult.kind === "error") throw createdResult.error;
+        if (!createdResult.value) return;
 
-        clearRoutineDraft(dataMode, supabaseUser?.id);
+        clearRoutineDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
         setIsEditingRoutinePlan(false);
         setActiveRoutineDay(setupDay);
         setRoutineNotice("Plan cycle-scoped creado correctamente.");
@@ -2612,9 +2769,13 @@ export function OrganizatechApp({
         setIsRoutineSuccessOpen(true);
         applyScreenTransition(createFlowScreenTransition("entrenamiento", "routine-plan-saved"));
       } catch (error) {
-        setStatusMessage(translateTrainingCycleRepositoryError(error));
+        if (isUserScopedOperationCurrent(routineSaveInFlightRef, operationOwner)) {
+          setStatusMessage(translateTrainingCycleRepositoryError(error));
+        }
       } finally {
-        setIsBusy(false);
+        if (finalizeUserScopedOperation(routineSaveInFlightRef, operationOwner)) {
+          setIsBusy(false);
+        }
       }
       return;
     }
@@ -2638,25 +2799,42 @@ export function OrganizatechApp({
         const removedExerciseIds = getRemovedExerciseIds(exercises, dayToPersist, persistedIds);
 
         for (const exerciseId of removedExerciseIds) {
-          await deleteExercise(exerciseId, dataMode);
+          const deleteResult = await settleUserScopedOperation(
+            routineSaveInFlightRef,
+            operationOwner,
+            deleteExercise(
+              exerciseId,
+              operationOwner.dataMode,
+              operationOwner.userId ?? undefined,
+            ),
+          );
+          if (deleteResult.kind === "stale") return;
+          if (deleteResult.kind === "error") throw deleteResult.error;
         }
 
         for (const row of rowsToPersist) {
-          await saveExercise({
-            id: row.sourceExerciseId ?? row.id,
-            routine: currentRoutineName,
-            day: dayToPersist,
-            name: row.name.trim(),
-            targetSets: Math.max(1, row.sets || 1),
-            targetReps: Math.max(1, row.reps || 1),
-            baseWeight: readRequiredWeight(row.weight),
-            notes: `Rutina creada para ${dayToPersist}.`,
-          }, dataMode);
+          const saveResult = await settleUserScopedOperation(
+            routineSaveInFlightRef,
+            operationOwner,
+            saveExercise({
+              id: row.sourceExerciseId ?? row.id,
+              routine: currentRoutineName,
+              day: dayToPersist,
+              name: row.name.trim(),
+              targetSets: Math.max(1, row.sets || 1),
+              targetReps: Math.max(1, row.reps || 1),
+              baseWeight: readRequiredWeight(row.weight),
+              notes: `Rutina creada para ${dayToPersist}.`,
+            }, operationOwner.dataMode, operationOwner.userId ?? undefined),
+          );
+          if (saveResult.kind === "stale") return;
+          if (saveResult.kind === "error") throw saveResult.error;
         }
       }
 
-      const refreshedData = await refreshData(dataMode);
-      if (!refreshedData) return;
+      const refreshedData = await refreshData(operationOwner.dataMode);
+      if (refreshedData.kind !== "success") return;
+      if (!isUserScopedOperationCurrent(routineSaveInFlightRef, operationOwner)) return;
       setActiveRoutineDay(setupDay);
       const successMessage = `Rutina de ${setupDay} guardada.`;
       setStatusMessage(nextIncompleteDay ? `${successMessage} Ahora configura ${nextIncompleteDay}.` : "Registro de rutina finalizado.");
@@ -2666,35 +2844,40 @@ export function OrganizatechApp({
         dispatchRoutineBuilder({ type: "select_day", day: setupTransition.nextDay });
         applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "routine-setup-continued"));
       } else {
-        clearRoutineDraft(dataMode, supabaseUser?.id);
+        clearRoutineDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
         setIsEditingRoutinePlan(false);
         setActiveRoutineDay(setupDay);
         activeWorkoutActions.clearReadiness();
         setIsRoutineSuccessOpen(true);
       }
     } catch (error) {
-      handlePersistenceError(error);
+      if (isUserScopedOperationCurrent(routineSaveInFlightRef, operationOwner)) {
+        handlePersistenceError(error);
+      }
     } finally {
-      setIsBusy(false);
+      if (finalizeUserScopedOperation(routineSaveInFlightRef, operationOwner)) {
+        setIsBusy(false);
+      }
     }
   }
 
   async function handleLogout() {
     setIsBusy(true);
+    const requestToken = captureSessionDataRequestToken();
+    const currentStorageScope = activeBrowserStorageScopeRef.current;
     try {
-      const currentStorageScope = activeBrowserStorageScopeRef.current;
-      clearBrowserStorageScope(currentStorageScope);
-      clearPasswordRecoveryFlow();
       const supabase = getSupabaseBrowserClient();
       if (supabase) {
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
       }
-      clearUserSessionState("Sesión cerrada correctamente.", currentStorageScope);
+      if (isSessionDataRequestCurrent(requestToken)) {
+        clearUserSessionState("Sesión cerrada correctamente.", currentStorageScope);
+      }
     } catch (error) {
-      setStatusMessage(translateAuthError(error));
+      if (isSessionDataRequestCurrent(requestToken)) setStatusMessage(translateAuthError(error));
     } finally {
-      setIsBusy(false);
+      if (isSessionDataRequestCurrent(requestToken)) setIsBusy(false);
     }
   }
 
@@ -2713,19 +2896,27 @@ export function OrganizatechApp({
   }
 
   async function startNewTrainingCycle() {
-    if (isNewCycleTransitionRef.current) return;
-
     if (dataMode === "supabase") {
       if (!isTrainingCyclesRepositoryActive) {
         setStatusMessage("Esta acción estará disponible en el siguiente paso.");
         setIsNewCycleConfirmOpen(false);
         return;
       }
+    }
 
-      isNewCycleTransitionRef.current = true;
-      setIsBusy(true);
-      try {
-        const activeCycle = await getActiveTrainingCycle();
+    const operationOwner = tryAcquireUserScopedOperation(trainingCycleCreateInFlightRef);
+    if (!operationOwner) return;
+    setIsBusy(true);
+    try {
+      if (operationOwner.dataMode === "supabase") {
+        const activeCycleResult = await settleUserScopedOperation(
+          trainingCycleCreateInFlightRef,
+          operationOwner,
+          getActiveTrainingCycle(),
+        );
+        if (activeCycleResult.kind === "stale") return;
+        if (activeCycleResult.kind === "error") throw activeCycleResult.error;
+        const activeCycle = activeCycleResult.value;
 
         const nextPlan = createNextTrainingPlan("controlled_cycle_scoped");
         const freshSetup = createSetupByDay();
@@ -2733,23 +2924,29 @@ export function OrganizatechApp({
 
         if (activeCycleToClose) {
           const endedAt = new Date().toISOString();
-          await completeTrainingCycle({
-            endedAt,
-            explicitlyConfirmed: true,
-            summarySnapshot: createPersistedCycleSummarySnapshot(
-              trainingPlan,
-              displayExercises,
-              displayEntries,
-              activeCycleToClose.startedAt,
+          const completionResult = await settleUserScopedOperation(
+            trainingCycleCreateInFlightRef,
+            operationOwner,
+            completeTrainingCycle({
               endedAt,
-              trainingCyclesSnapshotSource,
-            ),
-          });
+              explicitlyConfirmed: true,
+              summarySnapshot: createPersistedCycleSummarySnapshot(
+                trainingPlan,
+                displayExercises,
+                displayEntries,
+                activeCycleToClose.startedAt,
+                endedAt,
+                trainingCyclesSnapshotSource,
+              ),
+            }, operationOwner.userId ?? undefined),
+          );
+          if (completionResult.kind === "stale") return;
+          if (completionResult.kind === "error") throw completionResult.error;
         }
 
-        clearActiveFlow(dataMode, supabaseUser?.id);
-        clearRoutineDraft(dataMode, supabaseUser?.id);
-        clearWorkoutDraft(dataMode, supabaseUser?.id);
+        clearActiveFlow(operationOwner.dataMode, operationOwner.userId ?? undefined);
+        clearRoutineDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
+        clearWorkoutDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
         discardActiveWorkoutState();
         setPersistedActiveCycle(null);
         clearCycleScopedPlanState();
@@ -2769,47 +2966,62 @@ export function OrganizatechApp({
         setStatusMessage(activeCycle
           ? "Ciclo actual finalizado. Configura el nuevo plan antes de crearlo."
           : "Configura el plan del nuevo ciclo antes de crearlo.");
-      } catch (error) {
+        return;
+      }
+
+      if (!isUserScopedOperationCurrent(trainingCycleCreateInFlightRef, operationOwner)) return;
+      const snapshot = createTrainingCycleSnapshot(cycleHistory.length + 1, trainingPlan, exercises, entries);
+      clearRoutineDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
+      const nextHistory = [...cycleHistory, snapshot];
+      setCycleHistory(nextHistory);
+
+      const nextPlan = createNextTrainingPlan("default");
+      replaceLocalData([], []);
+      setExercises([]);
+      setEntries([]);
+      setTrainingSessions([]);
+      dispatchRoutineBuilder({ type: "reset_state", setupByDay: createSetupByDay(), activeDay: "Lunes" });
+      setTrainingPlan(nextPlan);
+      {
+        const dayReset = resolveDayStateReset();
+        setActiveRoutineDay(dayReset.activeRoutineDay);
+        setDashboardDayOverride(dayReset.dashboardDayOverride);
+        dispatchProgressController({ type: "selection_reset" });
+      }
+      activeWorkoutActions.replaceExerciseDrafts({});
+      activeWorkoutActions.clearReadiness();
+      setIsEditingRoutinePlan(true);
+      setStatusMessage("Ciclo actual finalizado. Ya puedes crear un nuevo ciclo de entrenamiento.");
+      applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
+    } catch (error) {
+      if (isUserScopedOperationCurrent(trainingCycleCreateInFlightRef, operationOwner)) {
         setStatusMessage(translateTrainingCycleRepositoryError(error));
-      } finally {
-        isNewCycleTransitionRef.current = false;
+      }
+    } finally {
+      if (finalizeUserScopedOperation(trainingCycleCreateInFlightRef, operationOwner)) {
         setIsBusy(false);
         setIsNewCycleConfirmOpen(false);
       }
-      return;
     }
-
-    const snapshot = createTrainingCycleSnapshot(cycleHistory.length + 1, trainingPlan, exercises, entries);
-    clearRoutineDraft(dataMode, supabaseUser?.id);
-    const nextHistory = [...cycleHistory, snapshot];
-    setCycleHistory(nextHistory);
-
-    const nextPlan = createNextTrainingPlan("default");
-    replaceLocalData([], []);
-    setExercises([]);
-    setEntries([]);
-    setTrainingSessions([]);
-    dispatchRoutineBuilder({ type: "reset_state", setupByDay: createSetupByDay(), activeDay: "Lunes" });
-    setTrainingPlan(nextPlan);
-    {
-      const dayReset = resolveDayStateReset();
-      setActiveRoutineDay(dayReset.activeRoutineDay);
-      setDashboardDayOverride(dayReset.dashboardDayOverride);
-      dispatchProgressController({ type: "selection_reset" });
-    }
-    activeWorkoutActions.replaceExerciseDrafts({});
-    activeWorkoutActions.clearReadiness();
-    setIsEditingRoutinePlan(true);
-    setIsNewCycleConfirmOpen(false);
-    setStatusMessage("Ciclo actual finalizado. Ya puedes crear un nuevo ciclo de entrenamiento.");
-    applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
   }
 
   async function deleteCurrentTrainingCycle() {
+    const operationOwner = tryAcquireUserScopedOperation(trainingCycleDeleteInFlightRef);
+    if (!operationOwner) return;
     setIsBusy(true);
     try {
       if (isTrainingCyclesRepositoryActive) {
-        const activeCycle = persistedActiveCycle ?? await getActiveTrainingCycle();
+        let activeCycle = persistedActiveCycle;
+        if (!activeCycle) {
+          const activeCycleResult = await settleUserScopedOperation(
+            trainingCycleDeleteInFlightRef,
+            operationOwner,
+            getActiveTrainingCycle(),
+          );
+          if (activeCycleResult.kind === "stale") return;
+          if (activeCycleResult.kind === "error") throw activeCycleResult.error;
+          activeCycle = activeCycleResult.value;
+        }
         if (!activeCycle) {
           setStatusMessage("No existe un ciclo activo para cancelar.");
           setIsDeleteCycleConfirmOpen(false);
@@ -2822,21 +3034,27 @@ export function OrganizatechApp({
         }
 
         const endedAt = new Date().toISOString();
-        await cancelTrainingCycle({
-          endedAt,
-          summarySnapshot: createPersistedCycleSummarySnapshot(
-            trainingPlan,
-            displayExercises,
-            displayEntries,
-            activeCycle.startedAt,
+        const cancellationResult = await settleUserScopedOperation(
+          trainingCycleDeleteInFlightRef,
+          operationOwner,
+          cancelTrainingCycle({
             endedAt,
-            trainingCyclesSnapshotSource,
-          ),
-        });
+            summarySnapshot: createPersistedCycleSummarySnapshot(
+              trainingPlan,
+              displayExercises,
+              displayEntries,
+              activeCycle.startedAt,
+              endedAt,
+              trainingCyclesSnapshotSource,
+            ),
+          }, operationOwner.userId ?? undefined),
+        );
+        if (cancellationResult.kind === "stale") return;
+        if (cancellationResult.kind === "error") throw cancellationResult.error;
 
         const nextPlan = createNextTrainingPlan("default");
-        clearRoutineDraft(dataMode, supabaseUser?.id);
-        clearWorkoutDraft(dataMode, supabaseUser?.id);
+        clearRoutineDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
+        clearWorkoutDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
         discardActiveWorkoutState();
         clearCycleScopedPlanState();
         setTrainingPlan(nextPlan);
@@ -2851,15 +3069,31 @@ export function OrganizatechApp({
         setIsDeleteCycleConfirmOpen(false);
         setStatusMessage("Ciclo cancelado. Ya puedes configurar un nuevo ciclo de entrenamiento.");
         applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
-        await refreshPersistedTrainingCycles();
+        const refreshResult = await settleUserScopedOperation(
+          trainingCycleDeleteInFlightRef,
+          operationOwner,
+          refreshPersistedTrainingCycles(),
+        );
+        if (refreshResult.kind === "error") throw refreshResult.error;
         return;
       }
 
-      await deactivateActiveCycle(dataMode);
-      clearRoutineDraft(dataMode, supabaseUser?.id);
-      clearWorkoutDraft(dataMode, supabaseUser?.id);
+      const deactivationResult = await settleUserScopedOperation(
+        trainingCycleDeleteInFlightRef,
+        operationOwner,
+        deactivateActiveCycle(
+          operationOwner.dataMode,
+          operationOwner.userId ?? undefined,
+        ),
+      );
+      if (deactivationResult.kind === "stale") return;
+      if (deactivationResult.kind === "error") throw deactivationResult.error;
+      clearRoutineDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
+      clearWorkoutDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
       discardActiveWorkoutState();
-      await refreshData(dataMode);
+      const refreshResult = await refreshData(operationOwner.dataMode);
+      if (refreshResult.kind !== "success") return;
+      if (!isUserScopedOperationCurrent(trainingCycleDeleteInFlightRef, operationOwner)) return;
 
       const nextPlan = createNextTrainingPlan("default");
       setTrainingPlan(nextPlan);
@@ -2875,15 +3109,19 @@ export function OrganizatechApp({
       setStatusMessage("Ciclo eliminado. Ya puedes configurar un nuevo ciclo de entrenamiento.");
       applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
     } catch (error) {
-      if (error instanceof TrainingCycleRepositoryError) {
-        setStatusMessage(translateTrainingCycleRepositoryError(error));
-      } else if (isSessionExpiredError(error)) {
-        clearUserSessionState("Tu sesión expiró. Inicia sesión nuevamente.");
-      } else {
-        setStatusMessage(translatePersistenceError(error));
+      if (isUserScopedOperationCurrent(trainingCycleDeleteInFlightRef, operationOwner)) {
+        if (error instanceof TrainingCycleRepositoryError) {
+          setStatusMessage(translateTrainingCycleRepositoryError(error));
+        } else if (isSessionExpiredError(error)) {
+          clearUserSessionState("Tu sesión expiró. Inicia sesión nuevamente.");
+        } else {
+          setStatusMessage(translatePersistenceError(error));
+        }
       }
     } finally {
-      setIsBusy(false);
+      if (finalizeUserScopedOperation(trainingCycleDeleteInFlightRef, operationOwner)) {
+        setIsBusy(false);
+      }
     }
   }
 
@@ -3020,7 +3258,7 @@ export function OrganizatechApp({
   }
 
   async function startTrainingWithDailyReadiness() {
-    const operationOwner = tryAcquireActiveWorkoutOperation(workoutStartInFlightRef);
+    const operationOwner = tryAcquireUserScopedOperation(workoutStartInFlightRef);
     if (!operationOwner) return;
     let ownsCheckingState = false;
 
@@ -3063,7 +3301,7 @@ export function OrganizatechApp({
 
       activeWorkoutActions.beginDailyReadinessCheck();
       ownsCheckingState = true;
-      const readinessResult = await settleActiveWorkoutOperation(
+      const readinessResult = await settleUserScopedOperation(
         workoutStartInFlightRef,
         operationOwner,
         getDailyTrainingReadiness(),
@@ -3091,7 +3329,7 @@ export function OrganizatechApp({
         setRoutineNotice(message);
       }
     } finally {
-      const canFinalize = finalizeActiveWorkoutOperation(workoutStartInFlightRef, operationOwner);
+      const canFinalize = finalizeUserScopedOperation(workoutStartInFlightRef, operationOwner);
       if (ownsCheckingState && canFinalize) {
         activeWorkoutActions.completeDailyReadinessCheck();
       }
@@ -3107,7 +3345,7 @@ export function OrganizatechApp({
   }
 
   async function persistDailyReadiness(value: TrainingReadiness) {
-    const operationOwner = tryAcquireActiveWorkoutOperation(dailyReadinessSaveInFlightRef);
+    const operationOwner = tryAcquireUserScopedOperation(dailyReadinessSaveInFlightRef);
     if (!operationOwner) return;
     let ownsSavingState = false;
 
@@ -3125,17 +3363,21 @@ export function OrganizatechApp({
       }
 
       if (readinessMode === "legacy") {
-        if (dataMode !== "supabase" || !hasSupabaseSession) {
+        if (operationOwner.dataMode !== "supabase" || !hasSupabaseSession) {
           activeWorkoutActions.publishReadiness(value);
+          return;
+        }
+        if (!operationOwner.userId) {
+          activeWorkoutActions.publishDailyReadinessError("Tu sesión expiró. Inicia sesión nuevamente.");
           return;
         }
 
         activeWorkoutActions.beginDailyReadinessSave();
         ownsSavingState = true;
-        const saveResult = await settleActiveWorkoutOperation(
+        const saveResult = await settleUserScopedOperation(
           dailyReadinessSaveInFlightRef,
           operationOwner,
-          saveDailyTrainingReadiness(value),
+          saveDailyTrainingReadiness(value, operationOwner.userId),
         );
         if (saveResult.kind === "stale") return;
         if (saveResult.kind === "success") {
@@ -3160,9 +3402,13 @@ export function OrganizatechApp({
         return;
       }
 
+      if (!operationOwner.userId) {
+        activeWorkoutActions.publishDailyReadinessError("Tu sesión expiró. Inicia sesión nuevamente.");
+        return;
+      }
       activeWorkoutActions.beginDailyReadinessSave();
       ownsSavingState = true;
-      const saveResult = await settleActiveWorkoutOperation(
+      const saveResult = await settleUserScopedOperation(
         dailyReadinessSaveInFlightRef,
         operationOwner,
         saveTrainingWorkoutReadiness({
@@ -3171,7 +3417,7 @@ export function OrganizatechApp({
           cycleDayId: context.cycleDayId,
           workoutStartedAt: context.workoutStartedAt,
           payload,
-        }),
+        }, operationOwner.userId),
       );
       if (saveResult.kind === "stale") return;
       if (saveResult.kind === "success") {
@@ -3188,7 +3434,7 @@ export function OrganizatechApp({
         activeWorkoutActions.publishDailyReadinessError(translateTrainingWorkoutReadinessError(saveResult.error));
       }
     } finally {
-      const canFinalize = finalizeActiveWorkoutOperation(dailyReadinessSaveInFlightRef, operationOwner);
+      const canFinalize = finalizeUserScopedOperation(dailyReadinessSaveInFlightRef, operationOwner);
       if (ownsSavingState && canFinalize) {
         activeWorkoutActions.completeDailyReadinessSave();
       }
@@ -3225,13 +3471,18 @@ export function OrganizatechApp({
     pendingLink: PendingWorkoutReadinessLink,
     operationOwner: SessionOperationOwner,
   ) {
-    const linkResult = await settleActiveWorkoutOperation(
+    if (!operationOwner.userId) {
+      throw new TrainingWorkoutReadinessLinkFlowError(
+        "Tu sesión expiró. Inicia sesión nuevamente.",
+      );
+    }
+    const linkResult = await settleUserScopedOperation(
       workoutCompletionInFlightRef,
       operationOwner,
       linkTrainingWorkoutReadinessSession({
         workoutAttemptId: pendingLink.workoutAttemptId,
         trainingSessionId: pendingLink.trainingSessionId,
-      }),
+      }, operationOwner.userId),
     );
     if (linkResult.kind === "stale") return false;
     if (linkResult.kind === "error") throw linkResult.error;
@@ -3299,7 +3550,7 @@ export function OrganizatechApp({
     savedAt: string;
     trainedDate: string;
   }, operationOwner: SessionOperationOwner) {
-    const historicalResult = await settleActiveWorkoutOperation(
+    const historicalResult = await settleUserScopedOperation(
       workoutCompletionInFlightRef,
       operationOwner,
       loadTrainingCompletionHistoricalInputs({
@@ -3349,7 +3600,7 @@ export function OrganizatechApp({
   }
 
   async function saveCompletedTraining() {
-    const operationOwner = tryAcquireActiveWorkoutOperation(workoutCompletionInFlightRef);
+    const operationOwner = tryAcquireUserScopedOperation(workoutCompletionInFlightRef);
     if (!operationOwner) return;
     let ownsBusyState = false;
 
@@ -3368,12 +3619,12 @@ export function OrganizatechApp({
             completionStart.pendingLink,
             operationOwner,
           );
-          if (!linked || !isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+          if (!linked || !isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
           setStatusMessage("Entrenamiento guardado.");
           finishCompletedWorkout();
           applyScreenTransition(resolveWorkoutCompletionTransition({ hasCompletionSummary: false }));
         } catch (error) {
-          if (!isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+          if (!isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
           setRoutineNotice(translateTrainingWorkoutReadinessLinkError(error));
         }
         return;
@@ -3422,6 +3673,7 @@ export function OrganizatechApp({
       const readinessNote = formatReadinessNote(readiness);
 
       if (preparation.mode === "cycle_scoped") {
+        if (!operationOwner.userId) return;
         const entriesResult = buildCycleScopedWorkoutCompletionEntries({
           cycleId: preparation.cycleId,
           cycleDay: preparation.cycleDay,
@@ -3457,7 +3709,7 @@ export function OrganizatechApp({
         setIsBusy(true);
         ownsBusyState = true;
         setRoutineNotice("");
-        const sessionSaveResult = await settleActiveWorkoutOperation(
+        const sessionSaveResult = await settleUserScopedOperation(
           workoutCompletionInFlightRef,
           operationOwner,
           createTrainingSessionWithCycleEntries({
@@ -3470,12 +3722,12 @@ export function OrganizatechApp({
             status: "completed",
             notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${readinessNote}`,
             entries: entriesResult.entries,
-          }),
+          }, operationOwner.userId),
         );
         if (sessionSaveResult.kind === "stale") return;
         if (sessionSaveResult.kind === "error") {
           const message = handlePersistenceError(sessionSaveResult.error);
-          if (!isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+          if (!isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
           setRoutineNotice(message);
           return;
         }
@@ -3517,9 +3769,9 @@ export function OrganizatechApp({
               nextPendingLink,
               operationOwner,
             );
-            if (!linked || !isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+            if (!linked || !isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
           } catch (error) {
-            if (!isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+            if (!isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
             setRoutineNotice(translateTrainingWorkoutReadinessLinkError(error));
             return;
           }
@@ -3533,7 +3785,7 @@ export function OrganizatechApp({
           savedAt: new Date().toISOString(),
           trainedDate: preparation.trainedDate,
         }, operationOwner);
-        if (!summarySnapshot || !isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+        if (!summarySnapshot || !isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
         if (!activeWorkoutActions.publishWorkoutCompletion(summarySnapshot, validExercises.map((exercise) => exercise.id))) return;
         setStatusMessage("Entrenamiento guardado.");
         try {
@@ -3543,7 +3795,7 @@ export function OrganizatechApp({
           // El entrenamiento ya fue persistido; un fallo local de limpieza no debe habilitar duplicados.
         }
 
-        const scopedSessionResult = await settleActiveWorkoutOperation(
+        const scopedSessionResult = await settleUserScopedOperation(
           workoutCompletionInFlightRef,
           operationOwner,
           getCycleScopedTrainingSessionData(preparation.cycleId, preparation.cyclePlan),
@@ -3591,19 +3843,35 @@ export function OrganizatechApp({
           dayLabel: visibleDay,
           readinessNote,
         });
-        const sessionSaveResult = await settleActiveWorkoutOperation(
+        const legacySessionInput = {
+          routine: visibleRoutine,
+          plannedDay,
+          plannedDate: legacyPlannedDate,
+          trainedDate,
+          weekNumber: trainingWeek,
+          status: "completed" as const,
+          notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${readinessNote}`,
+          entries: legacyEntries,
+        };
+        let legacySessionRequest: ReturnType<typeof saveTrainingSessionWithEntries>;
+        if (operationOwner.dataMode === "supabase") {
+          if (!operationOwner.userId) return;
+          legacySessionRequest = saveTrainingSessionWithEntries(
+            legacySessionInput,
+            operationOwner.dataMode,
+            operationOwner.userId,
+          );
+        } else {
+          legacySessionRequest = saveTrainingSessionWithEntries(
+            legacySessionInput,
+            "demo",
+            "demo",
+          );
+        }
+        const sessionSaveResult = await settleUserScopedOperation(
           workoutCompletionInFlightRef,
           operationOwner,
-          saveTrainingSessionWithEntries({
-            routine: visibleRoutine,
-            plannedDay,
-            plannedDate: legacyPlannedDate,
-            trainedDate,
-            weekNumber: trainingWeek,
-            status: "completed",
-            notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${readinessNote}`,
-            entries: legacyEntries,
-          }, dataMode),
+          legacySessionRequest,
         );
         if (sessionSaveResult.kind === "stale") return;
         if (sessionSaveResult.kind === "error") throw sessionSaveResult.error;
@@ -3617,7 +3885,7 @@ export function OrganizatechApp({
           savedAt: new Date().toISOString(),
           trainedDate,
         }, operationOwner);
-        if (!summarySnapshot || !isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+        if (!summarySnapshot || !isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
         if (!activeWorkoutActions.publishWorkoutCompletion(summarySnapshot, validExercises.map((exercise) => exercise.id))) return;
         setTrainingSessions((current) => [...current, savedSession]);
         setEntries((current) => [...current, ...savedSession.entries]);
@@ -3625,15 +3893,15 @@ export function OrganizatechApp({
         finishCompletedWorkout();
         applyScreenTransition(resolveWorkoutCompletionTransition({ hasCompletionSummary: true }));
       } catch (error) {
-        if (!isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+        if (!isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
         const message = handlePersistenceError(error);
-        if (!isActiveWorkoutOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+        if (!isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
         setRoutineNotice(message === "Ya existe un entrenamiento registrado para esta rutina y fecha."
           ? "Ya existe un entrenamiento registrado para esta rutina y fecha. Puedes revisar el resumen o editar el registro existente."
           : message);
       }
     } finally {
-      const canFinalize = finalizeActiveWorkoutOperation(
+      const canFinalize = finalizeUserScopedOperation(
         workoutCompletionInFlightRef,
         operationOwner,
       );
@@ -3794,10 +4062,20 @@ export function OrganizatechApp({
 
   function markNotificationsSeen(ids: string[]) {
     if (ids.length === 0) return;
+    const requestToken = captureSessionDataRequestToken();
+    const scope = activeBrowserStorageScopeRef.current;
+    if (
+      !scope ||
+      requestToken.scope !== scope ||
+      !isSessionDataRequestCurrent(requestToken)
+    ) return;
     setSeenNotificationRecords((current) => {
+      if (
+        activeBrowserStorageScopeRef.current !== scope ||
+        !isSessionDataRequestCurrent(requestToken)
+      ) return current;
       const next = [...transitionNotificationsSeen(current, ids)];
-      const scope = activeBrowserStorageScopeRef.current;
-      if (scope) saveSeenNotificationRecords(next, scope);
+      saveSeenNotificationRecords(next, scope);
       return next;
     });
   }
@@ -4061,6 +4339,7 @@ export function OrganizatechApp({
       )}
       {screen === "perfil" && (
         <ProfileScreen
+          key={supabaseUser?.id ?? "anonymous"}
           profile={profileViewModel}
           personalData={profilePersonalData}
           canEditPersonalData={canEditProfilePersonalData}

@@ -52,13 +52,16 @@ export async function getProfilePersonalData(): Promise<ProfilePersonalData> {
   return mapProfileRow(data as ProfileRow);
 }
 
-export async function updateProfilePersonalData(input: ProfilePersonalDataInput): Promise<ProfilePersonalData> {
+export async function updateProfilePersonalData(
+  input: ProfilePersonalDataInput,
+  expectedUserId: string | undefined = undefined,
+): Promise<ProfilePersonalData> {
   const validation = buildProfilePersonalDataPayload(input);
   if (!validation.ok || !validation.payload) {
     throw new ProfileRepositoryError("Revisa los datos del perfil antes de guardar.");
   }
 
-  const { supabase, userId } = await getAuthenticatedProfileClient();
+  const { supabase, userId } = await getAuthenticatedProfileClient(expectedUserId);
   const { data, error } = await supabase
     .from("profiles")
     .update(validation.payload)
@@ -70,7 +73,7 @@ export async function updateProfilePersonalData(input: ProfilePersonalDataInput)
   return mapProfileRow(data as ProfileRow);
 }
 
-async function getAuthenticatedProfileClient() {
+async function getAuthenticatedProfileClient(expectedUserId?: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) throw new ProfileRepositoryError("Inicia sesión para guardar tu perfil.");
 
@@ -79,6 +82,9 @@ async function getAuthenticatedProfileClient() {
 
   const userId = data.user?.id;
   if (!userId) throw new ProfileRepositoryError("Inicia sesión para guardar tu perfil.");
+  if (expectedUserId && userId !== expectedUserId) {
+    throw new ProfileRepositoryError("Tu sesión cambió. Vuelve a intentar con la cuenta activa.");
+  }
 
   return { supabase, userId };
 }

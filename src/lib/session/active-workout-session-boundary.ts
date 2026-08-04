@@ -15,6 +15,16 @@ export interface ActiveWorkoutSessionBoundaryDecision {
 
 export interface SessionOperationOwner {
   readonly requestToken: SessionDataRequestToken;
+  readonly userId: string | null;
+  readonly scope: string | null;
+  readonly dataMode: SessionOperationDataMode;
+  readonly operationId: string;
+}
+
+export type SessionOperationDataMode = "demo" | "supabase";
+
+export interface SessionOperationOwnerLock {
+  current: SessionOperationOwner | null;
 }
 
 export type SessionOperationPromiseResult<T> =
@@ -65,9 +75,26 @@ export function resolveIncomingWorkoutDraftRecoveryScope<TScope extends string>(
 export function tryAcquireSessionOperationOwner(
   currentOwner: SessionOperationOwner | null,
   requestToken: SessionDataRequestToken,
+  input: {
+    dataMode?: SessionOperationDataMode;
+    operationId?: string;
+  } = {},
 ): SessionOperationOwner | null {
   if (currentOwner) return null;
-  return { requestToken };
+  return Object.freeze({
+    requestToken,
+    userId: requestToken.userId,
+    scope: requestToken.scope,
+    dataMode: input.dataMode ?? (requestToken.userId ? "supabase" : "demo"),
+    operationId: input.operationId ?? createSessionOperationId(),
+  });
+}
+
+export function createSessionOperationId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `session-operation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function isSessionOperationOwner(
@@ -75,6 +102,21 @@ export function isSessionOperationOwner(
   expectedOwner: SessionOperationOwner,
 ): boolean {
   return currentOwner === expectedOwner;
+}
+
+export function isSessionOperationOwnerCurrent(input: {
+  currentOwner: SessionOperationOwner | null;
+  owner: SessionOperationOwner;
+  isRequestCurrent: (token: SessionDataRequestToken) => boolean;
+}): boolean {
+  return isSessionOperationOwner(input.currentOwner, input.owner) &&
+    input.isRequestCurrent(input.owner.requestToken);
+}
+
+export function invalidateSessionOperationOwners(
+  locks: readonly SessionOperationOwnerLock[],
+): void {
+  for (const lock of locks) lock.current = null;
 }
 
 export function releaseSessionOperationOwner(
@@ -90,8 +132,11 @@ export async function settleSessionOperationPromise<T>(input: {
   getCurrentOwner: () => SessionOperationOwner | null;
   isRequestCurrent: (token: SessionDataRequestToken) => boolean;
 }): Promise<SessionOperationPromiseResult<T>> {
-  const isCurrent = () => isSessionOperationOwner(input.getCurrentOwner(), input.owner) &&
-    input.isRequestCurrent(input.owner.requestToken);
+  const isCurrent = () => isSessionOperationOwnerCurrent({
+    currentOwner: input.getCurrentOwner(),
+    owner: input.owner,
+    isRequestCurrent: input.isRequestCurrent,
+  });
 
   try {
     const value = await input.request;
@@ -107,7 +152,11 @@ export function finalizeSessionOperationOwner(input: {
   isRequestCurrent: (token: SessionDataRequestToken) => boolean;
 }): SessionOperationFinalization {
   const released = isSessionOperationOwner(input.currentOwner, input.owner);
-  const canFinalize = released && input.isRequestCurrent(input.owner.requestToken);
+  const canFinalize = isSessionOperationOwnerCurrent({
+    currentOwner: input.currentOwner,
+    owner: input.owner,
+    isRequestCurrent: input.isRequestCurrent,
+  });
 
   return {
     canFinalize,

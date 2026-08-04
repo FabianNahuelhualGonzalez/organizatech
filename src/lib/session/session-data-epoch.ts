@@ -8,6 +8,7 @@ export interface SessionDataEpoch extends SessionDataIdentity {
 }
 
 export type SessionDataRequestToken = Readonly<SessionDataEpoch>;
+export type AuthenticatedRefreshResultKind = "success" | "stale" | "error";
 
 interface AdvanceSessionDataEpochOptions {
   force?: boolean;
@@ -54,11 +55,11 @@ export function advanceSessionDataEpoch(
 }
 
 export function captureSessionDataRequestToken(current: SessionDataEpoch): SessionDataRequestToken {
-  return {
+  return Object.freeze({
     generation: current.generation,
     userId: current.userId,
     scope: current.scope,
-  };
+  });
 }
 
 export function isSessionDataRequestTokenCurrent(
@@ -68,4 +69,28 @@ export function isSessionDataRequestTokenCurrent(
   return current.generation === token.generation &&
     current.userId === token.userId &&
     current.scope === token.scope;
+}
+
+/**
+ * An authenticated refresh error means the session was established but its
+ * initial data could not be loaded. Only a stale result belongs to an invalid
+ * epoch and must stop navigation/publication for the captured identity.
+ */
+export function shouldContinueAuthenticatedFlowAfterRefresh(
+  kind: AuthenticatedRefreshResultKind,
+): boolean {
+  return kind !== "stale";
+}
+
+/**
+ * Exposes an authenticated identity only when it belongs to the effective
+ * session. A signup response may include a User while email confirmation is
+ * still pending; that User is not an authenticated application identity.
+ */
+export function resolveEffectiveAuthenticatedUser<TUser extends { id: string }>(
+  session: { user: TUser } | null,
+  candidateUser: TUser | null,
+): TUser | null {
+  if (!session || !candidateUser || session.user.id !== candidateUser.id) return null;
+  return session.user;
 }
