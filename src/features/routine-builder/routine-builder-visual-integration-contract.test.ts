@@ -340,7 +340,7 @@ assert.doesNotMatch(packageSource, /routine-builder-visual-gap-preparation-contr
 const registration = "tsx src/features/routine-builder/routine-builder-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);
 const testCommands = (JSON.parse(packageSource) as { scripts: { test: string } }).scripts.test.split(" && ");
-assert.equal(testCommands.length, 122);
+assert.equal(testCommands.length, 124);
 for (const command of [
   "tsx src/features/routine-builder/model/routine-builder-state.test.ts",
   "tsx src/features/routine-builder/model/routine-builder-draft-normalization.test.ts",

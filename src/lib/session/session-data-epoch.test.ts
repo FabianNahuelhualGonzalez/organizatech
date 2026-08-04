@@ -261,6 +261,8 @@ function collectActiveWorkoutRepositoryWrites(appSource: string, activeWorkoutSo
 
 interface P341ContractSources {
   app: string;
+  trainingDataController: string;
+  trainingDataRequestOwner: string;
   sessionEpoch: string;
   operationOwner: string;
   profileRepository: string;
@@ -339,7 +341,7 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   const avatarSave = extractBetween(
     sources.app,
     "async function handleUploadProfileAvatar",
-    "async function refreshPersistedTrainingCycles",
+    "async function refreshTrainingCyclesBoundary",
   );
   assertMarkersInOrder(avatarSave, [
     "tryAcquireUserScopedOperation(profileAvatarUploadInFlightRef)",
@@ -395,11 +397,16 @@ function assertP341StaticContracts(sources: P341ContractSources) {
 
   const refresh = extractBetween(
     sources.app,
-    "async function refreshData",
+    "function applyTrainingDataRefreshResult",
     "async function refreshProfilePersonalData",
   );
-  for (const kind of ["success", "stale", "error"]) assert.ok(refresh.includes(`kind: "${kind}"`));
-  assert.match(refresh, /handlePersistenceError\(error, \{ preserveSession: true \}\)/);
+  for (const kind of ["stale", "error"]) assert.ok(refresh.includes(`kind === "${kind}"`));
+  assert.match(refresh, /handlePersistenceError\(result\.error, \{ preserveSession: true \}\)/);
+  assert.match(refresh, /trainingDataController\.refreshForIdentity\(\{/);
+  assert.match(refresh, /captureSessionDataRequestToken\(\)/);
+  assert.match(refresh, /isSessionDataRequestCurrent\(requestToken\)/);
+  assert.match(sources.trainingDataRequestOwner, /requestToken: identity\.captureRequestToken\(\)/);
+  assert.match(sources.trainingDataRequestOwner, /identity\.isRequestTokenCurrent\(owner\.requestToken\)/);
   assert.match(
     sources.sessionEpoch,
     /export function shouldContinueAuthenticatedFlowAfterRefresh\([\s\S]*?return kind !== "stale";/,
@@ -1892,6 +1899,14 @@ async function run() {
   );
   const p341Sources: P341ContractSources = {
     app: componentSource,
+    trainingDataController: readFileSync(
+      new URL("../../features/training-data/model/training-data-controller.ts", import.meta.url),
+      "utf8",
+    ),
+    trainingDataRequestOwner: readFileSync(
+      new URL("../../features/training-data/model/training-data-request-owner.ts", import.meta.url),
+      "utf8",
+    ),
     sessionEpoch: readFileSync(
       new URL("./session-data-epoch.ts", import.meta.url),
       "utf8",
@@ -2028,8 +2043,8 @@ async function run() {
       name: "permitir que refresh error limpie la sesion",
       target: "app",
       mutate: (source) => source.replace(
-        "      handlePersistenceError(error, { preserveSession: true });",
-        "      handlePersistenceError(error);",
+        "        handlePersistenceError(result.error, { preserveSession: true });",
+        "        handlePersistenceError(result.error);",
       ),
     },
     {
@@ -2323,7 +2338,7 @@ async function run() {
 
   const refreshDataSource = extractBetween(
     componentSource,
-    "async function refreshData",
+    "async function refreshTrainingDataForSession",
     "async function refreshProfilePersonalData",
   );
   assert.match(refreshDataSource, /captureSessionDataRequestToken\(\)/);
@@ -2388,21 +2403,12 @@ async function run() {
   assert.match(profileSource, /captureSessionDataRequestToken\(\)/);
   assert.match(profileSource, /isSessionDataRequestCurrent\(requestToken\)/);
 
-  const cyclesSource = extractBetween(
-    componentSource,
-    "async function refreshPersistedTrainingCycles",
-    "async function loadCycleScopedPlanIntoState",
+  assert.match(p341Sources.trainingDataRequestOwner, /requestToken: identity\.captureRequestToken\(\)/);
+  assert.match(
+    p341Sources.trainingDataRequestOwner,
+    /identity\.isRequestTokenCurrent\(owner\.requestToken\)/,
   );
-  assert.match(cyclesSource, /captureSessionDataRequestToken\(\)/);
-  assert.match(cyclesSource, /isSessionDataRequestCurrent\(requestToken\)/);
-
-  const planSource = extractBetween(
-    componentSource,
-    "async function loadCycleScopedPlanIntoState",
-    "async function createCycleScopedTrainingCycleFromSetup",
-  );
-  assert.match(planSource, /captureSessionDataRequestToken\(\)/);
-  assert.match(planSource, /isSessionDataRequestCurrent\(requestToken\)/);
+  assert.match(p341Sources.trainingDataController, /owners\.isCurrent\(owner\)/);
 
   const handleAuthSource = extractBetween(
     componentSource,
@@ -2416,7 +2422,7 @@ async function run() {
     applyIdentityIndex,
   );
   const refreshIndex = handleAuthSource.indexOf(
-    'const refreshResult = await refreshData("supabase");',
+    'const refreshResult = await refreshTrainingDataForSession("supabase");',
     captureIdentityIndex,
   );
   const refreshContinuationIndex = handleAuthSource.indexOf(

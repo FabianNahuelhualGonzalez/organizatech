@@ -12,6 +12,10 @@ const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf
 const cycleIdStaticSource = readFileSync("src/lib/training/training-cycle-id.ts", "utf8");
 const planModelStaticSource = readFileSync("src/lib/training/training-plan-model.ts", "utf8");
 const presentationStaticSource = readFileSync("src/features/training-plan/model/training-cycle-presentation.ts", "utf8");
+const trainingDataSelectorsStaticSource = readFileSync(
+  "src/features/training-data/model/training-data-selectors.ts",
+  "utf8",
+);
 const packageStaticSource = readFileSync("package.json", "utf8");
 
 assert.match(cycleIdStaticSource, /export const TRAINING_CYCLE_IDS = \[/);
@@ -20,9 +24,9 @@ assert.match(cycleIdStaticSource, /export function isTrainingCycleId\(/);
 assert.match(planModelStaticSource, /export interface TrainingPlan \{/);
 
 assert.match(
-  appStaticSource,
+  trainingDataSelectorsStaticSource,
   /import \{ isTrainingCycleId \} from "@\/lib\/training\/training-cycle-id";/,
-  "React debe importar el guard como valor runtime",
+  "el selector TrainingData debe importar el guard como valor runtime",
 );
 assert.match(
   appStaticSource,
@@ -71,14 +75,17 @@ for (const preservedCopy of [
 
 for (const callSite of [
   /useState<TrainingPlan>\(\(\) => createDefaultTrainingPlan\(\)\)/,
-  /function createTrainingPlanFromPersistedCycle\([^)]*fallback: TrainingPlan\): TrainingPlan/,
   /function normalizePersistedTrainingPlan\(value: unknown\): TrainingPlan/,
   /return normalizeTrainingPlanInput\(value\)\.plan;/,
-  /isTrainingCycleId\(snapshotCycleType\)/,
   /applyTrainingPlanEdit\(\{ plan: current, activeDay: setupDay \}, edit\)/,
 ]) {
   assert.match(appStaticSource, callSite, "los call-sites principales deben conservar sus tipos y boundaries");
 }
+assert.match(
+  trainingDataSelectorsStaticSource,
+  /function createTrainingPlanFromPersistedCycle\([^)]*fallback: TrainingPlan[^)]*\): TrainingPlan/,
+);
+assert.match(trainingDataSelectorsStaticSource, /isTrainingCycleId\(snapshotCycleType\)/);
 assert.doesNotMatch(appStaticSource, /^\s*function createDefaultTrainingPlan\s*\(/m);
 assert.doesNotMatch(appStaticSource, /^\s*function normalizeTrainingPlan\s*\(/m);
 assert.doesNotMatch(

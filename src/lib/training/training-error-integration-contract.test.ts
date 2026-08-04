@@ -9,6 +9,10 @@ import { readFileSync } from "node:fs";
  * these assertions only guard imports, call-sites and integration boundaries.
  */
 const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+const trainingDataControllerSource = readFileSync(
+  "src/features/training-data/model/training-data-controller.ts",
+  "utf8",
+);
 const packageStaticSource = readFileSync("package.json", "utf8");
 
 const translators = [
@@ -16,7 +20,7 @@ const translators = [
     name: "translateTrainingCycleRepositoryError",
     modulePath: "@/lib/training/training-cycle-error",
     sourcePath: "src/lib/training/training-cycle-error.ts",
-    expectedCallSites: 5,
+    expectedCallSites: 4,
   },
   {
     name: "translateTrainingWorkoutReadinessError",
@@ -41,6 +45,21 @@ const translators = [
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+assert.match(
+  trainingDataControllerSource,
+  /import \{ translateTrainingCycleRepositoryError \} from "@\/lib\/training\/training-cycle-error";/,
+  "TrainingData importa el traductor canonico de ciclos",
+);
+assert.match(
+  trainingDataControllerSource,
+  /translateCycleError = translateTrainingCycleRepositoryError/,
+  "el boundary usa el traductor canonico como dependencia por defecto",
+);
+assert.ok(
+  (trainingDataControllerSource.match(/translateCycleError\(/g) ?? []).length >= 2,
+  "errores de cycles y snapshot pasan por el traductor inyectado",
+);
 
 for (const translator of translators) {
   const importPattern = new RegExp(

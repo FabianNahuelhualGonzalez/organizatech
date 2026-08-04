@@ -10,6 +10,10 @@ import { readFileSync } from "node:fs";
 const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
 const controllerSource = readFileSync("src/lib/training/training-plan-controller.ts", "utf8");
 const normalizationSource = readFileSync("src/lib/training/training-plan-normalization.ts", "utf8");
+const trainingDataSelectorsSource = readFileSync(
+  "src/features/training-data/model/training-data-selectors.ts",
+  "utf8",
+);
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
   scripts: { test: string };
 };
@@ -56,9 +60,11 @@ assert.match(appSource, /normalize: normalizePersistedTrainingPlan/);
 assert.match(appSource, /normalizeTrainingPlan: normalizePersistedTrainingPlan/);
 assert.match(appSource, /function normalizePersistedTrainingPlan\(value: unknown\): TrainingPlan \{/);
 assert.match(appSource, /return normalizeTrainingPlanInput\(value\)\.plan;/);
-assert.match(appSource, /function createTrainingPlanFromPersistedCycle\(/);
-assert.match(appSource, /const normalized = normalizeTrainingPlanInput\(next\);/);
-assert.match(appSource, /\[isTrainingCyclesRepositoryActive, persistedActiveCycle, trainingPlan\]/);
+assert.doesNotMatch(appSource, /function createTrainingPlanFromPersistedCycle\(/);
+assert.match(trainingDataSelectorsSource, /export function createTrainingPlanFromPersistedCycle\(/);
+assert.match(trainingDataSelectorsSource, /const normalized = normalizeTrainingPlanInput\(next\);/);
+assert.match(appSource, /selectTrainingDataView\(trainingDataState, trainingPlan\)/);
+assert.match(appSource, /\[trainingDataState, trainingPlan\]/);
 
 for (const removedDuplicate of [
   /^\s*function createDefaultTrainingPlan\s*\(/m,
@@ -114,6 +120,6 @@ assert.match(normalizationSource, /export function normalizeTrainingPlanInput\(/
 const integrationTestCommand = "tsx src/lib/training/training-plan-controller-integration-contract.test.ts";
 const testCommands = packageJson.scripts.test.split(" && ");
 assert.equal(testCommands.filter((command) => command === integrationTestCommand).length, 1);
-assert.equal(testCommands.length, 122);
+assert.equal(testCommands.length, 124);
 
 console.log("training plan controller static integration contract tests passed");

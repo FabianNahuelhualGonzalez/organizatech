@@ -826,7 +826,7 @@ assert.match(
   /<button className="button training-completion-button" type="button" onClick=\{onDashboard\}>\s*Ir al panel principal\s*<\/button>/,
   "el boton Dashboard conserva clase, tipo, handler y texto",
 );
-assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 122);
+assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 124);
 
 // GuidedTrainingScreen (P3-30): extraccion mecanica. Conserva el contrato de props, reutiliza el
 // normalizador canonico de P3-29 sin redeclararlo, y no introduce estado ni efectos propios.
