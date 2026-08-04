@@ -144,8 +144,9 @@ export function loadWorkoutDraft<TReadiness, TExerciseDrafts>(
     }
 
     const startedAt = resolveStableWorkoutStartedAt(parsed.activeWorkoutStartedAt, options.createStartedAt);
+    // Reconstruct the persisted record by allowlist. Parsed storage is untrusted and must never
+    // become the final object through spread/mass assignment (ownership/session keys included).
     const draft = {
-      ...parsed,
       version: options.version,
       updatedAt,
       dataMode: options.mode,

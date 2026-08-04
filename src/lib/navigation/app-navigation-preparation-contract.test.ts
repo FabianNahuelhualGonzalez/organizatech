@@ -164,7 +164,7 @@ assert.equal(
   1,
   "el snapshot único debe derivarse exactamente una vez",
 );
-assert.match(initialAuthSource, /useState<Screen>\(initialAuthState\.screen\)/);
+assert.match(appSource, /useAppNavigationController\(initialAuthState\.screen,/);
 assert.match(appSource, /useState\(initialAuthState\.statusMessage\)/);
 assert.match(appSource, /useState\(initialAuthState\.isAuthLoading\)/);
 assert.doesNotMatch(appSource, /function getInitialAuthScreen\(\): Screen \{/, "getInitialAuthScreen quedo redundante tras integrar resolveInitialAuthState y fue eliminado");

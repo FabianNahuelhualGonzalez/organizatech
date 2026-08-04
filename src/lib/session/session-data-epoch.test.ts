@@ -261,6 +261,7 @@ function collectActiveWorkoutRepositoryWrites(appSource: string, activeWorkoutSo
 
 interface P341ContractSources {
   app: string;
+  authenticatedSessionCoordinator: string;
   trainingDataController: string;
   trainingDataRequestOwner: string;
   sessionEpoch: string;
@@ -312,9 +313,7 @@ function assertP341StaticContracts(sources: P341ContractSources) {
     "function applySessionState",
   );
   for (const marker of [
-    "setIsMenuOpen(false)",
-    "setIsNotificationPanelOpen(false)",
-    "setIsTopbarHidden(false)",
+    "appShell.closeAll()",
     "setIsNewCycleConfirmOpen(false)",
     "setIsDeleteCycleConfirmOpen(false)",
     "setIsRoutineSuccessOpen(false)",
@@ -411,32 +410,96 @@ function assertP341StaticContracts(sources: P341ContractSources) {
     sources.sessionEpoch,
     /export function shouldContinueAuthenticatedFlowAfterRefresh\([\s\S]*?return kind !== "stale";/,
   );
-  const authenticatedRefreshFlows = [
-    extractBetween(sources.app, "async function bootstrapSession", "void bootstrapSession();"),
-    extractBetween(
-      sources.app,
-      'if (event === "SIGNED_IN" || (event === "INITIAL_SESSION" && session))',
-      'if (event === "INITIAL_SESSION" && !session)',
-    ),
-    extractBetween(
-      sources.app,
-      "const session = result.data.session;",
-      "} catch (error) {",
-    ),
-  ];
-  for (const flow of authenticatedRefreshFlows) {
-    assert.match(
-      flow,
-      /if \(!shouldContinueAuthenticatedFlowAfterRefresh\(refreshResult\.kind\)\) return;/,
-    );
-    assert.doesNotMatch(flow, /refreshResult\.kind !== "success"/);
-  }
-  const tokenRefreshed = extractBetween(
+  assert.equal(
+    (sources.app.match(/useRef\(createAuthenticatedSessionCoordinator\(\)\)/g) ?? []).length,
+    1,
+    "debe existir un unico coordinador de continuacion autenticada",
+  );
+  const authenticatedContinuation = extractBetween(
     sources.app,
-    'if (event === "TOKEN_REFRESHED")',
+    "function continueAuthenticatedSession",
+    "function applySessionState",
+  );
+  assertMarkersInOrder(authenticatedContinuation, [
+    "captureSessionDataRequestToken()",
+    "authenticatedSessionCoordinatorRef.current.continueSession",
+    "refresh: () => refreshTrainingDataForSession(authState.dataMode)",
+    "isCurrent: isSessionDataRequestCurrent",
+    "onComplete:",
+    "clearAuthForms()",
+    "restoreActiveFlowForSession",
+    'navigation.transition(createAuthNavigationReset("dashboard", "session-established"))',
+  ], "continuacion autenticada centralizada");
+
+  const bootstrapSession = extractBetween(
+    sources.app,
+    "async function bootstrapSession",
+    "void bootstrapSession();",
+  );
+  assert.match(
+    bootstrapSession,
+    /await continueAuthenticatedSession\(authState, "restore-active-flow"\)/,
+  );
+  assert.doesNotMatch(bootstrapSession, /refreshTrainingDataForSession/);
+
+  const authListener = extractBetween(
+    sources.app,
+    "const authSubscription = supabase?.auth.onAuthStateChange",
     "}).data.subscription;",
   );
-  assert.doesNotMatch(tokenRefreshed, /advanceSessionDataIdentity|setProfilePersonalData\(null\)/);
+  assert.match(
+    authListener,
+    /const authEventResult = coordinateAuthenticatedSessionEvent\([\s\S]*?intent: interactiveAuthAttemptRef\.current \? "dashboard" : "restore-active-flow"[\s\S]*?applySameIdentitySession: applySessionState[\s\S]*?applyNewIdentitySession: applySessionState[\s\S]*?return continueAuthenticatedSession\(state, intent\)/,
+  );
+  assert.doesNotMatch(
+    authListener,
+    /refreshTrainingDataForSession|refreshTrainingCyclesBoundary|advanceSessionDataIdentity|resetActiveWorkoutSessionState|activeWorkoutBoundary\.(?:discard|resetForIdentity)|clearWorkoutDraft|navigation\.(?:reset|transition)/,
+    "el listener no puede abrir refreshes ni invalidar una identidad estable por su cuenta",
+  );
+  assert.doesNotMatch(authListener, /applySessionState\(nextState\)/);
+
+  const authenticatedHandler = extractBetween(
+    sources.app,
+    "const session = result.data.session;",
+    "} catch (error) {",
+  );
+  assert.match(
+    authenticatedHandler,
+    /await continueAuthenticatedSession\(authenticatedState, "dashboard"\)/,
+  );
+  assert.doesNotMatch(
+    authenticatedHandler.slice(authenticatedHandler.indexOf("applySessionState(authenticatedState);")),
+    /refreshTrainingDataForSession|createAuthNavigationReset\("dashboard", "session-established"\)/,
+    "el handler autenticado delega refresh y completion al coordinador",
+  );
+
+  assert.match(
+    sources.authenticatedSessionCoordinator,
+    /if \(establishedKey === key\) \{\s*return Promise\.resolve\(\{ kind: "same-identity" \}\);/,
+  );
+  assert.match(
+    sources.authenticatedSessionCoordinator,
+    /if \(inFlight\?\.key === key\)[\s\S]*?if \(intent === "dashboard"\) inFlight\.intent = "dashboard";[\s\S]*?return inFlight\.promise;/,
+  );
+  assert.match(
+    sources.authenticatedSessionCoordinator,
+    /const operationRevision = revision;[\s\S]*?const refreshResult = await ports\.refresh\(\);[\s\S]*?operationRevision !== revision \|\|[\s\S]*?refreshResult\.kind === "stale" \|\|[\s\S]*?!ports\.isCurrent\(token\)/,
+  );
+  assertMarkersInOrder(sources.authenticatedSessionCoordinator, [
+    "ports.onComplete(operation.intent, refreshResult.kind)",
+    'if (operationRevision !== revision) return { kind: "stale" }',
+    "establishedKey = key",
+    'return { kind: "completed", refreshKind: refreshResult.kind }',
+  ], "completion autenticado unico");
+  assert.match(
+    sources.authenticatedSessionCoordinator,
+    /reset\(\) \{\s*revision \+= 1;\s*establishedKey = null;\s*inFlight = null;/,
+  );
+  assert.doesNotMatch(
+    sources.app,
+    /useEffect\(\(\) => \{\s*if \(!isTrainingCyclesRepositoryActive\) return;[\s\S]*?refreshTrainingCyclesBoundary/,
+    "la activacion del repository no puede competir con el refresh autenticado",
+  );
 
   assert.match(sources.operationOwner, /readonly operationId: string/);
   assert.match(sources.operationOwner, /readonly dataMode: SessionOperationDataMode/);
@@ -494,7 +557,7 @@ function assertP341StaticContracts(sources: P341ContractSources) {
 
   const activeWorkoutCompletion = extractBetween(
     sources.app,
-    "async function saveCompletedTraining",
+    "async function completeWorkoutCommand",
     "function clearAuthForms",
   );
   assert.match(
@@ -512,7 +575,7 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   // Active Workout. No sustituye los casos runtime; impide que un write nuevo quede fuera de tabla.
   const activeWorkoutWritesSource = extractBetween(
     sources.app,
-    "async function persistDailyReadiness",
+    "async function submitReadinessCommand",
     "function clearAuthForms",
   );
   const activeWorkoutWriteInventory = [
@@ -1305,6 +1368,30 @@ async function run() {
   await runStaleSuccessScenario("avatar-upload");
   await runStaleSuccessScenario("cycle-create");
   await runStaleSuccessScenario("cycle-delete");
+  await runStaleSuccessScenario("active-workout-start");
+  await runStaleSuccessScenario("active-workout-readiness");
+  await runStaleSuccessScenario("active-workout-completion");
+
+  for (const operation of ["start", "readiness", "completion"] as const) {
+    const lock: { current: SessionOperationOwner | null } = { current: null };
+    const epoch = createSessionDataEpoch(identityA);
+    const firstOwner = tryAcquireSessionOperationOwner(
+      lock.current,
+      captureSessionDataRequestToken(epoch),
+      { dataMode: "supabase", operationId: `${operation}-first-click` },
+    );
+    assert.ok(firstOwner);
+    lock.current = firstOwner;
+    assert.equal(
+      tryAcquireSessionOperationOwner(
+        lock.current,
+        captureSessionDataRequestToken(epoch),
+        { dataMode: "supabase", operationId: `${operation}-second-click` },
+      ),
+      null,
+      `${operation}: doble clic no adquiere un segundo owner`,
+    );
+  }
 
   {
     let currentEpoch = createSessionDataEpoch(identityA);
@@ -1899,6 +1986,10 @@ async function run() {
   );
   const p341Sources: P341ContractSources = {
     app: componentSource,
+    authenticatedSessionCoordinator: readFileSync(
+      new URL("../../features/app-shell/model/authenticated-session-coordinator.ts", import.meta.url),
+      "utf8",
+    ),
     trainingDataController: readFileSync(
       new URL("../../features/training-data/model/training-data-controller.ts", import.meta.url),
       "utf8",
@@ -2003,11 +2094,11 @@ async function run() {
       ),
     },
     {
-      name: "avanzar epoch en TOKEN_REFRESHED",
+      name: "avanzar epoch tras cada evento auth",
       target: "app",
       mutate: (source) => source.replace(
-        '      if (event === "TOKEN_REFRESHED") {',
-        '      if (event === "TOKEN_REFRESHED") {\n        advanceSessionDataIdentity(nextState);',
+        "        applySameIdentitySession: applySessionState,\n",
+        "        applySameIdentitySession: (state) => { applySessionState(state); advanceSessionDataIdentity({ userId: state.user?.id ?? null, scope: null }); },\n",
       ),
     },
     {
@@ -2021,14 +2112,14 @@ async function run() {
     {
       name: "eliminar reset de overlay/modal",
       target: "app",
-      mutate: (source) => source.replace("    setIsNotificationPanelOpen(false);\n", ""),
+      mutate: (source) => source.replace("    appShell.closeAll();\n", ""),
     },
     {
-      name: "volver a tratar refresh error como stale en bootstrap",
-      target: "app",
+      name: "volver a tratar refresh error como stale en continuacion autenticada",
+      target: "authenticatedSessionCoordinator",
       mutate: (source) => source.replace(
-        "          if (!shouldContinueAuthenticatedFlowAfterRefresh(refreshResult.kind)) return;",
-        '          if (refreshResult.kind !== "success") return;',
+        'refreshResult.kind === "stale" ||',
+        'refreshResult.kind !== "success" ||',
       ),
     },
     {
@@ -2147,8 +2238,8 @@ async function run() {
       name: "introducir persistencia Active Workout sin owner",
       target: "app",
       mutate: (source) => `import { saveUnownedActiveWorkoutPersistence } from "@/lib/training/unowned-repository";\n${source.replace(
-        "async function persistDailyReadiness(value: TrainingReadiness) {",
-        "async function persistDailyReadiness(value: TrainingReadiness) {\n    void saveUnownedActiveWorkoutPersistence();",
+        "async function submitReadinessCommand(\n    value: TrainingReadiness,",
+        "async function submitReadinessCommand(\n    value: TrainingReadiness,\n    void saveUnownedActiveWorkoutPersistence();",
       )}`,
     },
     {
@@ -2213,7 +2304,7 @@ async function run() {
     "El cambio de identidad debe invalidar el epoch antes del reset de Active Workout",
   );
   assert.ok(
-    applySessionSource.indexOf("advanceSessionDataIdentity") < applySessionSource.indexOf("incomingWorkoutDraftRecoveryScopeRef.current = resolveIncomingWorkoutDraftRecoveryScope"),
+    applySessionSource.indexOf("advanceSessionDataIdentity") < applySessionSource.indexOf("resolveIncomingWorkoutDraftRecoveryScope"),
     "La proteccion del draft entrante se publica solo despues de invalidar el epoch anterior",
   );
   assert.match(
@@ -2256,19 +2347,14 @@ async function run() {
   const activeWorkoutResetSource = extractBetween(
     componentSource,
     "const resetActiveWorkoutSessionState = useCallback",
-    "}, [activeWorkoutActions, resetExerciseHistory]);",
+    "}, [activeWorkoutBoundary, resetExerciseHistory]);",
   );
   for (const resetContract of [
-    "workoutStartInFlightRef.current = null",
-    "dailyReadinessSaveInFlightRef.current = null",
-    "workoutCompletionInFlightRef.current = null",
-    "activeWorkoutAttemptIdRef.current = null",
-    "pendingReadinessLinkRef.current = null",
-    "activeWorkoutReadinessContextRef.current = null",
-    "activeWorkoutActions.resetActiveWorkout()",
+    "activeWorkoutBoundary.resetForIdentity",
+    "incomingRecoveryScope",
     // P3-32: performance y observación ya no se resetean con setters sueltos del root; el reset
     // central delega en la API del coordinador, único dueño de ambos estados y de sus request keys.
-    "resetExerciseHistory()",
+    "resetHistory: resetExerciseHistory",
   ]) {
     assert.ok(activeWorkoutResetSource.includes(resetContract), `El reset central conserva ${resetContract}`);
   }
@@ -2301,30 +2387,31 @@ async function run() {
     /latestExercisePerformanceRequestKeyRef|latestExerciseObservationRequestKeyRef/,
     "las request keys de historial son propiedad exclusiva de useActiveWorkoutExerciseHistory",
   );
-  for (const resetRef of [
-    "workoutStartInFlightRef.current = null",
-    "dailyReadinessSaveInFlightRef.current = null",
-    "workoutCompletionInFlightRef.current = null",
-    "activeWorkoutAttemptIdRef.current = null",
-    "pendingReadinessLinkRef.current = null",
-    "activeWorkoutReadinessContextRef.current = null",
-  ]) {
-    assert.ok(activeWorkoutResetSource.includes(resetRef), `El reset central conserva ${resetRef}`);
+  const activeWorkoutBoundarySource = readFileSync(
+    new URL("../../features/active-workout/hooks/useActiveWorkoutBoundary.ts", import.meta.url),
+    "utf8",
+  );
+  const activeWorkoutLifecycleSource = readFileSync(
+    new URL("../../features/active-workout/hooks/useActiveWorkoutDraftLifecycle.ts", import.meta.url),
+    "utf8",
+  );
+  for (const resetRef of ["startOwnerRef", "readinessOwnerRef", "completionOwnerRef", "replaceRuntimeSnapshot(EMPTY_RUNTIME)"]) {
+    assert.ok(activeWorkoutBoundarySource.includes(resetRef), `El boundary conserva ${resetRef}`);
   }
 
   assert.match(
-    componentSource,
-    /const scope = getBrowserStorageScope\(dataMode, supabaseUser\?\.id\);\s*if \(scope && incomingWorkoutDraftRecoveryScopeRef\.current === scope\) return;\s*clearWorkoutDraft\(dataMode, supabaseUser\?\.id\)/,
+    activeWorkoutLifecycleSource,
+    /const scope = getBrowserStorageScope\(input\.dataMode, input\.userId\);\s*if \(scope && getIncomingRecoveryScope\(\) === scope\) return;\s*clearActiveWorkoutDraft\(input\.dataMode, input\.userId\)/,
     "La limpieza automatica no borra el draft del scope entrante antes de intentar su recuperacion",
   );
   assert.match(
     componentSource,
-    /function restoreActiveFlowForSession[\s\S]*loadActiveFlow\(mode, userId\);[\s\S]*incomingWorkoutDraftRecoveryScopeRef\.current = null/,
+    /function restoreActiveFlowForSession[\s\S]*beforeRestoreAttempt\(recoveryScope\)[\s\S]*consumeIncomingRecoveryScope\(recoveryScope\)/,
     "La proteccion se libera al intentar la restauracion inicial del scope",
   );
   assert.match(
     componentSource,
-    /function restoreActiveWorkoutForNavigation[\s\S]*loadWorkoutDraft\(dataMode, supabaseUser\?\.id\);[\s\S]*incomingWorkoutDraftRecoveryScopeRef\.current = null/,
+    /function resumeOrRestoreActiveWorkoutCommand[\s\S]*loadWorkoutDraft\(dataMode, supabaseUser\?\.id\);[\s\S]*consumeIncomingRecoveryScope\(recoveryScope\)/,
     "La proteccion se libera al intentar la reentrada manual",
   );
 
@@ -2416,44 +2503,39 @@ async function run() {
     "async function handlePasswordRecovery",
   );
   const sessionResultIndex = handleAuthSource.indexOf("const session = result.data.session;");
-  const applyIdentityIndex = handleAuthSource.indexOf("applySessionState({", sessionResultIndex);
+  const authenticatedStateIndex = handleAuthSource.indexOf(
+    "const authenticatedState: SupabaseSessionState",
+    sessionResultIndex,
+  );
+  const applyIdentityIndex = handleAuthSource.indexOf(
+    "applySessionState(authenticatedState);",
+    authenticatedStateIndex,
+  );
   const captureIdentityIndex = handleAuthSource.indexOf(
     "appliedIdentityToken = captureSessionDataRequestToken();",
     applyIdentityIndex,
   );
-  const refreshIndex = handleAuthSource.indexOf(
-    'const refreshResult = await refreshTrainingDataForSession("supabase");',
+  const continuationIndex = handleAuthSource.indexOf(
+    'await continueAuthenticatedSession(authenticatedState, "dashboard");',
     captureIdentityIndex,
-  );
-  const refreshContinuationIndex = handleAuthSource.indexOf(
-    "if (!shouldContinueAuthenticatedFlowAfterRefresh(refreshResult.kind)) return;",
-    refreshIndex,
-  );
-  const staleGuardIndex = handleAuthSource.indexOf(
-    "if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;",
-    refreshContinuationIndex,
-  );
-  const clearFormsIndex = handleAuthSource.indexOf("clearAuthForms();", staleGuardIndex);
-  // P3-07B: la navegación final del login pasa por el controlador canónico (transición
-  // autoritativa con reset de historial), ya no por un setter directo de pantalla.
-  const dashboardIndex = handleAuthSource.indexOf(
-    'applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));',
-    clearFormsIndex,
   );
   const orderedLoginSteps = [
     sessionResultIndex,
+    authenticatedStateIndex,
     applyIdentityIndex,
     captureIdentityIndex,
-    refreshIndex,
-    refreshContinuationIndex,
-    staleGuardIndex,
-    clearFormsIndex,
-    dashboardIndex,
+    continuationIndex,
   ];
   assert.equal(
     orderedLoginSteps.every((index, position) => index >= 0 && (position === 0 || index > orderedLoginSteps[position - 1])),
     true,
-    "El login debe aplicar identidad, distinguir stale de error, validar el token y solo entonces navegar",
+    "El login debe aplicar identidad y delegar una sola continuacion autenticada",
+  );
+  const authenticatedHandlerTail = handleAuthSource.slice(applyIdentityIndex, continuationIndex);
+  assert.doesNotMatch(
+    authenticatedHandlerTail,
+    /refreshTrainingDataForSession|createAuthNavigationReset\("dashboard", "session-established"\)/,
+    "el handler no puede competir con el coordinador por refresh o completion",
   );
   assert.match(
     handleAuthSource,
@@ -2461,7 +2543,7 @@ async function run() {
   );
   assert.match(
     handleAuthSource,
-    /finally \{\s*if \(!appliedIdentityToken \|\| isSessionDataRequestCurrent\(appliedIdentityToken\)\) \{\s*setIsBusy\(false\);/,
+    /finally \{\s*interactiveAuthAttemptRef\.current = false;\s*if \(!appliedIdentityToken \|\| isSessionDataRequestCurrent\(appliedIdentityToken\)\) \{\s*setIsBusy\(false\);/,
   );
 
   // ---------------------------------------------------------------------------------------------

@@ -25,6 +25,10 @@ const controllerStateStaticSource = readFileSync(
   "src/features/active-workout/model/active-workout-controller-state.ts",
   "utf8",
 );
+const activeWorkoutBoundaryStaticSource = readFileSync(
+  "src/features/active-workout/model/active-workout-boundary-contract.ts",
+  "utf8",
+);
 const packageStaticSource = readFileSync("package.json", "utf8");
 
 assert.match(
@@ -60,7 +64,7 @@ assert.match(
   "el controller React debe conservar TrainingReadiness como fuente unica",
 );
 assert.match(appStaticSource, /\breadiness,\s*checkingDailyReadiness,/);
-assert.match(appStaticSource, /\} = useActiveWorkoutController\(\);/);
+assert.match(appStaticSource, /const activeWorkoutBoundary = useActiveWorkoutBoundary\(/);
 assert.doesNotMatch(appStaticSource, /const \[readiness,\s*setReadiness\]/);
 assert.match(
   readinessScreenStaticSource,
@@ -70,8 +74,7 @@ assert.match(
 
 for (const functionContract of [
   /function persistCurrentWorkoutDraftSnapshot\(nextReadiness: TrainingReadiness \| null\)/,
-  /async function submitDailyReadiness\(value: Omit<TrainingReadiness, "skipped">\)/,
-  /async function persistDailyReadiness\(value: TrainingReadiness\)/,
+  /async function submitReadinessCommand\([\s\S]*value: TrainingReadiness,/,
   /function formatReadinessNote\(value: TrainingReadiness \| null\)/,
 ]) {
   assert.match(
@@ -80,6 +83,7 @@ for (const functionContract of [
     "las funciones preexistentes deben conservar sus contratos con TrainingReadiness",
   );
 }
+assert.match(activeWorkoutBoundaryStaticSource, /submitReadiness\(value: Omit<TrainingReadiness, "skipped">\): Promise<void>/);
 assert.doesNotMatch(
   appStaticSource,
   /function normalizeTrainingReadiness\(/,

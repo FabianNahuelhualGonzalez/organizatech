@@ -173,16 +173,11 @@ Object.entries(components).forEach(([label, source]) => {
   assert.doesNotMatch(source, /notification-panel"|<NotificationPanel/, `${label} no debe dibujar el panel de notificaciones (sigue siendo slot del root)`);
 });
 
-// 9a. toggleMenu: cierra notificaciones, luego alterna isMenuOpen, y el refresh de avatar solo
-//     ocurre en la rama de apertura (next === true) — orden exacto preservado del onClick original.
+// 9a. toggleMenu delega exclusión/toggle al controller y conserva el refresh sólo al abrir.
 const toggleMenuSource = sourceSection(appSource, "function toggleMenu() {", "  return (");
 assertInOrder(toggleMenuSource, [
-  "setIsNotificationPanelOpen(false)",
-  "setIsMenuOpen((value) => {",
-  "const next = !value;",
-  "if (next) {",
+  "appShell.toggleMenu(() => {",
   "void refreshProfileAvatar({ force: true, allowProfileLookup: true });",
-  "return next;",
 ]);
 
 // 9b. Badge: el contador solo se dibuja cuando hay texto (guard condicional, no siempre visible).
@@ -191,12 +186,12 @@ assert.match(components.topbar, /className="notification-badge" aria-label={noti
 
 // 9c. Overlay de notificaciones: el cierre sigue siendo un callback del root pasado al panel
 //     (el backdrop en si vive en NotificationPanel y se verifica en su propio contrato).
-assert.match(appSource, /onClose=\{\(\) => setIsNotificationPanelOpen\(false\)\}/);
+assert.match(appSource, /onClose=\{appShell\.closeNotifications\}/);
 
 // 9d. Drawer: onNavigate y onLogout llegan directo del root, sin envoltorios que oculten el navigateTo/handleLogout reales.
 assert.match(appSource, /onNavigate={navigateTo}/);
 assert.match(appSource, /onLogout={handleLogout}/);
-assert.match(appSource, /onClose={\(\) => setIsMenuOpen\(false\)}/);
+assert.match(appSource, /onClose={appShell\.closeMenu}/);
 assert.match(components.drawer, /onClick={\(\) => onNavigate\(item\.id\)}/);
 
 // 9e. Back button: AppScreenHeader solo se pasa cuando canGoBackFromScreen(screen) es true — el

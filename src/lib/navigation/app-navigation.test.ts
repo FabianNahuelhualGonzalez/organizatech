@@ -155,6 +155,7 @@ assert.equal(openTraining.resetTrainingStart, true);
 const pauseTraining = back(openTraining.navigation, { hasStartedTraining: true, hasReadiness: true });
 assert.equal(pauseTraining.reason, "pause-active-workout");
 assert.deepEqual(pauseTraining.navigation, resetContextualNavigation("dashboard"));
+assert.equal(pauseTraining.pauseTraining, true);
 assert.equal(pauseTraining.stopTraining, false);
 assert.equal(pauseTraining.clearReadiness, false);
 assert.deepEqual(trainingSelection, trainingSelectionBefore);
@@ -300,7 +301,7 @@ assert.doesNotMatch(
 const clearUserSessionStateBlock = appSource.slice(clearUserSessionStateStart, clearBrowserStorageScopeStart);
 assert.equal(
   (clearUserSessionStateBlock.match(
-    /applyContextualNavigation\(resetContextualNavigation\("login"\)\)/g,
+    /navigation\.reset\("login"\)/g,
   ) ?? []).length,
   1,
   "logout usa una única transición coherente hacia login",

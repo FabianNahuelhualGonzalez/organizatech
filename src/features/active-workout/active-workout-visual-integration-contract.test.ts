@@ -577,6 +577,9 @@ const controllerModelSource = readSource(
 const controllerHookSource = readSource(
   "src/features/active-workout/hooks/useActiveWorkoutController.ts",
 );
+const boundaryHookSource = readSource(
+  "src/features/active-workout/hooks/useActiveWorkoutBoundary.ts",
+);
 const files = {
   readiness: readSource("src/features/active-workout/components/TrainingReadinessScreen.tsx"),
   start: readSource("src/features/active-workout/components/TrainingStartScreen.tsx"),
@@ -598,12 +601,12 @@ assert.match(controllerHookSource, /useReducer\(\s*activeWorkoutControllerReduce
 assert.match(controllerHookSource, /return useMemo\(\(\) => \(\{ state, actions \}\)/);
 assert.match(
   appSource,
-  /import \{ useActiveWorkoutController \} from "@\/features\/active-workout\/hooks\/useActiveWorkoutController";/,
+  /import \{ useActiveWorkoutBoundary \} from "@\/features\/active-workout\/hooks\/useActiveWorkoutBoundary";/,
 );
 assert.equal(
-  (appSource.match(/useActiveWorkoutController\(\)/g) ?? []).length,
+  (appSource.match(/useActiveWorkoutBoundary\(/g) ?? []).length,
   1,
-  "el root invoca una sola instancia del controller",
+  "el root invoca una sola instancia del boundary",
 );
 assert.doesNotMatch(controllerHookSource, /\buseEffect\b|\bfetch\s*\(|\blocalStorage\b|\bsessionStorage\b/);
 assert.doesNotMatch(
@@ -665,8 +668,10 @@ for (const removedSetter of [
 }
 assert.match(
   appSource,
-  /const \{ state: activeWorkoutState, actions: activeWorkoutActions \} = useActiveWorkoutController\(\);/,
+  /const activeWorkoutBoundary = useActiveWorkoutBoundary\(/,
 );
+assert.match(appSource, /const activeWorkoutState = activeWorkoutBoundary\.state;/);
+assert.match(appSource, /const activeWorkoutActions = activeWorkoutBoundary\.controllerActions;/);
 assert.match(appSource, /resolveActiveWorkoutStartTransition/);
 assert.match(appSource, /resolveActiveWorkoutRecoveryTransition/);
 assert.match(controllerHookSource, /resolveActiveWorkoutCompletionTransition/);
@@ -679,15 +684,15 @@ assert.match(controllerHookSource, /dispatch\(\{ type: "workout_completion_publi
 
 const startBoundarySource = appSource.slice(
   appSource.indexOf("  function prepareWorkoutStartSnapshot"),
-  appSource.indexOf("  async function startTrainingWithDailyReadiness"),
+  appSource.indexOf("  async function startTrainingCommand"),
 );
 assert.ok(
-  startBoundarySource.indexOf("activeWorkoutAttemptIdRef.current =") <
+  startBoundarySource.indexOf("activeWorkoutBoundary.replaceRuntimeSnapshot") <
     startBoundarySource.indexOf("activeWorkoutActions.commitWorkoutStart"),
   "start sincroniza attempt ref antes de publicar la transicion atomica",
 );
 assert.ok(
-  startBoundarySource.indexOf("pendingReadinessLinkRef.current =") <
+  startBoundarySource.indexOf("pendingReadinessLink: start.value.pendingReadinessLink") <
     startBoundarySource.indexOf("activeWorkoutActions.commitWorkoutStart"),
   "start sincroniza pending ref antes de publicar la transicion atomica",
 );
@@ -696,11 +701,11 @@ const recoveryBoundarySource = appSource.slice(
   appSource.indexOf("  function restoreActiveWorkoutForNavigation"),
 );
 assert.ok(
-  recoveryBoundarySource.indexOf("activeWorkoutAttemptIdRef.current =") <
+  recoveryBoundarySource.indexOf("activeWorkoutBoundary.replaceRuntimeSnapshot") <
     recoveryBoundarySource.indexOf("activeWorkoutActions.recoverWorkout"),
 );
 assert.ok(
-  recoveryBoundarySource.indexOf("pendingReadinessLinkRef.current =") <
+  recoveryBoundarySource.indexOf("pendingReadinessLink: recovery.value.pendingReadinessLink") <
     recoveryBoundarySource.indexOf("activeWorkoutActions.recoverWorkout"),
 );
 const resetBoundarySource = appSource.slice(
@@ -708,9 +713,13 @@ const resetBoundarySource = appSource.slice(
   appSource.indexOf("  useEffect(() =>", appSource.indexOf("  const resetActiveWorkoutSessionState = useCallback")),
 );
 assert.ok(
-  resetBoundarySource.indexOf("workoutCompletionInFlightRef.current = null") <
-    resetBoundarySource.indexOf("activeWorkoutActions.resetActiveWorkout()"),
+  resetBoundarySource.indexOf("activeWorkoutBoundary.resetForIdentity") >= 0,
   "reset invalida owners y refs antes de publicar memoria limpia",
+);
+assert.ok(
+  boundaryHookSource.indexOf("invalidateOperations();") <
+    boundaryHookSource.indexOf("controller.actions.resetActiveWorkout();"),
+  "el boundary invalida owners antes de publicar memoria limpia",
 );
 
 assert.doesNotMatch(controllerModelSource, /from "react"|\buse[A-Z]\w*\b/);
