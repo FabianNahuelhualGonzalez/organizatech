@@ -96,8 +96,9 @@ assert.match(
 assert.doesNotMatch(appSource, /setupTransition\.validation/);
 assert.doesNotMatch(appSource, /const allPlannedDaysComplete\b/);
 
-assert.equal((appSource.match(/\bsetScreen\(/g) ?? []).length, 2);
-assert.equal((appSource.match(/\bsetScreenHistory\(/g) ?? []).length, 1);
+assert.equal((appSource.match(/\bsetScreen\(/g) ?? []).length, 0);
+assert.equal((appSource.match(/\bsetScreenHistory\(/g) ?? []).length, 0);
+assert.match(appSource, /useAppNavigationController/);
 
 for (const visualContract of [
   /import \{ TrainingPlanSetupCard \}/,

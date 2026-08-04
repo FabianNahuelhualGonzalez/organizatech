@@ -16,6 +16,14 @@ const controllerStateStaticSource = readFileSync(
   "src/features/active-workout/model/active-workout-controller-state.ts",
   "utf8",
 );
+const activeWorkoutBoundaryStaticSource = readFileSync(
+  "src/features/active-workout/hooks/useActiveWorkoutBoundary.ts",
+  "utf8",
+);
+const activeWorkoutBoundaryContractStaticSource = readFileSync(
+  "src/features/active-workout/model/active-workout-boundary-contract.ts",
+  "utf8",
+);
 const completionStaticSource = readFileSync("src/lib/training/active-workout-completion.ts", "utf8");
 const completionSummaryStaticSource = readFileSync("src/lib/training/training-completion-summary.ts", "utf8");
 // P3-30: la declaracion `drafts: Record<string, ExerciseDraft>` dejo de estar inline en el root al
@@ -63,13 +71,13 @@ assert.match(
 );
 assert.match(
   appStaticSource,
-  /import \{ useActiveWorkoutController \} from "@\/features\/active-workout\/hooks\/useActiveWorkoutController";/,
-  "el root debe importar el controller productivo",
+  /import \{ useActiveWorkoutBoundary \} from "@\/features\/active-workout\/hooks\/useActiveWorkoutBoundary";/,
+  "el root debe importar el boundary productivo",
 );
 assert.match(
   appStaticSource,
-  /const \{ state: activeWorkoutState, actions: activeWorkoutActions \} = useActiveWorkoutController\(\);/,
-  "el root debe usar una unica instancia del controller",
+  /const activeWorkoutBoundary = useActiveWorkoutBoundary\(/,
+  "el root debe usar una unica instancia del boundary",
 );
 assert.match(
   appStaticSource,
@@ -78,9 +86,9 @@ assert.match(
 );
 
 assert.match(
-  appStaticSource,
-  /import \{[^}]*type ActiveWorkoutReadinessContext,[^}]*\} from "@\/lib\/training\/workout-draft-storage";/,
-  "React debe importar ActiveWorkoutReadinessContext como tipo",
+  activeWorkoutBoundaryContractStaticSource,
+  /import type \{[^}]*ActiveWorkoutReadinessContext,[^}]*\} from "@\/lib\/training\/workout-draft-storage";/,
+  "el contrato debe importar ActiveWorkoutReadinessContext como tipo",
 );
 assert.match(
   appStaticSource,
@@ -99,9 +107,9 @@ assert.doesNotMatch(appStaticSource, /^\s*type ActiveWorkoutReadinessContext\s*=
 assert.doesNotMatch(appStaticSource, /^\s*interface ExerciseDraft\s*\{/m);
 
 assert.match(
-  appStaticSource,
-  /activeWorkoutReadinessContextRef = useRef<ActiveWorkoutReadinessContext \| null>\(null\)/,
-  "el useRef preexistente debe conservarse literalmente",
+  activeWorkoutBoundaryStaticSource,
+  /readinessContextRef = useRef<ActiveWorkoutRuntimeSnapshot\["readinessContext"\]>\(null\)/,
+  "el ref sincrono pertenece al boundary",
 );
 assert.match(activeDraftStaticSource, /WorkoutDraftStorageRecord<TrainingReadiness \| null, Record<string, ExerciseDraft>>/);
 assert.doesNotMatch(

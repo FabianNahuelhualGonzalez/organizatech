@@ -276,7 +276,7 @@ assert.ok(
     mappingAdapterSource.indexOf("dispatchRoutineBuilder({"),
   "blocked se resuelve antes de despachar estado",
 );
-assert.match(appSource, /!prepareRoutineBuilderStateFromExercises\(exercises, activeRoutineDay\)[\s\S]*?return;/);
+assert.match(appSource, /prepareRoutineEditor: \(\) => prepareRoutineBuilderStateFromExercises\(exercises, activeRoutineDay\)/);
 
 // 12. Recovery está conectado a la API única de storage. Full y partial mantienen mensajes
 //     distintos y discardedRowCount se consume; las normalizaciones retiradas no vuelven al root.
@@ -329,9 +329,10 @@ assert.doesNotMatch(
   /saveExercise|deleteExercise|addCycleScopedTrainingDaysAndExercises|repository|supabase|storage/,
 );
 
-// 15. Controlador de navegación intacto: 2 escritores de pantalla, 1 de historial.
-assert.equal((appSource.match(/setScreen\(/g) ?? []).length, 2, "controlador de navegacion intacto: 2 escritores autorizados");
-assert.equal((appSource.match(/setScreenHistory\(/g) ?? []).length, 1, "controlador de navegacion intacto: 1 escritor de historial");
+// 15. Controlador de navegación feature-local: ningún writer queda en el root.
+assert.equal((appSource.match(/setScreen\(/g) ?? []).length, 0);
+assert.equal((appSource.match(/setScreenHistory\(/g) ?? []).length, 0);
+assert.match(appSource, /useAppNavigationController/);
 
 // 16. La preparación fue absorbida y los cinco tests de modelo, más este contrato, están
 //     registrados exactamente una vez. La consolidacion P3-15 a P3-26 suma 122 comandos.

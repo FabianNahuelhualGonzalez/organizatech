@@ -53,7 +53,7 @@ const openTargetSource = sourceSection("  function openNotificationTarget", "  f
 assertInOrder(openTargetSource, [
   "resolveNotificationOpenIntent(notification)",
   "markNotificationsSeen([intent.notificationId])",
-  "setIsNotificationPanelOpen(false)",
+  "appShell.closeNotifications()",
   "activeWorkoutActions.clearTrainingCompletionSummary()",
   "setDashboardDayOverride(intent.dashboardDayOverride)",
   "dispatchProgressController({ type: \"day_selected\", day: intent.comparisonDayOverride })",

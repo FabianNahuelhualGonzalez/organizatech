@@ -33,8 +33,10 @@ import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
 import { ProfileScreen } from "@/components/profile/ProfileScreen";
 import { CycleHistoryProductiveContainer } from "@/components/training/cycle-history";
 import { GuidedTrainingScreen } from "@/features/active-workout/components/GuidedTrainingScreen";
-import { useActiveWorkoutController } from "@/features/active-workout/hooks/useActiveWorkoutController";
+import { useActiveWorkoutBoundary } from "@/features/active-workout/hooks/useActiveWorkoutBoundary";
+import { useActiveWorkoutDraftLifecycle } from "@/features/active-workout/hooks/useActiveWorkoutDraftLifecycle";
 import { useActiveWorkoutExerciseHistory } from "@/features/active-workout/hooks/useActiveWorkoutExerciseHistory";
+import type { ActiveWorkoutOperationContext } from "@/features/active-workout/model/active-workout-boundary-contract";
 import {
   createActiveWorkoutReadinessContext,
   resolveActiveWorkoutRecoveryTransition,
@@ -47,6 +49,11 @@ import { TrainingStartScreen } from "@/features/active-workout/components/Traini
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
+import {
+  coordinateAuthenticatedSessionEvent,
+  createAuthenticatedSessionCoordinator,
+  type AuthenticatedSessionIntent,
+} from "@/features/app-shell/model/authenticated-session-coordinator";
 import { ComparisonScreenV2 } from "@/features/progress/components/comparison-screen-v2";
 import { useTrainingDataController } from "@/features/training-data/hooks/useTrainingDataController";
 import type { TrainingDataRefreshResult } from "@/features/training-data/model/training-data-controller";
@@ -132,19 +139,15 @@ import {
   resolvePasswordRecoverySessionDecision,
 } from "@/lib/auth/password-recovery-session";
 import {
-  getActiveFlow,
-  resetContextualNavigation,
-  resolveActiveFlowRestoration,
-  resolveContextualBackNavigation,
-  resolveContextualNavigation,
   screenLabel,
-  type ContextualNavigationState,
   type Screen,
 } from "@/lib/navigation/app-navigation";
 import { AppNavigationDrawer } from "@/features/app-shell/components/app-navigation-drawer";
 import { AppScreenHeader } from "@/features/app-shell/components/app-screen-header";
 import { AppShellLayout } from "@/features/app-shell/components/app-shell-layout";
 import { AppTopbar } from "@/features/app-shell/components/app-topbar";
+import { useAppNavigationController } from "@/features/app-shell/hooks/useAppNavigationController";
+import { useAppShellController } from "@/features/app-shell/hooks/useAppShellController";
 import {
   resolveInitialAuthState,
   resolveInitialAuthStatusMessage,
@@ -160,7 +163,6 @@ import {
   createFlowScreenTransition,
   resolvePasswordRecoveryRouteTransition,
   resolveWorkoutCompletionTransition,
-  type ScreenTransition,
 } from "@/lib/navigation/app-navigation-transition";
 import {
   isTrainingSummaryScreenValid,
@@ -192,15 +194,12 @@ import {
   type BrowserStorageScope,
 } from "@/lib/storage/browser-storage";
 import {
-  ACTIVE_FLOW_VERSION,
   ROUTINE_DRAFT_VERSION,
   clearActiveFlow,
   clearRoutineDraft,
-  loadActiveFlow,
   loadCycleHistory,
   loadRoutineDraft,
   loadTrainingPlan,
-  saveActiveFlow,
   saveCycleHistory,
   saveRoutineDraft,
   saveTrainingPlan,
@@ -211,7 +210,6 @@ import {
   createSessionDataEpoch,
   isSessionDataRequestTokenCurrent,
   resolveEffectiveAuthenticatedUser,
-  shouldContinueAuthenticatedFlowAfterRefresh,
   type SessionDataIdentity,
   type SessionDataRequestToken,
 } from "@/lib/session/session-data-epoch";
@@ -273,7 +271,6 @@ import {
   resolveWorkoutReadinessLinkConfirmation,
 } from "@/lib/training/active-workout-completion";
 import {
-  type ActiveWorkoutReadinessContext,
   type PendingWorkoutReadinessLink,
 } from "@/lib/training/workout-draft-storage";
 import {
@@ -288,7 +285,6 @@ import {
 import {
   canResumeActiveWorkoutFromMemory,
   resolveActiveWorkoutReentryDecision,
-  shouldRetainActiveWorkoutAttemptState,
 } from "@/lib/training/active-workout-reentry";
 import {
   resolveTrainingWorkoutReadinessMode,
@@ -415,8 +411,6 @@ export function OrganizatechApp({
     ?? getPasswordRecoveryRouteState();
   initialPasswordRecoveryRouteStateRef.current = initialPasswordRecoveryRouteState;
   const initialAuthState = resolveInitialAuthState(initialPasswordRecoveryRouteState);
-  const [screen, setScreen] = useState<Screen>(initialAuthState.screen);
-  const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
   const [sessionName, setSessionName] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -446,12 +440,9 @@ export function OrganizatechApp({
   const passwordRecoveryUpdateOwnerRef = useRef<SessionOperationOwner | null>(null);
   const passwordRecoveryStateRef = useRef<"none" | "pending" | "confirmed" | "invalid">("none");
   const [isPasswordRecoveryConfirmed, setIsPasswordRecoveryConfirmed] = useState(false);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   const [seenNotificationRecords, setSeenNotificationRecords] = useState<SeenNotificationRecord[]>([]);
   const [isEditingRoutinePlan, setIsEditingRoutinePlan] = useState(false);
   const [routineNotice, setRoutineNotice] = useState("");
-  const [isTopbarHidden, setIsTopbarHidden] = useState(false);
   const [routineBuilderState, dispatchRoutineBuilder] = useReducer(
     routineBuilderReducer,
     undefined,
@@ -470,17 +461,6 @@ export function OrganizatechApp({
     undefined,
     createInitialProgressControllerState,
   );
-  const { state: activeWorkoutState, actions: activeWorkoutActions } = useActiveWorkoutController();
-  const {
-    activeExerciseIndex, exerciseDrafts, readiness, checkingDailyReadiness,
-    savingDailyReadiness, dailyReadinessError, hasStartedTraining,
-    activeWorkoutStartedAt, activeWorkoutAttemptId, pendingReadinessLink,
-    hasRecoverableWorkoutStart, trainingCompletionSummary,
-  } = activeWorkoutState;
-  const activeWorkoutAttemptIdRef = useRef<string | null>(null);
-  const workoutStartInFlightRef = useRef<SessionOperationOwner | null>(null);
-  const dailyReadinessSaveInFlightRef = useRef<SessionOperationOwner | null>(null);
-  const workoutCompletionInFlightRef = useRef<SessionOperationOwner | null>(null);
   const profileSaveInFlightRef = useRef<SessionOperationOwner | null>(null);
   const profileAvatarUploadInFlightRef = useRef<SessionOperationOwner | null>(null);
   const routineSaveInFlightRef = useRef<SessionOperationOwner | null>(null);
@@ -490,8 +470,6 @@ export function OrganizatechApp({
   const profileAvatarBootstrapUserIdRef = useRef<string | null>(null);
   const lastProfileAvatarErrorRefreshAtRef = useRef(0);
   const profileAvatarRefreshInFlightRef = useRef(false);
-  const pendingReadinessLinkRef = useRef<PendingWorkoutReadinessLink | null>(null);
-  const activeWorkoutReadinessContextRef = useRef<ActiveWorkoutReadinessContext | null>(null);
   // P3-32: el estado data/loading/error, las request-key refs y los effects de historial del
   // ejercicio activo son propiedad exclusiva de useActiveWorkoutExerciseHistory (ver más abajo).
   const [routineEditorReturnScreen, setRoutineEditorReturnScreen] = useState<Screen | null>(null);
@@ -501,23 +479,40 @@ export function OrganizatechApp({
   const [isRoutineSuccessOpen, setIsRoutineSuccessOpen] = useState(false);
   const [isRoutineUpdateConfirmOpen, setIsRoutineUpdateConfirmOpen] = useState(false);
   const activeBrowserStorageScopeRef = useRef<BrowserStorageScope | null>(null);
-  const incomingWorkoutDraftRecoveryScopeRef = useRef<BrowserStorageScope | null>(null);
   const sessionDataEpochRef = useRef(createSessionDataEpoch());
   const sessionDataMountedRef = useRef(true);
+  const authenticatedSessionCoordinatorRef = useRef(createAuthenticatedSessionCoordinator());
+  const interactiveAuthAttemptRef = useRef(false);
 
-  const abortWorkoutStartState = useCallback(() => {
-    activeWorkoutAttemptIdRef.current = null;
-    pendingReadinessLinkRef.current = null;
-    activeWorkoutReadinessContextRef.current = null;
-    activeWorkoutActions.abortWorkoutStart();
-  }, [activeWorkoutActions]);
+  const captureSessionDataRequestToken = useCallback((): SessionDataRequestToken => {
+    return createSessionDataRequestToken(sessionDataEpochRef.current);
+  }, []);
 
-  const discardActiveWorkoutState = useCallback(() => {
-    activeWorkoutAttemptIdRef.current = null;
-    pendingReadinessLinkRef.current = null;
-    activeWorkoutReadinessContextRef.current = null;
-    activeWorkoutActions.discardWorkout();
-  }, [activeWorkoutActions]);
+  const isSessionDataRequestCurrent = useCallback((token: SessionDataRequestToken) => {
+    return sessionDataMountedRef.current &&
+      isSessionDataRequestTokenCurrent(sessionDataEpochRef.current, token);
+  }, []);
+
+  const activeWorkoutBoundary = useActiveWorkoutBoundary({
+    dataMode,
+    captureRequestToken: captureSessionDataRequestToken,
+    isRequestTokenCurrent: isSessionDataRequestCurrent,
+  }, {
+    start: startTrainingCommand,
+    submitReadiness: submitReadinessCommand,
+    complete: completeWorkoutCommand,
+    resumeOrRestore: resumeOrRestoreActiveWorkoutCommand,
+  });
+  const activeWorkoutState = activeWorkoutBoundary.state;
+  const activeWorkoutActions = activeWorkoutBoundary.controllerActions;
+  const {
+    activeExerciseIndex, exerciseDrafts, readiness, checkingDailyReadiness,
+    savingDailyReadiness, dailyReadinessError, hasStartedTraining,
+    activeWorkoutStartedAt, activeWorkoutAttemptId, trainingCompletionSummary,
+  } = activeWorkoutState;
+
+  const abortWorkoutStartState = activeWorkoutBoundary.abortStart;
+  const discardActiveWorkoutState = activeWorkoutBoundary.discard;
 
   const advanceSessionDataIdentity = useCallback((
     identity: SessionDataIdentity,
@@ -528,15 +523,13 @@ export function OrganizatechApp({
     if (next === current) return false;
 
     invalidateSessionOperationOwners([
-      workoutStartInFlightRef,
-      dailyReadinessSaveInFlightRef,
-      workoutCompletionInFlightRef,
       profileSaveInFlightRef,
       profileAvatarUploadInFlightRef,
       routineSaveInFlightRef,
       trainingCycleCreateInFlightRef,
       trainingCycleDeleteInFlightRef,
     ]);
+    activeWorkoutBoundary.invalidateOperations();
     sessionDataEpochRef.current = next;
     setIsBusy(false);
     profileAvatarRefreshInFlightRef.current = false;
@@ -548,16 +541,7 @@ export function OrganizatechApp({
     // antes del await: aunque la request key coincidiera por accidente entre dos usuarios, el token
     // deja de ser vigente y el resultado se descarta. Ver runActiveWorkoutHistoryLoad.
     return true;
-  }, []);
-
-  const captureSessionDataRequestToken = useCallback((): SessionDataRequestToken => {
-    return createSessionDataRequestToken(sessionDataEpochRef.current);
-  }, []);
-
-  const isSessionDataRequestCurrent = useCallback((token: SessionDataRequestToken) => {
-    return sessionDataMountedRef.current &&
-      isSessionDataRequestTokenCurrent(sessionDataEpochRef.current, token);
-  }, []);
+  }, [activeWorkoutBoundary]);
 
   const trainingDataIdentityPort = useMemo(() => ({
     captureRequestToken: captureSessionDataRequestToken,
@@ -598,6 +582,30 @@ export function OrganizatechApp({
   const isCycleScopedActiveCycle = trainingDataView.isCycleScoped;
   const isCycleScopedPlanBlocked = trainingDataView.mode === "blocked";
   const cycleScopedPlanBlockerMessage = trainingDataView.blockerMessage;
+  const appShell = useAppShellController();
+  const navigation = useAppNavigationController(initialAuthState.screen, {
+    dataMode,
+    userId: supabaseUser?.id,
+    activeStorageScope: activeBrowserStorageScopeRef.current,
+    hasRoutinePlan: exercises.length > 0,
+    isEditingRoutinePlan,
+    hasStartedTraining,
+    readiness,
+  });
+  const { screen } = navigation;
+  const {
+    isMenuOpen,
+    isNotificationPanelOpen,
+    isTopbarHidden,
+  } = appShell;
+  useActiveWorkoutDraftLifecycle({
+    boundary: activeWorkoutBoundary,
+    screen,
+    dataMode,
+    userId: supabaseUser?.id,
+    activeStorageScope: activeBrowserStorageScopeRef.current,
+    activeRoutineDay,
+  });
 
   function tryAcquireUserScopedOperation(
     lockRef: SessionOperationOwnerLock,
@@ -681,7 +689,7 @@ export function OrganizatechApp({
     confirmPasswordRecoveryFlow(recoveryUserId);
     setIsAuthLoading(false);
     setStatusMessage(resolveInitialAuthStatusMessage("active"));
-    applyScreenTransition(resolvePasswordRecoveryRouteTransition("active"));
+    navigation.transition(resolvePasswordRecoveryRouteTransition("active"));
   }
 
   function invalidatePasswordRecoverySession() {
@@ -694,7 +702,7 @@ export function OrganizatechApp({
     setIsBusy(false);
     setIsAuthLoading(false);
     setStatusMessage(resolveInitialAuthStatusMessage("expired"));
-    applyScreenTransition(resolvePasswordRecoveryRouteTransition("expired"));
+    navigation.transition(resolvePasswordRecoveryRouteTransition("expired"));
   }
 
   function completePasswordRecoveryUpdate(storageScope: BrowserStorageScope | null): boolean {
@@ -763,13 +771,7 @@ export function OrganizatechApp({
           return;
         }
         if (authState.session) {
-          setStatusMessage("");
-          const refreshResult = await refreshTrainingDataForSession(authState.dataMode);
-          if (!shouldContinueAuthenticatedFlowAfterRefresh(refreshResult.kind)) return;
-          if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
-          if (!restoreActiveFlowForSession(authState.dataMode, authState.user?.id)) {
-            applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));
-          }
+          await continueAuthenticatedSession(authState, "restore-active-flow");
         } else {
           setStatusMessage(authState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
         }
@@ -825,54 +827,61 @@ export function OrganizatechApp({
         return;
       }
 
-      applySessionState(nextState);
-      const requestToken = captureSessionDataRequestToken();
-      if (passwordRecoveryStateRef.current === "invalid" && event !== "PASSWORD_RECOVERY") return;
-      const recoveryState = getPasswordRecoveryRouteState();
-      const storedRecovery = loadPasswordRecoveryFlow();
-      const recoveryEvent =
-        event === "PASSWORD_RECOVERY" || event === "INITIAL_SESSION" || event === "SIGNED_IN"
-          ? event
-          : null;
-      const recoveryDecision = resolvePasswordRecoverySessionDecision({
-        routeState: recoveryState,
-        event: recoveryEvent,
-        sessionLookup: "success",
-        sessionUserId: session?.user.id ?? null,
-        hasCallbackEvidence: Boolean(recoveryCallbackAccessToken),
-        callbackMatchesSession: Boolean(
-          recoveryCallbackAccessToken
-          && session?.access_token === recoveryCallbackAccessToken
-        ),
-        storedRecoveryStatus: storedRecovery?.status ?? null,
-        storedRecoveryUserId: storedRecovery?.userId ?? null,
-      });
-      if (recoveryDecision === "invalid") {
-        invalidatePasswordRecoverySession();
-        return;
-      }
-      if (recoveryDecision === "confirmed") {
-        confirmPasswordRecoverySession(session);
-        return;
-      }
-      if (event === "SIGNED_IN" || (event === "INITIAL_SESSION" && session)) {
-        passwordRecoveryUpdateOwnerRef.current = null;
-        setStatusMessage("");
-        void refreshTrainingDataForSession(nextState.dataMode).then((refreshResult) => {
-          if (!shouldContinueAuthenticatedFlowAfterRefresh(refreshResult.kind)) return;
-          if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
-          setIsAuthLoading(false);
-          if (!restoreActiveFlowForSession(nextState.dataMode, nextState.user?.id)) {
-            applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));
+      const authEventResult = coordinateAuthenticatedSessionEvent({
+        event,
+        state: nextState,
+        currentIdentity: sessionDataEpochRef.current,
+        nextIdentity: {
+          userId: session?.user.id ?? null,
+          scope: getBrowserStorageScope(nextState.dataMode, session?.user.id),
+        },
+        intent: interactiveAuthAttemptRef.current ? "dashboard" : "restore-active-flow",
+        hasAuthenticatedSession: Boolean(session),
+      }, {
+        applySameIdentitySession: applySessionState,
+        applyNewIdentitySession: applySessionState,
+        canContinueAfterSessionApplied: () => {
+          if (passwordRecoveryStateRef.current === "invalid" && event !== "PASSWORD_RECOVERY") {
+            return false;
           }
-        });
-      }
+          const recoveryState = getPasswordRecoveryRouteState();
+          const storedRecovery = loadPasswordRecoveryFlow();
+          const recoveryEvent =
+            event === "PASSWORD_RECOVERY" || event === "INITIAL_SESSION" || event === "SIGNED_IN"
+              ? event
+              : null;
+          const recoveryDecision = resolvePasswordRecoverySessionDecision({
+            routeState: recoveryState,
+            event: recoveryEvent,
+            sessionLookup: "success",
+            sessionUserId: session?.user.id ?? null,
+            hasCallbackEvidence: Boolean(recoveryCallbackAccessToken),
+            callbackMatchesSession: Boolean(
+              recoveryCallbackAccessToken
+              && session?.access_token === recoveryCallbackAccessToken
+            ),
+            storedRecoveryStatus: storedRecovery?.status ?? null,
+            storedRecoveryUserId: storedRecovery?.userId ?? null,
+          });
+          if (recoveryDecision === "invalid") {
+            invalidatePasswordRecoverySession();
+            return false;
+          }
+          if (recoveryDecision === "confirmed") {
+            confirmPasswordRecoverySession(session);
+            return false;
+          }
+          return true;
+        },
+        continueSession: (state, intent) => {
+          passwordRecoveryUpdateOwnerRef.current = null;
+          return continueAuthenticatedSession(state, intent);
+        },
+      });
+      if (!authEventResult.proceedAfterSessionApplied) return;
       if (event === "INITIAL_SESSION" && !session) {
         setIsAuthLoading(false);
         setStatusMessage(nextState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
-      }
-      if (event === "TOKEN_REFRESHED") {
-        setStatusMessage("");
       }
     }).data.subscription;
 
@@ -906,19 +915,6 @@ export function OrganizatechApp({
   }, []);
 
   useEffect(() => {
-    let lastY = window.scrollY;
-    function handleScroll() {
-      const currentY = window.scrollY;
-      const isScrollingDown = currentY > lastY;
-      setIsTopbarHidden(currentY > 80 && isScrollingDown);
-      lastY = currentY;
-    }
-
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  useEffect(() => {
     const scope = getBrowserStorageScope(dataMode, supabaseUser?.id);
     if (!scope || activeBrowserStorageScopeRef.current !== scope) return;
     saveTrainingPlan(trainingPlan, scope, {
@@ -936,38 +932,6 @@ export function OrganizatechApp({
   }, [cycleHistory, dataMode, supabaseUser?.id]);
 
   const hasRoutinePlanForDraft = exercises.length > 0;
-
-  useEffect(() => {
-    if (
-      screen === "login" ||
-      screen === "registro" ||
-      screen === "recuperar-password" ||
-      screen === "nueva-password" ||
-      screen === "recovery-expired"
-    ) return;
-    const flow = getActiveFlow(screen, hasRoutinePlanForDraft, isEditingRoutinePlan, hasStartedTraining, readiness);
-
-    function persistFlow() {
-      const userKey = getBrowserStorageScope(dataMode, supabaseUser?.id);
-      if (!userKey || activeBrowserStorageScopeRef.current !== userKey) return;
-      saveActiveFlow({
-        version: ACTIVE_FLOW_VERSION,
-        updatedAt: Date.now(),
-        dataMode,
-        userKey,
-        flow,
-      });
-    }
-
-    persistFlow();
-    window.addEventListener("pagehide", persistFlow);
-    document.addEventListener("visibilitychange", persistFlow);
-
-    return () => {
-      window.removeEventListener("pagehide", persistFlow);
-      document.removeEventListener("visibilitychange", persistFlow);
-    };
-  }, [dataMode, hasRoutinePlanForDraft, hasStartedTraining, isEditingRoutinePlan, readiness, screen, supabaseUser?.id]);
 
   useEffect(() => {
     const isRoutineDraftActive = screen === "registro-entrenamiento" && (!hasRoutinePlanForDraft || isEditingRoutinePlan);
@@ -1002,65 +966,8 @@ export function OrganizatechApp({
   }, [activeRoutineDay, dataMode, hasRoutinePlanForDraft, isEditingRoutinePlan, routineEditorReturnScreen, screen, setupByDay, setupDay, supabaseUser?.id, trainingPlan]);
 
   useEffect(() => {
-    const isWorkoutDraftActive = screen === "entrenamiento" && hasStartedTraining;
-    if (!isWorkoutDraftActive || !activeWorkoutStartedAt) return;
-    const stableWorkoutStartedAt = activeWorkoutStartedAt;
-    const workoutScope = getBrowserStorageScope(dataMode, supabaseUser?.id);
-
-    function persistWorkoutDraft() {
-      if (!workoutScope || activeBrowserStorageScopeRef.current !== workoutScope) return;
-      saveActiveWorkoutDraft({
-        updatedAt: Date.now(),
-        dataMode,
-        userId: supabaseUser?.id,
-        activeRoutineDay,
-        activeExerciseIndex,
-        activeWorkoutStartedAt: stableWorkoutStartedAt,
-        hasStartedTraining,
-        readiness,
-        exerciseDrafts,
-        workoutAttemptId: activeWorkoutAttemptIdRef.current ?? activeWorkoutAttemptId,
-        pendingReadinessLink: pendingReadinessLinkRef.current,
-        cycleId: activeWorkoutReadinessContextRef.current?.cycleId ?? null,
-        cycleDayId: activeWorkoutReadinessContextRef.current?.cycleDayId ?? null,
-        plannedDay: activeWorkoutReadinessContextRef.current?.plannedDay ?? null,
-        plannedDate: activeWorkoutReadinessContextRef.current?.plannedDate ?? null,
-      });
-    }
-
-    persistWorkoutDraft();
-    window.addEventListener("pagehide", persistWorkoutDraft);
-    document.addEventListener("visibilitychange", persistWorkoutDraft);
-
-    return () => {
-      window.removeEventListener("pagehide", persistWorkoutDraft);
-      document.removeEventListener("visibilitychange", persistWorkoutDraft);
-    };
-  }, [activeExerciseIndex, activeRoutineDay, activeWorkoutAttemptId, activeWorkoutStartedAt, dataMode, exerciseDrafts, hasStartedTraining, pendingReadinessLink, readiness, screen, supabaseUser?.id]);
-
-  useEffect(() => {
-    if (screen === "entrenamiento" && !hasStartedTraining && !hasRecoverableWorkoutStart) {
-      const scope = getBrowserStorageScope(dataMode, supabaseUser?.id);
-      if (scope && incomingWorkoutDraftRecoveryScopeRef.current === scope) return;
-      clearWorkoutDraft(dataMode, supabaseUser?.id);
-    }
-  }, [dataMode, hasRecoverableWorkoutStart, hasStartedTraining, screen, supabaseUser?.id]);
-
-  useEffect(() => {
-    const isActiveWorkout = screen === "entrenamiento" && hasStartedTraining;
-    const isPausedWorkoutOnDashboard = shouldRetainActiveWorkoutAttemptState({ screen, hasStartedTraining });
-    if (isActiveWorkout && !activeWorkoutStartedAt) {
-      activeWorkoutActions.recordWorkoutStartedAt(createStableWorkoutStartedAt());
-      return;
-    }
-    if (!isActiveWorkout && !isPausedWorkoutOnDashboard && !hasRecoverableWorkoutStart && (activeWorkoutStartedAt || activeWorkoutAttemptId || pendingReadinessLink)) {
-      abortWorkoutStartState();
-    }
-  }, [abortWorkoutStartState, activeWorkoutActions, activeWorkoutAttemptId, activeWorkoutStartedAt, hasRecoverableWorkoutStart, hasStartedTraining, pendingReadinessLink, screen]);
-
-  useEffect(() => {
     if (screen === "training-summary" && !trainingCompletionSummary) {
-      applyScreenTransition(createFlowScreenTransition("dashboard", "summary-state-sanitized"));
+      navigation.transition(createFlowScreenTransition("dashboard", "summary-state-sanitized"));
     }
     // El adaptador de transiciones solo envuelve setters estables de React; incluirlo como
     // dependencia re-ejecutaría el saneamiento en cada render sin cambiar su resultado.
@@ -1283,25 +1190,14 @@ export function OrganizatechApp({
     isSessionDataRequestCurrent,
   });
 
-  const resetActiveWorkoutSessionState = useCallback(() => {
-    const hadActiveWorkoutBusyOwner = Boolean(workoutCompletionInFlightRef.current);
-
-    workoutStartInFlightRef.current = null;
-    dailyReadinessSaveInFlightRef.current = null;
-    workoutCompletionInFlightRef.current = null;
-    activeWorkoutAttemptIdRef.current = null;
-    pendingReadinessLinkRef.current = null;
-    activeWorkoutReadinessContextRef.current = null;
-
-    activeWorkoutActions.resetActiveWorkout();
+  const resetActiveWorkoutSessionState = useCallback((incomingRecoveryScope: BrowserStorageScope | null) => {
+    activeWorkoutBoundary.resetForIdentity({
+      incomingRecoveryScope,
+      resetHistory: resetExerciseHistory,
+    });
     setRoutineNotice("");
-
-    // P3-32: el coordinador es dueño de ambos flujos; el reset delega en su propia API en lugar de
-    // manipular refs/estado que ya no pertenecen al root.
-    resetExerciseHistory();
-
-    if (hadActiveWorkoutBusyOwner) setIsBusy(false);
-  }, [activeWorkoutActions, resetExerciseHistory]);
+    setIsBusy(false);
+  }, [activeWorkoutBoundary, resetExerciseHistory]);
 
   useEffect(() => {
     const currentUserId = supabaseUser?.id ?? null;
@@ -1385,9 +1281,7 @@ export function OrganizatechApp({
   }, [refreshProfileAvatar]);
 
   function resetUserScopedTransientState() {
-    setIsMenuOpen(false);
-    setIsNotificationPanelOpen(false);
-    setIsTopbarHidden(false);
+    appShell.closeAll();
     setIsNewCycleConfirmOpen(false);
     setIsDeleteCycleConfirmOpen(false);
     setIsRoutineSuccessOpen(false);
@@ -1399,6 +1293,34 @@ export function OrganizatechApp({
     dispatchProgressController({ type: "selection_reset" });
     clearAuthForms();
     setStatusMessage("");
+  }
+
+  function continueAuthenticatedSession(
+    authState: SupabaseSessionState,
+    intent: AuthenticatedSessionIntent,
+  ) {
+    const requestToken = captureSessionDataRequestToken();
+    if (!authState.session || !authState.user || requestToken.userId !== authState.user.id) {
+      return Promise.resolve({ kind: "stale" } as const);
+    }
+    return authenticatedSessionCoordinatorRef.current.continueSession(
+      requestToken,
+      intent,
+      {
+        refresh: () => refreshTrainingDataForSession(authState.dataMode),
+        isCurrent: isSessionDataRequestCurrent,
+        onStart: () => setStatusMessage(""),
+        onComplete: (completedIntent) => {
+          setIsAuthLoading(false);
+          clearAuthForms();
+          if (
+            completedIntent === "restore-active-flow" &&
+            restoreActiveFlowForSession(authState.dataMode, authState.user?.id)
+          ) return;
+          navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
+        },
+      },
+    );
   }
 
   function applySessionState(authState: SupabaseSessionState) {
@@ -1427,11 +1349,11 @@ export function OrganizatechApp({
       });
     }
     if (sessionBoundary.resetActiveWorkoutMemory) {
-      incomingWorkoutDraftRecoveryScopeRef.current = resolveIncomingWorkoutDraftRecoveryScope({
+      const incomingRecoveryScope = resolveIncomingWorkoutDraftRecoveryScope({
         scope: nextStorageScope,
         willAttemptAutomaticRecovery: Boolean(effectiveSession),
       });
-      resetActiveWorkoutSessionState();
+      resetActiveWorkoutSessionState(incomingRecoveryScope);
       resetUserScopedTransientState();
     }
     if (hasStorageScopeChanged) {
@@ -1481,6 +1403,8 @@ export function OrganizatechApp({
       sessionDataEpochRef.current.scope === null
     ) return false;
 
+    authenticatedSessionCoordinatorRef.current.reset();
+    interactiveAuthAttemptRef.current = false;
     const signedOutIdentity = { userId: null, scope: null };
     const sessionBoundary = resolveActiveWorkoutSessionBoundary({
       currentIdentity: sessionDataEpochRef.current,
@@ -1492,8 +1416,7 @@ export function OrganizatechApp({
     }
     trainingDataController.reset({ cyclesEnabled: false });
     if (sessionBoundary.resetActiveWorkoutMemory) {
-      incomingWorkoutDraftRecoveryScopeRef.current = null;
-      resetActiveWorkoutSessionState();
+      resetActiveWorkoutSessionState(null);
     }
     resetUserScopedTransientState();
     if (sessionBoundary.clearClosingStorageScope) {
@@ -1520,7 +1443,7 @@ export function OrganizatechApp({
     setCycleHistory([]);
     setSeenNotificationRecords([]);
     if (options.navigate !== false) {
-      applyContextualNavigation(resetContextualNavigation("login"));
+      navigation.reset("login");
     }
     setStatusMessage(message);
     return true;
@@ -1530,45 +1453,16 @@ export function OrganizatechApp({
     clearStoredBrowserStorageScope(scope);
   }
 
-  function applyContextualNavigation(navigation: ContextualNavigationState) {
-    setScreenHistory([...navigation.history]);
-    setScreen(navigation.screen);
-  }
-
-  // Adaptador único de transiciones canónicas (P3-07B): toda pantalla fuera de la navegación
-  // contextual del usuario se aplica aquí, según la política de historial de la transición.
-  function applyScreenTransition(transition: ScreenTransition) {
-    if (transition.historyPolicy === "reset") {
-      applyContextualNavigation(resetContextualNavigation(transition.screen));
-      return;
-    }
-    setScreen(transition.screen);
-  }
-
   function restoreActiveFlowForSession(mode: DataMode, userId?: string) {
-    const recoveryScope = getBrowserStorageScope(mode, userId);
-    const activeFlow = loadActiveFlow(mode, userId);
-    if (incomingWorkoutDraftRecoveryScopeRef.current === recoveryScope) {
-      incomingWorkoutDraftRecoveryScopeRef.current = null;
-    }
-    if (!activeFlow) return false;
-    const restoration = resolveActiveFlowRestoration(activeFlow.flow);
-
-    if (restoration.kind === "routine-draft") {
-      return restoreRoutineDraftForSession(mode, userId);
-    }
-
-    if (restoration.kind === "workout-draft") {
-      return restoreWorkoutDraftForSession(mode, userId);
-    }
-
-    if (restoration.kind !== "screen") return false;
-    if (restoration.resetTrainingStart) {
-      activeWorkoutActions.clearTrainingStart();
-    }
-    applyContextualNavigation(resetContextualNavigation(restoration.screen));
-    setIsMenuOpen(false);
-    return true;
+    return navigation.restoreActiveFlow(mode, userId, {
+      beforeRestoreAttempt(recoveryScope) {
+        activeWorkoutBoundary.consumeIncomingRecoveryScope(recoveryScope);
+      },
+      restoreRoutineDraft: restoreRoutineDraftForSession,
+      restoreWorkoutDraft: restoreWorkoutDraftForSession,
+      clearTrainingStart: activeWorkoutActions.clearTrainingStart,
+      closeMenu: appShell.closeMenu,
+    });
   }
 
   function restoreRoutineDraftForSession(mode: DataMode, userId?: string) {
@@ -1599,8 +1493,6 @@ export function OrganizatechApp({
     setIsEditingRoutinePlan(draft.isEditingRoutinePlan);
     setRoutineEditorReturnScreen(draft.routineEditorReturnScreen);
     setActiveRoutineDay(draft.activeRoutineDay);
-    applyContextualNavigation(resetContextualNavigation("registro-entrenamiento"));
-    setIsMenuOpen(false);
     if (draft.recovery.kind === "full") {
       setStatusMessage("Recuperamos tu avance pendiente.");
     } else if (draft.recovery.discardedRowCount === 1) {
@@ -1632,52 +1524,53 @@ export function OrganizatechApp({
     if (recovery.kind === "rejected") return false;
 
     setActiveRoutineDay(draft.activeRoutineDay);
-    activeWorkoutAttemptIdRef.current = recovery.value.activeWorkoutAttemptId;
-    pendingReadinessLinkRef.current = recovery.value.pendingReadinessLink;
-    activeWorkoutReadinessContextRef.current = createActiveWorkoutReadinessContext({
-      workoutAttemptId: recovery.value.activeWorkoutAttemptId,
-      cycleId: draft.cycleId,
-      cycleDayId: draft.cycleDayId,
-      workoutStartedAt: recovery.value.activeWorkoutStartedAt,
-      plannedDay: draft.plannedDay,
-      plannedDate: draft.plannedDate,
+    activeWorkoutBoundary.replaceRuntimeSnapshot({
+      attemptId: recovery.value.activeWorkoutAttemptId,
+      pendingReadinessLink: recovery.value.pendingReadinessLink,
+      readinessContext: createActiveWorkoutReadinessContext({
+        workoutAttemptId: recovery.value.activeWorkoutAttemptId,
+        cycleId: draft.cycleId,
+        cycleDayId: draft.cycleDayId,
+        workoutStartedAt: recovery.value.activeWorkoutStartedAt,
+        plannedDay: draft.plannedDay,
+        plannedDate: draft.plannedDate,
+      }),
     });
     activeWorkoutActions.recoverWorkout(recovery.value);
     setIsEditingRoutinePlan(false);
-    applyContextualNavigation(resetContextualNavigation("entrenamiento"));
-    setIsMenuOpen(false);
     setStatusMessage("Recuperamos tu entrenamiento pendiente.");
     return true;
   }
 
-  function restoreActiveWorkoutForNavigation() {
+  function resumeOrRestoreActiveWorkoutCommand() {
     const recoveryScope = getBrowserStorageScope(dataMode, supabaseUser?.id);
     const draft = loadWorkoutDraft(dataMode, supabaseUser?.id);
-    if (incomingWorkoutDraftRecoveryScopeRef.current === recoveryScope) {
-      incomingWorkoutDraftRecoveryScopeRef.current = null;
-    }
+    activeWorkoutBoundary.consumeIncomingRecoveryScope(recoveryScope);
+    const runtime = activeWorkoutBoundary.getRuntimeSnapshot();
     const memoryState = {
       attemptV2: trainingWorkoutReadinessV2Enabled && isCycleScopedActiveCycle,
       hasStartedTraining,
       readiness,
       activeWorkoutStartedAt,
-      workoutAttemptId: activeWorkoutAttemptIdRef.current ?? activeWorkoutAttemptId,
-      cycleId: activeWorkoutReadinessContextRef.current?.cycleId ?? null,
-      cycleDayId: activeWorkoutReadinessContextRef.current?.cycleDayId ?? null,
+      workoutAttemptId: runtime.attemptId ?? activeWorkoutAttemptId,
+      cycleId: runtime.readinessContext?.cycleId ?? null,
+      cycleDayId: runtime.readinessContext?.cycleDayId ?? null,
     };
     const decision = resolveActiveWorkoutReentryDecision(memoryState, Boolean(draft));
 
     if (decision === "resume-memory" && canResumeActiveWorkoutFromMemory(memoryState)) {
-      applyContextualNavigation(resetContextualNavigation("entrenamiento"));
-      setIsMenuOpen(false);
-      return true;
+      return "resume-memory" as const;
     }
 
     if (decision === "restore-draft") {
-      return restoreWorkoutDraftRecord(draft);
+      return restoreWorkoutDraftRecord(draft) ? "restore-draft" as const : "unavailable" as const;
     }
 
-    return false;
+    return "unavailable" as const;
+  }
+
+  function restoreActiveWorkoutForNavigation() {
+    return activeWorkoutBoundary.resumeOrRestore() !== "unavailable";
   }
 
   function applyTrainingDataRefreshResult(
@@ -1857,7 +1750,7 @@ export function OrganizatechApp({
         state: { activeDay: setupDay, setupByDay: setupState },
       });
       setIsEditingRoutinePlan(true);
-      applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
+      navigation.transition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
       setStatusMessage("Configura al menos una rutina, un dia y un ejercicio antes de crear el ciclo.");
       return false;
     }
@@ -1909,14 +1802,6 @@ export function OrganizatechApp({
     activeWorkoutActions.markTrainingStopped();
     return true;
   }
-
-  useEffect(() => {
-    if (!isTrainingCyclesRepositoryActive) return;
-    void refreshTrainingCyclesBoundary();
-    // The refresh is keyed to repository activation and authenticated user.
-    // Including the local async function would refetch on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTrainingCyclesRepositoryActive, supabaseUser?.id]);
 
   function handlePersistenceError(
     error: unknown,
@@ -2004,10 +1889,11 @@ export function OrganizatechApp({
       if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
       setStatusMessage(getMissingSupabaseMessage());
       clearAuthForms();
-      applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));
+      navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
       return;
     }
 
+    interactiveAuthAttemptRef.current = true;
     setIsBusy(true);
     try {
       const result =
@@ -2028,31 +1914,28 @@ export function OrganizatechApp({
       }
 
       const session = result.data.session;
-      applySessionState({
+      const authenticatedState: SupabaseSessionState = {
         isConfigured: true,
         dataMode: session ? "supabase" : "demo",
         session,
         user: session?.user ?? null,
-      });
+      };
+      applySessionState(authenticatedState);
       appliedIdentityToken = captureSessionDataRequestToken();
 
       if (!session && mode === "registro") {
         setStatusMessage("Cuenta creada. Revisa tu correo para confirmar el registro.");
         clearAuthForms();
-        applyScreenTransition(createAuthNavigationReset("login", "signup-confirmation-pending"));
+        navigation.transition(createAuthNavigationReset("login", "signup-confirmation-pending"));
         return;
       }
 
-      setStatusMessage("");
-      const refreshResult = await refreshTrainingDataForSession("supabase");
-      if (!shouldContinueAuthenticatedFlowAfterRefresh(refreshResult.kind)) return;
-      if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
-      clearAuthForms();
-      applyScreenTransition(createAuthNavigationReset("dashboard", "session-established"));
+      await continueAuthenticatedSession(authenticatedState, "dashboard");
     } catch (error) {
       if (appliedIdentityToken && !isSessionDataRequestCurrent(appliedIdentityToken)) return;
       setStatusMessage(translateAuthError(error));
     } finally {
+      interactiveAuthAttemptRef.current = false;
       if (!appliedIdentityToken || isSessionDataRequestCurrent(appliedIdentityToken)) {
         setIsBusy(false);
       }
@@ -2247,67 +2130,31 @@ export function OrganizatechApp({
   }
 
   function navigateTo(nextScreen: Screen) {
-    const decision = resolveContextualNavigation({
-      current: { screen, history: screenHistory },
-      nextScreen,
+    navigation.navigate(nextScreen, {
       hasRoutinePlan,
+      prepareRoutineEditor: () => prepareRoutineBuilderStateFromExercises(exercises, activeRoutineDay),
+      clearTrainingCompletionSummary: activeWorkoutActions.clearTrainingCompletionSummary,
+      tryRestoreActiveWorkout: restoreActiveWorkoutForNavigation,
+      clearTrainingStart: activeWorkoutActions.clearTrainingStart,
+      setRoutineEditorEditing: setIsEditingRoutinePlan,
+      closeMenu: appShell.closeMenu,
     });
-
-    if (decision.kind === "same-screen") {
-      if (decision.closeMenu) setIsMenuOpen(false);
-      return;
-    }
-
-    if (
-      decision.prepareRoutineEditor &&
-      !prepareRoutineBuilderStateFromExercises(exercises, activeRoutineDay)
-    ) {
-      return;
-    }
-
-    if (decision.clearTrainingCompletionSummary) {
-      activeWorkoutActions.clearTrainingCompletionSummary();
-    }
-
-    if (!decision.prepareRoutineEditor && decision.tryRestoreActiveWorkout) {
-      if (restoreActiveWorkoutForNavigation()) return;
-      if (decision.resetTrainingStart) {
-        activeWorkoutActions.clearTrainingStart();
-      }
-    }
-    if (decision.routineEditorEditingState !== null) {
-      setIsEditingRoutinePlan(decision.routineEditorEditingState);
-    }
-    applyContextualNavigation(decision.navigation);
-    if (decision.closeMenu) setIsMenuOpen(false);
   }
 
   function goBack() {
-    const decision = resolveContextualBackNavigation({
-      current: { screen, history: screenHistory },
+    navigation.back({
       hasStartedTraining,
       hasReadiness: Boolean(readiness),
       isEditingRoutinePlan,
       hasRoutinePlan,
       routineEditorReturnScreen,
+      pauseTraining: activeWorkoutBoundary.pause,
+      stopTraining: activeWorkoutActions.markTrainingStopped,
+      clearReadiness: activeWorkoutActions.clearReadiness,
+      closeRoutineEditor: () => setIsEditingRoutinePlan(false),
+      clearRoutineEditorReturnScreen: () => setRoutineEditorReturnScreen(null),
+      closeMenu: appShell.closeMenu,
     });
-
-    if (decision.stopTraining) {
-      activeWorkoutActions.markTrainingStopped();
-    }
-    if (decision.clearReadiness) {
-      activeWorkoutActions.clearReadiness();
-    }
-    if (decision.closeRoutineEditor) {
-      setIsEditingRoutinePlan(false);
-    }
-    if (decision.clearRoutineEditorReturnScreen) {
-      setRoutineEditorReturnScreen(null);
-    }
-    if (decision.navigationChanged) {
-      applyContextualNavigation(decision.navigation);
-    }
-    if (decision.closeMenu) setIsMenuOpen(false);
   }
 
   function updateSetupRow(id: string, field: keyof Omit<SetupExerciseRow, "id" | "sourceExerciseId" | "exerciseLineageId">, value: string) {
@@ -2386,8 +2233,8 @@ export function OrganizatechApp({
     if (screen === "entrenamiento") {
       activeWorkoutActions.clearTrainingStart();
     }
-    setIsMenuOpen(false);
-    applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "routine-editor-opened"));
+    appShell.closeMenu();
+    navigation.transition(createFlowScreenTransition("registro-entrenamiento", "routine-editor-opened"));
   }
 
   function cancelRoutineUpdate() {
@@ -2497,7 +2344,7 @@ export function OrganizatechApp({
         setRoutineNotice(successMessage);
         setIsEditingRoutinePlan(true);
         dispatchRoutineBuilder({ type: "select_day", day: setupTransition.nextDay });
-        applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "routine-setup-continued"));
+        navigation.transition(createFlowScreenTransition("registro-entrenamiento", "routine-setup-continued"));
         return;
       }
 
@@ -2667,7 +2514,7 @@ export function OrganizatechApp({
           );
           setStatusMessage("Plan cycle-scoped actualizado. El historial anterior se conserva.");
           setIsRoutineSuccessOpen(true);
-          applyScreenTransition(createFlowScreenTransition("entrenamiento", "routine-plan-saved"));
+          navigation.transition(createFlowScreenTransition("entrenamiento", "routine-plan-saved"));
           return;
         }
 
@@ -2691,7 +2538,7 @@ export function OrganizatechApp({
         setRoutineNotice("Plan cycle-scoped creado correctamente.");
         setStatusMessage("Ciclo y plan operativo creados correctamente en QA.");
         setIsRoutineSuccessOpen(true);
-        applyScreenTransition(createFlowScreenTransition("entrenamiento", "routine-plan-saved"));
+        navigation.transition(createFlowScreenTransition("entrenamiento", "routine-plan-saved"));
       } catch (error) {
         if (isUserScopedOperationCurrent(routineSaveInFlightRef, operationOwner)) {
           setStatusMessage(translateTrainingCycleRepositoryError(error));
@@ -2766,7 +2613,7 @@ export function OrganizatechApp({
       if (setupTransition.kind === "continue_setup") {
         setIsEditingRoutinePlan(true);
         dispatchRoutineBuilder({ type: "select_day", day: setupTransition.nextDay });
-        applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "routine-setup-continued"));
+        navigation.transition(createFlowScreenTransition("registro-entrenamiento", "routine-setup-continued"));
       } else {
         clearRoutineDraft(operationOwner.dataMode, operationOwner.userId ?? undefined);
         setIsEditingRoutinePlan(false);
@@ -2806,7 +2653,10 @@ export function OrganizatechApp({
   }
 
   function openRoutineDay(day: string, keepTrainingStarted = false) {
-    if (!keepTrainingStarted && restoreActiveWorkoutForNavigation()) return;
+    if (!keepTrainingStarted && navigation.reenterActiveWorkout({
+      tryRestoreActiveWorkout: restoreActiveWorkoutForNavigation,
+      closeMenu: appShell.closeMenu,
+    })) return;
 
     const nextDayExerciseCount = displayExercises.filter((exercise) =>
       (exercise.day ?? day) === day).length;
@@ -2816,7 +2666,7 @@ export function OrganizatechApp({
     if (!keepTrainingStarted) {
       activeWorkoutActions.clearTrainingStart();
     }
-    applyScreenTransition(createFlowScreenTransition("entrenamiento", "routine-day-opened"));
+    navigation.transition(createFlowScreenTransition("entrenamiento", "routine-day-opened"));
   }
 
   async function startNewTrainingCycle() {
@@ -2882,7 +2732,7 @@ export function OrganizatechApp({
           dispatchProgressController({ type: "selection_reset" });
         }
         setIsEditingRoutinePlan(true);
-        applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
+        navigation.transition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
         setStatusMessage(activeCycle
           ? "Ciclo actual finalizado. Configura el nuevo plan antes de crearlo."
           : "Configura el plan del nuevo ciclo antes de crearlo.");
@@ -2910,7 +2760,7 @@ export function OrganizatechApp({
       activeWorkoutActions.clearReadiness();
       setIsEditingRoutinePlan(true);
       setStatusMessage("Ciclo actual finalizado. Ya puedes crear un nuevo ciclo de entrenamiento.");
-      applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
+      navigation.transition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
     } catch (error) {
       if (isUserScopedOperationCurrent(trainingCycleCreateInFlightRef, operationOwner)) {
         setStatusMessage(translateTrainingCycleRepositoryError(error));
@@ -2985,7 +2835,7 @@ export function OrganizatechApp({
         setIsEditingRoutinePlan(true);
         setIsDeleteCycleConfirmOpen(false);
         setStatusMessage("Ciclo cancelado. Ya puedes configurar un nuevo ciclo de entrenamiento.");
-        applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
+        navigation.transition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
         const refreshResult = await refreshTrainingCyclesBoundary();
         if (!isUserScopedOperationCurrent(trainingCycleDeleteInFlightRef, operationOwner)) return;
         if (refreshResult.kind === "error") throw refreshResult.error;
@@ -3021,7 +2871,7 @@ export function OrganizatechApp({
       setIsEditingRoutinePlan(true);
       setIsDeleteCycleConfirmOpen(false);
       setStatusMessage("Ciclo eliminado. Ya puedes configurar un nuevo ciclo de entrenamiento.");
-      applyScreenTransition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
+      navigation.transition(createFlowScreenTransition("registro-entrenamiento", "cycle-lifecycle-reset"));
     } catch (error) {
       if (isUserScopedOperationCurrent(trainingCycleDeleteInFlightRef, operationOwner)) {
         if (error instanceof TrainingCycleRepositoryError) {
@@ -3047,18 +2897,20 @@ export function OrganizatechApp({
     });
   }
   function resolveCurrentReadinessMode() {
+    const runtime = activeWorkoutBoundary.getRuntimeSnapshot();
     return resolveTrainingWorkoutReadinessMode({
       enabled: trainingWorkoutReadinessV2Enabled,
       cycleScoped: isCycleScopedActiveCycle,
-      workoutAttemptId: activeWorkoutReadinessContextRef.current?.workoutAttemptId ?? null,
-      cycleId: activeWorkoutReadinessContextRef.current?.cycleId ?? null,
-      cycleDayId: activeWorkoutReadinessContextRef.current?.cycleDayId ?? null,
-      workoutStartedAt: activeWorkoutReadinessContextRef.current?.workoutStartedAt ?? null,
+      workoutAttemptId: runtime.readinessContext?.workoutAttemptId ?? null,
+      cycleId: runtime.readinessContext?.cycleId ?? null,
+      cycleDayId: runtime.readinessContext?.cycleDayId ?? null,
+      workoutStartedAt: runtime.readinessContext?.workoutStartedAt ?? null,
     });
   }
 
   function persistCurrentWorkoutDraftSnapshot(nextReadiness: TrainingReadiness | null) {
     if (!activeWorkoutStartedAt) return;
+    const runtime = activeWorkoutBoundary.getRuntimeSnapshot();
     saveActiveWorkoutDraft({
       updatedAt: Date.now(),
       dataMode,
@@ -3069,22 +2921,26 @@ export function OrganizatechApp({
       hasStartedTraining,
       readiness: nextReadiness,
       exerciseDrafts,
-      workoutAttemptId: activeWorkoutAttemptIdRef.current ?? activeWorkoutAttemptId,
-      pendingReadinessLink: pendingReadinessLinkRef.current,
-      cycleId: activeWorkoutReadinessContextRef.current?.cycleId ?? null,
-      cycleDayId: activeWorkoutReadinessContextRef.current?.cycleDayId ?? null,
-      plannedDay: activeWorkoutReadinessContextRef.current?.plannedDay ?? null,
-      plannedDate: activeWorkoutReadinessContextRef.current?.plannedDate ?? null,
+      workoutAttemptId: runtime.attemptId ?? activeWorkoutAttemptId,
+      pendingReadinessLink: runtime.pendingReadinessLink,
+      cycleId: runtime.readinessContext?.cycleId ?? null,
+      cycleDayId: runtime.readinessContext?.cycleDayId ?? null,
+      plannedDay: runtime.readinessContext?.plannedDay ?? null,
+      plannedDate: runtime.readinessContext?.plannedDate ?? null,
     });
   }
   function syncPendingWorkoutReadinessLink(link: PendingWorkoutReadinessLink | null) {
+    const runtime = activeWorkoutBoundary.getRuntimeSnapshot();
     const update = resolvePendingReadinessLinkUpdate({
-      activeWorkoutAttemptId: activeWorkoutAttemptIdRef.current,
+      activeWorkoutAttemptId: runtime.attemptId,
       pendingReadinessLink: link,
     });
     if (update.kind === "rejected") return false;
 
-    pendingReadinessLinkRef.current = update.value;
+    activeWorkoutBoundary.replaceRuntimeSnapshot({
+      ...runtime,
+      pendingReadinessLink: update.value,
+    });
     if (update.value) {
       activeWorkoutActions.publishPendingReadinessLink(update.value);
     } else {
@@ -3094,6 +2950,7 @@ export function OrganizatechApp({
   }
 
   function prepareWorkoutStartSnapshot(nextActiveExerciseIndex: number) {
+    const runtime = activeWorkoutBoundary.getRuntimeSnapshot();
     const startedAt = activeWorkoutStartedAt ?? createStableWorkoutStartedAt();
     const plannedDay = getTrainingDayCode(visibleDay);
     const cycleId = isCycleScopedActiveCycle ? persistedActiveCycle?.id ?? null : null;
@@ -3116,14 +2973,16 @@ export function OrganizatechApp({
       throw new Error("No pudimos preparar la identidad del entrenamiento. Recarga el ciclo activo e intenta nuevamente.");
     }
 
-    const currentWorkoutAttemptId = activeWorkoutAttemptIdRef.current ?? activeWorkoutAttemptId;
+    const currentWorkoutAttemptId = runtime.attemptId ?? activeWorkoutAttemptId;
     const attemptId = resolveWorkoutAttemptId({
       enabled: trainingWorkoutReadinessV2Enabled && isCycleScopedActiveCycle,
       cycleId,
       cycleDayId,
       existingWorkoutAttemptId: currentWorkoutAttemptId,
     }, createWorkoutAttemptId);
-    const nextPendingReadinessLink = attemptId && attemptId === currentWorkoutAttemptId ? pendingReadinessLinkRef.current : null;
+    const nextPendingReadinessLink = attemptId && attemptId === currentWorkoutAttemptId
+      ? runtime.pendingReadinessLink
+      : null;
     const start = resolveActiveWorkoutStartTransition({
       activeExerciseIndex: nextActiveExerciseIndex,
       exerciseCount: dayExercises.length,
@@ -3135,15 +2994,17 @@ export function OrganizatechApp({
       throw new Error("No pudimos preparar el entrenamiento.");
     }
 
-    activeWorkoutAttemptIdRef.current = start.value.activeWorkoutAttemptId;
-    pendingReadinessLinkRef.current = start.value.pendingReadinessLink;
-    activeWorkoutReadinessContextRef.current = createActiveWorkoutReadinessContext({
-      workoutAttemptId: start.value.activeWorkoutAttemptId,
-      cycleId,
-      cycleDayId,
-      workoutStartedAt: start.value.activeWorkoutStartedAt,
-      plannedDay,
-      plannedDate,
+    activeWorkoutBoundary.replaceRuntimeSnapshot({
+      attemptId: start.value.activeWorkoutAttemptId,
+      pendingReadinessLink: start.value.pendingReadinessLink,
+      readinessContext: createActiveWorkoutReadinessContext({
+        workoutAttemptId: start.value.activeWorkoutAttemptId,
+        cycleId,
+        cycleDayId,
+        workoutStartedAt: start.value.activeWorkoutStartedAt,
+        plannedDay,
+        plannedDate,
+      }),
     });
     activeWorkoutActions.commitWorkoutStart(start.value);
 
@@ -3171,9 +3032,7 @@ export function OrganizatechApp({
     };
   }
 
-  async function startTrainingWithDailyReadiness() {
-    const operationOwner = tryAcquireUserScopedOperation(workoutStartInFlightRef);
-    if (!operationOwner) return;
+  async function startTrainingCommand(operationContext: ActiveWorkoutOperationContext) {
     let ownsCheckingState = false;
 
     try {
@@ -3215,11 +3074,7 @@ export function OrganizatechApp({
 
       activeWorkoutActions.beginDailyReadinessCheck();
       ownsCheckingState = true;
-      const readinessResult = await settleUserScopedOperation(
-        workoutStartInFlightRef,
-        operationOwner,
-        getDailyTrainingReadiness(),
-      );
+      const readinessResult = await operationContext.settle(getDailyTrainingReadiness());
       if (readinessResult.kind === "stale") return;
       if (readinessResult.kind === "success") {
         if (readinessResult.value?.payload) {
@@ -3243,24 +3098,17 @@ export function OrganizatechApp({
         setRoutineNotice(message);
       }
     } finally {
-      const canFinalize = finalizeUserScopedOperation(workoutStartInFlightRef, operationOwner);
-      if (ownsCheckingState && canFinalize) {
+      if (ownsCheckingState && operationContext.isCurrent()) {
         activeWorkoutActions.completeDailyReadinessCheck();
       }
     }
   }
 
-  async function submitDailyReadiness(value: Omit<TrainingReadiness, "skipped">) {
-    await persistDailyReadiness({ ...value, skipped: false });
-  }
-
-  async function skipDailyReadiness() {
-    await persistDailyReadiness({ skipped: true });
-  }
-
-  async function persistDailyReadiness(value: TrainingReadiness) {
-    const operationOwner = tryAcquireUserScopedOperation(dailyReadinessSaveInFlightRef);
-    if (!operationOwner) return;
+  async function submitReadinessCommand(
+    value: TrainingReadiness,
+    operationContext: ActiveWorkoutOperationContext,
+  ) {
+    const operationOwner = operationContext.owner;
     let ownsSavingState = false;
 
     try {
@@ -3288,9 +3136,7 @@ export function OrganizatechApp({
 
         activeWorkoutActions.beginDailyReadinessSave();
         ownsSavingState = true;
-        const saveResult = await settleUserScopedOperation(
-          dailyReadinessSaveInFlightRef,
-          operationOwner,
+        const saveResult = await operationContext.settle(
           saveDailyTrainingReadiness(value, operationOwner.userId),
         );
         if (saveResult.kind === "stale") return;
@@ -3302,7 +3148,7 @@ export function OrganizatechApp({
         return;
       }
 
-      const context = activeWorkoutReadinessContextRef.current;
+      const context = operationContext.getRuntimeSnapshot().readinessContext;
       if (!context) {
         activeWorkoutActions.publishDailyReadinessError("No pudimos recuperar la identidad del entrenamiento. Recarga e intenta nuevamente.");
         return;
@@ -3322,9 +3168,7 @@ export function OrganizatechApp({
       }
       activeWorkoutActions.beginDailyReadinessSave();
       ownsSavingState = true;
-      const saveResult = await settleUserScopedOperation(
-        dailyReadinessSaveInFlightRef,
-        operationOwner,
+      const saveResult = await operationContext.settle(
         saveTrainingWorkoutReadiness({
           workoutAttemptId: context.workoutAttemptId,
           cycleId: context.cycleId,
@@ -3348,8 +3192,7 @@ export function OrganizatechApp({
         activeWorkoutActions.publishDailyReadinessError(translateTrainingWorkoutReadinessError(saveResult.error));
       }
     } finally {
-      const canFinalize = finalizeUserScopedOperation(dailyReadinessSaveInFlightRef, operationOwner);
-      if (ownsSavingState && canFinalize) {
+      if (ownsSavingState && operationContext.isCurrent()) {
         activeWorkoutActions.completeDailyReadinessSave();
       }
     }
@@ -3383,16 +3226,15 @@ export function OrganizatechApp({
 
   async function confirmTrainingWorkoutReadinessLink(
     pendingLink: PendingWorkoutReadinessLink,
-    operationOwner: SessionOperationOwner,
+    operationContext: ActiveWorkoutOperationContext,
   ) {
+    const operationOwner = operationContext.owner;
     if (!operationOwner.userId) {
       throw new TrainingWorkoutReadinessLinkFlowError(
         "Tu sesión expiró. Inicia sesión nuevamente.",
       );
     }
-    const linkResult = await settleUserScopedOperation(
-      workoutCompletionInFlightRef,
-      operationOwner,
+    const linkResult = await operationContext.settle(
       linkTrainingWorkoutReadinessSession({
         workoutAttemptId: pendingLink.workoutAttemptId,
         trainingSessionId: pendingLink.trainingSessionId,
@@ -3450,9 +3292,11 @@ export function OrganizatechApp({
   // "dashboard" → "training-summary" dentro del mismo lote).
   function finishCompletedWorkout() {
     clearWorkoutDraft(dataMode, supabaseUser?.id);
-    activeWorkoutAttemptIdRef.current = null;
-    pendingReadinessLinkRef.current = null;
-    activeWorkoutReadinessContextRef.current = null;
+    activeWorkoutBoundary.replaceRuntimeSnapshot({
+      attemptId: null,
+      pendingReadinessLink: null,
+      readinessContext: null,
+    });
     activeWorkoutActions.finishWorkout();
   }
 
@@ -3463,10 +3307,8 @@ export function OrganizatechApp({
     workoutStartedAt: string | null;
     savedAt: string;
     trainedDate: string;
-  }, operationOwner: SessionOperationOwner) {
-    const historicalResult = await settleUserScopedOperation(
-      workoutCompletionInFlightRef,
-      operationOwner,
+  }, operationContext: ActiveWorkoutOperationContext) {
+    const historicalResult = await operationContext.settle(
       loadTrainingCompletionHistoricalInputs({
         currentSessionId: input.sessionId,
         exercises: input.validExercises,
@@ -3513,16 +3355,15 @@ export function OrganizatechApp({
     });
   }
 
-  async function saveCompletedTraining() {
-    const operationOwner = tryAcquireUserScopedOperation(workoutCompletionInFlightRef);
-    if (!operationOwner) return;
+  async function completeWorkoutCommand(operationContext: ActiveWorkoutOperationContext) {
+    const operationOwner = operationContext.owner;
     let ownsBusyState = false;
 
     try {
       if (isBusy) return;
 
       const completionStart = resolveActiveWorkoutCompletionStart(
-        pendingReadinessLinkRef.current,
+        operationContext.getRuntimeSnapshot().pendingReadinessLink,
       );
       if (completionStart.kind === "retry_pending_link") {
         setIsBusy(true);
@@ -3531,14 +3372,14 @@ export function OrganizatechApp({
         try {
           const linked = await confirmTrainingWorkoutReadinessLink(
             completionStart.pendingLink,
-            operationOwner,
+            operationContext,
           );
-          if (!linked || !isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+          if (!linked || !operationContext.isCurrent()) return;
           setStatusMessage("Entrenamiento guardado.");
           finishCompletedWorkout();
-          applyScreenTransition(resolveWorkoutCompletionTransition({ hasCompletionSummary: false }));
+          navigation.transition(resolveWorkoutCompletionTransition({ hasCompletionSummary: false }));
         } catch (error) {
-          if (!isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+          if (!operationContext.isCurrent()) return;
           setRoutineNotice(translateTrainingWorkoutReadinessLinkError(error));
         }
         return;
@@ -3559,8 +3400,9 @@ export function OrganizatechApp({
         cycleScopedActiveCycle: isCycleScopedActiveCycle,
       });
       const shouldLinkWorkoutReadiness = readinessMode === "attempt_v2";
-      const readinessContext = activeWorkoutReadinessContextRef.current;
-      const capturedWorkoutAttemptId = activeWorkoutAttemptIdRef.current;
+      const runtime = operationContext.getRuntimeSnapshot();
+      const readinessContext = runtime.readinessContext;
+      const capturedWorkoutAttemptId = runtime.attemptId;
       const plannedDay = getTrainingDayCode(visibleDay);
       const preparation = prepareActiveWorkoutCompletion({
         mode: completionMode,
@@ -3623,9 +3465,7 @@ export function OrganizatechApp({
         setIsBusy(true);
         ownsBusyState = true;
         setRoutineNotice("");
-        const sessionSaveResult = await settleUserScopedOperation(
-          workoutCompletionInFlightRef,
-          operationOwner,
+        const sessionSaveResult = await operationContext.settle(
           createTrainingSessionWithCycleEntries({
             cycleId: preparation.cycleId,
             cycleDayId: preparation.cycleDay.id,
@@ -3641,7 +3481,7 @@ export function OrganizatechApp({
         if (sessionSaveResult.kind === "stale") return;
         if (sessionSaveResult.kind === "error") {
           const message = handlePersistenceError(sessionSaveResult.error);
-          if (!isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+          if (!operationContext.isCurrent()) return;
           setRoutineNotice(message);
           return;
         }
@@ -3681,11 +3521,11 @@ export function OrganizatechApp({
           try {
             const linked = await confirmTrainingWorkoutReadinessLink(
               nextPendingLink,
-              operationOwner,
+              operationContext,
             );
-            if (!linked || !isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+            if (!linked || !operationContext.isCurrent()) return;
           } catch (error) {
-            if (!isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+            if (!operationContext.isCurrent()) return;
             setRoutineNotice(translateTrainingWorkoutReadinessLinkError(error));
             return;
           }
@@ -3698,21 +3538,23 @@ export function OrganizatechApp({
           workoutStartedAt: captured.workoutStartedAt,
           savedAt: new Date().toISOString(),
           trainedDate: preparation.trainedDate,
-        }, operationOwner);
-        if (!summarySnapshot || !isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+        }, operationContext);
+        if (!summarySnapshot || !operationContext.isCurrent()) return;
         if (!activeWorkoutActions.publishWorkoutCompletion(summarySnapshot, validExercises.map((exercise) => exercise.id))) return;
         setStatusMessage("Entrenamiento guardado.");
         try {
           finishCompletedWorkout();
-          applyScreenTransition(resolveWorkoutCompletionTransition({ hasCompletionSummary: true }));
+          navigation.transition(resolveWorkoutCompletionTransition({ hasCompletionSummary: true }));
         } catch {
           // El entrenamiento ya fue persistido; un fallo local de limpieza no debe habilitar duplicados.
         }
 
-        await trainingDataController.reloadCycleSessions(preparation.cycleId, {
+        const reloadResult = await trainingDataController.reloadCycleSessions(preparation.cycleId, {
           errorMessage: "Entrenamiento guardado. Recarga el panel para ver la sesion registrada.",
         });
-        return;
+        if (reloadResult.kind === "stale") return "stale";
+        if (reloadResult.kind === "error") return "error";
+        return "success";
       }
 
       setIsBusy(true);
@@ -3773,11 +3615,7 @@ export function OrganizatechApp({
             "demo",
           );
         }
-        const sessionSaveResult = await settleUserScopedOperation(
-          workoutCompletionInFlightRef,
-          operationOwner,
-          legacySessionRequest,
-        );
+        const sessionSaveResult = await operationContext.settle(legacySessionRequest);
         if (sessionSaveResult.kind === "stale") return;
         if (sessionSaveResult.kind === "error") throw sessionSaveResult.error;
         const savedSession = sessionSaveResult.value;
@@ -3789,27 +3627,26 @@ export function OrganizatechApp({
           workoutStartedAt: captured.workoutStartedAt,
           savedAt: new Date().toISOString(),
           trainedDate,
-        }, operationOwner);
-        if (!summarySnapshot || !isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+        }, operationContext);
+        if (!summarySnapshot || !operationContext.isCurrent()) return;
         if (!activeWorkoutActions.publishWorkoutCompletion(summarySnapshot, validExercises.map((exercise) => exercise.id))) return;
-        trainingDataController.appendLegacySession(savedSession, operationOwner.requestToken);
+        if (!trainingDataController.appendLegacySession(savedSession, operationOwner.requestToken)) {
+          return "stale";
+        }
         setStatusMessage("Entrenamiento guardado.");
         finishCompletedWorkout();
-        applyScreenTransition(resolveWorkoutCompletionTransition({ hasCompletionSummary: true }));
+        navigation.transition(resolveWorkoutCompletionTransition({ hasCompletionSummary: true }));
+        return "success";
       } catch (error) {
-        if (!isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+        if (!operationContext.isCurrent()) return;
         const message = handlePersistenceError(error);
-        if (!isUserScopedOperationCurrent(workoutCompletionInFlightRef, operationOwner)) return;
+        if (!operationContext.isCurrent()) return;
         setRoutineNotice(message === "Ya existe un entrenamiento registrado para esta rutina y fecha."
           ? "Ya existe un entrenamiento registrado para esta rutina y fecha. Puedes revisar el resumen o editar el registro existente."
           : message);
       }
     } finally {
-      const canFinalize = finalizeUserScopedOperation(
-        workoutCompletionInFlightRef,
-        operationOwner,
-      );
-      if (ownsBusyState && canFinalize) {
+      if (ownsBusyState && operationContext.isCurrent()) {
         setIsBusy(false);
       }
     }
@@ -3836,7 +3673,7 @@ export function OrganizatechApp({
     clearPasswordRecoveryUrl();
     clearAuthForms();
     setStatusMessage("");
-    applyScreenTransition(createAuthNavigationReset(nextScreen, "auth-screen-switch"));
+    navigation.transition(createAuthNavigationReset(nextScreen, "auth-screen-switch"));
   }
 
   if (screen === "recovery-expired") {
@@ -3985,14 +3822,13 @@ export function OrganizatechApp({
   }
 
   function toggleNotifications() {
-    setIsNotificationPanelOpen((current) => !current);
-    setIsMenuOpen(false);
+    appShell.toggleNotifications();
   }
 
   function openNotificationTarget(notification: AppNotification) {
     const intent = resolveNotificationOpenIntent(notification);
     markNotificationsSeen([intent.notificationId]);
-    setIsNotificationPanelOpen(false);
+    appShell.closeNotifications();
     activeWorkoutActions.clearTrainingCompletionSummary();
     if (intent.dashboardDayOverride) {
       setDashboardDayOverride(intent.dashboardDayOverride);
@@ -4038,13 +3874,8 @@ export function OrganizatechApp({
   });
 
   function toggleMenu() {
-    setIsNotificationPanelOpen(false);
-    setIsMenuOpen((value) => {
-      const next = !value;
-      if (next) {
-        void refreshProfileAvatar({ force: true, allowProfileLookup: true });
-      }
-      return next;
+    appShell.toggleMenu(() => {
+      void refreshProfileAvatar({ force: true, allowProfileLookup: true });
     });
   }
 
@@ -4072,7 +3903,7 @@ export function OrganizatechApp({
           historyNotifications={historyNotifications}
           seenNotificationRecordsById={seenNotificationRecordsById}
           emptyMessage={NOTIFICATION_EMPTY_MESSAGE}
-          onClose={() => setIsNotificationPanelOpen(false)}
+          onClose={appShell.closeNotifications}
           onOpenNotification={openNotificationTarget}
         />
       }
@@ -4088,7 +3919,7 @@ export function OrganizatechApp({
           }
           items={menuScreens.map((item) => ({ id: item, label: screenLabel(item), isActive: screen === item }))}
           isLogoutDisabled={isBusy}
-          onClose={() => setIsMenuOpen(false)}
+          onClose={appShell.closeMenu}
           onNavigate={navigateTo}
           onLogout={handleLogout}
         />
@@ -4127,7 +3958,7 @@ export function OrganizatechApp({
           summary={trainingCompletionSummary}
           onDashboard={() => {
             activeWorkoutActions.clearTrainingCompletionSummary();
-            applyScreenTransition(createFlowScreenTransition("dashboard", "summary-dismissed"));
+            navigation.transition(createFlowScreenTransition("dashboard", "summary-dismissed"));
           }}
         />
       )}
@@ -4179,15 +4010,15 @@ export function OrganizatechApp({
           routineDays={routineDays}
           switchDay={(day) => openRoutineDay(day)}
           editRoutine={() => openRoutineEditor(visibleDay)}
-          startTraining={startTrainingWithDailyReadiness}
+          startTraining={activeWorkoutBoundary.start}
           isStartingTraining={checkingDailyReadiness}
           notice={dailyReadinessError || routineNotice}
         />
       )}
       {screen === "entrenamiento" && activeWorkoutVariant === "readiness" && (
         <TrainingReadinessScreen
-          onSubmit={submitDailyReadiness}
-          onSkip={skipDailyReadiness}
+          onSubmit={activeWorkoutBoundary.submitReadiness}
+          onSkip={activeWorkoutBoundary.skipReadiness}
           isSaving={savingDailyReadiness}
           error={dailyReadinessError}
         />
@@ -4212,7 +4043,7 @@ export function OrganizatechApp({
           latestExerciseObservationDidQuery={latestExerciseObservationDidQuery}
           updateDraft={updateExerciseDraft}
           registerExercise={registerCurrentExercise}
-          saveCompletedTraining={saveCompletedTraining}
+          saveCompletedTraining={activeWorkoutBoundary.complete}
           editRoutine={() => openRoutineEditor(visibleDay)}
           routineDays={routineDays}
           switchDay={(day) => openRoutineDay(day, true)}
@@ -4278,7 +4109,7 @@ export function OrganizatechApp({
         <RoutineSuccessModal
           onConfirm={() => {
             setIsRoutineSuccessOpen(false);
-            applyScreenTransition(createFlowScreenTransition("dashboard", "routine-success-dismissed"));
+            navigation.transition(createFlowScreenTransition("dashboard", "routine-success-dismissed"));
           }}
         />
       )}

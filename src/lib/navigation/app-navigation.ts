@@ -50,6 +50,7 @@ export interface ContextualBackDecision {
   reason: ContextualBackReason;
   navigation: ContextualNavigationState;
   navigationChanged: boolean;
+  pauseTraining: boolean;
   stopTraining: boolean;
   clearReadiness: boolean;
   closeRoutineEditor: boolean;
@@ -201,6 +202,7 @@ export function resolveContextualBackNavigation(input: {
   if (current.screen === "entrenamiento" && hasReadiness) {
     return createBackDecision("pause-active-workout", resetContextualNavigation("dashboard"), {
       navigationChanged: true,
+      pauseTraining: true,
     });
   }
 
@@ -278,6 +280,7 @@ function createBackDecision(
     reason,
     navigation: copyNavigationState(navigation),
     navigationChanged: false,
+    pauseTraining: false,
     stopTraining: false,
     clearReadiness: false,
     closeRoutineEditor: false,

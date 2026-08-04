@@ -31,7 +31,7 @@ assert.match(appSource, /newNotifications=\{newNotifications\}/);
 assert.match(appSource, /historyNotifications=\{historyNotifications\}/);
 assert.match(appSource, /seenNotificationRecordsById=\{seenNotificationRecordsById\}/);
 assert.match(appSource, /emptyMessage=\{NOTIFICATION_EMPTY_MESSAGE\}/);
-assert.match(appSource, /onClose=\{\(\) => setIsNotificationPanelOpen\(false\)\}/);
+assert.match(appSource, /onClose=\{appShell\.closeNotifications\}/);
 assert.match(appSource, /onOpenNotification=\{openNotificationTarget\}/);
 
 // 3. El JSX inline antiguo fue eliminado del root.
@@ -106,7 +106,7 @@ const openTargetSource = (() => {
   assert.ok(start >= 0 && end > start, "openNotificationTarget/scrollToNotificationSection deben seguir adyacentes");
   return appSource.slice(start, end);
 })();
-["resolveNotificationOpenIntent(notification)", "markNotificationsSeen([intent.notificationId])", "setIsNotificationPanelOpen(false)", "navigateTo(intent.target)", "scrollToNotificationSection(intent.section ?? undefined)"]
+["resolveNotificationOpenIntent(notification)", "markNotificationsSeen([intent.notificationId])", "appShell.closeNotifications()", "navigateTo(intent.target)", "scrollToNotificationSection(intent.section ?? undefined)"]
   .reduce((previous, marker) => {
     const current = openTargetSource.indexOf(marker);
     assert.ok(current > previous, `orden funcional roto en: ${marker}`);
@@ -114,8 +114,8 @@ const openTargetSource = (() => {
   }, -1);
 
 // 8. Controlador de navegación intacto (P3-07B no se degrada).
-assert.equal((appSource.match(/setScreen\(/g) ?? []).length, 2, "exactamente 2 escritores de pantalla autorizados");
-assert.equal((appSource.match(/setScreenHistory\(/g) ?? []).length, 1, "exactamente 1 escritor de historial autorizado");
+assert.equal((appSource.match(/setScreen\(/g) ?? []).length, 0);
+assert.equal((appSource.match(/setScreenHistory\(/g) ?? []).length, 0);
 
 // 9. Registro exacto en la suite.
 assert.equal(
