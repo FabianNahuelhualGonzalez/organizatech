@@ -105,8 +105,12 @@ async function run() {
   );
 
   const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+  const trainingDataSelectorsSource = readFileSync(
+    "src/features/training-data/model/training-data-selectors.ts",
+    "utf8",
+  );
   assert.match(appSource, /getCycleCalendarWeekNumber\(persistedActiveCycle\.plannedStartDate, todayKey\)/, "currentWeek scoped usa calendario del ciclo");
-  assert.match(appSource, /weekNumber: effectiveWeekNumber/, "guardado scoped usa effectiveWeekNumber");
+  assert.match(trainingDataSelectorsSource, /weekNumber: effectiveWeekNumber/, "lectura scoped normaliza effectiveWeekNumber");
   assert.doesNotMatch(appSource, /weekNumber: cycleDay\.weekIndex/, "guardado scoped no usa weekIndex de plantilla");
   assert.doesNotMatch(appSource, /usesCycleScopedSessions \|\| session\.calendarWeekStart === currentWeekStart/, "dashboard scoped no permite todas las sesiones historicas");
   assert.doesNotMatch(appSource, /usesCycleScopedSessions \|\| normalizeEntryDateKey\(entry\.date\) === expectedDate/, "dashboard scoped no mezcla entries historicas globales");

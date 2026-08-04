@@ -849,7 +849,7 @@ async function run() {
     assert.match(appSource, /pendingReadinessLink: pendingReadinessLinkRef\.current/, "autosave usa pending ref como fuente primaria");
     assert.match(appSource, /resolveActiveWorkoutRecoveryTransition\(\{[\s\S]*activeWorkoutAttemptId: draft\.workoutAttemptId,[\s\S]*pendingReadinessLink: draft\.pendingReadinessLink,[\s\S]*activeWorkoutActions\.recoverWorkout\(recovery\.value\)/, "organizatech-app recupera attempt y pending mediante el boundary atomico");
     const restoreNavigationStart = appSource.indexOf("function restoreActiveWorkoutForNavigation()");
-    const restoreNavigationEnd = appSource.indexOf("  async function refreshData", restoreNavigationStart);
+    const restoreNavigationEnd = appSource.indexOf("  function applyTrainingDataRefreshResult", restoreNavigationStart);
     const restoreNavigationBlock = restoreNavigationStart >= 0 && restoreNavigationEnd > restoreNavigationStart ? appSource.slice(restoreNavigationStart, restoreNavigationEnd) : "";
     assert.match(restoreNavigationBlock, /resolveActiveWorkoutReentryDecision/, "reentrada decide antes de iniciar readiness normal");
     assert.match(restoreNavigationBlock, /attemptV2: trainingWorkoutReadinessV2Enabled && isCycleScopedActiveCycle/, "reentrada distingue memoria legacy de attempt_v2");
@@ -958,7 +958,8 @@ async function run() {
     assert.match(legacyCompletionBranch, /saveTrainingSessionWithEntries\(\s*legacySessionInput,\s*operationOwner\.dataMode,\s*operationOwner\.userId,\s*\)[\s\S]*settleUserScopedOperation\([\s\S]*legacySessionRequest[\s\S]*sessionSaveResult\.kind === "stale"[\s\S]*await buildCompletedTrainingSummarySnapshot/, "rama legacy pasa el owner exacto y usa el boundary productivo en save y summary");
     assert.match(completionBlock, /settleUserScopedOperation\([\s\S]*createTrainingSessionWithCycleEntries[\s\S]*sessionSaveResult\.kind === "stale"/, "cycle-scoped descarta save stale mediante el helper productivo");
     assert.match(completionBlock, /createTrainingSessionWithCycleEntries\(\{[\s\S]*?\}, operationOwner\.userId\)/, "cycle-scoped pasa exactamente el owner capturado al repository");
-    assert.match(completionBlock, /settleUserScopedOperation\([\s\S]*getCycleScopedTrainingSessionData[\s\S]*scopedSessionResult\.kind === "stale"/, "recarga cycle-scoped descarta resultados stale antes de publicar datos");
+    assert.match(completionBlock, /trainingDataController\.reloadCycleSessions\(preparation\.cycleId/, "recarga cycle-scoped delega freshness y publicacion al boundary TrainingData");
+    assert.match(completionBlock, /trainingDataController\.appendLegacySession\(savedSession, operationOwner\.requestToken\)/, "completion legacy entrega la sesion al boundary con el token P3-41 capturado");
     assert.doesNotMatch(completionBlock, /const entriesInput:|validExercises\.map\(\(exercise\) => \{\s*const draft = normalizeExerciseDraft/, "el root no reconstruye payloads de completion inline");
     const summaryStart = appSource.indexOf("async function buildCompletedTrainingSummarySnapshot");
     const summaryEnd = appSource.indexOf("  async function saveCompletedTraining", summaryStart);

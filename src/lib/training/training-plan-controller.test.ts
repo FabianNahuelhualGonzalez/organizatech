@@ -327,6 +327,6 @@ assert.equal(
   1,
   "npm test registra el controller exactamente una vez",
 );
-assert.equal(packageJson.scripts.test.split(" && ").length, 122);
+assert.equal(packageJson.scripts.test.split(" && ").length, 124);
 
 console.log("training plan controller tests passed");
