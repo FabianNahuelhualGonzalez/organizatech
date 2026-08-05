@@ -9,6 +9,10 @@ import { readFileSync } from "node:fs";
  * these assertions only guard type integration and structural conservation.
  */
 const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+const routineControllerStaticSource = readFileSync(
+  "src/features/routine-builder/hooks/useRoutineBuilderController.ts",
+  "utf8",
+);
 const routineDraftStaticSource = readFileSync(
   "src/lib/training/training-routine-draft.ts",
   "utf8",
@@ -51,21 +55,23 @@ assert.match(
 assert.doesNotMatch(appStaticSource, /^\s*interface SetupExerciseRow\s*\{/m);
 assert.doesNotMatch(appStaticSource, /^\s*interface SetupDayState\s*\{/m);
 
-assert.match(appStaticSource, /\buseReducer\b/);
+assert.doesNotMatch(appStaticSource, /\buseReducer\b/);
 assert.match(
-  appStaticSource,
-  /import \{[\s\S]*?createRoutineBuilderRow,[\s\S]*?createRoutineBuilderState,[\s\S]*?routineBuilderReducer,[\s\S]*?\} from "@\/features\/routine-builder\/model\/routine-builder-state";/,
-  "React debe importar el reducer, initializer y factory de filas canónicos",
+  routineControllerStaticSource,
+  /createRoutineBuilderRow/,
+  "la factory de filas pertenece al controller feature-local",
 );
+assert.doesNotMatch(appStaticSource, /createRoutineBuilderRow/);
 assert.match(
-  appStaticSource,
-  /const\s+\[\s*routineBuilderState\s*,\s*dispatchRoutineBuilder\s*\]\s*=\s*useReducer\(\s*routineBuilderReducer,/,
-  "Routine Builder debe inicializarse realmente con useReducer y routineBuilderReducer",
+  routineControllerStaticSource,
+  /const\s+\[\s*builderState\s*,\s*dispatchBuilder\s*\]\s*=\s*useReducer\(\s*routineBuilderReducer,/,
+  "Routine Builder debe inicializarse realmente con useReducer dentro de su controller",
 );
-assert.match(appStaticSource, /createRoutineBuilderState\(\{[\s\S]*?setupByDay:\s*createSetupByDay\(\)/);
-assert.match(appStaticSource, /const\s+setupDay\s*=\s*routineBuilderState\.activeDay;/);
-assert.match(appStaticSource, /const\s+setupByDay\s*=\s*routineBuilderState\.setupByDay;/);
-assert.match(appStaticSource, /dispatchRoutineBuilder\(\{[\s\S]*?type:\s*"(?:select_day|replace_state|reset_state|update_row_field)"/);
+assert.match(routineControllerStaticSource, /createRoutineBuilderState\(\{[\s\S]*?setupByDay:\s*createSetupByDay\(\)/);
+assert.match(appStaticSource, /const\s+\{[\s\S]*?activeDay:\s*setupDay,[\s\S]*?setupByDay,[\s\S]*?\}\s*=\s*routineBuilder;/);
+assert.match(appStaticSource, /function dispatchRoutineBuilder\(action: \{ type: "select_day"; day: string \}\)/);
+assert.match(appStaticSource, /routineBuilder\.selectRoutineDay\(action\.day\)/);
+assert.doesNotMatch(routineControllerStaticSource, /\bdispatch\(action:/);
 assert.doesNotMatch(appStaticSource, /const\s+\[\s*setupDay\s*,/);
 assert.doesNotMatch(appStaticSource, /const\s+\[\s*setupByDay\s*,/);
 assert.doesNotMatch(appStaticSource, /\bsetSetupDay\b/);
@@ -81,26 +87,27 @@ assert.match(appStaticSource, /existingRowsPolicy:\s*"append"/);
 assert.doesNotMatch(appStaticSource, /^\s*function createSetupByDayFromExercises\s*\(/m);
 
 assert.match(
-  appStaticSource,
+  routineControllerStaticSource,
   /import \{ resolveRoutineBuilderDraftRecovery \} from "@\/features\/routine-builder\/model\/routine-builder-draft-recovery";/,
 );
-assert.match(restoreRoutineDraftStaticSource, /loadRoutineDraft\(mode, userId, \{/);
-assert.match(restoreRoutineDraftStaticSource, /resolveSetupRecovery\(input\)\s*\{/);
-assert.match(restoreRoutineDraftStaticSource, /resolveRoutineBuilderDraftRecovery\(input\)/);
+assert.match(restoreRoutineDraftStaticSource, /routineBuilder\.restoreDraft\(mode, userId\)/);
+assert.match(routineControllerStaticSource, /loadRoutineDraft\(input\.mode, input\.userId, \{/);
+assert.match(routineControllerStaticSource, /resolveSetupRecovery\(value\)\s*\{/);
+assert.match(routineControllerStaticSource, /resolveRoutineBuilderDraftRecovery\(value\)/);
 assert.match(
-  restoreRoutineDraftStaticSource,
+  routineControllerStaticSource,
   /normalizeTrainingPlan: normalizePersistedTrainingPlan/,
   "recovery debe usar la normalizacion canonica de Training Plan",
 );
-assert.doesNotMatch(restoreRoutineDraftStaticSource, /normalizeSetupByDay/);
-assert.doesNotMatch(restoreRoutineDraftStaticSource, /hasSetupDraftContent/);
+assert.doesNotMatch(routineControllerStaticSource, /normalizeSetupByDay/);
+assert.doesNotMatch(routineControllerStaticSource, /hasSetupDraftContent/);
 
 assert.match(appStaticSource, /rows: SetupExerciseRow\[\];/);
 assert.match(appStaticSource, /setupState: Record<string, SetupDayState>/);
 
 assert.match(
-  appStaticSource,
-  /saveRoutineDraft\(\{[\s\S]*?setupByDay,[\s\S]*?trainingPlan,[\s\S]*?activeRoutineDay,[\s\S]*?\}\);/,
+  routineControllerStaticSource,
+  /write\(\{[\s\S]*?setupByDay: input\.snapshot\.setupByDay,[\s\S]*?trainingPlan: input\.snapshot\.draftPlan,[\s\S]*?activeRoutineDay: input\.snapshot\.activeRoutineDay,[\s\S]*?\}\);/,
   "el guardado debe conservar setupByDay, trainingPlan y activeRoutineDay en el mismo draft",
 );
 assert.match(
@@ -119,16 +126,11 @@ assert.doesNotMatch(appFlowStorageStaticSource, /\bnormalizeSetupByDay\b|\bhasSe
 assert.doesNotMatch(appFlowStorageStaticSource, /from ["']@\/features\//);
 
 for (const functionName of [
-  "createSetupRow",
-  "createSetupRows",
-  "createSetupDayState",
-  "createSetupByDay",
   "getConfiguredSetupDays",
   "updateSetupRow",
   "updateSetupRoutineName",
   "addSetupRow",
   "removeSetupRow",
-  "saveInitialRoutine",
   "readSetupNumber",
   "createId",
   "readRequiredWeight",
@@ -140,6 +142,18 @@ for (const functionName of [
     `${functionName} debe permanecer en React`,
   );
 }
+
+assert.match(appStaticSource, /async function executeRoutineSaveAdapter\(/);
+for (const featureFunctionName of ["createSetupRows", "createSetupDayState", "createSetupByDay"]) {
+  assert.match(
+    routineControllerStaticSource,
+    new RegExp(`export function ${featureFunctionName}\\(`),
+    `${featureFunctionName} debe pertenecer a Routine Builder`,
+  );
+  assert.doesNotMatch(appStaticSource, new RegExp(`^\\s*function ${featureFunctionName}\\(`, "m"));
+}
+assert.match(routineControllerStaticSource, /export function useRoutineBuilderWorkflows/);
+assert.doesNotMatch(appStaticSource, /async function saveInitialRoutine\(/);
 
 for (const removedFunctionName of [
   "normalizeSetupByDay",

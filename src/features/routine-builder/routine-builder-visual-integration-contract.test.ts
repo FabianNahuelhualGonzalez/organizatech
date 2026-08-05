@@ -25,6 +25,9 @@ function stripComments(source: string): string {
 }
 
 const appSource = readSource("src/components/organizatech-app.tsx");
+const routineControllerSource = readSource(
+  "src/features/routine-builder/hooks/useRoutineBuilderController.ts",
+);
 const packageSource = readSource("package.json");
 const successSource = readSource("src/features/routine-builder/components/RoutineSuccessModal.tsx");
 const updateSource = readSource("src/features/routine-builder/components/ConfirmRoutineUpdateModal.tsx");
@@ -177,7 +180,7 @@ assert.match(
 );
 assert.match(
   appSource,
-  /async function saveInitialRoutine\(confirmation: RoutineBuilderSaveConfirmation\)/,
+  /async function executeRoutineSaveAdapter\([\s\S]*confirmation: RoutineBuilderSaveConfirmation/,
 );
 assert.doesNotMatch(appSource, /saveInitialRoutine\(confirmedRoutineUpdate\s*=\s*false\)/);
 assert.doesNotMatch(appSource, /saveInitialRoutine\(true\)/);
@@ -239,20 +242,24 @@ assert.match(appSource, /<TrainingStartScreen/);
 assert.match(appSource, /<GuidedTrainingScreen/);
 assert.match(appSource, /<TrainingReadinessScreen/);
 
-// 10. El reducer es la única fuente de verdad del editor; los aliases son sólo lectura y no
-//     quedan setters/useState legacy ni un segundo reducer paralelo.
-assert.match(appSource, /import \{ useCallback, useEffect, useMemo, useReducer, useRef, useState \} from "react";/);
-assert.match(appSource, /from "@\/features\/routine-builder\/model\/routine-builder-state";/);
-assert.match(appSource, /\bcreateRoutineBuilderState\(\{/);
-assert.match(appSource, /\broutineBuilderReducer\b/);
-assert.match(appSource, /\bcreateRoutineBuilderRow\(createId\(\)\)/);
+// 10. El reducer es la única fuente de verdad del editor y vive en el controller feature-local;
+//     el root sólo consume su contrato y no conserva setters/useState legacy ni otro reducer.
+assert.match(appSource, /import \{ useCallback, useEffect, useMemo, useRef, useState \} from "react";/);
+assert.doesNotMatch(appSource, /\buseReducer\b|\broutineBuilderReducer\b|\bcreateRoutineBuilderState\b/);
+assert.match(routineControllerSource, /import \{ useCallback, useEffect, useMemo, useReducer, useRef, useState \} from "react";/);
+assert.match(routineControllerSource, /from "@\/features\/routine-builder\/model\/routine-builder-state";/);
+assert.match(routineControllerSource, /\bcreateRoutineBuilderState\(\{/);
+assert.match(routineControllerSource, /\broutineBuilderReducer\b/);
+assert.match(routineControllerSource, /\bcreateRoutineBuilderRow\(createRoutineBuilderId\(\)\)/);
+assert.doesNotMatch(appSource, /\bcreateRoutineBuilderRow\(/);
 assert.equal(
-  (appSource.match(/useReducer\(\s*routineBuilderReducer,/g) ?? []).length,
+  (routineControllerSource.match(/useReducer\(\s*routineBuilderReducer,/g) ?? []).length,
   1,
-  "una única fuente routineBuilderReducer en el root",
+  "una única fuente routineBuilderReducer en el controller",
 );
-assert.match(appSource, /const setupDay = routineBuilderState\.activeDay;/);
-assert.match(appSource, /const setupByDay = routineBuilderState\.setupByDay;/);
+assert.match(appSource, /const\s+\{[\s\S]*?activeDay:\s*setupDay,[\s\S]*?setupByDay,[\s\S]*?\}\s*=\s*routineBuilder;/);
+assert.match(appSource, /function dispatchRoutineBuilder\(action: \{ type: "select_day"; day: string \}\)/);
+assert.doesNotMatch(routineControllerSource, /\bdispatch\(action:/);
 assert.doesNotMatch(appSource, /const \[setupDay,/);
 assert.doesNotMatch(appSource, /const \[setupByDay,/);
 assert.doesNotMatch(appSource, /\bsetSetupDay\b|\bsetSetupByDay\b/);
@@ -273,37 +280,39 @@ assert.match(mappingAdapterSource, /if \(mapping\.kind === "blocked"\)/);
 assert.match(mappingAdapterSource, /No se pudo preparar la rutina para editar\. Intenta nuevamente\./);
 assert.ok(
   mappingAdapterSource.indexOf('if (mapping.kind === "blocked")') <
-    mappingAdapterSource.indexOf("dispatchRoutineBuilder({"),
+    mappingAdapterSource.indexOf("routineBuilder.replaceBuilderState("),
   "blocked se resuelve antes de despachar estado",
 );
 assert.match(appSource, /prepareRoutineEditor: \(\) => prepareRoutineBuilderStateFromExercises\(exercises, activeRoutineDay\)/);
 
 // 12. Recovery está conectado a la API única de storage. Full y partial mantienen mensajes
 //     distintos y discardedRowCount se consume; las normalizaciones retiradas no vuelven al root.
-assert.match(appSource, /from "@\/features\/routine-builder\/model\/routine-builder-draft-recovery";/);
-assert.match(appSource, /resolveSetupRecovery\(input\) \{/);
-assert.match(appSource, /const result = resolveRoutineBuilderDraftRecovery\(input\);/);
-assert.match(appSource, /type: "replace_state",\s+state: \{ activeDay: draft\.setupDay, setupByDay: draft\.setupByDay \}/);
-assert.match(appSource, /Recuperamos tu avance pendiente\./);
-assert.match(appSource, /Se descartó 1 fila inválida\./);
-assert.match(appSource, /Se descartaron \$\{draft\.recovery\.discardedRowCount\} filas inválidas\./);
-assert.match(appSource, /draft\.recovery\.discardedRowCount/);
+assert.match(routineControllerSource, /from "@\/features\/routine-builder\/model\/routine-builder-draft-recovery";/);
+assert.match(routineControllerSource, /resolveSetupRecovery\(value\) \{/);
+assert.match(routineControllerSource, /const result = resolveRoutineBuilderDraftRecovery\(value\);/);
+assert.match(routineControllerSource, /type: "replace_state",\s+state: \{ activeDay: draft\.setupDay, setupByDay: draft\.setupByDay \}/);
+assert.match(routineControllerSource, /Recuperamos tu avance pendiente\./);
+assert.match(routineControllerSource, /Se descartó 1 fila inválida\./);
+assert.match(routineControllerSource, /Se descartaron \$\{draft\.recovery\.discardedRowCount\} filas inválidas\./);
+assert.match(routineControllerSource, /draft\.recovery\.discardedRowCount/);
 assert.doesNotMatch(appSource, /^function normalizeSetupByDay\b/m);
 assert.doesNotMatch(appSource, /^function hasSetupDraftContent\b/m);
 
-// 13. updateSetupRow y los efectos de saveInitialRoutine permanecen en el root. El parsing HTML
-//     precede a acciones discriminadas y la preparación pura continúa delegada a P3-25.
+// 13. updateSetupRow y los adapters concretos permanecen en el root. El parsing HTML precede a
+//     comandos de dominio y la preparación pura continúa delegada a P3-25.
 assert.match(appSource, /function updateSetupRow\(/);
-assert.match(appSource, /type: "update_row_field"/);
+assert.match(routineControllerSource, /type: "update_row_field"/);
 assert.match(appSource, /readWeightInput\(value, currentRow\.weight\)/);
 assert.match(appSource, /readSetupNumber\(value\)/);
 assert.doesNotMatch(appSource, /\{ \.\.\.row, \[field\]:/);
-assert.match(appSource, /(?:async\s+)?function saveInitialRoutine\(/);
+assert.match(appSource, /async function executeRoutineSaveAdapter\(/);
+assert.doesNotMatch(appSource, /async function saveInitialRoutine\(/);
 assert.match(
   appSource,
   /from "@\/features\/routine-builder\/model\/routine-builder-save";/,
 );
 assert.match(appSource, /resolveRoutineBuilderSavePreparation\(\{/);
+assert.doesNotMatch(routineControllerSource, /prepareSave/);
 assert.match(appSource, /persistenceMode: isTrainingCyclesRepositoryActive \? "cycle_scoped" : "legacy"/);
 assert.match(appSource, /allowEmptyRows: isCycleScopedRoutineEdit/);
 assert.match(
@@ -318,11 +327,11 @@ assert.match(appSource, /addCycleScopedTrainingDaysAndExercises\(\{/);
 assert.match(appSource, /for \(const dayToPersist of daysToPersist\)/);
 assert.match(
   appSource,
-  /deleteExercise\(\s*exerciseId,\s*operationOwner\.dataMode,\s*operationOwner\.userId \?\? undefined,\s*\)/,
+  /deleteExercise\(\s*exerciseId,\s*operation\.dataMode,\s*operation\.userId \?\? undefined,\s*\)/,
 );
 assert.match(
   appSource,
-  /saveExercise\(\{[\s\S]*?\}, operationOwner\.dataMode, operationOwner\.userId \?\? undefined\)/,
+  /saveExercise\(\{[\s\S]*?\}, operation\.dataMode, operation\.userId \?\? undefined\)/,
 );
 assert.doesNotMatch(
   stripComments(savePreparationSource),

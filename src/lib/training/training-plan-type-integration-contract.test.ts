@@ -9,6 +9,10 @@ import { readFileSync } from "node:fs";
  * these assertions only guard exports, imports, call-sites and boundaries.
  */
 const appStaticSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+const routineControllerStaticSource = readFileSync(
+  "src/features/routine-builder/hooks/useRoutineBuilderController.ts",
+  "utf8",
+);
 const cycleIdStaticSource = readFileSync("src/lib/training/training-cycle-id.ts", "utf8");
 const planModelStaticSource = readFileSync("src/lib/training/training-plan-model.ts", "utf8");
 const presentationStaticSource = readFileSync("src/features/training-plan/model/training-cycle-presentation.ts", "utf8");
@@ -73,14 +77,19 @@ for (const preservedCopy of [
   assert.ok(catalogSource.includes(preservedCopy), `debe preservarse el copy: ${preservedCopy}`);
 }
 
+assert.match(
+  routineControllerStaticSource,
+  /useState<RoutineBuilderTrainingDataState>\(\(\) => \(\{[\s\S]*draftPlan: createDefaultTrainingPlan\(\),[\s\S]*activeRoutineDay: "Lunes"/,
+  "el snapshot tipado y atómico de TrainingData pertenece al controller feature-local",
+);
 for (const callSite of [
-  /useState<TrainingPlan>\(\(\) => createDefaultTrainingPlan\(\)\)/,
   /function normalizePersistedTrainingPlan\(value: unknown\): TrainingPlan/,
   /return normalizeTrainingPlanInput\(value\)\.plan;/,
-  /applyTrainingPlanEdit\(\{ plan: current, activeDay: setupDay \}, edit\)/,
+  /applyTrainingPlanEdit\([\s\S]*plan: currentPlan[\s\S]*activeDay: currentBuilderState\.activeDay/,
 ]) {
-  assert.match(appStaticSource, callSite, "los call-sites principales deben conservar sus tipos y boundaries");
+  assert.match(routineControllerStaticSource, callSite, "los call-sites principales deben conservar sus tipos y boundaries");
 }
+assert.doesNotMatch(appStaticSource, /function normalizePersistedTrainingPlan/);
 assert.match(
   trainingDataSelectorsStaticSource,
   /function createTrainingPlanFromPersistedCycle\([^)]*fallback: TrainingPlan[^)]*\): TrainingPlan/,

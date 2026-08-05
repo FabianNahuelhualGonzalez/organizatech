@@ -10,6 +10,10 @@ import { readFileSync } from "node:fs";
 const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
 const controllerSource = readFileSync("src/lib/training/training-plan-controller.ts", "utf8");
 const normalizationSource = readFileSync("src/lib/training/training-plan-normalization.ts", "utf8");
+const routineControllerSource = readFileSync(
+  "src/features/routine-builder/hooks/useRoutineBuilderController.ts",
+  "utf8",
+);
 const trainingDataSelectorsSource = readFileSync(
   "src/features/training-data/model/training-data-selectors.ts",
   "utf8",
@@ -19,25 +23,29 @@ const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
 };
 
 for (const canonicalImport of [
-  "applyTrainingPlanEdit",
   "createNextTrainingPlan",
   "resolveTrainingPlanSetupTransition",
-  "normalizeTrainingPlanInput",
-  "createDefaultTrainingPlan",
   "getTrainingPlanDurationOptions",
   "getTrainingPlanObjectiveOptions as getCycleObjectiveOptions",
 ]) {
   assert.ok(appSource.includes(canonicalImport), `falta el import canónico ${canonicalImport}`);
 }
+assert.match(
+  routineControllerSource,
+  /import \{ createDefaultTrainingPlan \} from "@\/lib\/training\/training-plan-rules";/,
+  "Routine Builder importa la factory canónica que ahora posee su estado",
+);
+assert.match(routineControllerSource, /import \{[\s\S]*applyTrainingPlanEdit[\s\S]*\} from "@\/lib\/training\/training-plan-controller"/);
+assert.match(routineControllerSource, /import \{ normalizeTrainingPlanInput \}/);
 
 for (const controllerCall of [
-  /applyTrainingPlanEdit\(\{ plan: current, activeDay: setupDay \}, edit\)/,
   /resolveTrainingPlanSetupTransition\(\{/,
   /createNextTrainingPlan\("controlled_cycle_scoped"\)/,
   /createNextTrainingPlan\("default"\)/,
 ]) {
   assert.match(appSource, controllerCall);
 }
+assert.match(routineControllerSource, /applyTrainingPlanEdit\([\s\S]*plan: currentPlan[\s\S]*activeDay: currentBuilderState\.activeDay/);
 
 for (const editHandler of [
   /updateTrainingPlan\(\{ type: "toggle_training_day", value: item \}\)/,
@@ -48,18 +56,19 @@ for (const editHandler of [
   assert.match(appSource, editHandler);
 }
 assert.match(appSource, /updateTrainingPlan: \(edit: TrainingPlanEdit\) => void;/);
-assert.match(appSource, /if \(result\.kind !== "updated"\) return current;/);
 assert.match(
-  appSource,
-  /dispatchRoutineBuilder\(\{ type: "select_day", day: result\.state\.activeDay \}\)/,
+  routineControllerSource,
+  /dispatchBuilder\(\{ type: "select_day", day: result\.state\.activeDay \}\)/,
   "el controller de Training Plan debe delegar el activeDay al reducer de Routine Builder",
 );
 assert.doesNotMatch(appSource, /\bsetSetupDay\b|\bsetSetupByDay\b/);
 
-assert.match(appSource, /normalize: normalizePersistedTrainingPlan/);
-assert.match(appSource, /normalizeTrainingPlan: normalizePersistedTrainingPlan/);
-assert.match(appSource, /function normalizePersistedTrainingPlan\(value: unknown\): TrainingPlan \{/);
-assert.match(appSource, /return normalizeTrainingPlanInput\(value\)\.plan;/);
+assert.match(appSource, /routineBuilder\.restoreDraft\(mode, userId\)/);
+assert.match(routineControllerSource, /loadTrainingPlan\(scope, \{[\s\S]*normalize: normalizePersistedTrainingPlan/);
+assert.match(routineControllerSource, /normalizeTrainingPlan: normalizePersistedTrainingPlan/);
+assert.match(routineControllerSource, /function normalizePersistedTrainingPlan\(value: unknown\): TrainingPlan \{/);
+assert.match(routineControllerSource, /return normalizeTrainingPlanInput\(value\)\.plan;/);
+assert.doesNotMatch(appSource, /function normalizePersistedTrainingPlan/);
 assert.doesNotMatch(appSource, /function createTrainingPlanFromPersistedCycle\(/);
 assert.match(trainingDataSelectorsSource, /export function createTrainingPlanFromPersistedCycle\(/);
 assert.match(trainingDataSelectorsSource, /const normalized = normalizeTrainingPlanInput\(next\);/);
@@ -76,7 +85,8 @@ for (const removedDuplicate of [
   assert.doesNotMatch(appSource, removedDuplicate);
 }
 
-assert.match(appSource, /async function saveInitialRoutine\(confirmation: RoutineBuilderSaveConfirmation\)/);
+assert.match(appSource, /async function executeRoutineSaveAdapter\([\s\S]*confirmation: RoutineBuilderSaveConfirmation/);
+assert.match(routineControllerSource, /export function useRoutineBuilderWorkflows/);
 assert.match(appSource, /saveRoutine=\{\(\) => void saveInitialRoutine\("unconfirmed"\)\}/);
 assert.match(appSource, /onConfirm=\{\(\) => void saveInitialRoutine\("confirmed_routine_update"\)\}/);
 assert.match(appSource, /routineUpdateConfirmed: confirmation === "confirmed_routine_update"/);
@@ -84,14 +94,14 @@ assert.match(appSource, /const activeDayAccepted = validRows\.length > 0 \|\| is
 assert.match(appSource, /requiresRoutineUpdateConfirmation: isChangingRoutineDays && !isTrainingCyclesRepositoryActive/);
 assert.match(appSource, /setupTransition\.kind === "blocked"/);
 assert.match(appSource, /setupTransition\.kind === "confirm_update"/);
-assert.match(appSource, /setIsRoutineUpdateConfirmOpen\(true\)/);
+assert.match(appSource, /routineBuilder\.openModal\("routine-update-confirm"\)/);
 assert.ok(
   (appSource.match(/setupTransition\.kind === "continue_setup"/g) ?? []).length >= 2,
   "las ramas repository y legacy deben consumir continue_setup",
 );
 assert.match(
   appSource,
-  /dispatchRoutineBuilder\(\{ type: "select_day", day: setupTransition\.nextDay \}\)/,
+  /routineBuilder\.selectRoutineDay\(setupTransition\.nextDay\)/,
 );
 assert.doesNotMatch(appSource, /setupTransition\.validation/);
 assert.doesNotMatch(appSource, /const allPlannedDaysComplete\b/);

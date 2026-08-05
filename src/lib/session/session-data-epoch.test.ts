@@ -266,6 +266,8 @@ interface P341ContractSources {
   trainingDataRequestOwner: string;
   sessionEpoch: string;
   operationOwner: string;
+  routineBuilderHook: string;
+  routineBuilderOwner: string;
   profileRepository: string;
   avatarRepository: string;
   dataRepository: string;
@@ -314,14 +316,9 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   );
   for (const marker of [
     "appShell.closeAll()",
-    "setIsNewCycleConfirmOpen(false)",
-    "setIsDeleteCycleConfirmOpen(false)",
-    "setIsRoutineSuccessOpen(false)",
-    "setIsRoutineUpdateConfirmOpen(false)",
-    "setRoutineEditorReturnScreen(null)",
-    "setRoutineNotice(\"\")",
+    "routineBuilder.resetTransient()",
     "setDashboardDayOverride(\"\")",
-    'dispatchProgressController({ type: "selection_reset" })',
+    "progressController.resetSelection()",
   ]) assert.ok(transientReset.includes(marker), `reset user-scoped incompleto: ${marker}`);
 
   const profileSave = extractBetween(
@@ -351,32 +348,33 @@ function assertP341StaticContracts(sources: P341ContractSources) {
 
   const routineSave = extractBetween(
     sources.app,
-    "async function saveInitialRoutine",
+    "async function executeRoutineSaveAdapter",
     "async function handleLogout",
   );
-  assert.match(routineSave, /tryAcquireUserScopedOperation\(routineSaveInFlightRef\)/);
-  assert.match(routineSave, /deleteExercise\([\s\S]*operationOwner\.userId \?\? undefined/);
-  assert.match(routineSave, /saveExercise\([\s\S]*operationOwner\.userId \?\? undefined/);
-  assert.match(routineSave, /if \(deleteResult\.kind === "stale"\) return;/);
-  assert.match(routineSave, /if \(saveResult\.kind === "stale"\) return;/);
-  assert.equal(
-    (routineSave.match(
-      /if \(finalizeUserScopedOperation\(routineSaveInFlightRef, operationOwner\)\)/g,
-    ) ?? []).length,
-    2,
-    "ambos finally de Routine deben estar gobernados por su owner",
-  );
+  assert.doesNotMatch(routineSave, /acquire|finalizeRoutineSave|settleRoutineSave/);
+  assert.match(routineSave, /deleteExercise\([\s\S]*operation\.userId \?\? undefined/);
+  assert.match(routineSave, /saveExercise\([\s\S]*operation\.userId \?\? undefined/);
+  assert.match(routineSave, /operation\.runLegacyBatch\(legacyWrites\)/);
+  assert.match(routineSave, /operation\.isCurrent\(\)/);
 
-  for (const [start, end, lock] of [
-    ["async function startNewTrainingCycle", "async function deleteCurrentTrainingCycle", "trainingCycleCreateInFlightRef"],
-    ["async function deleteCurrentTrainingCycle", "function updateExerciseDraft", "trainingCycleDeleteInFlightRef"],
+  for (const [start, end, expectedOperation] of [
+    ["async function executeCycleCreateAdapter", "async function executeCycleDeleteAdapter", "settle"],
+    ["async function executeCycleDeleteAdapter", "function updateExerciseDraft", "runRepositoryWrite"],
   ] as const) {
     const operation = extractBetween(sources.app, start, end);
-    assert.match(operation, new RegExp(`tryAcquireUserScopedOperation\\(${lock}\\)`));
-    assert.match(operation, /settleUserScopedOperation\(/);
-    assert.match(operation, new RegExp(`finalizeUserScopedOperation\\(${lock}, operationOwner\\)`));
-    assert.match(operation, /operationOwner\.userId \?\? undefined/);
+    assert.doesNotMatch(operation, /acquire|finalizeCycle|settleCycle/);
+    assert.match(operation, new RegExp(`operation\\.${expectedOperation}\\(`));
+    assert.match(operation, /operation\.userId \?\? undefined/);
   }
+  assert.match(sources.app, /useRoutineBuilderWorkflows\(routineBuilder, \{/);
+  assert.doesNotMatch(sources.app, /async function (?:saveInitialRoutine|startNewTrainingCycle|deleteCurrentTrainingCycle)/);
+  assert.match(sources.routineBuilderHook, /export function useRoutineBuilderWorkflows/);
+  assert.match(sources.routineBuilderHook, /runRoutineSave|runCycleCreate|runCycleDelete/);
+  assert.doesNotMatch(sources.routineBuilderHook, /acquireRoutineSaveOwner|finalizeRoutineSave|settleRoutineSave/);
+  assert.match(
+    sources.routineBuilderOwner,
+    /const finalized = input\.registry\.finalize\(input\.operation, owner\);/,
+  );
 
   const logout = extractBetween(sources.app, "async function handleLogout", "function openRoutineDay");
   assert.doesNotMatch(logout, /clearBrowserStorageScope|clearPasswordRecoveryFlow/);
@@ -404,6 +402,10 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   assert.match(refresh, /trainingDataController\.refreshForIdentity\(\{/);
   assert.match(refresh, /captureSessionDataRequestToken\(\)/);
   assert.match(refresh, /isSessionDataRequestCurrent\(requestToken\)/);
+  assert.match(refresh, /routineBuilder\.reconcileTrainingDataRefresh\(\(currentDraftPlan\) => \{/);
+  assert.match(refresh, /selectTrainingDataView\(result\.state, currentDraftPlan\)/);
+  assert.doesNotMatch(refresh, /selectTrainingDataView\(result\.state, trainingPlan\)/);
+  assert.doesNotMatch(refresh, /getVisibleTrainingDay\([^)]*activeRoutineDay/);
   assert.match(sources.trainingDataRequestOwner, /requestToken: identity\.captureRequestToken\(\)/);
   assert.match(sources.trainingDataRequestOwner, /identity\.isRequestTokenCurrent\(owner\.requestToken\)/);
   assert.match(
@@ -2006,6 +2008,14 @@ async function run() {
       new URL("./active-workout-session-boundary.ts", import.meta.url),
       "utf8",
     ),
+    routineBuilderHook: readFileSync(
+      new URL("../../features/routine-builder/hooks/useRoutineBuilderController.ts", import.meta.url),
+      "utf8",
+    ),
+    routineBuilderOwner: readFileSync(
+      new URL("../../features/routine-builder/model/routine-builder-operation-owner.ts", import.meta.url),
+      "utf8",
+    ),
     profileRepository: readFileSync(
       new URL("../profile/profile-repository.ts", import.meta.url),
       "utf8",
@@ -2063,10 +2073,10 @@ async function run() {
     },
     {
       name: "permitir finally A sobre B",
-      target: "app",
+      target: "routineBuilderOwner",
       mutate: (source) => source.replace(
-        "if (finalizeUserScopedOperation(routineSaveInFlightRef, operationOwner))",
-        "if (true)",
+        "const finalized = input.registry.finalize(input.operation, owner);",
+        "const finalized = true;",
       ),
     },
     {

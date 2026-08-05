@@ -20,7 +20,7 @@ const translators = [
     name: "translateTrainingCycleRepositoryError",
     modulePath: "@/lib/training/training-cycle-error",
     sourcePath: "src/lib/training/training-cycle-error.ts",
-    expectedCallSites: 4,
+    expectedCallSites: 5,
   },
   {
     name: "translateTrainingWorkoutReadinessError",
@@ -59,6 +59,11 @@ assert.match(
 assert.ok(
   (trainingDataControllerSource.match(/translateCycleError\(/g) ?? []).length >= 2,
   "errores de cycles y snapshot pasan por el traductor inyectado",
+);
+assert.match(
+  appStaticSource,
+  /onUnexpectedError\(operation, error\)\s*\{[\s\S]*?translateTrainingCycleRepositoryError\(error\)/,
+  "el workflow extraido conserva la traduccion canonica de errores inesperados",
 );
 
 for (const translator of translators) {

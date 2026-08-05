@@ -251,14 +251,18 @@ function testStaticInfrastructureBoundary() {
 function testStaticProductiveIntegrationContract() {
   // Contrato source-based: valida ownership y wiring; no renderiza React ni simula DOM/eventos.
   const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
+  const hookSource = readFileSync(
+    "src/features/progress/hooks/useProgressController.ts",
+    "utf8",
+  );
   const comparisonSource = readFileSync(
     "src/features/progress/components/comparison-screen-v2.tsx",
     "utf8",
   );
-  const controllerImport = appSource.match(
+  const controllerImport = hookSource.match(
     /import \{[^}]+\} from "@\/features\/progress\/model\/progress-controller-state";/,
   )?.[0] ?? "";
-  const viewStart = appSource.indexOf("  const progressControllerView = buildProgressControllerView(");
+  const viewStart = appSource.indexOf("  const progressControllerSource = useMemo(");
   const viewEnd = appSource.indexOf("  const dashboardCarouselDays", viewStart);
   const viewSource = viewStart >= 0 && viewEnd > viewStart
     ? appSource.slice(viewStart, viewEnd)
@@ -271,19 +275,12 @@ function testStaticProductiveIntegrationContract() {
   ]) {
     assert.match(controllerImport, new RegExp(`\\b${importedName}\\b`));
   }
-  assert.equal(
-    (appSource.match(
-      /const \[progressControllerState, dispatchProgressController\] = useReducer\(\s*progressControllerReducer,\s*undefined,\s*createInitialProgressControllerState,\s*\);/g,
-    ) ?? []).length,
-    1,
-    "el root debe crear exactamente un reducer productivo de Progress",
-  );
-  assert.equal(
-    (appSource.match(/\bbuildProgressControllerView\(/g) ?? []).length,
-    1,
-    "la vista canonica se construye exactamente una vez",
-  );
-  assert.match(viewSource, /progressControllerState,/);
+  assert.equal((hookSource.match(/useState<ProgressSelectionSnapshot>/g) ?? []).length, 1);
+  assert.equal((hookSource.match(/\bprogressControllerReducer\(/g) ?? []).length, 1);
+  assert.equal((hookSource.match(/\bbuildProgressControllerView\(/g) ?? []).length, 1);
+  assert.doesNotMatch(appSource, /progressControllerReducer|createInitialProgressControllerState/);
+  assert.match(appSource, /useProgressController\(\{/);
+  assert.match(viewSource, /cycleId: persistedActiveCycle\?\.id \?\? null,/);
   assert.match(viewSource, /plannedExercises: displayExercises,/);
   assert.match(viewSource, /entries: metrics,/);
   assert.match(viewSource, /routineDays,/);
@@ -294,16 +291,23 @@ function testStaticProductiveIntegrationContract() {
   assert.doesNotMatch(appSource, /\bsetComparisonDay\b/);
   assert.doesNotMatch(comparisonSource, /\bcomparisonDay\b|\bsetComparisonDay\b/);
 
-  assert.equal((appSource.match(/dispatchProgressController\(/g) ?? []).length, 10);
-  assert.equal((appSource.match(/type: "selection_reset"/g) ?? []).length, 5);
+  assert.doesNotMatch(hookSource, /\bmetrics\s*:/);
+  assert.doesNotMatch(hookSource, /\b(?:exercises|entries|sessions)\s*:\s*(?:readonly\s+)?[^;]+;/);
+  assert.match(hookSource, /identity\.cycleId \?\? "legacy"/);
+  assert.match(hookSource, /snapshot\.key === key/);
+  const resetStart = appSource.indexOf("  function resetUserScopedTransientState()");
+  const resetEnd = appSource.indexOf("\n  function applySessionState", resetStart);
+  assert.ok(resetStart >= 0 && resetEnd > resetStart, "se delimitó resetUserScopedTransientState");
+  const resetSource = appSource.slice(resetStart, resetEnd);
   assert.match(
-    appSource,
-    /function resetUserScopedTransientState\([\s\S]*dispatchProgressController\(\{ type: "selection_reset" \}\)/,
+    resetSource,
+    /progressController\.resetSelection\(\)/,
     "SIGNED_OUT/cambio de identidad resetea la seleccion de Progress",
   );
-  assert.equal((appSource.match(/type: "day_selected"/g) ?? []).length, 3);
-  assert.equal((appSource.match(/type: "exercise_selected"/g) ?? []).length, 1);
-  assert.equal((appSource.match(/type: "week_selected"/g) ?? []).length, 1);
+  assert.doesNotMatch(resetSource, /dispatchProgressController/);
+  assert.equal((appSource.match(/dispatchProgressController\(\{ type: "day_selected"/g) ?? []).length, 3);
+  assert.equal((appSource.match(/dispatchProgressController\(\{ type: "exercise_selected"/g) ?? []).length, 1);
+  assert.equal((appSource.match(/dispatchProgressController\(\{ type: "week_selected"/g) ?? []).length, 1);
   assert.match(
     appSource,
     /dispatchProgressController\(\{ type: "day_selected", day: intent\.comparisonDayOverride \}\)/,

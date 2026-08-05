@@ -862,7 +862,7 @@ async function run() {
     assert.doesNotMatch(autosaveBlock, /plannedDay: getTrainingDayCode\(visibleDay\)|plannedDate: null/, "autosave no reconstruye contexto v2 desde estado visual");
     assert.match(
       appSource,
-      /const cancellationResult = await settleUserScopedOperation\([\s\S]*cancelTrainingCycle\([\s\S]*cancellationResult\.kind === "stale"[\s\S]*cancellationResult\.kind === "error"[\s\S]*clearWorkoutDraft\(operationOwner\.dataMode, operationOwner\.userId \?\? undefined\)/,
+      /const cancellationResult = await operation\.runRepositoryWrite\([\s\S]*cancelTrainingCycle\([\s\S]*cancellationResult\.kind === "stale"[\s\S]*cancellationResult\.kind === "error"[\s\S]*clearWorkoutDraft\(operation\.dataMode, operation\.userId \?\? undefined\)/,
       "deleteCurrentTrainingCycle limpia solo despues del cancel exitoso y vigente",
     );
     assert.match(appSource, /workoutAttemptId: start\.value\.activeWorkoutAttemptId/, "organizatech-app guarda el attempt validado en el draft inicial");
@@ -913,9 +913,9 @@ async function run() {
     assert.equal(activeBackDecision.clearReadiness, false, "volver al dashboard conserva readiness");
     assert.doesNotMatch(goBackBlock, /clearWorkoutDraft|resetWorkoutAttemptState/, "el adaptador de volver no elimina el intento activo");
     const openRoutineStart = appSource.indexOf("function openRoutineDay(day: string, keepTrainingStarted = false)");
-    const openRoutineEnd = appSource.indexOf("  async function startNewTrainingCycle", openRoutineStart);
+    const openRoutineEnd = appSource.indexOf("  async function executeCycleCreateAdapter", openRoutineStart);
     const openRoutineBlock = openRoutineStart >= 0 && openRoutineEnd > openRoutineStart ? appSource.slice(openRoutineStart, openRoutineEnd) : "";
-    assert.match(openRoutineBlock, /if \(!keepTrainingStarted && navigation\.reenterActiveWorkout\(\{[\s\S]*tryRestoreActiveWorkout: restoreActiveWorkoutForNavigation,[\s\S]*closeMenu: appShell\.closeMenu,[\s\S]*\}\)\) return;[\s\S]*setActiveRoutineDay\(day\)/, "entrada desde dashboard usa el mismo commit central de reentry antes de reemplazar dia/indice activos");
+    assert.match(openRoutineBlock, /if \(!keepTrainingStarted && navigation\.reenterActiveWorkout\(\{[\s\S]*tryRestoreActiveWorkout: restoreActiveWorkoutForNavigation,[\s\S]*closeMenu: appShell\.closeMenu,[\s\S]*\}\)\) return;[\s\S]*routineBuilder\.selectActiveRoutineDay\(day\)/, "entrada desde dashboard usa el mismo commit central de reentry antes de reemplazar dia/indice activos");
     const attemptCleanupStart = activeWorkoutLifecycleSource.indexOf("const isActiveWorkout =");
     const attemptCleanupEnd = activeWorkoutLifecycleSource.indexOf("\n  ]);", attemptCleanupStart);
     const attemptCleanupEffect = attemptCleanupStart >= 0 && attemptCleanupEnd > attemptCleanupStart
