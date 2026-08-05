@@ -625,8 +625,8 @@ function assertTrainingDataBoundarySourceContract(sources: BoundaryContractSourc
   );
   assert.match(sources.app, /createCycleScopedTrainingCycleFromSetup[\s\S]*refreshTrainingCyclesBoundary\(\)/);
   assert.match(sources.app, /addCycleScopedTrainingDaysAndExercises\([\s\S]*reloadCycleScopedBoundary\(activeCycle\.id\)/);
-  assert.match(sources.app, /startNewTrainingCycle[\s\S]*trainingDataController\.clearForCycleSetup\(operationOwner\.requestToken\)/);
-  assert.match(sources.app, /deleteCurrentTrainingCycle[\s\S]*refreshTrainingCyclesBoundary\(\)/);
+  assert.match(sources.app, /executeCycleCreateAdapter[\s\S]*trainingDataController\.clearForCycleSetup\(operation\.requestToken\)/);
+  assert.match(sources.app, /executeCycleDeleteAdapter[\s\S]*refreshTrainingCyclesBoundary\(\)/);
   assert.doesNotMatch(sources.app, /<ShareWorkoutCard\b|from ["'][^"']*workout-share/);
 }
 

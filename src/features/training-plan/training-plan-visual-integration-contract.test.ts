@@ -12,6 +12,9 @@ function readSource(path: string): string {
 const appSource = readSource("src/components/organizatech-app.tsx");
 const packageSource = readSource("package.json");
 const catalogSource = readSource("src/features/training-plan/model/training-cycle-presentation.ts");
+const routineBuilderControllerSource = readSource(
+  "src/features/routine-builder/hooks/useRoutineBuilderController.ts",
+);
 const files = {
   cycleManagement: readSource("src/features/training-plan/components/CycleManagementScreen.tsx"),
   planBlocker: readSource("src/features/training-plan/components/CycleScopedPlanBlocker.tsx"),
@@ -79,7 +82,16 @@ assert.doesNotMatch(files.setupCard, /as\s+TrainingCycleId/, "el componente no d
 // P3-18: el root conserva el boundary string del componente y lo entrega al controller,
 // cuyo guard canónico decide si la edición de cycleType puede aplicarse.
 assert.match(appSource, /function updateCycleType\(value: string\) \{\s*\n\s*updateTrainingPlan\(\{ type: "cycle_type", value \}\);/);
-assert.match(appSource, /const result = applyTrainingPlanEdit\(\{ plan: current, activeDay: setupDay \}, edit\);/);
+assert.match(
+  routineBuilderControllerSource,
+  /const result = applyTrainingPlanEdit\(\s*\{ plan: currentPlan, activeDay: currentBuilderState\.activeDay \},\s*edit,\s*\);/,
+  "el controller feature-local aplica el edit canónico contra su estado vigente",
+);
+assert.doesNotMatch(
+  appSource,
+  /\bapplyTrainingPlanEdit\(/,
+  "el composition root no debe reimplementar reglas de edición del plan",
+);
 assert.match(appSource, /onCycleTypeChange=\{updateCycleType\}/);
 assert.doesNotMatch(appSource, /event\.target\.value as TrainingCycleId/, "el cast inseguro quedo eliminado del flujo integrado");
 // Catálogos canónicos compartidos, sin copias locales en el componente.
