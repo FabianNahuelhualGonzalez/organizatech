@@ -179,16 +179,35 @@ interface AvatarRepositoryCalls {
   uploads: Array<{ path: string; options: { upsert?: boolean; contentType?: string } }>;
   removes: string[][];
   profileUpdates: Array<Record<string, unknown>>;
+  profileReads: number;
+  profileSelects: string[];
 }
 
-function createAvatarRepositoryMock(storedPath: string | null = `${userId}/avatar`) {
+interface AvatarRepositoryMockOptions {
+  switchUserAfterProfileRead?: string;
+  switchUserAfterUpload?: string;
+  switchUserAfterProfileUpdate?: string;
+  switchUserAfterSignedUrl?: string;
+  emptySignedUrlResponses?: number;
+  signedUrlFailures?: number;
+}
+
+function createAvatarRepositoryMock(
+  storedPath: string | null = `${userId}/avatar`,
+  options: AvatarRepositoryMockOptions = {},
+) {
   const calls: AvatarRepositoryCalls = {
     signedUrls: [],
     uploads: [],
     removes: [],
     profileUpdates: [],
+    profileReads: 0,
+    profileSelects: [],
   };
 
+  let activeUserId = userId;
+  let emptySignedUrlResponses = options.emptySignedUrlResponses ?? 0;
+  let signedUrlFailures = options.signedUrlFailures ?? 0;
   let profileRow = {
     avatar_path: storedPath,
     avatar_updated_at: storedPath ? "2026-07-07T12:00:00.000Z" : null,
@@ -197,7 +216,7 @@ function createAvatarRepositoryMock(storedPath: string | null = `${userId}/avata
   const client = {
     auth: {
       getUser: async () => ({
-        data: { user: { id: userId } },
+        data: { user: { id: activeUserId } },
         error: null,
       }),
     },
@@ -205,14 +224,28 @@ function createAvatarRepositoryMock(storedPath: string | null = `${userId}/avata
       from: () => ({
         createSignedUrl: async (avatarPath: string, expiresIn: number) => {
           calls.signedUrls.push({ path: avatarPath, expiresIn });
+          if (options.switchUserAfterSignedUrl) {
+            activeUserId = options.switchUserAfterSignedUrl;
+          }
+          if (signedUrlFailures > 0) {
+            signedUrlFailures -= 1;
+            return { data: { signedUrl: null }, error: new Error("signed URL unavailable") };
+          }
+          if (emptySignedUrlResponses > 0) {
+            emptySignedUrlResponses -= 1;
+            return { data: { signedUrl: "" }, error: null };
+          }
           return { data: { signedUrl: "signed-avatar" }, error: null };
         },
         upload: async (
           avatarPath: string,
           _file: File,
-          options: { upsert?: boolean; contentType?: string },
+          uploadOptions: { upsert?: boolean; contentType?: string },
         ) => {
-          calls.uploads.push({ path: avatarPath, options });
+          calls.uploads.push({ path: avatarPath, options: uploadOptions });
+          if (options.switchUserAfterUpload) {
+            activeUserId = options.switchUserAfterUpload;
+          }
           return { data: { path: avatarPath }, error: null };
         },
         remove: async (avatarPaths: string[]) => {
@@ -224,12 +257,26 @@ function createAvatarRepositoryMock(storedPath: string | null = `${userId}/avata
     from: (table: string) => {
       assert.equal(table, "profiles");
       return {
-        select: () => ({
+        select: (columns: string) => ({
           eq: (column: string, value: string) => {
             assert.equal(column, "id");
             assert.equal(value, userId);
             return {
-              maybeSingle: async () => ({ data: profileRow, error: null }),
+              maybeSingle: async () => {
+                calls.profileReads += 1;
+                calls.profileSelects.push(columns);
+                const selectedColumns = new Set(columns.split(","));
+                const selectedRow = {
+                  ...(selectedColumns.has("avatar_path") ? { avatar_path: profileRow.avatar_path } : {}),
+                  ...(selectedColumns.has("avatar_updated_at")
+                    ? { avatar_updated_at: profileRow.avatar_updated_at }
+                    : {}),
+                };
+                if (options.switchUserAfterProfileRead) {
+                  activeUserId = options.switchUserAfterProfileRead;
+                }
+                return { data: selectedRow, error: null };
+              },
             };
           },
         }),
@@ -245,7 +292,12 @@ function createAvatarRepositoryMock(storedPath: string | null = `${userId}/avata
               assert.equal(value, userId);
               return {
                 select: () => ({
-                  single: async () => ({ data: profileRow, error: null }),
+                  single: async () => {
+                    if (options.switchUserAfterProfileUpdate) {
+                      activeUserId = options.switchUserAfterProfileUpdate;
+                    }
+                    return { data: profileRow, error: null };
+                  },
                 }),
               };
             },
@@ -269,6 +321,69 @@ async function runRepositoryTests() {
     assert.deepEqual(calls.signedUrls, [{ path: `${userId}/avatar`, expiresIn: 3600 }]);
   }
 
+  {
+    const { calls, repository } = createAvatarRepositoryMock();
+    assert.deepEqual(await repository.getCurrentProfileAvatar(userId), {
+      avatarPath: `${userId}/avatar`,
+      avatarUrl: "signed-avatar",
+      avatarUpdatedAt: "2026-07-07T12:00:00.000Z",
+    });
+    assert.equal(calls.profileReads, 1);
+    assert.deepEqual(calls.profileSelects, ["avatar_path,avatar_updated_at"]);
+    assert.deepEqual(calls.signedUrls, [{ path: `${userId}/avatar`, expiresIn: 3600 }]);
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock();
+    await assert.rejects(
+      repository.getCurrentProfileAvatar(otherUserId),
+      /Tu sesión cambió/,
+    );
+    assert.equal(calls.profileReads, 0);
+    assert.deepEqual(calls.signedUrls, []);
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock(`${userId}/avatar`, {
+      switchUserAfterProfileRead: otherUserId,
+    });
+    await assert.rejects(
+      repository.getCurrentProfileAvatar(userId),
+      /Tu sesión cambió/,
+    );
+    assert.equal(calls.profileReads, 1);
+    assert.deepEqual(calls.signedUrls, []);
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock(`${userId}/avatar`, {
+      switchUserAfterSignedUrl: otherUserId,
+    });
+    await assert.rejects(
+      repository.getCurrentProfileAvatar(userId),
+      /Tu sesión cambió/,
+    );
+    assert.deepEqual(calls.signedUrls, [{ path: `${userId}/avatar`, expiresIn: 3600 }]);
+  }
+
+  {
+    const { repository } = createAvatarRepositoryMock(`${userId}/avatar`, { signedUrlFailures: 1 });
+    await assert.rejects(
+      repository.getCurrentProfileAvatar(userId),
+      /No se pudo obtener la foto de perfil/,
+    );
+    assert.equal((await repository.getCurrentProfileAvatar(userId)).avatarUrl, "signed-avatar");
+  }
+
+  {
+    const { repository } = createAvatarRepositoryMock(`${userId}/avatar`, { emptySignedUrlResponses: 1 });
+    await assert.rejects(
+      repository.getCurrentProfileAvatar(userId),
+      /No se pudo obtener la foto de perfil/,
+    );
+    assert.equal((await repository.getCurrentProfileAvatar(userId)).avatarUrl, "signed-avatar");
+  }
+
   for (const storedPath of [
     `${otherUserId}/avatar`,
     `${userId}/avatar.webp`,
@@ -285,12 +400,72 @@ async function runRepositoryTests() {
     const avatarFile = file("image/jpeg") as unknown as File;
     const avatar = await repository.uploadProfileAvatar(avatarFile);
     assert.equal(avatar.avatarPath, `${userId}/avatar`);
+    assert.equal(avatar.avatarUrl, "signed-avatar");
     assert.deepEqual(calls.uploads, [{
       path: `${userId}/avatar`,
       options: { upsert: true, contentType: "image/jpeg" },
     }]);
+    assert.deepEqual(Object.keys(calls.profileUpdates[0] ?? {}).sort(), [
+      "avatar_path",
+      "avatar_updated_at",
+    ]);
     assert.equal(calls.profileUpdates[0]?.avatar_path, `${userId}/avatar`);
+    assert.equal(avatar.avatarUpdatedAt, calls.profileUpdates[0]?.avatar_updated_at);
+    assert.match(String(avatar.avatarUpdatedAt), /^\d{4}-\d{2}-\d{2}T/);
     assert.deepEqual(calls.signedUrls, [{ path: `${userId}/avatar`, expiresIn: 3600 }]);
+
+    assert.deepEqual(await repository.getCurrentProfileAvatar(userId), avatar);
+    assert.deepEqual(calls.signedUrls, [
+      { path: `${userId}/avatar`, expiresIn: 3600 },
+      { path: `${userId}/avatar`, expiresIn: 3600 },
+    ]);
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock(null);
+    await assert.rejects(
+      repository.uploadProfileAvatar(file("image/jpeg") as unknown as File, otherUserId),
+      /Tu sesión cambió/,
+    );
+    assert.deepEqual(calls.uploads, []);
+    assert.deepEqual(calls.profileUpdates, []);
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock(null, {
+      switchUserAfterUpload: otherUserId,
+    });
+    await assert.rejects(
+      repository.uploadProfileAvatar(file("image/jpeg") as unknown as File, userId),
+      /Tu sesión cambió/,
+    );
+    assert.equal(calls.uploads.length, 1);
+    assert.deepEqual(calls.profileUpdates, []);
+    assert.deepEqual(calls.signedUrls, []);
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock(null, {
+      switchUserAfterProfileUpdate: otherUserId,
+    });
+    await assert.rejects(
+      repository.uploadProfileAvatar(file("image/jpeg") as unknown as File, userId),
+      /Tu sesión cambió/,
+    );
+    assert.equal(calls.profileUpdates.length, 1);
+    assert.deepEqual(calls.signedUrls, []);
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock(null, {
+      switchUserAfterSignedUrl: otherUserId,
+    });
+    await assert.rejects(
+      repository.uploadProfileAvatar(file("image/jpeg") as unknown as File, userId),
+      /Tu sesión cambió/,
+    );
+    assert.equal(calls.profileUpdates.length, 1);
+    assert.equal(calls.signedUrls.length, 1);
   }
 
   {

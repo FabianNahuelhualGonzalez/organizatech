@@ -714,8 +714,8 @@ function run() {
     const { storage, values } = createStorage();
     const history = [{ id: "cycle-1" }, { id: "cycle-2" }];
     assert.equal(saveCycleHistory(history, getScope(), { storage }), true);
-    assert.deepEqual(loadCycleHistory<{ id: string }>(getScope(), { storage }), history);
-    assert.equal(loadCycleHistory<{ id: string }>(getScope(USER_B), { storage }).length, 0);
+    assert.deepEqual(loadCycleHistory(getScope(), { storage }), history);
+    assert.equal(loadCycleHistory(getScope(USER_B), { storage }).length, 0);
     assert.ok(values.has(getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.cycleHistory, getScope())));
   }
 

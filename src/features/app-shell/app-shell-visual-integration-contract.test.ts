@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 
 /**
  * Contrato ESTÁTICO de integración (P3-07A). No renderiza React, no ejecuta el componente.
@@ -48,7 +49,86 @@ function assertInOrder(source: string, markers: string[]) {
   });
 }
 
+function unwrapExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function propertyNameText(member: ts.ObjectLiteralElementLike): string | null {
+  if (!member.name) return null;
+  return ts.isIdentifier(member.name) || ts.isStringLiteral(member.name)
+    ? member.name.text
+    : null;
+}
+
+function findReturnedObjectMember(input: {
+  path: string;
+  source: string;
+  functionName: string;
+  memberName: string;
+}): ts.ObjectLiteralElementLike {
+  const sourceFile = ts.createSourceFile(
+    input.path,
+    input.source,
+    ts.ScriptTarget.Latest,
+    true,
+    input.path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const candidates = sourceFile.statements.filter((statement): statement is ts.FunctionDeclaration => (
+    ts.isFunctionDeclaration(statement) && statement.name?.text === input.functionName
+  ));
+  assert.equal(candidates.length, 1, `${input.functionName}: se esperaba una función top-level inequívoca`);
+  const body = candidates[0].body;
+  assert.ok(body, `${input.functionName}: la función debe tener cuerpo ejecutable`);
+  const returns = body.statements.filter((statement): statement is ts.ReturnStatement => (
+    ts.isReturnStatement(statement)
+  ));
+  assert.equal(returns.length, 1, `${input.functionName}: se esperaba un único return directo del boundary`);
+  const returnedExpression = returns[0].expression && unwrapExpression(returns[0].expression);
+  assert.ok(
+    returnedExpression && ts.isObjectLiteralExpression(returnedExpression),
+    `${input.functionName}: el return directo debe ser un objeto boundary`,
+  );
+  const members = returnedExpression.properties.filter((member) => (
+    propertyNameText(member) === input.memberName
+  ));
+  assert.equal(members.length, 1, `${input.functionName}.${input.memberName}: miembro ausente o ambiguo`);
+  return members[0];
+}
+
+function assertProfileForegroundWiring(source: string) {
+  const member = findReturnedObjectMember({
+    path: "src/features/profile/hooks/useProfileController.ts",
+    source,
+    functionName: "useProfileController",
+    memberName: "refreshProfileAvatar",
+  });
+  assert.ok(
+    ts.isPropertyAssignment(member),
+    `useProfileController.refreshProfileAvatar: se esperaba PropertyAssignment, no ${ts.SyntaxKind[member.kind]}`,
+  );
+  const initializer = unwrapExpression(member.initializer);
+  if (ts.isArrowFunction(initializer)) {
+    assert.fail("useProfileController.refreshProfileAvatar: un ArrowFunction no puede reemplazar el command conectado");
+  }
+  assert.ok(
+    ts.isPropertyAccessExpression(initializer),
+    "useProfileController.refreshProfileAvatar: el initializer ejecutable debe referenciar controller.foreground",
+  );
+  assert.ok(
+    ts.isIdentifier(initializer.expression) &&
+      initializer.expression.text === "controller" &&
+      initializer.name.text === "foreground",
+    "useProfileController.refreshProfileAvatar: wiring distinto de controller.foreground",
+  );
+}
+
 const appSource = readSource("src/components/organizatech-app.tsx");
+const profileHookSource = readSource("src/features/profile/hooks/useProfileController.ts");
+const profileControllerSource = readSource("src/features/profile/model/profile-controller.ts");
 
 const components = {
   shellLayout: readSource("src/features/app-shell/components/app-shell-layout.tsx"),
@@ -157,9 +237,44 @@ function assertNoForbiddenImports(source: string, label: string) {
 }
 Object.entries(components).forEach(([label, source]) => assertNoForbiddenImports(source, label));
 
-// 6. El refresh de avatar permanece en un callback del root, no en los componentes visuales.
+// 6. El refresh de avatar permanece en el API público de Profile. El root sólo conecta el callback
+//    estrecho de App Shell y los componentes visuales no conocen el controller.
+assert.match(
+  appSource,
+  /import \{ useProfileController \} from "@\/features\/profile\/hooks\/useProfileController";/,
+);
+assert.match(appSource, /const profileBoundary = useProfileController\(\{/);
+assert.match(appSource, /refreshProfileAvatar,\s*\n/);
+assert.doesNotMatch(
+  appSource,
+  /function refreshProfileAvatar\s*\(/,
+  "el root no debe reinstalar el owner legacy de refreshProfileAvatar",
+);
+assertProfileForegroundWiring(profileHookSource);
+const foregroundSource = sourceSection(
+  profileControllerSource,
+  "    foreground() {",
+  "    async saveProfile",
+);
+assertInOrder(foregroundSource, [
+  "return controller.refreshAvatar({",
+  "force: true,",
+  "allowProfileLookup: true,",
+  "publishProfileLookup: false,",
+]);
+const imageErrorSource = sourceSection(
+  profileHookSource,
+  "  const handleAvatarImageError = useCallback(() => {",
+  "  return {",
+);
+assertInOrder(imageErrorSource, [
+  "if (now - lastImageErrorRefreshAtRef.current < PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS) return;",
+  "lastImageErrorRefreshAtRef.current = now;",
+  "void controller.foreground();",
+]);
+assert.match(appSource, /onAvatarImageError=\{handleProfileAvatarImageError\}/);
 assert.match(appSource, /function toggleMenu\(\) \{/);
-assert.match(appSource, /void refreshProfileAvatar\(\{ force: true, allowProfileLookup: true \}\);/);
+assert.match(appSource, /void refreshProfileAvatar\(\);/);
 Object.entries(components).forEach(([label, source]) => {
   assert.doesNotMatch(source, /refreshProfileAvatar/, `${label} no debe conocer refreshProfileAvatar (logica de produccion del root)`);
 });
@@ -177,7 +292,7 @@ Object.entries(components).forEach(([label, source]) => {
 const toggleMenuSource = sourceSection(appSource, "function toggleMenu() {", "  return (");
 assertInOrder(toggleMenuSource, [
   "appShell.toggleMenu(() => {",
-  "void refreshProfileAvatar({ force: true, allowProfileLookup: true });",
+  "void refreshProfileAvatar();",
 ]);
 
 // 9b. Badge: el contador solo se dibuja cuando hay texto (guard condicional, no siempre visible).

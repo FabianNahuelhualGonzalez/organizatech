@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 /*
  * Static Training plan type integration source contract only.
@@ -20,7 +21,33 @@ const trainingDataSelectorsStaticSource = readFileSync(
   "src/features/training-data/model/training-data-selectors.ts",
   "utf8",
 );
+const legacySnapshotStaticSource = readFileSync(
+  "src/lib/training/cycle-history/cycle-history-legacy-adapter.ts",
+  "utf8",
+);
+const legacyControllerStaticSource = readFileSync(
+  "src/features/cycle-history/model/legacy-cycle-history-controller.ts",
+  "utf8",
+);
+const legacyHookStaticSource = readFileSync(
+  "src/features/cycle-history/hooks/useLegacyCycleHistoryController.ts",
+  "utf8",
+);
 const packageStaticSource = readFileSync("package.json", "utf8");
+
+function collectProductionTypeScriptSources(directory: string): Array<{ path: string; source: string }> {
+  const sources: Array<{ path: string; source: string }> = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      collectProductionTypeScriptSources(path).forEach((source) => sources.push(source));
+      continue;
+    }
+    if (!/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) continue;
+    sources.push({ path, source: readFileSync(path, "utf8") });
+  }
+  return sources;
+}
 
 assert.match(cycleIdStaticSource, /export const TRAINING_CYCLE_IDS = \[/);
 assert.match(cycleIdStaticSource, /export type TrainingCycleId\s*=/);
@@ -103,12 +130,51 @@ assert.doesNotMatch(
   "el flujo integrado no debe castear input del DOM directamente al tipo de dominio",
 );
 
-assert.match(appStaticSource, /interface TrainingCycleSnapshot \{/);
-assert.match(appStaticSource, /plan: TrainingPlan;/);
+assert.match(
+  legacySnapshotStaticSource,
+  /export interface LegacyCycleHistorySnapshot \{/,
+  "el snapshot legacy pertenece al adapter canónico de Cycle History",
+);
+assert.match(legacySnapshotStaticSource, /plan: TrainingPlan;/);
 assert.match(
   appStaticSource,
   /type TrainingCycleSnapshot as PersistedTrainingCycleSnapshot/,
   "el snapshot local y el snapshot del repository deben seguir separados",
+);
+assert.doesNotMatch(appStaticSource, /interface (?:TrainingCycleSnapshot|LegacyCycleHistorySnapshot) \{/);
+assert.match(
+  legacyControllerStaticSource,
+  /import type \{ LegacyCycleHistorySnapshot \} from "@\/lib\/training\/cycle-history\/cycle-history-legacy-adapter";/,
+);
+assert.match(
+  legacyControllerStaticSource,
+  /readonly cycleHistory: readonly LegacyCycleHistorySnapshot\[\];/,
+);
+assert.match(
+  legacyHookStaticSource,
+  /createLegacyCycleHistoryController\(\{/,
+  "el hook instancia el único owner feature-local",
+);
+assert.match(
+  appStaticSource,
+  /import \{ useLegacyCycleHistoryController \} from "@\/features\/cycle-history\/hooks\/useLegacyCycleHistoryController";/,
+);
+assert.match(appStaticSource, /const legacyCycleHistoryBoundary = useLegacyCycleHistoryController\(\{/);
+assert.match(appStaticSource, /legacySnapshots=\{cycleHistory\}/);
+
+const productionSources = collectProductionTypeScriptSources("src");
+const legacySnapshotOwners = productionSources.filter(({ source }) => (
+  /(?:export\s+)?interface LegacyCycleHistorySnapshot \{/.test(source)
+));
+assert.deepEqual(
+  legacySnapshotOwners.map(({ path }) => path),
+  ["src/lib/training/cycle-history/cycle-history-legacy-adapter.ts"],
+  "LegacyCycleHistorySnapshot debe tener un único owner productivo",
+);
+assert.equal(
+  productionSources.filter(({ source }) => /interface TrainingCycleSnapshot \{/.test(source)).length,
+  0,
+  "el contrato legacy TrainingCycleSnapshot no debe reaparecer",
 );
 
 for (const testRegistration of [

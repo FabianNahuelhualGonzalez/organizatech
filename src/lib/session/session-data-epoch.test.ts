@@ -268,6 +268,7 @@ interface P341ContractSources {
   operationOwner: string;
   routineBuilderHook: string;
   routineBuilderOwner: string;
+  profileController: string;
   profileRepository: string;
   avatarRepository: string;
   dataRepository: string;
@@ -303,10 +304,10 @@ function assertP341StaticContracts(sources: P341ContractSources) {
     "if (identityChanged)",
     "setIsSupabaseConfiguredState",
   );
-  assert.match(identityProfileReset, /setProfilePersonalData\(null\)/);
+  assert.match(identityProfileReset, /profileBoundary\.controller\.invalidateIdentity\(\)/);
   assert.doesNotMatch(
     applySession.slice(applySession.indexOf("setIsSupabaseConfiguredState")),
-    /setProfilePersonalData\(null\)|setProfileAvatar\(createEmptyProfileAvatarState\(\)\)/,
+    /profileBoundary\.controller\.invalidateIdentity\(\)/,
   );
 
   const transientReset = extractBetween(
@@ -322,28 +323,28 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   ]) assert.ok(transientReset.includes(marker), `reset user-scoped incompleto: ${marker}`);
 
   const profileSave = extractBetween(
-    sources.app,
-    "async function handleSaveProfilePersonalData",
-    "async function handleUploadProfileAvatar",
+    sources.profileController,
+    "async saveProfile(profileInput)",
+    "async uploadAvatar(file)",
   );
   assertMarkersInOrder(profileSave, [
-    "tryAcquireUserScopedOperation(profileSaveInFlightRef)",
-    "updateProfilePersonalData(input, operationOwner.userId)",
+    "acquireWrite(saveOwner)",
+    "input.source.saveProfile(allowlistedInput, owner.userId)",
     'if (result.kind === "stale") return null;',
-    "setProfilePersonalData(result.value)",
+    "publish({ profilePersonalData: result.value })",
   ], "Profile save owner");
-  assert.match(profileSave, /finally[\s\S]*finalizeUserScopedOperation\(profileSaveInFlightRef, operationOwner\)/);
+  assert.match(profileSave, /finally[\s\S]*finalizeWrite\(saveOwner, owner\)/);
 
   const avatarSave = extractBetween(
-    sources.app,
-    "async function handleUploadProfileAvatar",
-    "async function refreshTrainingCyclesBoundary",
+    sources.profileController,
+    "async uploadAvatar(file)",
+    "invalidateIdentity()",
   );
   assertMarkersInOrder(avatarSave, [
-    "tryAcquireUserScopedOperation(profileAvatarUploadInFlightRef)",
-    "uploadProfileAvatar(file, operationOwner.userId)",
+    "acquireWrite(uploadOwner)",
+    "input.source.uploadAvatar(file, owner.userId)",
     'if (result.kind === "stale") return false;',
-    "setProfileAvatar(avatar)",
+    "profileAvatar: result.value",
   ], "Avatar owner");
 
   const routineSave = extractBetween(
@@ -395,7 +396,7 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   const refresh = extractBetween(
     sources.app,
     "function applyTrainingDataRefreshResult",
-    "async function refreshProfilePersonalData",
+    "async function refreshTrainingCyclesBoundary",
   );
   for (const kind of ["stale", "error"]) assert.ok(refresh.includes(`kind === "${kind}"`));
   assert.match(refresh, /handlePersistenceError\(result\.error, \{ preserveSession: true \}\)/);
@@ -2016,6 +2017,10 @@ async function run() {
       new URL("../../features/routine-builder/model/routine-builder-operation-owner.ts", import.meta.url),
       "utf8",
     ),
+    profileController: readFileSync(
+      new URL("../../features/profile/model/profile-controller.ts", import.meta.url),
+      "utf8",
+    ),
     profileRepository: readFileSync(
       new URL("../profile/profile-repository.ts", import.meta.url),
       "utf8",
@@ -2060,15 +2065,15 @@ async function run() {
   }> = [
     {
       name: "quitar guard post-await",
-      target: "app",
-      mutate: (source) => source.replace('      if (result.kind === "stale") return null;\n', ""),
+      target: "profileController",
+      mutate: (source) => source.replace('        if (result.kind === "stale") return null;\n', ""),
     },
     {
-      name: "usar supabaseUser dinamico",
-      target: "app",
+      name: "usar identidad dinamica en Profile",
+      target: "profileController",
       mutate: (source) => source.replace(
-        "updateProfilePersonalData(input, operationOwner.userId)",
-        "updateProfilePersonalData(input, supabaseUser.id)",
+        "input.source.saveProfile(allowlistedInput, owner.userId)",
+        "input.source.saveProfile(allowlistedInput, input.identity.captureRequestToken().userId!)",
       ),
     },
     {
@@ -2290,11 +2295,6 @@ async function run() {
   assert.match(componentSource, /if \(event === "SIGNED_OUT"\)[\s\S]*?clearUserSessionState/);
   assert.match(
     componentSource,
-    /function settleUserScopedOperation<[\s\S]*return settleSessionOperationPromise/,
-    "El root delega la resolucion post-await al helper productivo probado en runtime",
-  );
-  assert.match(
-    componentSource,
     /function finalizeUserScopedOperation\([\s\S]*finalizeSessionOperationOwner/,
     "El root delega ownership y finally al helper productivo probado en runtime",
   );
@@ -2436,27 +2436,14 @@ async function run() {
   const refreshDataSource = extractBetween(
     componentSource,
     "async function refreshTrainingDataForSession",
-    "async function refreshProfilePersonalData",
+    "async function refreshTrainingCyclesBoundary",
   );
   assert.match(refreshDataSource, /captureSessionDataRequestToken\(\)/);
   assert.match(refreshDataSource, /isSessionDataRequestCurrent\(requestToken\)/);
   assert.match(refreshDataSource, /finally[\s\S]*?isSessionDataRequestCurrent\(requestToken\)/);
 
-  const profileAvatarSource = extractBetween(
-    componentSource,
-    "const refreshProfileAvatar = useCallback",
-    "const completedTrainingDays",
-  );
-  assert.match(profileAvatarSource, /captureSessionDataRequestToken\(\)/);
-  assert.match(profileAvatarSource, /isSessionDataRequestCurrent\(requestToken\)/);
-
-  const profileEffectSource = extractBetween(
-    componentSource,
-    'if (screen !== "perfil" || !canEditProfilePersonalData)',
-    "function refreshAvatarOnResume",
-  );
-  assert.match(profileEffectSource, /captureSessionDataRequestToken\(\)/);
-  assert.match(profileEffectSource, /isSessionDataRequestCurrent\(requestToken\)/);
+  assert.match(p341Sources.profileController, /input\.identity\.captureRequestToken\(\)/);
+  assert.match(p341Sources.profileController, /input\.identity\.isRequestTokenCurrent/);
 
   // P3-32: los dos effects de historial se movieron al coordinador. La garantía se verifica ahora
   // sobre su fuente real y para AMBOS flujos (antes sólo se comprobaba el de performance): cada uno
@@ -2493,12 +2480,14 @@ async function run() {
   assert.doesNotMatch(historyHookCode, /Promise\.all/, "performance y observacion deben fallar por separado");
 
   const profileSource = extractBetween(
-    componentSource,
-    "async function refreshProfilePersonalData",
-    "async function handleSaveProfilePersonalData",
+    p341Sources.profileController,
+    "async refreshProfile()",
+    "async refreshAvatar(options = {})",
   );
-  assert.match(profileSource, /captureSessionDataRequestToken\(\)/);
-  assert.match(profileSource, /isSessionDataRequestCurrent\(requestToken\)/);
+  assert.match(profileSource, /beginRead\("profile"\)/);
+  assert.match(profileSource, /beginRead\("avatar"\)/);
+  assert.match(profileSource, /isReadCurrent\("profile", profileOwner\)/);
+  assert.match(profileSource, /isReadCurrent\("avatar", avatarOwner\)/);
 
   assert.match(p341Sources.trainingDataRequestOwner, /requestToken: identity\.captureRequestToken\(\)/);
   assert.match(

@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 
 const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
 const notificationGroupSource = readFileSync("src/features/notifications/components/NotificationGroup.tsx", "utf8");
+const notificationsControllerSource = readFileSync("src/features/notifications/model/notifications-controller.ts", "utf8");
+const notificationsHookSource = readFileSync("src/features/notifications/hooks/useNotificationsController.ts", "utf8");
 const packageSource = readFileSync("package.json", "utf8");
 const modelTestSource = readFileSync("src/lib/notifications/notification-model.test.ts", "utf8");
 
@@ -25,40 +27,52 @@ function assertInOrder(source: string, markers: string[]) {
 }
 
 // CASO 1: la aplicacion delega la construccion completa al modelo puro.
-assert.match(appSource, /import \{ buildAppNotifications \} from "@\/lib\/notifications\/notification-model";/);
-assert.match(appSource, /const appNotifications = useMemo\(\(\) => buildAppNotifications\(\{/);
+assert.match(appSource, /useNotificationsController\(\{/);
+assert.match(notificationsControllerSource, /const appNotifications = buildAppNotifications\(catalogInput, now\)/);
 assert.match(notificationGroupSource, /resolveNotificationIconKey\(notification\.category\)/);
 
 // CASO 2: seleccion y textos derivados salen del selector puro.
-assert.match(appSource, /selectNotificationView\(appNotifications, seenNotificationRecords\)/);
-assert.match(appSource, /buildNotificationPanelSubtitleText\(unseenNotificationCount, appNotifications\.length\)/);
-assert.match(appSource, /buildNotificationBadgeText\(unseenNotificationCount\)/);
-assert.match(appSource, /buildNotificationBadgeAriaLabel\(unseenNotificationCount\)/);
+assert.match(notificationsControllerSource, /selectNotificationView\(appNotifications, seenRecords\)/);
+assert.match(notificationsControllerSource, /buildNotificationPanelSubtitleText/);
+assert.match(notificationsControllerSource, /buildNotificationBadgeText/);
+assert.match(notificationsControllerSource, /buildNotificationBadgeAriaLabel/);
 assert.match(notificationGroupSource, /buildNotificationItemStateLabel\(/);
 assert.match(notificationGroupSource, /resolveNotificationItemReferenceDate\(notification, seenRecord\)/);
 assert.match(appSource, /\{NOTIFICATION_EMPTY_MESSAGE\}/);
 
-// CASO 3: React conserva estado/persistencia, pero la transicion inmutable es la pura.
-const markSeenSource = sourceSection("  function markNotificationsSeen", "  function toggleNotifications");
+// CASO 3: el controller conserva ref/persistencia y ejecuta I/O fuera de cualquier updater React.
+const markSeenSource = notificationsControllerSource.slice(
+  notificationsControllerSource.indexOf("      function markSeen"),
+  notificationsControllerSource.indexOf("      return {", notificationsControllerSource.indexOf("      function markSeen")),
+);
 assertInOrder(markSeenSource, [
-  "setSeenNotificationRecords((current) => {",
-  "transitionNotificationsSeen(current, ids)",
-  "saveSeenNotificationRecords(next, scope)",
-  "return next",
+  "markNotificationsSeen(seenRecords, ids)",
+  "input.storage.save(persistable, owner.scope)",
+  "publish(persistable)",
 ]);
 assert.doesNotMatch(markSeenSource, /new Map\(|\.sort\(|\.slice\(/, "React no debe reconstruir la regla de visto");
+assert.doesNotMatch(notificationsHookSource, /set[A-Za-z]+\(\(current\)/);
 
 // CASOS 4-6: el intent semantico se materializa con P2-D y los efectos quedan en React.
-const openTargetSource = sourceSection("  function openNotificationTarget", "  function scrollToNotificationSection");
+const openTargetSource = sourceSection("  function handleNotificationOpenIntent", "  function scrollToNotificationSection");
 assertInOrder(openTargetSource, [
-  "resolveNotificationOpenIntent(notification)",
-  "markNotificationsSeen([intent.notificationId])",
   "appShell.closeNotifications()",
   "activeWorkoutActions.clearTrainingCompletionSummary()",
   "setDashboardDayOverride(intent.dashboardDayOverride)",
   "dispatchProgressController({ type: \"day_selected\", day: intent.comparisonDayOverride })",
   "navigateTo(intent.target)",
   "scrollToNotificationSection(intent.section ?? undefined)",
+]);
+const openCommandStart = notificationsControllerSource.indexOf("        open(notification, publishIntent) {");
+const openCommandEnd = notificationsControllerSource.indexOf("      };", openCommandStart);
+assert.ok(openCommandStart >= 0 && openCommandEnd > openCommandStart, "se encontró el command open de Notifications");
+const openCommandSource = notificationsControllerSource.slice(openCommandStart, openCommandEnd);
+assertInOrder(openCommandSource, [
+  "const intent = resolveNotificationOpenIntent(notification);",
+  "const replayGuard = acquireOpenReplayGuard(owner, intent);",
+  "if (!replayGuard) return false;",
+  "if (!markSeen([notification.id])) {",
+  "publishIntent(intent);",
 ]);
 assert.doesNotMatch(openTargetSource, /setScreen\(/, "La apertura no debe crear navegacion paralela a P2-D");
 

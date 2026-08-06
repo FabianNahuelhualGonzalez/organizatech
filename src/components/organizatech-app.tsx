@@ -49,6 +49,9 @@ import { TrainingStartScreen } from "@/features/active-workout/components/Traini
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
+import { useNotificationsController } from "@/features/notifications/hooks/useNotificationsController";
+import { useProfileController } from "@/features/profile/hooks/useProfileController";
+import { useLegacyCycleHistoryController } from "@/features/cycle-history/hooks/useLegacyCycleHistoryController";
 import {
   coordinateAuthenticatedSessionEvent,
   createAuthenticatedSessionCoordinator,
@@ -99,37 +102,12 @@ import { CycleScopedPlanBlocker } from "@/features/training-plan/components/Cycl
 import { TRAINING_CYCLE_PRESENTATIONS as trainingCycles } from "@/features/training-plan/model/training-cycle-presentation";
 import { selectTrainingPlanSources } from "@/features/training-plan/model/training-plan-sources";
 import { buildProfileViewModelFromSources } from "@/lib/profile/profile-view-model";
-import { buildAppNotifications } from "@/lib/notifications/notification-model";
-import {
-  NOTIFICATION_EMPTY_MESSAGE,
-  buildNotificationBadgeAriaLabel,
-  buildNotificationBadgeText,
-  buildNotificationPanelSubtitleText,
-  selectNotificationView,
-} from "@/lib/notifications/notification-selector";
-import {
-  markNotificationsSeen as transitionNotificationsSeen,
-  resolveNotificationOpenIntent,
-} from "@/lib/notifications/notification-state";
+import { NOTIFICATION_EMPTY_MESSAGE } from "@/lib/notifications/notification-selector";
 import type {
-  AppNotification,
   AppNotificationSection,
-  SeenNotificationRecord,
+  NotificationOpenIntent,
   TrainingNotificationContext,
 } from "@/lib/notifications/notification-types";
-import {
-  getProfilePersonalData,
-  updateProfilePersonalData,
-  type ProfilePersonalData,
-} from "@/lib/profile/profile-repository";
-import type { ProfilePersonalDataInput } from "@/lib/profile/profile-form";
-import { getCurrentProfileAvatar, uploadProfileAvatar } from "@/lib/profile/profile-avatar-repository";
-import {
-  createEmptyProfileAvatarState,
-  mergeProfileAvatarMetadata,
-  selectProfileAvatarPath,
-  type ProfileAvatarState,
-} from "@/lib/profile/profile-avatar";
 import {
   calculateWeeklyComparison,
   calculateWeeklySummary,
@@ -194,16 +172,12 @@ import {
   hasStoredPasswordRecoveryFlow,
   loadPasswordRecoveryFlow,
   normalizePasswordRecoveryUserId,
-  loadSeenNotificationRecordsFromBrowser as loadSeenNotificationRecords,
-  saveSeenNotificationRecordsFromBrowser as saveSeenNotificationRecords,
   startPasswordRecoveryFlow,
   type BrowserStorageScope,
 } from "@/lib/storage/browser-storage";
 import {
   clearActiveFlow,
   clearRoutineDraft,
-  loadCycleHistory,
-  saveCycleHistory,
 } from "@/lib/storage/app-flow-storage";
 import {
   advanceSessionDataEpoch as createAdvancedSessionDataEpoch,
@@ -216,13 +190,11 @@ import {
 } from "@/lib/session/session-data-epoch";
 import {
   finalizeSessionOperationOwner,
-  invalidateSessionOperationOwners,
   isSessionOperationOwner,
   isSessionOperationOwnerCurrent,
   releaseSessionOperationOwner,
   resolveActiveWorkoutSessionBoundary,
   resolveIncomingWorkoutDraftRecoveryScope,
-  settleSessionOperationPromise,
   tryAcquireSessionOperationOwner,
   type SessionOperationOwner,
   type SessionOperationOwnerLock,
@@ -360,8 +332,6 @@ import {
 } from "@/lib/training/training-completion-summary";
 
 const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
-const PROFILE_AVATAR_REFRESH_THROTTLE_MS = 45 * 1000;
-const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
 const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
 const objectiveDescriptions: Record<string, string> = {
   Fuerza: "Busca aumentar la capacidad de levantar más carga. Prioriza ejercicios base, descansos amplios y progresión controlada de peso.",
@@ -380,16 +350,6 @@ const objectiveDescriptions: Record<string, string> = {
   Intensidad: "Sesión orientada a trabajar con cargas exigentes o esfuerzo alto, cuidando descansos y técnica.",
   "Control/RIR": "Sesión enfocada en regular el esfuerzo usando RIR para saber cuántas repeticiones quedan en reserva.",
 };
-
-interface TrainingCycleSnapshot {
-  id: string;
-  name: string;
-  createdAt: string;
-  endedAt: string;
-  plan: TrainingPlan;
-  exercises: ExerciseTemplate[];
-  entries: ExerciseEntry[];
-}
 
 interface OrganizatechAppProps {
   trainingCyclesRepositoryEnabled?: boolean;
@@ -421,13 +381,6 @@ export function OrganizatechApp({
   const [dataMode, setDataMode] = useState<DataMode>("demo");
   const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
-  const [profilePersonalData, setProfilePersonalData] = useState<ProfilePersonalData | null>(null);
-  const [profilePersonalDataLoading, setProfilePersonalDataLoading] = useState(false);
-  const [profilePersonalDataError, setProfilePersonalDataError] = useState("");
-  const [profileAvatar, setProfileAvatar] = useState<ProfileAvatarState>(() => createEmptyProfileAvatarState());
-  const [profileAvatarResetKey, setProfileAvatarResetKey] = useState(0);
-  const [profileAvatarLoading, setProfileAvatarLoading] = useState(false);
-  const [profileAvatarError, setProfileAvatarError] = useState("");
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(initialAuthState.isAuthLoading);
   const [isBusy, setIsBusy] = useState(false);
@@ -436,17 +389,9 @@ export function OrganizatechApp({
   const passwordRecoveryUpdateOwnerRef = useRef<SessionOperationOwner | null>(null);
   const passwordRecoveryStateRef = useRef<"none" | "pending" | "confirmed" | "invalid">("none");
   const [isPasswordRecoveryConfirmed, setIsPasswordRecoveryConfirmed] = useState(false);
-  const [seenNotificationRecords, setSeenNotificationRecords] = useState<SeenNotificationRecord[]>([]);
   const [dashboardDayOverride, setDashboardDayOverride] = useState("");
-  const profileSaveInFlightRef = useRef<SessionOperationOwner | null>(null);
-  const profileAvatarUploadInFlightRef = useRef<SessionOperationOwner | null>(null);
-  const lastProfileAvatarRefreshAtRef = useRef(0);
-  const profileAvatarBootstrapUserIdRef = useRef<string | null>(null);
-  const lastProfileAvatarErrorRefreshAtRef = useRef(0);
-  const profileAvatarRefreshInFlightRef = useRef(false);
   // P3-32: el estado data/loading/error, las request-key refs y los effects de historial del
   // ejercicio activo son propiedad exclusiva de useActiveWorkoutExerciseHistory (ver más abajo).
-  const [cycleHistory, setCycleHistory] = useState<TrainingCycleSnapshot[]>([]);
   const activeBrowserStorageScopeRef = useRef<BrowserStorageScope | null>(null);
   const sessionDataEpochRef = useRef(createSessionDataEpoch());
   const sessionDataMountedRef = useRef(true);
@@ -532,18 +477,10 @@ export function OrganizatechApp({
     const next = createAdvancedSessionDataEpoch(current, identity, options);
     if (next === current) return false;
 
-    invalidateSessionOperationOwners([
-      profileSaveInFlightRef,
-      profileAvatarUploadInFlightRef,
-    ]);
     routineBuilderRef.current.invalidateOperations();
     activeWorkoutBoundary.invalidateOperations();
     sessionDataEpochRef.current = next;
     setIsBusy(false);
-    profileAvatarRefreshInFlightRef.current = false;
-    profileAvatarBootstrapUserIdRef.current = null;
-    lastProfileAvatarRefreshAtRef.current = 0;
-    lastProfileAvatarErrorRefreshAtRef.current = 0;
     // P3-32: ya no se limpian aquí las request keys de historial. Viven dentro del coordinador y su
     // invalidación ante un cambio de identidad la garantiza el SessionDataRequestToken capturado
     // antes del await: aunque la request key coincidiera por accidente entre dos usuarios, el token
@@ -603,6 +540,44 @@ export function OrganizatechApp({
     readiness,
   });
   const { screen } = navigation;
+  const hasSupabaseSession = Boolean(
+    supabaseSession && supabaseUser && supabaseSession.user.id === supabaseUser.id,
+  );
+  const canEditProfilePersonalData = Boolean(hasSupabaseSession && getSupabaseBrowserClient());
+  const activeFeatureStorageScope = getBrowserStorageScope(dataMode, supabaseUser?.id);
+  const trainingDataPrepared = trainingDataState.appData.status === "ready" ||
+    trainingDataState.appData.status === "error";
+  const profileBoundary = useProfileController({
+    identity: trainingDataIdentityPort,
+    enabled: canEditProfilePersonalData,
+    dataMode,
+    trainingDataPrepared,
+    screen,
+  });
+  const {
+    profilePersonalData,
+    profilePersonalDataLoading,
+    profilePersonalDataError,
+    profileAvatar,
+    profileAvatarLoading,
+    profileAvatarError,
+    profileAvatarResetKey,
+    refreshProfilePersonalData,
+    refreshProfileAvatar,
+    handleSaveProfilePersonalData,
+    handleUploadProfileAvatar,
+    handleProfileAvatarImageError,
+  } = profileBoundary;
+  const legacyCycleHistoryBoundary = useLegacyCycleHistoryController({
+    identity: trainingDataIdentityPort,
+    scope: activeFeatureStorageScope,
+  });
+  const {
+    cycleHistory,
+    legacyCycleHistoryCount,
+    nextLegacyCycleNumber,
+    appendCompletedCycle,
+  } = legacyCycleHistoryBoundary;
   const {
     isMenuOpen,
     isNotificationPanelOpen,
@@ -637,19 +612,6 @@ export function OrganizatechApp({
     return isSessionOperationOwnerCurrent({
       currentOwner: lockRef.current,
       owner,
-      isRequestCurrent: isSessionDataRequestCurrent,
-    });
-  }
-
-  function settleUserScopedOperation<T>(
-    lockRef: SessionOperationOwnerLock,
-    owner: SessionOperationOwner,
-    request: Promise<T>,
-  ) {
-    return settleSessionOperationPromise({
-      request,
-      owner,
-      getCurrentOwner: () => lockRef.current,
       isRequestCurrent: isSessionDataRequestCurrent,
     });
   }
@@ -924,12 +886,6 @@ export function OrganizatechApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    const scope = getBrowserStorageScope(dataMode, supabaseUser?.id);
-    if (!scope || activeBrowserStorageScopeRef.current !== scope) return;
-    saveCycleHistory(cycleHistory, scope);
-  }, [cycleHistory, dataMode, supabaseUser?.id]);
-
   const hasRoutinePlanForDraft = exercises.length > 0;
   useRoutineBuilderDraftLifecycle({
     controller: routineBuilder,
@@ -949,10 +905,6 @@ export function OrganizatechApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, trainingCompletionSummary]);
 
-  const hasSupabaseSession = Boolean(
-    supabaseSession && supabaseUser && supabaseSession.user.id === supabaseUser.id,
-  );
-  const canEditProfilePersonalData = Boolean(hasSupabaseSession && getSupabaseBrowserClient());
   const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
   const todayKey = getSantiagoDateKey(new Date());
   const currentWeek = isCycleScopedActiveCycle && persistedActiveCycle?.plannedStartDate
@@ -1035,10 +987,10 @@ export function OrganizatechApp({
     activeCycleId: isCycleScopedActiveCycle ? persistedActiveCycle?.id ?? null : null,
     plannedDays: routineDays,
   }), [calendarNormalizedEntries, calendarNormalizedTrainingSessions, isCycleScopedActiveCycle, persistedActiveCycle?.id, routineDays]);
-  const visibleCycleHistoryCount = isTrainingCyclesRepositoryActive ? persistedCycleHistory.length : cycleHistory.length;
+  const visibleCycleHistoryCount = isTrainingCyclesRepositoryActive ? persistedCycleHistory.length : legacyCycleHistoryCount;
   const visibleCycleNumber = isTrainingCyclesRepositoryActive
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
-    : cycleHistory.length + 1;
+    : nextLegacyCycleNumber;
   const authModeLabel = dataMode === "supabase" && hasSupabaseSession ? "Activo" : isSupabaseConfiguredState ? "Listo" : "Prueba";
   const profileViewModel = useMemo(() => buildProfileViewModelFromSources({
     personalData: profilePersonalData,
@@ -1048,59 +1000,6 @@ export function OrganizatechApp({
     canEditPersonalData: canEditProfilePersonalData,
     avatar: profileAvatar,
   }), [canEditProfilePersonalData, dataSource, profileAvatar, profilePersonalData, sessionName, supabaseUser?.email]);
-  const refreshProfileAvatar = useCallback(async (options?: { force?: boolean; avatarPath?: string | null; allowProfileLookup?: boolean }) => {
-    const requestToken = captureSessionDataRequestToken();
-    if (!isSessionDataRequestCurrent(requestToken) || !requestToken.userId || !requestToken.scope) return null;
-    if (!canEditProfilePersonalData || !supabaseSession) return null;
-    if (profileAvatarRefreshInFlightRef.current) return null;
-
-    const now = Date.now();
-    if (!options?.force && now - lastProfileAvatarRefreshAtRef.current < PROFILE_AVATAR_REFRESH_THROTTLE_MS) {
-      return null;
-    }
-
-    lastProfileAvatarRefreshAtRef.current = now;
-    profileAvatarRefreshInFlightRef.current = true;
-    try {
-      let avatarPath = selectProfileAvatarPath(
-        options?.avatarPath,
-        profileAvatar.avatarPath,
-        profilePersonalData?.avatarPath,
-      );
-      if (!avatarPath && options?.allowProfileLookup) {
-        const profile = await getProfilePersonalData();
-        if (!isSessionDataRequestCurrent(requestToken)) return null;
-        setProfilePersonalData(profile);
-        setSessionName(profile.displayName);
-        avatarPath = profile.avatarPath;
-        if (!avatarPath) {
-          setProfileAvatar(createEmptyProfileAvatarState());
-          setProfileAvatarResetKey((current) => current + 1);
-          setProfileAvatarError("");
-          return null;
-        }
-      }
-
-      if (!avatarPath) return null;
-
-      const avatar = await getCurrentProfileAvatar();
-      if (!isSessionDataRequestCurrent(requestToken)) return null;
-      setProfileAvatar(avatar);
-      if (avatar.avatarUrl) {
-        setProfileAvatarResetKey((current) => current + 1);
-      }
-      setProfileAvatarError("");
-      return avatar;
-    } catch {
-      if (!isSessionDataRequestCurrent(requestToken)) return null;
-      setProfileAvatarError("No pudimos actualizar tu foto de perfil. La mostraremos apenas vuelva a estar disponible.");
-      return null;
-    } finally {
-      if (isSessionDataRequestCurrent(requestToken)) {
-        profileAvatarRefreshInFlightRef.current = false;
-      }
-    }
-  }, [canEditProfilePersonalData, captureSessionDataRequestToken, isSessionDataRequestCurrent, profileAvatar.avatarPath, profilePersonalData?.avatarPath, supabaseSession]);
   const completedTrainingDays = calculateWeeklyCompletedTrainingDays({
     plannedDays: dashboardCarouselDays,
     exercises: displayExercises,
@@ -1122,7 +1021,7 @@ export function OrganizatechApp({
     completedDays: completedTrainingDays,
     plannedDays: hasRoutinePlan ? dashboardCarouselDays.length : 0,
   });
-  const appNotifications = useMemo(() => buildAppNotifications({
+  const notificationCatalogInput = useMemo(() => ({
     profile: profileViewModel,
     personalData: profilePersonalData,
     currentWeek,
@@ -1147,28 +1046,22 @@ export function OrganizatechApp({
     todayTrainingNotificationContext,
     weeklyEquivalentProgress,
   ]);
-  const notificationView = useMemo(
-    () => selectNotificationView(appNotifications, seenNotificationRecords),
-    [appNotifications, seenNotificationRecords],
-  );
+  const notificationsBoundary = useNotificationsController({
+    identity: trainingDataIdentityPort,
+    scope: activeFeatureStorageScope,
+    catalogInput: notificationCatalogInput,
+    onOpenIntent: handleNotificationOpenIntent,
+  });
   const {
+    appNotifications,
     newNotifications,
     historyNotifications,
-    unseenCount: unseenNotificationCount,
-    seenRecordsById: seenNotificationRecordsById,
-  } = notificationView;
-  const notificationPanelSubtitle = useMemo(
-    () => buildNotificationPanelSubtitleText(unseenNotificationCount, appNotifications.length),
-    [appNotifications.length, unseenNotificationCount],
-  );
-  const notificationBadgeText = useMemo(
-    () => buildNotificationBadgeText(unseenNotificationCount),
-    [unseenNotificationCount],
-  );
-  const notificationBadgeAriaLabel = useMemo(
-    () => buildNotificationBadgeAriaLabel(unseenNotificationCount),
-    [unseenNotificationCount],
-  );
+    seenNotificationRecordsById,
+    notificationPanelSubtitle,
+    notificationBadgeText,
+    notificationBadgeAriaLabel,
+    openNotificationTarget,
+  } = notificationsBoundary;
 
   const {
     latestExercisePerformance,
@@ -1197,87 +1090,6 @@ export function OrganizatechApp({
     routineBuilderRef.current.clearNotice();
     setIsBusy(false);
   }, [activeWorkoutBoundary, resetExerciseHistory]);
-
-  useEffect(() => {
-    const currentUserId = supabaseUser?.id ?? null;
-    if (!canEditProfilePersonalData || !currentUserId) {
-      profileAvatarBootstrapUserIdRef.current = null;
-      return;
-    }
-
-    if (profileAvatarBootstrapUserIdRef.current === currentUserId) return;
-    profileAvatarBootstrapUserIdRef.current = currentUserId;
-    void refreshProfileAvatar({ force: true, allowProfileLookup: true });
-  }, [canEditProfilePersonalData, refreshProfileAvatar, supabaseUser?.id]);
-
-  useEffect(() => {
-    if (screen !== "perfil" || !canEditProfilePersonalData) {
-      if (!canEditProfilePersonalData) {
-        setProfilePersonalData(null);
-        setProfilePersonalDataLoading(false);
-        setProfilePersonalDataError("");
-        setProfileAvatar(createEmptyProfileAvatarState());
-        setProfileAvatarLoading(false);
-        setProfileAvatarError("");
-      }
-      return;
-    }
-
-    let isMounted = true;
-    const requestToken = captureSessionDataRequestToken();
-    if (!isSessionDataRequestCurrent(requestToken) || !requestToken.userId || !requestToken.scope) return;
-    setProfilePersonalDataLoading(true);
-    setProfilePersonalDataError("");
-    setProfileAvatarLoading(true);
-    setProfileAvatarError("");
-
-    void getProfilePersonalData()
-      .then(async (profile) => {
-        if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
-        setProfilePersonalData(profile);
-        setSessionName(profile.displayName);
-        await refreshProfileAvatar({ force: true, avatarPath: profile.avatarPath });
-        if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
-      })
-      .catch((error) => {
-        if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
-        setProfilePersonalDataError(error instanceof Error ? error.message : "No pudimos cargar tu perfil.");
-      })
-      .finally(() => {
-        if (isMounted && isSessionDataRequestCurrent(requestToken)) {
-          setProfilePersonalDataLoading(false);
-          setProfileAvatarLoading(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [canEditProfilePersonalData, captureSessionDataRequestToken, isSessionDataRequestCurrent, refreshProfileAvatar, screen]);
-
-  useEffect(() => {
-    function refreshAvatarOnResume() {
-      void refreshProfileAvatar({ force: true, allowProfileLookup: true });
-    }
-
-    function refreshAvatarOnVisibilityChange() {
-      if (document.visibilityState === "visible") {
-        refreshAvatarOnResume();
-      }
-    }
-
-    document.addEventListener("visibilitychange", refreshAvatarOnVisibilityChange);
-    window.addEventListener("focus", refreshAvatarOnResume);
-    window.addEventListener("pageshow", refreshAvatarOnResume);
-    window.addEventListener("online", refreshAvatarOnResume);
-
-    return () => {
-      document.removeEventListener("visibilitychange", refreshAvatarOnVisibilityChange);
-      window.removeEventListener("focus", refreshAvatarOnResume);
-      window.removeEventListener("pageshow", refreshAvatarOnResume);
-      window.removeEventListener("online", refreshAvatarOnResume);
-    };
-  }, [refreshProfileAvatar]);
 
   function resetUserScopedTransientState() {
     appShell.closeAll();
@@ -1333,6 +1145,11 @@ export function OrganizatechApp({
     const identityChanged = sessionBoundary.invalidateEpoch
       ? advanceSessionDataIdentity(nextIdentity, { force: sessionBoundary.forceEpochAdvance })
       : false;
+    if (identityChanged) {
+      profileBoundary.controller.invalidateIdentity();
+      notificationsBoundary.controller.invalidateIdentity();
+      legacyCycleHistoryBoundary.controller.replaceIdentityScope(null);
+    }
     const hasStorageScopeChanged = activeBrowserStorageScopeRef.current !== nextStorageScope;
     if (identityChanged || hasStorageScopeChanged) {
       trainingDataController.reset({
@@ -1351,27 +1168,13 @@ export function OrganizatechApp({
     }
     if (hasStorageScopeChanged) {
       routineBuilder.replaceIdentityScope(nextStorageScope);
-      setCycleHistory([]);
-      setSeenNotificationRecords([]);
+      legacyCycleHistoryBoundary.controller.replaceIdentityScope(nextStorageScope);
+      notificationsBoundary.controller.replaceIdentityScope(nextStorageScope);
       // P3-32: se conserva exactamente el alcance previo — el cambio de storage scope deja en idle
       // sólo la performance, sin tocar la observación, porque es una condición independiente del
       // reset de memoria de Active Workout.
       resetExercisePerformanceHistory();
       activeBrowserStorageScopeRef.current = nextStorageScope;
-
-      if (typeof window !== "undefined" && nextStorageScope) {
-        setCycleHistory(loadCycleHistory<TrainingCycleSnapshot>(nextStorageScope));
-        setSeenNotificationRecords(loadSeenNotificationRecords(nextStorageScope));
-      }
-    }
-    if (identityChanged) {
-      setProfilePersonalData(null);
-      setProfilePersonalDataLoading(false);
-      setProfilePersonalDataError("");
-      setProfileAvatar(createEmptyProfileAvatarState());
-      setProfileAvatarResetKey((current) => current + 1);
-      setProfileAvatarLoading(false);
-      setProfileAvatarError("");
     }
     setIsSupabaseConfiguredState(authState.isConfigured);
     setDataMode(effectiveDataMode);
@@ -1401,6 +1204,9 @@ export function OrganizatechApp({
     });
     if (sessionBoundary.invalidateEpoch) {
       advanceSessionDataIdentity(signedOutIdentity, { force: sessionBoundary.forceEpochAdvance });
+      profileBoundary.controller.invalidateIdentity();
+      notificationsBoundary.controller.invalidateIdentity();
+      legacyCycleHistoryBoundary.controller.replaceIdentityScope(null);
     }
     trainingDataController.reset({ cyclesEnabled: false });
     if (sessionBoundary.resetActiveWorkoutMemory) {
@@ -1417,18 +1223,9 @@ export function OrganizatechApp({
     activeBrowserStorageScopeRef.current = null;
     setSupabaseSession(null);
     setSupabaseUser(null);
-    setProfilePersonalData(null);
-    setProfilePersonalDataLoading(false);
-    setProfilePersonalDataError("");
-    setProfileAvatar(createEmptyProfileAvatarState());
-    setProfileAvatarResetKey((current) => current + 1);
-    setProfileAvatarLoading(false);
-    setProfileAvatarError("");
     setDataMode("demo");
     setIsBusy(false);
     routineBuilder.replaceIdentityScope(null);
-    setCycleHistory([]);
-    setSeenNotificationRecords([]);
     if (options.navigate !== false) {
       navigation.reset("login");
     }
@@ -1585,89 +1382,6 @@ export function OrganizatechApp({
       if (canFinalizeBusy && isSessionDataRequestCurrent(requestToken) && !isTrainingDataLoading) {
         setIsBusy(false);
       }
-    }
-  }
-
-  async function refreshProfilePersonalData() {
-    const requestToken = captureSessionDataRequestToken();
-    if (!isSessionDataRequestCurrent(requestToken) || !requestToken.userId || !requestToken.scope) return null;
-    if (!canEditProfilePersonalData) {
-      setProfilePersonalData(null);
-      setProfilePersonalDataLoading(false);
-      setProfilePersonalDataError("");
-      setProfileAvatar(createEmptyProfileAvatarState());
-      setProfileAvatarResetKey((current) => current + 1);
-      setProfileAvatarLoading(false);
-      setProfileAvatarError("");
-      return null;
-    }
-
-    setProfilePersonalDataLoading(true);
-    setProfilePersonalDataError("");
-    setProfileAvatarLoading(true);
-    setProfileAvatarError("");
-    try {
-      const profile = await getProfilePersonalData();
-      if (!isSessionDataRequestCurrent(requestToken)) return null;
-      setProfilePersonalData(profile);
-      setSessionName(profile.displayName);
-      await refreshProfileAvatar({ force: true, avatarPath: profile.avatarPath });
-      if (!isSessionDataRequestCurrent(requestToken)) return null;
-      return profile;
-    } catch (error) {
-      if (!isSessionDataRequestCurrent(requestToken)) return null;
-      const message = error instanceof Error ? error.message : "No pudimos cargar tu perfil.";
-      setProfilePersonalDataError(message);
-      return null;
-    } finally {
-      if (isSessionDataRequestCurrent(requestToken)) {
-        setProfilePersonalDataLoading(false);
-        setProfileAvatarLoading(false);
-      }
-    }
-  }
-
-  async function handleSaveProfilePersonalData(input: ProfilePersonalDataInput) {
-    const operationOwner = tryAcquireUserScopedOperation(profileSaveInFlightRef);
-    if (!operationOwner || operationOwner.dataMode !== "supabase" || !operationOwner.userId) return null;
-
-    try {
-      const result = await settleUserScopedOperation(
-        profileSaveInFlightRef,
-        operationOwner,
-        updateProfilePersonalData(input, operationOwner.userId),
-      );
-      if (result.kind === "stale") return null;
-      if (result.kind === "error") throw result.error;
-      setProfilePersonalData(result.value);
-      setSessionName(result.value.displayName);
-      return result.value;
-    } finally {
-      finalizeUserScopedOperation(profileSaveInFlightRef, operationOwner);
-    }
-  }
-
-  async function handleUploadProfileAvatar(file: File) {
-    const operationOwner = tryAcquireUserScopedOperation(profileAvatarUploadInFlightRef);
-    if (!operationOwner || operationOwner.dataMode !== "supabase" || !operationOwner.userId) return false;
-
-    setProfileAvatarError("");
-    try {
-      const result = await settleUserScopedOperation(
-        profileAvatarUploadInFlightRef,
-        operationOwner,
-        uploadProfileAvatar(file, operationOwner.userId),
-      );
-      if (result.kind === "stale") return false;
-      if (result.kind === "error") throw result.error;
-      const avatar = result.value;
-      lastProfileAvatarRefreshAtRef.current = Date.now();
-      setProfileAvatar(avatar);
-      setProfileAvatarResetKey((current) => current + 1);
-      setProfilePersonalData((current) => mergeProfileAvatarMetadata(current, avatar));
-      return true;
-    } finally {
-      finalizeUserScopedOperation(profileAvatarUploadInFlightRef, operationOwner);
     }
   }
 
@@ -2661,10 +2375,9 @@ export function OrganizatechApp({
       }
 
       if (!operation.isCurrent()) return;
-      const snapshot = createTrainingCycleSnapshot(cycleHistory.length + 1, trainingPlan, exercises, entries);
+      const snapshot = appendCompletedCycle({ plan: trainingPlan, exercises, entries });
+      if (!snapshot || !operation.isCurrent()) return;
       clearRoutineDraft(operation.dataMode, operation.userId ?? undefined);
-      const nextHistory = [...cycleHistory, snapshot];
-      setCycleHistory(nextHistory);
 
       const nextPlan = createNextTrainingPlan("default");
       replaceLocalData([], []);
@@ -3700,40 +3413,11 @@ export function OrganizatechApp({
     );
   }
 
-  function handleProfileAvatarImageError() {
-    const now = Date.now();
-    if (now - lastProfileAvatarErrorRefreshAtRef.current < PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS) return;
-    lastProfileAvatarErrorRefreshAtRef.current = now;
-    void refreshProfileAvatar({ force: true, allowProfileLookup: true });
-  }
-
-  function markNotificationsSeen(ids: string[]) {
-    if (ids.length === 0) return;
-    const requestToken = captureSessionDataRequestToken();
-    const scope = activeBrowserStorageScopeRef.current;
-    if (
-      !scope ||
-      requestToken.scope !== scope ||
-      !isSessionDataRequestCurrent(requestToken)
-    ) return;
-    setSeenNotificationRecords((current) => {
-      if (
-        activeBrowserStorageScopeRef.current !== scope ||
-        !isSessionDataRequestCurrent(requestToken)
-      ) return current;
-      const next = [...transitionNotificationsSeen(current, ids)];
-      saveSeenNotificationRecords(next, scope);
-      return next;
-    });
-  }
-
   function toggleNotifications() {
     appShell.toggleNotifications();
   }
 
-  function openNotificationTarget(notification: AppNotification) {
-    const intent = resolveNotificationOpenIntent(notification);
-    markNotificationsSeen([intent.notificationId]);
+  function handleNotificationOpenIntent(intent: NotificationOpenIntent) {
     appShell.closeNotifications();
     activeWorkoutActions.clearTrainingCompletionSummary();
     if (intent.dashboardDayOverride) {
@@ -3781,7 +3465,7 @@ export function OrganizatechApp({
 
   function toggleMenu() {
     appShell.toggleMenu(() => {
-      void refreshProfileAvatar({ force: true, allowProfileLookup: true });
+      void refreshProfileAvatar();
     });
   }
 
@@ -4514,19 +4198,6 @@ function addDaysToDateKey(value: string, days: number) {
   return getLocalDateKey(date);
 }
 
-function createTrainingCycleSnapshot(index: number, plan: TrainingPlan, exercises: ExerciseTemplate[], entries: ExerciseEntry[]): TrainingCycleSnapshot {
-  const now = new Date().toISOString();
-  return {
-    id: createId(),
-    name: `Ciclo ${index}`,
-    createdAt: entries[0]?.date ?? now,
-    endedAt: now,
-    plan,
-    exercises,
-    entries,
-  };
-}
-
 function createPersistedCycleSummarySnapshot(
   plan: TrainingPlan,
   exercises: ExerciseTemplate[],
@@ -4538,8 +4209,7 @@ function createPersistedCycleSummarySnapshot(
   const metrics = calculateWeeklyComparison(entries);
   const summary = calculateWeeklySummary(metrics, Math.max(1, ...entries.map((entry) => entry.week)));
   const activeDays = getActiveRoutineDays(exercises, plan);
-  const legacyCycle = createTrainingCycleSnapshot(0, plan, exercises, entries);
-  const progress = summarizeCycleProgress(legacyCycle);
+  const progress = summarizeCycleProgress(entries);
   const moodSummary = summarizeCycleMood(entries);
   const suggestions = createCycleSuggestions(progress, moodSummary);
 
@@ -4580,9 +4250,9 @@ function getCycleTypeTitle(plan: TrainingPlan) {
   return cycle?.title ?? "Ciclo";
 }
 
-function summarizeCycleProgress(cycle: TrainingCycleSnapshot) {
+function summarizeCycleProgress(entries: ExerciseEntry[]) {
   const byExercise = new Map<string, ExerciseMetrics[]>();
-  for (const entry of calculateWeeklyComparison(cycle.entries)) {
+  for (const entry of calculateWeeklyComparison(entries)) {
     const list = byExercise.get(entry.exerciseId) ?? [];
     list.push(entry);
     byExercise.set(entry.exerciseId, list);

@@ -32,22 +32,31 @@ export class ProfileAvatarRepositoryError extends Error {
 export function createProfileAvatarRepository(
   getClient: ProfileAvatarClientFactory = getSupabaseBrowserClient,
 ) {
-  async function getProfileAvatarSignedUrl(): Promise<string | null> {
-    const { supabase, userId } = await getAuthenticatedProfileAvatarClient();
+  async function getProfileAvatarSignedUrl(
+    expectedUserId: string | undefined = undefined,
+  ): Promise<string | null> {
+    const { supabase, userId } = await getAuthenticatedProfileAvatarClient(expectedUserId);
     const row = await getProfileAvatarRow(supabase, userId);
+    await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);
     const avatarPath = getCanonicalStoredAvatarPath(userId, row.avatar_path);
     if (!avatarPath) return null;
 
-    return createCanonicalSignedUrl(supabase, avatarPath);
+    const signedUrl = await createCanonicalSignedUrl(supabase, avatarPath);
+    await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);
+    return signedUrl;
   }
 
-  async function getCurrentProfileAvatar(): Promise<ProfileAvatarState> {
-    const { supabase, userId } = await getAuthenticatedProfileAvatarClient();
+  async function getCurrentProfileAvatar(
+    expectedUserId: string | undefined = undefined,
+  ): Promise<ProfileAvatarState> {
+    const { supabase, userId } = await getAuthenticatedProfileAvatarClient(expectedUserId);
     const row = await getProfileAvatarRow(supabase, userId);
+    await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);
     const avatarPath = getCanonicalStoredAvatarPath(userId, row.avatar_path);
     if (!avatarPath) return mapProfileAvatarState(null, null);
 
     const avatarUrl = await createCanonicalSignedUrl(supabase, avatarPath);
+    await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);
     return mapProfileAvatarState(row, avatarUrl);
   }
 
@@ -86,8 +95,10 @@ export function createProfileAvatarRepository(
       .single();
 
     if (updateError) throw new ProfileAvatarRepositoryError("No se pudo subir la foto de perfil.", updateError);
+    await assertExpectedProfileAvatarUser(supabase, userId);
 
     const avatarUrl = await createCanonicalSignedUrl(supabase, avatarPath);
+    await assertExpectedProfileAvatarUser(supabase, userId);
     return mapProfileAvatarState(data as ProfileAvatarRow, avatarUrl);
   }
 
@@ -163,7 +174,9 @@ async function createCanonicalSignedUrl(supabase: SupabaseClient, avatarPath: st
     .createSignedUrl(avatarPath, PROFILE_AVATAR_SIGNED_URL_TTL_SECONDS);
 
   if (error) throw new ProfileAvatarRepositoryError("No se pudo obtener la foto de perfil.", error);
-  return data.signedUrl || null;
+  const signedUrl = data.signedUrl?.trim();
+  if (!signedUrl) throw new ProfileAvatarRepositoryError("No se pudo obtener la foto de perfil.");
+  return signedUrl;
 }
 
 function getCanonicalStoredAvatarPath(userId: string, storedPath: string | null) {
