@@ -16,6 +16,8 @@ const overlayFocusStaticSource = readFileSync("src/ui/overlays/use-overlay-focus
 const userAvatarStaticSource = readFileSync("src/components/profile/UserAvatar.tsx", "utf8");
 const profileAvatarStaticSource = readFileSync("src/lib/profile/profile-avatar.ts", "utf8");
 const profileViewModelStaticSource = readFileSync("src/lib/profile/profile-view-model.ts", "utf8");
+const profileControllerStaticSource = readFileSync("src/features/profile/model/profile-controller.ts", "utf8");
+const profileHookStaticSource = readFileSync("src/features/profile/hooks/useProfileController.ts", "utf8");
 const packageStaticSource = readFileSync("package.json", "utf8");
 
 function extractStaticSourceSection(source: string, startMarker: string, endMarker: string): string {
@@ -38,7 +40,7 @@ function assertStaticMarkersInOrder(source: string, markers: string[]) {
 
 // CONTRATO ESTATICO 1: el componente delega la seleccion de fuentes y el view model.
 assert.match(appStaticSource, /import \{ buildProfileViewModelFromSources \} from "@\/lib\/profile\/profile-view-model";/);
-const viewModelSection = extractStaticSourceSection(appStaticSource, "  const profileViewModel = useMemo", "  const refreshProfileAvatar");
+const viewModelSection = extractStaticSourceSection(appStaticSource, "  const profileViewModel = useMemo", "  const completedTrainingDays");
 assert.match(viewModelSection, /buildProfileViewModelFromSources\(\{/);
 assert.match(viewModelSection, /personalData: profilePersonalData/);
 assert.match(viewModelSection, /avatar: profileAvatar/);
@@ -372,9 +374,9 @@ assert.match(avatarEditorStaticSource, /exportAvatarImage\(\{/);
 assert.match(userAvatarStaticSource, /const \[imgFailed, setImgFailed\] = useState\(false\)/);
 assert.match(userAvatarStaticSource, /profile\.avatarUrl && !imgFailed/);
 assert.match(userAvatarStaticSource, /setImgFailed\(true\)/);
-assert.match(appStaticSource, /createEmptyProfileAvatarState\(\)/);
-assert.match(appStaticSource, /selectProfileAvatarPath\(/);
-assert.match(appStaticSource, /mergeProfileAvatarMetadata\(current, avatar\)/);
+assert.match(profileControllerStaticSource, /createEmptyProfileAvatarState\(\)/);
+assert.match(profileControllerStaticSource, /selectProfileAvatarPath\(/);
+assert.match(profileControllerStaticSource, /mergeProfileAvatarMetadata\(snapshot\.profilePersonalData, result\.value\)/);
 
 // CONTRATO ESTATICO 5: el handler declara la secuencia de restauracion al cancelar.
 const cancelSection = extractStaticSourceSection(profileScreenStaticSource, "  function cancelEdition", "  return (");
@@ -392,8 +394,7 @@ const applySessionSection = extractStaticSourceSection(appStaticSource, "  funct
 assertStaticMarkersInOrder(applySessionSection, [
   "resolveEffectiveAuthenticatedUser(authState.session, authState.user)",
   "advanceSessionDataIdentity",
-  "setProfilePersonalData(null)",
-  "setProfileAvatar(createEmptyProfileAvatarState())",
+  "profileBoundary.controller.invalidateIdentity()",
   "setSupabaseUser(authenticatedUser)",
 ]);
 const identityChangedProfileSection = extractStaticSourceSection(
@@ -401,27 +402,26 @@ const identityChangedProfileSection = extractStaticSourceSection(
   "if (identityChanged)",
   "setIsSupabaseConfiguredState",
 );
-assert.match(identityChangedProfileSection, /setProfilePersonalData\(null\)/);
-assert.match(identityChangedProfileSection, /setProfileAvatar\(createEmptyProfileAvatarState\(\)\)/);
+assert.match(identityChangedProfileSection, /profileBoundary\.controller\.invalidateIdentity\(\)/);
 assert.doesNotMatch(
   applySessionSection.slice(applySessionSection.indexOf("setIsSupabaseConfiguredState")),
-  /setProfilePersonalData\(null\)|setProfileAvatar\(createEmptyProfileAvatarState\(\)\)/,
+  /profileBoundary\.controller\.invalidateIdentity\(\)/,
   "Profile/avatar no se limpian incondicionalmente en TOKEN_REFRESHED",
 );
 const clearSessionSection = extractStaticSourceSection(appStaticSource, "  function clearUserSessionState", "  function clearBrowserStorageScope");
 assertStaticMarkersInOrder(clearSessionSection, [
   "advanceSessionDataIdentity",
+  "profileBoundary.controller.invalidateIdentity()",
   "setSupabaseUser(null)",
-  "setProfilePersonalData(null)",
-  "setProfileAvatar(createEmptyProfileAvatarState())",
 ]);
 
-// CONTRATO ESTATICO 7: browser APIs, repositories y side effects permanecen en adaptadores React.
-assert.match(appStaticSource, /getProfilePersonalData\(\)/);
-assert.match(appStaticSource, /updateProfilePersonalData\(input, operationOwner\.userId\)/);
-assert.match(appStaticSource, /uploadProfileAvatar\(file, operationOwner\.userId\)/);
-assert.match(appStaticSource, /document\.addEventListener\("visibilitychange"/);
-assert.match(appStaticSource, /window\.addEventListener\("focus"/);
+// CONTRATO ESTATICO 7: browser APIs, repositories y side effects salen del root y quedan en el boundary.
+assert.match(profileHookStaticSource, /readProfile: getProfilePersonalData/);
+assert.match(profileHookStaticSource, /saveProfile: updateProfilePersonalData/);
+assert.match(profileHookStaticSource, /uploadAvatar: uploadProfileAvatar/);
+assert.match(profileHookStaticSource, /document\.addEventListener\("visibilitychange"/);
+assert.match(profileHookStaticSource, /window\.addEventListener\("focus"/);
+assert.doesNotMatch(appStaticSource, /profile-repository|profile-avatar-repository/);
 assert.match(profileScreenStaticSource, /useRef<HTMLInputElement \| null>/);
 assert.match(profileScreenStaticSource, /type="file"/);
 assert.doesNotMatch(profileAvatarStaticSource, /useState|useEffect|getSupabaseBrowserClient|document\.|window\./);
@@ -431,9 +431,6 @@ assert.doesNotMatch(profileViewModelStaticSource, /useState|useEffect|getSupabas
 assert.doesNotMatch(appStaticSource, /avatarPath:\s*null,\s*avatarUrl:\s*null,\s*avatarUpdatedAt:\s*null/);
 for (const helperName of [
   "buildProfileViewModelFromSources",
-  "createEmptyProfileAvatarState",
-  "selectProfileAvatarPath",
-  "mergeProfileAvatarMetadata",
 ]) {
   assert.doesNotMatch(appStaticSource, new RegExp(`(?:function|const)\\s+${helperName}\\b`));
 }

@@ -315,10 +315,10 @@ export function saveTrainingPlan<TTrainingPlan>(
   );
 }
 
-export function loadCycleHistory<TCycleSnapshot>(
+export function loadCycleHistory(
   scope: BrowserStorageScope,
   options: AppFlowStorageOptions = {},
-): TCycleSnapshot[] {
+): unknown[] {
   const storage = options.storage === undefined ? getBrowserLocalStorage() : options.storage;
   if (!storage) return [];
 
@@ -327,11 +327,11 @@ export function loadCycleHistory<TCycleSnapshot>(
     storage,
     getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.cycleHistory, scope),
     isUnknownArray,
-  ) as TCycleSnapshot[] | null ?? [];
+  ) ?? [];
 }
 
-export function saveCycleHistory<TCycleSnapshot>(
-  history: TCycleSnapshot[],
+export function saveCycleHistory(
+  history: readonly unknown[],
   scope: BrowserStorageScope,
   options: AppFlowStorageOptions = {},
 ): boolean {

@@ -1,3 +1,5 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   buildProfilePersonalDataPayload,
@@ -5,19 +7,9 @@ import {
   type ProfilePersonalDataInput,
 } from "@/lib/profile/profile-form";
 import { mapProfileAvatarState } from "@/lib/profile/profile-avatar";
+import type { ProfilePersonalData } from "@/lib/profile/profile-types";
 
-export interface ProfilePersonalData {
-  id: string;
-  displayName: string;
-  email: string;
-  firstName: string | null;
-  lastName: string | null;
-  birthDate: string | null;
-  gender: ProfileGender;
-  phoneNumber: string | null;
-  avatarPath: string | null;
-  avatarUpdatedAt: string | null;
-}
+export type { ProfilePersonalData } from "@/lib/profile/profile-types";
 
 interface ProfileRow {
   id: string;
@@ -39,8 +31,10 @@ export class ProfileRepositoryError extends Error {
   }
 }
 
-export async function getProfilePersonalData(): Promise<ProfilePersonalData> {
-  const { supabase, userId } = await getAuthenticatedProfileClient();
+export async function getProfilePersonalData(
+  expectedUserId: string | undefined = undefined,
+): Promise<ProfilePersonalData> {
+  const { supabase, userId } = await getAuthenticatedProfileClient(expectedUserId);
   const { data, error } = await supabase
     .from("profiles")
     .select("id,display_name,email,first_name,last_name,birth_date,gender,phone_number,avatar_path,avatar_updated_at")
@@ -49,6 +43,7 @@ export async function getProfilePersonalData(): Promise<ProfilePersonalData> {
 
   if (error) throw new ProfileRepositoryError("No pudimos cargar tu perfil.", error);
   if (!data) throw new ProfileRepositoryError("No encontramos tu perfil. Actualiza la sesión e intenta nuevamente.");
+  await assertExpectedProfileUser(supabase, expectedUserId ?? userId);
   return mapProfileRow(data as ProfileRow);
 }
 
@@ -70,6 +65,7 @@ export async function updateProfilePersonalData(
     .single();
 
   if (error) throw new ProfileRepositoryError("No pudimos guardar tu perfil.", error);
+  await assertExpectedProfileUser(supabase, expectedUserId ?? userId);
   return mapProfileRow(data as ProfileRow);
 }
 
@@ -87,6 +83,16 @@ async function getAuthenticatedProfileClient(expectedUserId?: string) {
   }
 
   return { supabase, userId };
+}
+
+async function assertExpectedProfileUser(
+  supabase: SupabaseClient,
+  expectedUserId: string,
+) {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || data.user?.id !== expectedUserId) {
+    throw new ProfileRepositoryError("Tu sesión cambió. Vuelve a intentar con la cuenta activa.", error);
+  }
 }
 
 function mapProfileRow(row: ProfileRow): ProfilePersonalData {

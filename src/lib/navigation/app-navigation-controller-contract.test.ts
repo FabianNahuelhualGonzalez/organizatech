@@ -11,6 +11,10 @@ const controllerModelSource = readFileSync(
   "utf8",
 );
 const transitionSource = readFileSync("src/lib/navigation/app-navigation-transition.ts", "utf8");
+const notificationsControllerSource = readFileSync(
+  "src/features/notifications/model/notifications-controller.ts",
+  "utf8",
+);
 
 function sourceSection(source: string, startMarker: string, endMarker: string): string {
   const start = source.indexOf(startMarker);
@@ -61,11 +65,29 @@ assert.match(controllerSource, /if \(reenterActiveWorkout\(ports\)\) return deci
 assert.match(appSource, /function openRoutineDay[\s\S]*navigation\.reenterActiveWorkout\(\{/);
 const notificationSource = sourceSection(
   appSource,
-  "  function openNotificationTarget",
+  "  function handleNotificationOpenIntent",
   "  function scrollToNotificationSection",
 );
 assert.match(notificationSource, /navigateTo\(intent\.target\)/);
 assert.doesNotMatch(notificationSource, /navigation\.transition|setScreen/);
+const notificationCommandSource = sourceSection(
+  notificationsControllerSource,
+  "        open(notification, publishIntent) {",
+  "      };",
+);
+const notificationCommandMarkers = [
+  "const intent = resolveNotificationOpenIntent(notification);",
+  "const replayGuard = acquireOpenReplayGuard(owner, intent);",
+  "if (!markSeen([notification.id])) {",
+  "publishIntent(intent);",
+];
+let previousNotificationCommandIndex = -1;
+for (const marker of notificationCommandMarkers) {
+  const currentIndex = notificationCommandSource.indexOf(marker);
+  assert.ok(currentIndex >= 0, `falta paso de navegación Notifications: ${marker}`);
+  assert.ok(currentIndex > previousNotificationCommandIndex, `paso fuera de orden: ${marker}`);
+  previousNotificationCommandIndex = currentIndex;
+}
 assert.match(appSource, /screen === "training-summary" && !trainingCompletionSummary[\s\S]{0,200}?navigation\.transition\(createFlowScreenTransition\("dashboard", "summary-state-sanitized"\)\)/);
 
 console.log("app-navigation-controller contract tests passed");

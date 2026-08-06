@@ -18,7 +18,7 @@ import { Button } from "@/ui/buttons/button";
 import { FormField } from "@/ui/forms/form-field";
 import { TextInput } from "@/ui/forms/text-input";
 import { StatusMessage } from "@/ui/feedback/status-message";
-import type { ProfilePersonalData } from "@/lib/profile/profile-repository";
+import type { ProfilePersonalData } from "@/lib/profile/profile-types";
 import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
 import { PROFILE_AVATAR_EDITOR_ID, ProfileAvatarEditor } from "./ProfileAvatarEditor";
 import { UserAvatar } from "./UserAvatar";
