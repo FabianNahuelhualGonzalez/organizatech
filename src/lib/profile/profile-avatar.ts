@@ -1,6 +1,8 @@
 export const PROFILE_AVATAR_BUCKET = "profile-avatars";
 export const PROFILE_AVATAR_MAX_SIZE_BYTES = 2 * 1024 * 1024;
 export const PROFILE_AVATAR_SIGNED_URL_TTL_SECONDS = 60 * 60;
+export const PROFILE_AVATAR_IMAGE_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
+export const PROFILE_AVATAR_FOREGROUND_EVENT_DEDUP_MS = 1000;
 export const PROFILE_AVATAR_ALLOWED_MIME_TYPES = [
   "image/jpeg",
   "image/png",
@@ -42,6 +44,59 @@ export function createEmptyProfileAvatarState(): ProfileAvatarState {
     avatarUrl: null,
     avatarUpdatedAt: null,
   };
+}
+
+export async function preloadProfileAvatarImage(avatarUrl: string | null): Promise<boolean> {
+  if (!avatarUrl) return false;
+  if (typeof Image === "undefined") return true;
+
+  return new Promise<boolean>((resolve) => {
+    const image = new Image();
+    let settled = false;
+    let loadStarted = false;
+    const settle = (loaded: boolean) => {
+      if (settled) return;
+      settled = true;
+      image.onload = null;
+      image.onerror = null;
+      resolve(loaded);
+    };
+    const handleLoad = () => {
+      if (loadStarted) return;
+      loadStarted = true;
+      if (typeof image.decode !== "function") {
+        settle(true);
+        return;
+      }
+      void image.decode().then(
+        () => settle(true),
+        () => settle(false),
+      );
+    };
+
+    image.onload = handleLoad;
+    image.onerror = () => settle(false);
+    image.decoding = "async";
+    image.src = avatarUrl;
+    if (image.complete) {
+      if (image.naturalWidth > 0) handleLoad();
+      else settle(false);
+    }
+  });
+}
+
+export function shouldRefreshProfileAvatarAfterImageError(
+  lastRefreshAt: number,
+  refreshAt: number,
+): boolean {
+  return refreshAt - lastRefreshAt >= PROFILE_AVATAR_IMAGE_ERROR_REFRESH_THROTTLE_MS;
+}
+
+export function shouldRefreshProfileAvatarOnForegroundEvent(
+  lastRefreshAt: number,
+  refreshAt: number,
+): boolean {
+  return refreshAt - lastRefreshAt >= PROFILE_AVATAR_FOREGROUND_EVENT_DEDUP_MS;
 }
 
 export function selectProfileAvatarPath(

@@ -427,6 +427,207 @@ assert.match(profileScreenStaticSource, /type="file"/);
 assert.doesNotMatch(profileAvatarStaticSource, /useState|useEffect|getSupabaseBrowserClient|document\.|window\./);
 assert.doesNotMatch(profileViewModelStaticSource, /useState|useEffect|getSupabaseBrowserClient|document\.|window\./);
 
+// PERF-02: contrato versionado y probes de mutación en memoria (sin tocar el working tree).
+function validatePerf02VersionedCacheContract(sources: {
+  controller: string;
+  avatar: string;
+  hook: string;
+}) {
+  const profileControllerFactoryStart = sources.controller.indexOf("export function createProfileController");
+  assert.ok(profileControllerFactoryStart > 0);
+  assert.doesNotMatch(
+    sources.controller.slice(0, profileControllerFactoryStart),
+    /avatarMemory|foregroundOperation/,
+    "la memoria de avatar no puede convertirse en singleton de módulo",
+  );
+
+  const memoryKeySection = extractStaticSourceSection(
+    sources.controller,
+    "  function createAvatarMemoryKey(",
+    "  function isAvatarMemoryKeyCurrent",
+  );
+  assertStaticMarkersInOrder(memoryKeySection, [
+    "generation: token.generation",
+    "userId: token.userId",
+    "scope: token.scope",
+    "      identityKey,",
+    "avatarPath: avatar.avatarPath",
+    "avatarUpdatedAt: avatar.avatarUpdatedAt",
+  ]);
+  assert.match(sources.controller, /avatarMemory\.key\.avatarPath !== version\.avatarPath/);
+  assert.match(sources.controller, /avatarMemory\.key\.avatarUpdatedAt !== version\.avatarUpdatedAt/);
+
+  const avatarReadSection = extractStaticSourceSection(
+    sources.controller,
+    "  async function runAvatarRead(",
+    "  function startAvatarRead(",
+  );
+  assertStaticMarkersInOrder(avatarReadSection, [
+    "const preloadOutcome = await preloadAvatarForRead(owner, avatar)",
+    'if (preloadOutcome === "failed") throw',
+    "rememberAvatar(owner.requestToken, owner.identityKey, avatar)",
+    "      publish({\n        profileAvatar: avatar,",
+  ]);
+
+  const preloadReadSection = extractStaticSourceSection(
+    sources.controller,
+    "  async function preloadAvatarForRead",
+    "  async function preloadAvatarForWrite",
+  );
+  assertStaticMarkersInOrder(preloadReadSection, [
+    "loaded = await preloadAvatarImage(avatar.avatarUrl)",
+    "} catch {\n      loaded = false",
+    'return loaded ? "loaded" : "failed"',
+  ]);
+
+  const uploadSection = extractStaticSourceSection(
+    sources.controller,
+    "    async uploadAvatar(file)",
+    "    invalidateIdentity()",
+  );
+  assertStaticMarkersInOrder(uploadSection, [
+    "readRequestIds.avatar += 1",
+    "invalidateAvatarMemory()",
+    "request: input.source.uploadAvatar(file, owner.userId)",
+    "const preloadOutcome = await preloadAvatarForWrite(owner, result.value)",
+    "rememberAvatar(owner.requestToken, identityKey, result.value)",
+    "        publish({\n          profileAvatar: result.value,",
+  ]);
+
+  assert.match(sources.avatar, /PROFILE_AVATAR_IMAGE_ERROR_REFRESH_THROTTLE_MS = 8 \* 1000/);
+  assert.match(
+    sources.hook,
+    /const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = PROFILE_AVATAR_IMAGE_ERROR_REFRESH_THROTTLE_MS/,
+  );
+  assert.match(sources.avatar, /image\.onerror = \(\) => settle\(false\)/);
+  assert.match(sources.avatar, /\(\) => settle\(false\),\s*\);/);
+  assert.match(sources.controller, /foregroundOperation\?\.promise === trackedRequest/);
+  assert.match(sources.controller, /foregroundOperation\.avatarVersionKey === expectedVersionKey/);
+  assert.match(sources.hook, /shouldRefreshProfileAvatarAfterImageError/);
+  assert.match(sources.avatar, /const image = new Image\(\);/);
+
+  for (const source of [sources.controller, sources.hook, sources.avatar]) {
+    assert.doesNotMatch(
+      source,
+      /localStorage|sessionStorage|indexedDB|caches\.|document\.cookie|console\.(?:log|info|warn|error)|location\.(?:search|hash)/,
+      "la signed URL no se persiste, registra ni incorpora a navegación",
+    );
+  }
+}
+
+function replacePerf02Mutation(source: string, find: string, replacement: string, name: string) {
+  assert.equal(source.split(find).length - 1, 1, `${name}: patrón único`);
+  return source.replace(find, replacement);
+}
+
+const perf02Sources = {
+  controller: profileControllerStaticSource,
+  avatar: profileAvatarStaticSource,
+  hook: profileHookStaticSource,
+};
+validatePerf02VersionedCacheContract(perf02Sources);
+
+const perf02MutationProbes = [
+  {
+    name: "quitar avatarPath de la versión",
+    mutate: () => ({
+      ...perf02Sources,
+      controller: replacePerf02Mutation(
+        perf02Sources.controller,
+        "      avatarPath: avatar.avatarPath,\n",
+        "",
+        "quitar avatarPath de la versión",
+      ),
+    }),
+  },
+  {
+    name: "quitar avatarUpdatedAt de la versión",
+    mutate: () => ({
+      ...perf02Sources,
+      controller: replacePerf02Mutation(
+        perf02Sources.controller,
+        "      avatarUpdatedAt: avatar.avatarUpdatedAt,\n",
+        "",
+        "quitar avatarUpdatedAt de la versión",
+      ),
+    }),
+  },
+  {
+    name: "tratar onerror como éxito",
+    mutate: () => ({
+      ...perf02Sources,
+      avatar: replacePerf02Mutation(
+        perf02Sources.avatar,
+        "    image.onerror = () => settle(false);",
+        "    image.onerror = () => settle(true);",
+        "tratar onerror como éxito",
+      ),
+    }),
+  },
+  {
+    name: "absorber rechazo y publicar",
+    mutate: () => ({
+      ...perf02Sources,
+      controller: replacePerf02Mutation(
+        perf02Sources.controller,
+        "    } catch {\n      loaded = false;\n    }\n    if (!isReadCurrent(\"avatar\", owner)) return \"stale\";",
+        "    } catch {\n      loaded = true;\n    }\n    if (!isReadCurrent(\"avatar\", owner)) return \"stale\";",
+        "absorber rechazo y publicar",
+      ),
+    }),
+  },
+  {
+    name: "publicar antes del preload",
+    mutate: () => ({
+      ...perf02Sources,
+      controller: replacePerf02Mutation(
+        perf02Sources.controller,
+        "        const preloadOutcome = await preloadAvatarForRead(owner, avatar);",
+        "      publish({\n        profileAvatar: avatar,\n      });\n        const preloadOutcome = await preloadAvatarForRead(owner, avatar);",
+        "publicar antes del preload",
+      ),
+    }),
+  },
+  {
+    name: "mover invalidación del read después del upload",
+    mutate: () => ({
+      ...perf02Sources,
+      controller: replacePerf02Mutation(
+        perf02Sources.controller,
+        "      readRequestIds.avatar += 1;\n      invalidateAvatarMemory();",
+        "      invalidateAvatarMemory();",
+        "mover invalidación del read después del upload",
+      ),
+    }),
+  },
+  {
+    name: "cambiar throttle 8 a 9 segundos",
+    mutate: () => ({
+      ...perf02Sources,
+      avatar: replacePerf02Mutation(
+        perf02Sources.avatar,
+        "PROFILE_AVATAR_IMAGE_ERROR_REFRESH_THROTTLE_MS = 8 * 1000",
+        "PROFILE_AVATAR_IMAGE_ERROR_REFRESH_THROTTLE_MS = 9 * 1000",
+        "cambiar throttle 8 a 9 segundos",
+      ),
+    }),
+  },
+  {
+    name: "persistir signed URL",
+    mutate: () => ({
+      ...perf02Sources,
+      controller: `${perf02Sources.controller}\nlocalStorage.setItem("avatar", "signed-url");\n`,
+    }),
+  },
+];
+
+for (const probe of perf02MutationProbes) {
+  assert.throws(
+    () => validatePerf02VersionedCacheContract(probe.mutate()),
+    `PERF-02 mutation debe morir: ${probe.name}`,
+  );
+}
+
 // CONTRATO ESTATICO 8: no quedan implementaciones locales de reglas puras extraidas.
 assert.doesNotMatch(appStaticSource, /avatarPath:\s*null,\s*avatarUrl:\s*null,\s*avatarUpdatedAt:\s*null/);
 for (const helperName of [

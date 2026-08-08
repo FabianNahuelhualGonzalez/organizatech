@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  createActiveWorkoutHistoryPrefetchController,
+  type ActiveWorkoutHistoryPrefetchController,
+  type ActiveWorkoutHistoryScope,
+} from "@/features/active-workout/model/active-workout-history-prefetch-controller";
 import { runActiveWorkoutHistoryLoad } from "@/lib/training/active-workout-history-load";
 import {
   createLatestExerciseObservationRequest,
@@ -52,6 +57,12 @@ export interface UseActiveWorkoutExerciseHistoryInput {
   observationUserId: string | null;
   captureSessionDataRequestToken: () => SessionDataRequestToken;
   isSessionDataRequestCurrent: (token: SessionDataRequestToken) => boolean;
+  /**
+   * API PERF-03 pendiente de wiring en el composition root. Ambos campos son opcionales como
+   * transición: si falta cualquiera, performance conserva el flujo current-only previo.
+   */
+  historyScope?: ActiveWorkoutHistoryScope;
+  performancePrefetchLineageIds?: readonly string[];
 }
 
 export interface UseActiveWorkoutExerciseHistoryResult {
@@ -82,6 +93,8 @@ export function useActiveWorkoutExerciseHistory(
     observationUserId,
     captureSessionDataRequestToken,
     isSessionDataRequestCurrent,
+    historyScope,
+    performancePrefetchLineageIds,
   } = input;
 
   const [latestExercisePerformance, setLatestExercisePerformance] = useState<LatestExercisePerformance | null>(null);
@@ -93,8 +106,39 @@ export function useActiveWorkoutExerciseHistory(
   const [latestExerciseObservationError, setLatestExerciseObservationError] = useState("");
   const [latestExerciseObservationDidQuery, setLatestExerciseObservationDidQuery] = useState(false);
   const latestExerciseObservationRequestKeyRef = useRef<string | null>(null);
+  const isSessionDataRequestCurrentRef = useRef(isSessionDataRequestCurrent);
+  isSessionDataRequestCurrentRef.current = isSessionDataRequestCurrent;
+  const performancePrefetchControllerRef = useRef<ActiveWorkoutHistoryPrefetchController | null>(null);
+  const performancePrefetchEnabledRef = useRef(false);
+
+  const getPerformancePrefetchController = useCallback(() => {
+    if (!performancePrefetchControllerRef.current) {
+      performancePrefetchControllerRef.current = createActiveWorkoutHistoryPrefetchController({
+        fetchPerformance: getLatestExercisePerformanceByLineage,
+        isRequestTokenCurrent: (token) => isSessionDataRequestCurrentRef.current(token),
+        publishCurrent: (publication) => {
+          latestExercisePerformanceRequestKeyRef.current = publication.requestKey;
+          setLatestExercisePerformance(publication.performance);
+          setLatestExercisePerformanceLoading(publication.loading);
+          setLatestExercisePerformanceError(publication.error);
+        },
+      });
+    }
+    return performancePrefetchControllerRef.current;
+  }, []);
+
+  useEffect(() => {
+    const controller = getPerformancePrefetchController();
+    return () => {
+      controller.dispose();
+      if (performancePrefetchControllerRef.current === controller) {
+        performancePrefetchControllerRef.current = null;
+      }
+    };
+  }, [getPerformancePrefetchController]);
 
   const resetExercisePerformanceHistory = useCallback(() => {
+    performancePrefetchControllerRef.current?.invalidate();
     const idle = getLatestExercisePerformanceIdleState();
     setLatestExercisePerformance(idle.performance);
     setLatestExercisePerformanceLoading(idle.loading);
@@ -102,6 +146,7 @@ export function useActiveWorkoutExerciseHistory(
   }, []);
 
   const resetExerciseHistory = useCallback(() => {
+    performancePrefetchControllerRef.current?.invalidate();
     latestExercisePerformanceRequestKeyRef.current = null;
     latestExerciseObservationRequestKeyRef.current = null;
 
@@ -119,6 +164,26 @@ export function useActiveWorkoutExerciseHistory(
 
   useEffect(() => {
     const requestToken = captureSessionDataRequestToken();
+
+    if (historyScope && performancePrefetchLineageIds) {
+      performancePrefetchEnabledRef.current = true;
+      getPerformancePrefetchController().synchronize({
+        requestToken,
+        historyScope,
+        activeExerciseLineageId: activeWorkoutExerciseLineageId,
+        workoutStartedAt: activeWorkoutStartedAt,
+        performancePrefetchLineageIds,
+      });
+      return;
+    }
+
+    // Fallback compatible mientras el root no entregue la API PERF-03. Hoy no existe una sesión
+    // remota in-progress que excluir: `workoutStartedAt` es el cutoff estable y por eso se conserva
+    // `currentSessionId: null`, sin inventar una identidad de sesión.
+    if (performancePrefetchEnabledRef.current) {
+      performancePrefetchControllerRef.current?.invalidate();
+      performancePrefetchEnabledRef.current = false;
+    }
 
     if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
       latestExercisePerformanceRequestKeyRef.current = null;
@@ -169,7 +234,7 @@ export function useActiveWorkoutExerciseHistory(
     return () => {
       isMounted = false;
     };
-  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, isSessionDataRequestCurrent]);
+  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, getPerformancePrefetchController, historyScope, isSessionDataRequestCurrent, performancePrefetchLineageIds]);
 
   useEffect(() => {
     const requestToken = captureSessionDataRequestToken();

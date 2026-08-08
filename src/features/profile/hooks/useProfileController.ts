@@ -7,12 +7,17 @@ import {
   type ProfileController,
   type ProfileIdentityPort,
 } from "@/features/profile/model/profile-controller";
+import {
+  PROFILE_AVATAR_IMAGE_ERROR_REFRESH_THROTTLE_MS,
+  shouldRefreshProfileAvatarAfterImageError,
+  shouldRefreshProfileAvatarOnForegroundEvent,
+} from "@/lib/profile/profile-avatar";
 import { getCurrentProfileAvatar, uploadProfileAvatar } from "@/lib/profile/profile-avatar-repository";
 import { getProfilePersonalData, updateProfilePersonalData } from "@/lib/profile/profile-repository";
 import type { Screen } from "@/lib/navigation/app-navigation";
 import type { DataMode } from "@/lib/supabase/session";
 
-const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = 8 * 1000;
+const PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS = PROFILE_AVATAR_IMAGE_ERROR_REFRESH_THROTTLE_MS;
 
 export function useProfileController(input: {
   identity: ProfileIdentityPort;
@@ -38,6 +43,7 @@ export function useProfileController(input: {
     ? subscription.snapshot
     : controller.getSnapshot();
   const lastImageErrorRefreshAtRef = useRef(0);
+  const lastForegroundEventAtRef = useRef(0);
 
   useEffect(() => {
     setSubscription({ controller, snapshot: controller.getSnapshot() });
@@ -69,6 +75,9 @@ export function useProfileController(input: {
 
   useEffect(() => {
     function refreshOnResume() {
+      const now = Date.now();
+      if (!shouldRefreshProfileAvatarOnForegroundEvent(lastForegroundEventAtRef.current, now)) return;
+      lastForegroundEventAtRef.current = now;
       void controller.foreground();
     }
 
@@ -91,7 +100,15 @@ export function useProfileController(input: {
   const handleAvatarImageError = useCallback(() => {
     const now = Date.now();
     if (now - lastImageErrorRefreshAtRef.current < PROFILE_AVATAR_ERROR_REFRESH_THROTTLE_MS) return;
+    if (!shouldRefreshProfileAvatarAfterImageError(lastImageErrorRefreshAtRef.current, now)) return;
     lastImageErrorRefreshAtRef.current = now;
+    void controller.refreshAvatar({
+      force: true,
+      allowProfileLookup: true,
+      publishProfileLookup: false,
+      foreground: true,
+      publishLoading: false,
+    });
     void controller.foreground();
   }, [controller]);
 

@@ -12,6 +12,7 @@ import type { DataMode } from "@/lib/supabase/session";
 import {
   createEmptyProfileAvatarState,
   mergeProfileAvatarMetadata,
+  preloadProfileAvatarImage,
   selectProfileAvatarPath,
   type ProfileAvatarState,
 } from "@/lib/profile/profile-avatar";
@@ -67,6 +68,9 @@ export interface ProfileAvatarRefreshOptions {
   avatarPath?: string | null;
   allowProfileLookup?: boolean;
   publishProfileLookup?: boolean;
+  foreground?: boolean;
+  publishLoading?: boolean;
+  reuseFreshMemory?: boolean;
 }
 
 type ReadLane = "profile" | "avatar";
@@ -77,6 +81,27 @@ interface ReadOwner {
   readonly userId: string;
   readonly identityKey: string;
 }
+
+interface ProfileAvatarMemoryKey {
+  readonly generation: number;
+  readonly userId: string;
+  readonly scope: string;
+  readonly identityKey: string;
+  readonly avatarPath: string;
+  readonly avatarUpdatedAt: string;
+}
+
+interface ProfileAvatarMemoryEntry {
+  readonly key: ProfileAvatarMemoryKey;
+  readonly avatar: ProfileAvatarState;
+}
+
+interface ProfileAvatarVersion {
+  readonly avatarPath: string;
+  readonly avatarUpdatedAt: string;
+}
+
+type AvatarPreloadOutcome = "loaded" | "failed" | "stale";
 
 function createInitialSnapshot(resetKey = 0): ProfileControllerSnapshot {
   return {
@@ -94,12 +119,14 @@ export function createProfileController(input: {
   identity: ProfileIdentityPort;
   source: ProfileDataSource;
   now?: () => number;
+  preloadAvatarImage?: (avatarUrl: string | null) => Promise<boolean>;
 }): ProfileController {
   const listeners = new Set<(snapshot: ProfileControllerSnapshot) => void>();
   const readRequestIds: Record<ReadLane, number> = { profile: 0, avatar: 0 };
   const saveOwner: SessionOperationOwnerLock = { current: null };
   const uploadOwner: SessionOperationOwnerLock = { current: null };
   const now = input.now ?? Date.now;
+  const preloadAvatarImage = input.preloadAvatarImage ?? preloadProfileAvatarImage;
   let snapshot = createInitialSnapshot();
   let configuredIdentityKey: string | null = null;
   let enabled = false;
@@ -109,6 +136,12 @@ export function createProfileController(input: {
   let lastAvatarRefreshAt = 0;
   let bootstrapIdentityKey: string | null = null;
   let bootstrapPromise: Promise<ProfilePersonalData | null> | null = null;
+  let avatarMemory: ProfileAvatarMemoryEntry | null = null;
+  let foregroundOperation: {
+    readonly identityKey: string;
+    readonly avatarVersionKey: string;
+    readonly promise: Promise<ProfileAvatarState | null>;
+  } | null = null;
 
   function publish(patch: Partial<ProfileControllerSnapshot>) {
     if (disposed) return;
@@ -144,6 +177,99 @@ export function createProfileController(input: {
       configuredIdentityKey === owner.identityKey &&
       readRequestIds[lane] === owner.requestId &&
       input.identity.isRequestTokenCurrent(owner.requestToken);
+  }
+
+  function createAvatarMemoryKey(
+    token: SessionDataRequestToken,
+    identityKey: string,
+    avatar: ProfileAvatarState,
+  ): ProfileAvatarMemoryKey | null {
+    if (!token.userId || !token.scope || !avatar.avatarPath || !avatar.avatarUpdatedAt) return null;
+    return {
+      generation: token.generation,
+      userId: token.userId,
+      scope: token.scope,
+      identityKey,
+      avatarPath: avatar.avatarPath,
+      avatarUpdatedAt: avatar.avatarUpdatedAt,
+    };
+  }
+
+  function isAvatarMemoryKeyCurrent(key: ProfileAvatarMemoryKey) {
+    const token = input.identity.captureRequestToken();
+    return !disposed &&
+      configuredIdentityKey === key.identityKey &&
+      token.generation === key.generation &&
+      token.userId === key.userId &&
+      token.scope === key.scope &&
+      input.identity.isRequestTokenCurrent(token);
+  }
+
+  function getSnapshotAvatarVersion(): ProfileAvatarVersion | null {
+    const metadata = snapshot.profilePersonalData ?? snapshot.profileAvatar;
+    if (!metadata.avatarPath || !metadata.avatarUpdatedAt) return null;
+    return {
+      avatarPath: metadata.avatarPath,
+      avatarUpdatedAt: metadata.avatarUpdatedAt,
+    };
+  }
+
+  function avatarVersionKey(version: ProfileAvatarVersion | null) {
+    return version ? `${version.avatarPath}:${version.avatarUpdatedAt}` : "unversioned";
+  }
+
+  function isAvatarVersionCurrent(version: ProfileAvatarVersion) {
+    const currentVersion = getSnapshotAvatarVersion();
+    return currentVersion?.avatarPath === version.avatarPath &&
+      currentVersion.avatarUpdatedAt === version.avatarUpdatedAt;
+  }
+
+  function getCurrentAvatarMemory(version: ProfileAvatarVersion | null): ProfileAvatarMemoryEntry | null {
+    if (
+      !avatarMemory ||
+      !version ||
+      !isAvatarMemoryKeyCurrent(avatarMemory.key) ||
+      avatarMemory.key.avatarPath !== version.avatarPath ||
+      avatarMemory.key.avatarUpdatedAt !== version.avatarUpdatedAt
+    ) return null;
+    return avatarMemory;
+  }
+
+  function rememberAvatar(token: SessionDataRequestToken, identityKey: string, avatar: ProfileAvatarState) {
+    const key = createAvatarMemoryKey(token, identityKey, avatar);
+    avatarMemory = key && avatar.avatarPath && avatar.avatarUrl
+      ? { key, avatar }
+      : null;
+  }
+
+  function invalidateAvatarMemory() {
+    avatarMemory = null;
+    foregroundOperation = null;
+  }
+
+  async function preloadAvatarForRead(owner: ReadOwner, avatar: ProfileAvatarState): Promise<AvatarPreloadOutcome> {
+    let loaded = false;
+    try {
+      loaded = await preloadAvatarImage(avatar.avatarUrl);
+    } catch {
+      loaded = false;
+    }
+    if (!isReadCurrent("avatar", owner)) return "stale";
+    return loaded ? "loaded" : "failed";
+  }
+
+  async function preloadAvatarForWrite(
+    owner: SessionOperationOwner,
+    avatar: ProfileAvatarState,
+  ): Promise<AvatarPreloadOutcome> {
+    let loaded = false;
+    try {
+      loaded = await preloadAvatarImage(avatar.avatarUrl);
+    } catch {
+      loaded = false;
+    }
+    if (!isWriteCurrent(uploadOwner, owner)) return "stale";
+    return loaded ? "loaded" : "failed";
   }
 
   function invalidateReads() {
@@ -190,27 +316,36 @@ export function createProfileController(input: {
     options: ProfileAvatarRefreshOptions,
     publishLoading: boolean,
   ): Promise<ProfileAvatarState | null> {
+    if (!isReadCurrent("avatar", owner)) return null;
+    let expectedVersion = getSnapshotAvatarVersion();
     const refreshAt = now();
-    if (!options.force && refreshAt - lastAvatarRefreshAt < PROFILE_AVATAR_REFRESH_THROTTLE_MS) {
-      return null;
+    if (
+      (options.reuseFreshMemory || !options.force) &&
+      refreshAt - lastAvatarRefreshAt < PROFILE_AVATAR_REFRESH_THROTTLE_MS
+    ) {
+      const memory = getCurrentAvatarMemory(expectedVersion);
+      if (memory) return memory.avatar;
     }
     lastAvatarRefreshAt = refreshAt;
     if (publishLoading) publish({ profileAvatarLoading: true, profileAvatarError: "" });
     try {
-      let avatarPath = selectProfileAvatarPath(
-        options.avatarPath,
-        snapshot.profileAvatar.avatarPath,
-        snapshot.profilePersonalData?.avatarPath,
-      );
+      const snapshotAvatarPath = snapshot.profilePersonalData
+        ? snapshot.profilePersonalData.avatarPath
+        : snapshot.profileAvatar.avatarPath;
+      let avatarPath = selectProfileAvatarPath(options.avatarPath, snapshotAvatarPath);
       if (!avatarPath && options.allowProfileLookup) {
         const profile = await input.source.readProfile(owner.userId);
         if (!isReadCurrent("avatar", owner)) return null;
         if (options.publishProfileLookup) publish({ profilePersonalData: profile });
         avatarPath = profile.avatarPath;
+        expectedVersion = profile.avatarPath && profile.avatarUpdatedAt
+          ? { avatarPath: profile.avatarPath, avatarUpdatedAt: profile.avatarUpdatedAt }
+          : null;
       }
       if (!avatarPath) {
         if (!isReadCurrent("avatar", owner)) return null;
         const emptyAvatar = createEmptyProfileAvatarState();
+        avatarMemory = null;
         publish({
           profileAvatar: emptyAvatar,
           profileAvatarError: "",
@@ -221,6 +356,37 @@ export function createProfileController(input: {
 
       const avatar = await input.source.readAvatar(owner.userId);
       if (!isReadCurrent("avatar", owner)) return null;
+      if (
+        expectedVersion &&
+        (avatar.avatarPath || avatar.avatarUpdatedAt) &&
+        (avatar.avatarPath !== expectedVersion.avatarPath ||
+          avatar.avatarUpdatedAt !== expectedVersion.avatarUpdatedAt)
+      ) {
+        lastAvatarRefreshAt = 0;
+        return null;
+      }
+      if (expectedVersion && !isAvatarVersionCurrent(expectedVersion) && snapshot.profilePersonalData) {
+        lastAvatarRefreshAt = 0;
+        return null;
+      }
+      const hasCompleteAvatarVersion = Boolean(
+        avatar.avatarPath && avatar.avatarUrl && avatar.avatarUpdatedAt,
+      );
+      const hasEmptyAvatarVersion = !avatar.avatarPath && !avatar.avatarUrl && !avatar.avatarUpdatedAt;
+      if (!hasCompleteAvatarVersion && !hasEmptyAvatarVersion) {
+        throw new Error("Profile avatar version is incomplete");
+      }
+      if (hasCompleteAvatarVersion) {
+        const preloadOutcome = await preloadAvatarForRead(owner, avatar);
+        if (preloadOutcome === "stale") return null;
+        if (preloadOutcome === "failed") throw new Error("Profile avatar preload failed");
+      }
+      if (!isReadCurrent("avatar", owner)) return null;
+      if (expectedVersion && !isAvatarVersionCurrent(expectedVersion) && snapshot.profilePersonalData) {
+        lastAvatarRefreshAt = 0;
+        return null;
+      }
+      rememberAvatar(owner.requestToken, owner.identityKey, avatar);
       publish({
         profileAvatar: avatar,
         profileAvatarError: "",
@@ -231,6 +397,7 @@ export function createProfileController(input: {
       return avatar;
     } catch {
       if (!isReadCurrent("avatar", owner)) return null;
+      lastAvatarRefreshAt = 0;
       publish({
         profileAvatarError: "No pudimos actualizar tu foto de perfil. La mostraremos apenas vuelva a estar disponible.",
       });
@@ -238,6 +405,15 @@ export function createProfileController(input: {
     } finally {
       if (isReadCurrent("avatar", owner)) publish({ profileAvatarLoading: false });
     }
+  }
+
+  function startAvatarRead(
+    options: ProfileAvatarRefreshOptions,
+    publishLoading: boolean,
+  ): Promise<ProfileAvatarState | null> {
+    const owner = beginRead("avatar");
+    if (!owner) return Promise.resolve(null);
+    return runAvatarRead(owner, options, publishLoading);
   }
 
   const controller: ProfileController = {
@@ -265,6 +441,7 @@ export function createProfileController(input: {
       configuredIdentityKey = nextIdentityKey;
       invalidateReads();
       invalidateSessionOperationOwners([saveOwner, uploadOwner]);
+      invalidateAvatarMemory();
       lastAvatarRefreshAt = 0;
       bootstrapIdentityKey = null;
       bootstrapPromise = null;
@@ -329,9 +506,30 @@ export function createProfileController(input: {
     },
 
     async refreshAvatar(options = {}) {
-      const owner = beginRead("avatar");
-      if (!owner) return null;
-      return runAvatarRead(owner, options, true);
+      const identityKey = configuredIdentityKey;
+      const expectedVersion = getSnapshotAvatarVersion();
+      const expectedVersionKey = avatarVersionKey(expectedVersion);
+      if (options.foreground) {
+        if (!identityKey) return null;
+        if (
+          foregroundOperation?.identityKey === identityKey &&
+          foregroundOperation.avatarVersionKey === expectedVersionKey
+        ) return foregroundOperation.promise;
+        if (uploadOwner.current) return snapshot.profileAvatar.avatarUrl ? snapshot.profileAvatar : null;
+        if (snapshot.profileAvatarLoading) return getCurrentAvatarMemory(expectedVersion)?.avatar ?? null;
+      }
+
+      const request = startAvatarRead(options, options.publishLoading ?? true);
+      if (!options.foreground || !identityKey) return request;
+      const trackedRequest = request.finally(() => {
+        if (foregroundOperation?.promise === trackedRequest) foregroundOperation = null;
+      });
+      foregroundOperation = {
+        identityKey,
+        avatarVersionKey: expectedVersionKey,
+        promise: trackedRequest,
+      };
+      return trackedRequest;
     },
 
     foreground() {
@@ -339,6 +537,9 @@ export function createProfileController(input: {
         force: true,
         allowProfileLookup: true,
         publishProfileLookup: false,
+        foreground: true,
+        publishLoading: false,
+        reuseFreshMemory: true,
       });
     },
 
@@ -373,6 +574,9 @@ export function createProfileController(input: {
     async uploadAvatar(file) {
       const owner = acquireWrite(uploadOwner);
       if (!owner || !owner.userId) return false;
+      readRequestIds.avatar += 1;
+      invalidateAvatarMemory();
+      lastAvatarRefreshAt = 0;
       try {
         if (!isWriteCurrent(uploadOwner, owner)) return false;
         const result = await settleSessionOperationPromise({
@@ -383,6 +587,25 @@ export function createProfileController(input: {
         });
         if (result.kind === "stale") return false;
         if (result.kind === "error") throw result.error;
+        if (!isWriteCurrent(uploadOwner, owner)) return false;
+        if (!result.value.avatarPath || !result.value.avatarUrl || !result.value.avatarUpdatedAt) {
+          publish({
+            profileAvatarError: "No pudimos actualizar tu foto de perfil. La mostraremos apenas vuelva a estar disponible.",
+          });
+          throw new Error("No pudimos guardar la foto. Prueba con otra imagen.");
+        }
+        const preloadOutcome = await preloadAvatarForWrite(owner, result.value);
+        if (preloadOutcome === "stale") return false;
+        if (preloadOutcome === "failed") {
+          publish({
+            profileAvatarError: "No pudimos actualizar tu foto de perfil. La mostraremos apenas vuelva a estar disponible.",
+          });
+          throw new Error("No pudimos guardar la foto. Prueba con otra imagen.");
+        }
+        if (!isWriteCurrent(uploadOwner, owner)) return false;
+        const identityKey = currentIdentityKey(owner.requestToken);
+        if (!identityKey || identityKey !== configuredIdentityKey) return false;
+        rememberAvatar(owner.requestToken, identityKey, result.value);
         if (!isWriteCurrent(uploadOwner, owner)) return false;
         readRequestIds.avatar += 1;
         lastAvatarRefreshAt = now();
@@ -405,6 +628,7 @@ export function createProfileController(input: {
       trainingDataPrepared = false;
       invalidateReads();
       invalidateSessionOperationOwners([saveOwner, uploadOwner]);
+      invalidateAvatarMemory();
       bootstrapIdentityKey = null;
       bootstrapPromise = null;
       publish(createInitialSnapshot(snapshot.profileAvatarResetKey + 1));
