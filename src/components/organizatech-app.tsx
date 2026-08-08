@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   Dumbbell,
   Eye,
@@ -57,7 +58,7 @@ import {
   createAuthenticatedSessionCoordinator,
   type AuthenticatedSessionIntent,
 } from "@/features/app-shell/model/authenticated-session-coordinator";
-import { ComparisonScreenV2 } from "@/features/progress/components/comparison-screen-v2";
+import type { ComparisonScreenV2Props } from "@/features/progress/components/comparison-screen-v2";
 import { useTrainingDataController } from "@/features/training-data/hooks/useTrainingDataController";
 import type { TrainingDataRefreshResult } from "@/features/training-data/model/training-data-controller";
 import {
@@ -224,7 +225,10 @@ import {
   translateTrainingWorkoutReadinessError,
   type TrainingWorkoutReadinessPayload,
 } from "@/lib/training/training-workout-readiness-repository";
-import { getLatestExercisePerformanceByLineage } from "@/lib/training/exercise-last-performance-repository";
+import {
+  getLatestExercisePerformanceByLineage,
+  normalizeExerciseLineageId,
+} from "@/lib/training/exercise-last-performance-repository";
 import { createStableWorkoutStartedAt } from "@/lib/training/exercise-last-performance-loader";
 import {
   createExerciseDraft,
@@ -330,6 +334,11 @@ import {
   buildTrainingCompletionSummary,
   loadTrainingCompletionHistoricalInputs,
 } from "@/lib/training/training-completion-summary";
+
+const ComparisonScreenV2 = dynamic<ComparisonScreenV2Props>(
+  () => import("@/features/progress/components/comparison-screen-v2")
+    .then((module) => module.ComparisonScreenV2),
+);
 
 const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
 const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
@@ -969,13 +978,26 @@ export function OrganizatechApp({
     calendarDashboardDay,
     carouselDays: dashboardCarouselDays,
   });
-  const dayExercises = displayExercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay);
+  const dayExercises = useMemo(
+    () => displayExercises.filter((exercise) => (exercise.day ?? visibleDay) === visibleDay),
+    [displayExercises, visibleDay],
+  );
   const dashboardExercises = displayExercises.filter((exercise) => (exercise.day ?? dashboardDay) === dashboardDay);
   const activeWorkoutExercise = screen === "entrenamiento" && hasStartedTraining && readiness
     ? dayExercises[activeExerciseIndex] ?? dayExercises[0] ?? null
     : null;
   const activeWorkoutExerciseLineageId = activeWorkoutExercise?.exerciseLineageId ?? null;
   const activeWorkoutExerciseId = activeWorkoutExercise?.id ?? null;
+  const activeWorkoutHistoryScope = useMemo(() => ({
+    source: isCycleScopedActiveCycle ? "cycle-scoped" as const : "legacy" as const,
+    cycleId: persistedActiveCycle?.id ?? null,
+  }), [isCycleScopedActiveCycle, persistedActiveCycle?.id]);
+  const performancePrefetchLineageIds = useMemo(
+    () => dayExercises
+      .map((exercise) => normalizeExerciseLineageId(exercise.exerciseLineageId))
+      .filter((lineageId): lineageId is string => lineageId !== null),
+    [dayExercises],
+  );
   const visibleRoutine = dayExercises[0]?.routine ?? setupByDay[visibleDay]?.routineName ?? visibleDay;
   const targetSummary = calculateTargetSummary(dayExercises);
   const currentMetrics = metrics.filter((entry) => entry.week === currentWeek);
@@ -1077,6 +1099,8 @@ export function OrganizatechApp({
     activeWorkoutExerciseId,
     activeWorkoutExerciseLineageId,
     activeWorkoutStartedAt,
+    historyScope: activeWorkoutHistoryScope,
+    performancePrefetchLineageIds,
     observationUserId: supabaseUser?.id ?? null,
     captureSessionDataRequestToken,
     isSessionDataRequestCurrent,

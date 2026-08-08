@@ -45,7 +45,11 @@ for (const forbiddenImport of [
 }
 
 const comparisonSource = sources.get(paths[0]) ?? "";
-assert.match(appSource, /import \{ ComparisonScreenV2 \} from "@\/features\/progress\/components\/comparison-screen-v2";/);
+assert.match(appSource, /import type \{ ComparisonScreenV2Props \} from "@\/features\/progress\/components\/comparison-screen-v2";/);
+assert.match(
+  appSource,
+  /const ComparisonScreenV2 = dynamic<ComparisonScreenV2Props>\([\s\S]*?import\("@\/features\/progress\/components\/comparison-screen-v2"\)[\s\S]*?module\.ComparisonScreenV2[\s\S]*?\);/,
+);
 assert.match(appSource, /<ComparisonScreenV2/);
 assert.match(comparisonSource, /className="screen weekly-comparison-screen" data-section="weekly-comparison"/);
 assert.match(comparisonSource, /model: WeeklyExerciseComparisonModel;/);

@@ -37,7 +37,7 @@ function profile(userId: string, displayName: string, avatarPath: string | null 
     gender: "not_specified",
     phoneNumber: null,
     avatarPath,
-    avatarUpdatedAt: null,
+    avatarUpdatedAt: avatarPath ? "2026-08-04T12:00:00.000Z" : null,
   };
 }
 
@@ -49,6 +49,18 @@ function avatar(userId: string): ProfileAvatarState {
   };
 }
 
+function versionedAvatar(
+  userId: string,
+  version: string,
+  avatarPath = `${userId}/avatar`,
+): ProfileAvatarState {
+  return {
+    avatarPath,
+    avatarUrl: `https://signed.invalid/${userId}?version=${version}`,
+    avatarUpdatedAt: `2026-08-0${version}T12:00:00.000Z`,
+  };
+}
+
 function emptyAvatar(): ProfileAvatarState {
   return {
     avatarPath: null,
@@ -57,15 +69,23 @@ function emptyAvatar(): ProfileAvatarState {
   };
 }
 
-function harness(source: ProfileDataSource) {
+function harness(
+  source: ProfileDataSource,
+  options: {
+    now?: number;
+    preloadAvatarImage?: (avatarUrl: string | null) => Promise<boolean>;
+  } = {},
+) {
   let epoch = createSessionDataEpoch({ userId: USER_A, scope: SCOPE_A });
+  let currentNow = options.now ?? 100_000;
   const controller = createProfileController({
     identity: {
       captureRequestToken: () => captureSessionDataRequestToken(epoch),
       isRequestTokenCurrent: (token) => isSessionDataRequestTokenCurrent(epoch, token),
     },
     source,
-    now: () => 100_000,
+    now: () => currentNow,
+    preloadAvatarImage: options.preloadAvatarImage,
   });
   controller.replaceIdentityScope({ enabled: true, dataMode: "supabase", trainingDataPrepared: true });
   return {
@@ -85,6 +105,9 @@ function harness(source: ProfileDataSource) {
     switchToB(prepared = true) {
       epoch = advanceSessionDataEpoch(epoch, { userId: USER_B, scope: SCOPE_B });
       controller.replaceIdentityScope({ enabled: true, dataMode: "supabase", trainingDataPrepared: prepared });
+    },
+    advanceTime(milliseconds: number) {
+      currentNow += milliseconds;
     },
   };
 }
@@ -170,6 +193,220 @@ test("bootstrap con avatar existente publica la URL derivada y el reset vigente"
   assert.equal(avatarReads, 1);
   assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, `https://signed.invalid/${USER_A}`);
   assert.equal(controller.getSnapshot().profileAvatarResetKey, 2);
+});
+
+test("menú abierto tras bootstrap consume avatar precargado sin nuevos repository reads", async () => {
+  let profileReads = 0;
+  let avatarReads = 0;
+  const preloadedUrls: Array<string | null> = [];
+  const { controller } = harness(immediateSource({
+    readProfile: async (userId) => {
+      profileReads += 1;
+      return profile(userId, "A", `${userId}/avatar`);
+    },
+    readAvatar: async (userId) => {
+      avatarReads += 1;
+      return avatar(userId);
+    },
+  }), {
+    preloadAvatarImage: async (avatarUrl) => {
+      preloadedUrls.push(avatarUrl);
+      return true;
+    },
+  });
+
+  await controller.bootstrap();
+  const menuAvatar = controller.getSnapshot().profileAvatar;
+
+  assert.equal(profileReads, 1);
+  assert.equal(avatarReads, 1);
+  assert.deepEqual(preloadedUrls, [`https://signed.invalid/${USER_A}`]);
+  assert.equal(controller.getSnapshot().profileAvatarLoading, false);
+  assert.equal(menuAvatar.avatarUrl, `https://signed.invalid/${USER_A}`);
+});
+
+test("metadatos v1 -> v2 dentro de ventana fresca renuevan path y URL sin lookup extra", async () => {
+  const v1 = versionedAvatar(USER_A, "1");
+  const v2 = versionedAvatar(USER_A, "2", `${USER_A}/avatar-v2`);
+  let avatarReads = 0;
+  let profileReads = 0;
+  const { controller } = harness(immediateSource({
+    readProfile: async () => {
+      profileReads += 1;
+      return {
+        ...profile(USER_A, "A", v1.avatarPath),
+        avatarUpdatedAt: v1.avatarUpdatedAt,
+      };
+    },
+    readAvatar: async () => {
+      avatarReads += 1;
+      return avatarReads === 1 ? v1 : v2;
+    },
+    saveProfile: async () => ({
+      ...profile(USER_A, "A", v2.avatarPath),
+      avatarUpdatedAt: v2.avatarUpdatedAt,
+    }),
+  }), { preloadAvatarImage: async () => true });
+
+  await controller.bootstrap();
+  await controller.saveProfile({ firstName: "A" });
+  assert.equal((await controller.foreground())?.avatarUrl, v2.avatarUrl);
+  assert.equal(profileReads, 1);
+  assert.equal(avatarReads, 2);
+});
+
+test("mismo path con avatarUpdatedAt distinto invalida hit fresco y renueva signed URL", async () => {
+  const v1 = versionedAvatar(USER_A, "1");
+  const v2 = versionedAvatar(USER_A, "2");
+  let avatarReads = 0;
+  const { controller } = harness(immediateSource({
+    readProfile: async () => ({
+      ...profile(USER_A, "A", v1.avatarPath),
+      avatarUpdatedAt: v1.avatarUpdatedAt,
+    }),
+    readAvatar: async () => {
+      avatarReads += 1;
+      return avatarReads === 1 ? v1 : v2;
+    },
+    saveProfile: async () => ({
+      ...profile(USER_A, "A", v2.avatarPath),
+      avatarUpdatedAt: v2.avatarUpdatedAt,
+    }),
+  }), { preloadAvatarImage: async () => true });
+
+  await controller.bootstrap();
+  await controller.saveProfile({ firstName: "A" });
+  assert.equal((await controller.foreground())?.avatarUrl, v2.avatarUrl);
+  assert.equal(avatarReads, 2);
+});
+
+test("la URL nueva no se publica antes de completar preload/decode exitoso", async () => {
+  const preload = deferred<boolean>();
+  const v1 = versionedAvatar(USER_A, "1");
+  const { controller } = harness(immediateSource({
+    readAvatar: async () => v1,
+  }), { preloadAvatarImage: () => preload.promise });
+
+  const pending = controller.refreshAvatar({ force: true, avatarPath: v1.avatarPath });
+  await Promise.resolve();
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, null);
+  preload.resolve(true);
+  assert.equal((await pending)?.avatarUrl, v1.avatarUrl);
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, v1.avatarUrl);
+});
+
+test("preload fallido conserva avatar anterior válido y no publica URL v2", async () => {
+  const v1 = versionedAvatar(USER_A, "1");
+  const v2 = versionedAvatar(USER_A, "2");
+  let avatarReads = 0;
+  let preloadAttempts = 0;
+  const { controller } = harness(immediateSource({
+    readProfile: async () => ({
+      ...profile(USER_A, "A", v1.avatarPath),
+      avatarUpdatedAt: v1.avatarUpdatedAt,
+    }),
+    readAvatar: async () => {
+      avatarReads += 1;
+      return avatarReads === 1 ? v1 : v2;
+    },
+    saveProfile: async () => ({
+      ...profile(USER_A, "A", v2.avatarPath),
+      avatarUpdatedAt: v2.avatarUpdatedAt,
+    }),
+  }), {
+    preloadAvatarImage: async () => {
+      preloadAttempts += 1;
+      return preloadAttempts === 1;
+    },
+  });
+
+  await controller.bootstrap();
+  await controller.saveProfile({ firstName: "A" });
+  assert.equal(await controller.foreground(), null);
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, v1.avatarUrl);
+  assert.match(controller.getSnapshot().profileAvatarError, /foto de perfil/);
+});
+
+test("rechazo de preload sin avatar anterior mantiene estado vacío y error controlado", async () => {
+  const v1 = versionedAvatar(USER_A, "1");
+  const { controller } = harness(immediateSource({
+    readAvatar: async () => v1,
+  }), {
+    preloadAvatarImage: async () => {
+      throw new Error("decode failed");
+    },
+  });
+
+  assert.equal(
+    await controller.refreshAvatar({ force: true, avatarPath: v1.avatarPath }),
+    null,
+  );
+  assert.deepEqual(controller.getSnapshot().profileAvatar, emptyAvatar());
+  assert.match(controller.getSnapshot().profileAvatarError, /foto de perfil/);
+  assert.equal(controller.getSnapshot().profileAvatarLoading, false);
+});
+
+test("eventos foreground simultáneos comparten una sola operación y una sola precarga", async () => {
+  const profileLookup = deferred<ProfilePersonalData>();
+  const avatarRead = deferred<ProfileAvatarState>();
+  let profileReads = 0;
+  let avatarReads = 0;
+  let preloads = 0;
+  const { controller } = harness(immediateSource({
+    readProfile: () => {
+      profileReads += 1;
+      return profileLookup.promise;
+    },
+    readAvatar: () => {
+      avatarReads += 1;
+      return avatarRead.promise;
+    },
+  }), {
+    preloadAvatarImage: async () => {
+      preloads += 1;
+      return true;
+    },
+  });
+
+  const focus = controller.foreground();
+  const pageshow = controller.foreground();
+  const visibilitychange = controller.foreground();
+  const online = controller.foreground();
+  assert.equal(profileReads, 1);
+
+  profileLookup.resolve(profile(USER_A, "A", `${USER_A}/avatar`));
+  await Promise.resolve();
+  assert.equal(avatarReads, 1);
+  avatarRead.resolve(avatar(USER_A));
+  await Promise.all([focus, pageshow, visibilitychange, online]);
+  assert.equal(preloads, 1);
+});
+
+test("foreground vencido revalida sin borrar avatar ni publicar loading visible", async () => {
+  const refreshedAvatar = deferred<ProfileAvatarState>();
+  let avatarReads = 0;
+  const { controller, advanceTime } = harness(immediateSource({
+    readAvatar: async (userId) => {
+      avatarReads += 1;
+      if (avatarReads === 1) return avatar(userId);
+      return refreshedAvatar.promise;
+    },
+  }));
+
+  await controller.bootstrap();
+  advanceTime(46_000);
+  const pending = controller.foreground();
+  assert.equal(avatarReads, 2);
+  assert.equal(controller.getSnapshot().profileAvatarLoading, false);
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, `https://signed.invalid/${USER_A}`);
+
+  refreshedAvatar.resolve({
+    ...avatar(USER_A),
+    avatarUrl: `https://signed.invalid/${USER_A}?version=2`,
+  });
+  await pending;
+  assert.equal(controller.getSnapshot().profileAvatarLoading, false);
+  assert.match(controller.getSnapshot().profileAvatar.avatarUrl ?? "", /version=2/);
 });
 
 test("bootstrap no cachea un avatar fallido y el siguiente intento puede recuperarlo", async () => {
@@ -341,6 +578,110 @@ test("upload A -> B no publica avatar, URL, reset key ni error bajo B", async ()
   assert.deepEqual(controller.getSnapshot(), snapshotB);
 });
 
+test("upload invalida reads anteriores y también los iniciados mientras el write vigente domina", async () => {
+  const reads = [deferred<ProfileAvatarState>(), deferred<ProfileAvatarState>()];
+  const upload = deferred<ProfileAvatarState>();
+  let readIndex = 0;
+  const { controller } = harness(immediateSource({
+    readAvatar: () => reads[readIndex++].promise,
+    uploadAvatar: () => upload.promise,
+  }), { preloadAvatarImage: async () => true });
+
+  const beforeUpload = controller.refreshAvatar({ force: true, avatarPath: `${USER_A}/avatar` });
+  const pendingUpload = controller.uploadAvatar({} as File);
+  reads[0].resolve(versionedAvatar(USER_A, "1"));
+  assert.equal(await beforeUpload, null);
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, null);
+
+  const duringUpload = controller.refreshAvatar({ force: true, avatarPath: `${USER_A}/avatar` });
+  const uploaded = versionedAvatar(USER_A, "2");
+  upload.resolve(uploaded);
+  assert.equal(await pendingUpload, true);
+  reads[1].resolve(versionedAvatar(USER_A, "1"));
+  assert.equal(await duringUpload, null);
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, uploaded.avatarUrl);
+});
+
+test("upload invalida memoria anterior, bloquea foreground redundante y precarga la URL nueva", async () => {
+  const upload = deferred<ProfileAvatarState>();
+  let avatarReads = 0;
+  const preloadedUrls: Array<string | null> = [];
+  const { controller } = harness(immediateSource({
+    readAvatar: async (userId) => {
+      avatarReads += 1;
+      return avatar(userId);
+    },
+    uploadAvatar: () => upload.promise,
+  }), {
+    preloadAvatarImage: async (avatarUrl) => {
+      preloadedUrls.push(avatarUrl);
+      return true;
+    },
+  });
+
+  await controller.bootstrap();
+  const pendingUpload = controller.uploadAvatar({} as File);
+  assert.equal((await controller.foreground())?.avatarUrl, `https://signed.invalid/${USER_A}`);
+  assert.equal(avatarReads, 1);
+
+  const uploadedAvatar = {
+    ...avatar(USER_A),
+    avatarUrl: `https://signed.invalid/${USER_A}?upload=2`,
+  };
+  upload.resolve(uploadedAvatar);
+  assert.equal(await pendingUpload, true);
+  assert.deepEqual(preloadedUrls, [
+    `https://signed.invalid/${USER_A}`,
+    `https://signed.invalid/${USER_A}?upload=2`,
+  ]);
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, uploadedAvatar.avatarUrl);
+  await controller.foreground();
+  assert.equal(avatarReads, 1);
+});
+
+test("upload fallido no reutiliza la entrada anterior y permite reconstruirla por foreground", async () => {
+  let avatarReads = 0;
+  const { controller } = harness(immediateSource({
+    readAvatar: async (userId) => {
+      avatarReads += 1;
+      return avatar(userId);
+    },
+    uploadAvatar: async () => {
+      throw new Error("upload failed");
+    },
+  }));
+
+  await controller.bootstrap();
+  await assert.rejects(controller.uploadAvatar({} as File), /upload failed/);
+  await controller.foreground();
+  assert.equal(avatarReads, 2);
+});
+
+test("preload fallido del upload no publica ni versiona la URL nueva", async () => {
+  const v1 = versionedAvatar(USER_A, "1");
+  const v2 = versionedAvatar(USER_A, "2");
+  let preloadAttempts = 0;
+  const { controller } = harness(immediateSource({
+    readProfile: async () => ({
+      ...profile(USER_A, "A", v1.avatarPath),
+      avatarUpdatedAt: v1.avatarUpdatedAt,
+    }),
+    readAvatar: async () => v1,
+    uploadAvatar: async () => v2,
+  }), {
+    preloadAvatarImage: async () => {
+      preloadAttempts += 1;
+      return preloadAttempts === 1;
+    },
+  });
+
+  await controller.bootstrap();
+  await assert.rejects(controller.uploadAvatar({} as File), /No pudimos guardar la foto/);
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, v1.avatarUrl);
+  assert.equal(controller.getSnapshot().profilePersonalData?.avatarUpdatedAt, v1.avatarUpdatedAt);
+  assert.match(controller.getSnapshot().profileAvatarError, /foto de perfil/);
+});
+
 test("foreground same-identity refresca avatar sin publicar profile lookup ni resetear formulario local", async () => {
   let profileReads = 0;
   const { controller } = harness(immediateSource({
@@ -362,7 +703,7 @@ test("foreground anterior al upload no puede borrar la URL recién publicada", a
   }));
 
   const foreground = controller.foreground();
-  assert.equal(controller.getSnapshot().profileAvatarLoading, true);
+  assert.equal(controller.getSnapshot().profileAvatarLoading, false);
   assert.equal(await controller.uploadAvatar({} as File), true);
   assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, `https://signed.invalid/${USER_A}`);
   assert.equal(controller.getSnapshot().profileAvatarLoading, false);
@@ -396,6 +737,57 @@ test("error real al firmar URL es controlado y un retry posterior publica avatar
   assert.equal(controller.getSnapshot().profileAvatarLoading, false);
 });
 
+test("retry de error de imagen salta memoria fresca y foreground se une sin read duplicado", async () => {
+  const retryRead = deferred<ProfileAvatarState>();
+  let avatarReads = 0;
+  const { controller } = harness(immediateSource({
+    readAvatar: async (userId) => {
+      avatarReads += 1;
+      if (avatarReads === 1) return avatar(userId);
+      return retryRead.promise;
+    },
+  }));
+
+  await controller.bootstrap();
+  const imageErrorRetry = controller.refreshAvatar({
+    force: true,
+    allowProfileLookup: true,
+    publishProfileLookup: false,
+    foreground: true,
+    publishLoading: false,
+  });
+  const simultaneousForeground = controller.foreground();
+  assert.equal(avatarReads, 2);
+  assert.equal(controller.getSnapshot().profileAvatarLoading, false);
+
+  retryRead.resolve({
+    ...avatar(USER_A),
+    avatarUrl: `https://signed.invalid/${USER_A}?retry=2`,
+  });
+  await Promise.all([imageErrorRetry, simultaneousForeground]);
+  assert.equal(avatarReads, 2);
+  assert.match(controller.getSnapshot().profileAvatar.avatarUrl ?? "", /retry=2/);
+});
+
+test("eliminación remota invalida la entrada de memoria y no revive la signed URL anterior", async () => {
+  let avatarReads = 0;
+  const { controller } = harness(immediateSource({
+    readAvatar: async (userId) => {
+      avatarReads += 1;
+      return avatarReads === 1 ? avatar(userId) : emptyAvatar();
+    },
+  }));
+
+  await controller.bootstrap();
+  assert.deepEqual(
+    await controller.refreshAvatar({ force: true, avatarPath: `${USER_A}/avatar` }),
+    emptyAvatar(),
+  );
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, null);
+  assert.deepEqual(await controller.foreground(), emptyAvatar());
+  assert.equal(avatarReads, 3);
+});
+
 test("TOKEN_REFRESHED del mismo owner conserva operación vigente", async () => {
   const write = deferred<ProfilePersonalData>();
   const { controller } = harness(immediateSource({ saveProfile: () => write.promise }));
@@ -412,6 +804,47 @@ test("TOKEN_REFRESHED del mismo usuario conserva read de avatar vigente", async 
   controller.replaceIdentityScope({ enabled: true, dataMode: "supabase", trainingDataPrepared: true });
   avatarRead.resolve(avatar(USER_A));
   assert.equal((await pending)?.avatarUrl, `https://signed.invalid/${USER_A}`);
+  assert.equal(controller.getSnapshot().profileAvatarLoading, false);
+});
+
+test("respuesta A que espera precarga no publica ni cachea después de cambiar a B", async () => {
+  const preloadA = deferred<boolean>();
+  let avatarReads = 0;
+  const { controller, switchToB } = harness(immediateSource({
+    readAvatar: async (userId) => {
+      avatarReads += 1;
+      return avatar(userId);
+    },
+  }), {
+    preloadAvatarImage: (avatarUrl) => avatarUrl?.includes(USER_A)
+      ? preloadA.promise
+      : Promise.resolve(true),
+  });
+
+  const requestA = controller.refreshAvatar({ force: true, avatarPath: `${USER_A}/avatar` });
+  await Promise.resolve();
+  switchToB();
+  preloadA.resolve(true);
+  assert.equal(await requestA, null);
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, null);
+
+  await controller.refreshAvatar({ force: true, avatarPath: `${USER_B}/avatar` });
+  assert.equal(avatarReads, 2);
+  assert.equal(controller.getSnapshot().profileAvatar.avatarUrl, `https://signed.invalid/${USER_B}`);
+});
+
+test("dispose durante precarga invalida la operación pendiente y no publica", async () => {
+  const preload = deferred<boolean>();
+  const { controller } = harness(immediateSource(), {
+    preloadAvatarImage: () => preload.promise,
+  });
+
+  const pending = controller.refreshAvatar({ force: true, avatarPath: `${USER_A}/avatar` });
+  await Promise.resolve();
+  controller.dispose();
+  preload.resolve(true);
+  assert.equal(await pending, null);
+  assert.deepEqual(controller.getSnapshot().profileAvatar, emptyAvatar());
   assert.equal(controller.getSnapshot().profileAvatarLoading, false);
 });
 

@@ -6,6 +6,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   PROFILE_AVATAR_MAX_SIZE_BYTES,
+  PROFILE_AVATAR_IMAGE_ERROR_REFRESH_THROTTLE_MS,
+  PROFILE_AVATAR_FOREGROUND_EVENT_DEDUP_MS,
   PROFILE_AVATAR_SIGNED_URL_TTL_SECONDS,
   buildProfileAvatarDeletePayload,
   buildProfileAvatarPath,
@@ -15,7 +17,10 @@ import {
   mapProfileAvatarState,
   mergeProfileAvatarMetadata,
   normalizeProfileAvatarPath,
+  preloadProfileAvatarImage,
   selectProfileAvatarPath,
+  shouldRefreshProfileAvatarAfterImageError,
+  shouldRefreshProfileAvatarOnForegroundEvent,
   validateProfileAvatarFile,
 } from "./profile-avatar";
 import { createProfileAvatarRepository } from "./profile-avatar-repository";
@@ -140,6 +145,13 @@ assert.equal(isOwnProfileAvatarPath(userId, "not-a-path"), false);
 assert.equal(isOwnProfileAvatarPath("not-a-uuid", `${userId}/avatar`), false);
 
 assert.equal(PROFILE_AVATAR_SIGNED_URL_TTL_SECONDS, 3600);
+assert.equal(PROFILE_AVATAR_IMAGE_ERROR_REFRESH_THROTTLE_MS, 8000);
+assert.equal(PROFILE_AVATAR_FOREGROUND_EVENT_DEDUP_MS, 1000);
+assert.equal(shouldRefreshProfileAvatarAfterImageError(10_000, 17_999), false);
+assert.equal(shouldRefreshProfileAvatarAfterImageError(10_000, 18_000), true);
+assert.equal(shouldRefreshProfileAvatarAfterImageError(10_000, 9_000), false);
+assert.equal(shouldRefreshProfileAvatarOnForegroundEvent(10_000, 10_999), false);
+assert.equal(shouldRefreshProfileAvatarOnForegroundEvent(10_000, 11_000), true);
 
 {
   const updatedAt = "2026-07-07T12:00:00.000Z";
@@ -314,6 +326,50 @@ function createAvatarRepositoryMock(
 }
 
 async function runRepositoryTests() {
+  assert.equal(typeof Image, "undefined");
+  assert.equal(await preloadProfileAvatarImage("https://signed.invalid/avatar"), true);
+  assert.equal(await preloadProfileAvatarImage(null), false);
+
+  const originalImageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Image");
+  try {
+    class FailingImage {
+      complete = false;
+      naturalWidth = 0;
+      decoding = "auto";
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      set src(_avatarUrl: string) {
+        queueMicrotask(() => this.onerror?.());
+      }
+    }
+    Object.defineProperty(globalThis, "Image", {
+      configurable: true,
+      writable: true,
+      value: FailingImage,
+    });
+    assert.equal(await preloadProfileAvatarImage("https://signed.invalid/onerror"), false);
+
+    class DecodeFailingImage extends FailingImage {
+      override set src(_avatarUrl: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+
+      decode() {
+        return Promise.reject(new Error("decode failed"));
+      }
+    }
+    Object.defineProperty(globalThis, "Image", {
+      configurable: true,
+      writable: true,
+      value: DecodeFailingImage,
+    });
+    assert.equal(await preloadProfileAvatarImage("https://signed.invalid/decode-error"), false);
+  } finally {
+    if (originalImageDescriptor) Object.defineProperty(globalThis, "Image", originalImageDescriptor);
+    else Reflect.deleteProperty(globalThis, "Image");
+  }
+
   {
     const { calls, repository } = createAvatarRepositoryMock();
     assert.equal(repository.getProfileAvatarSignedUrl.length, 0);
