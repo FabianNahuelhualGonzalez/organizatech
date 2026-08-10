@@ -23,43 +23,57 @@ const activeCycle = {
 };
 const plan = { routines: [] };
 const source = createRepositoryTrainingDataSource({
-  async loadAppData(mode, expectedUserId) {
+  async loadLegacySnapshot(mode, expectedUserId) {
     calls.push(`app:${mode}:${expectedUserId ?? "none"}`);
     return { exercises: [], entries: [], sessions: [], source: "supabase" };
   },
-  async getActiveCycle() {
-    calls.push("active");
+  async ensureProfile(mode, expectedUserId) {
+    calls.push(`profile:${mode}:${expectedUserId ?? "none"}`);
+  },
+  async getActiveCycle(expectedUserId, isExpectedRequestCurrent) {
+    calls.push(`active:${expectedUserId ?? "none"}:${isExpectedRequestCurrent?.() ?? false}`);
     return activeCycle;
   },
   async getCycleHistory() {
     calls.push("history");
     return [];
   },
-  async getCyclePlan(cycleId) {
-    calls.push(`plan:${cycleId}`);
+  async getCyclePlan(cycleId, expectedUserId, _getClient, isExpectedRequestCurrent) {
+    calls.push(`plan:${cycleId}:${expectedUserId ?? "none"}:${isExpectedRequestCurrent?.() ?? false}`);
     return plan;
   },
-  async getCycleSessions(cycleId, receivedPlan) {
-    calls.push(`sessions:${cycleId}`);
+  async getCycleSessionRows(cycleId, expectedUserId, _getClient, isExpectedRequestCurrent) {
+    calls.push(`session-rows:${cycleId}:${expectedUserId ?? "none"}:${isExpectedRequestCurrent?.() ?? false}`);
+    return { raw: true } as never;
+  },
+  assembleCycleSessions(cycleId, receivedPlan, rawData) {
+    calls.push(`assemble:${cycleId}`);
     assert.equal(receivedPlan, plan);
+    assert.deepEqual(rawData, { raw: true });
     return { sessions: [], entries: [] };
   },
 });
 
 async function awaitAppData() {
-  const appData = await source.loadAppData("supabase", "user-a");
-  const cycles = await source.loadCycles();
-  const cyclePlan = await source.loadCyclePlan("cycle-a");
-  const sessions = await source.loadCycleSessions("cycle-a", cyclePlan);
+  const appData = await source.loadLegacySnapshot("supabase", "user-a");
+  await source.ensureProfile("supabase", "user-a");
+  const active = await source.loadActiveCycle("user-a", () => true);
+  const history = await source.loadCycleHistory();
+  const cyclePlan = await source.loadCyclePlan("cycle-a", "user-a", () => true);
+  const rawSessionData = await source.loadCycleSessionRows("cycle-a", "user-a", () => true);
+  const sessions = source.assembleCycleSessions("cycle-a", cyclePlan, rawSessionData);
   assert.equal(appData.source, "supabase");
-  assert.equal(cycles.active?.id, "cycle-a");
+  assert.equal(active?.id, "cycle-a");
+  assert.deepEqual(history, []);
   assert.deepEqual(sessions, { sessions: [], entries: [] });
   assert.deepEqual(calls, [
     "app:supabase:user-a",
-    "active",
+    "profile:supabase:user-a",
+    "active:user-a:true",
     "history",
-    "plan:cycle-a",
-    "sessions:cycle-a",
+    "plan:cycle-a:user-a:true",
+    "session-rows:cycle-a:user-a:true",
+    "assemble:cycle-a",
   ]);
 
   const repositorySource = readFileSync("src/lib/data/repository.ts", "utf8");

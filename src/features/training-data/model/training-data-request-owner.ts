@@ -1,6 +1,11 @@
 import type { SessionDataRequestToken } from "@/lib/session/session-data-epoch";
 
-export type TrainingDataResource = "app-data" | "cycles" | "cycle-snapshot";
+export type TrainingDataResource =
+  | "legacy-snapshot"
+  | "active-cycle"
+  | "cycle-history"
+  | "cycle-snapshot"
+  | "profile-prerequisite";
 
 export interface TrainingDataIdentityPort {
   captureRequestToken(): SessionDataRequestToken;
@@ -27,9 +32,11 @@ export function createTrainingDataRequestOwnerRegistry(
   identity: TrainingDataIdentityPort,
 ): TrainingDataRequestOwnerRegistry {
   const latestRequestIds: Record<TrainingDataResource, number> = {
-    "app-data": 0,
-    cycles: 0,
+    "legacy-snapshot": 0,
+    "active-cycle": 0,
+    "cycle-history": 0,
     "cycle-snapshot": 0,
+    "profile-prerequisite": 0,
   };
   let lifecycle = 0;
   let selectedCycleId: string | null = null;
@@ -61,9 +68,11 @@ export function createTrainingDataRequestOwnerRegistry(
 
     invalidateAll() {
       lifecycle += 1;
-      invalidate("app-data");
-      invalidate("cycles");
+      invalidate("legacy-snapshot");
+      invalidate("active-cycle");
+      invalidate("cycle-history");
       invalidate("cycle-snapshot");
+      invalidate("profile-prerequisite");
       selectedCycleId = null;
     },
 

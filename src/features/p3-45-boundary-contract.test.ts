@@ -188,6 +188,65 @@ function namedFunctionAst(path: string, source: string, functionName: string) {
   return JSON.stringify(serialize(declaration));
 }
 
+function assertTrainingDataPreparedProfileWiringAst(source: string) {
+  const sourceFile = parseSource(files.root, source);
+  const declarations: ts.VariableDeclaration[] = [];
+  const profileCalls: ts.CallExpression[] = [];
+
+  const visit = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      if (node.name.text === "trainingDataPrepared") declarations.push(node);
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "useProfileController"
+    ) profileCalls.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+
+  assert.equal(
+    declarations.length,
+    1,
+    "trainingDataPrepared debe tener exactamente una declaración ejecutable",
+  );
+  const declaration = declarations[0];
+  const declarationList = declaration.parent;
+  assert.ok(ts.isVariableDeclarationList(declarationList));
+  assert.ok(
+    (declarationList.flags & ts.NodeFlags.Const) !== 0,
+    "trainingDataPrepared debe declararse como const",
+  );
+  const initializer = declaration.initializer;
+  assert.ok(
+    initializer &&
+      ts.isCallExpression(initializer) &&
+      ts.isIdentifier(initializer.expression) &&
+      initializer.expression.text === "isTrainingDataProfilePrepared" &&
+      initializer.arguments.length === 1 &&
+      ts.isIdentifier(initializer.arguments[0]) &&
+      initializer.arguments[0].text === "trainingDataState",
+    "trainingDataPrepared debe usar exactamente isTrainingDataProfilePrepared(trainingDataState)",
+  );
+
+  assert.equal(profileCalls.length, 1, "useProfileController debe tener una única conexión productiva");
+  const profileInput = profileCalls[0].arguments[0];
+  assert.ok(ts.isObjectLiteralExpression(profileInput), "Profile debe recibir un objeto de entrada explícito");
+  const consumers = profileInput.properties.filter((property) => (
+    (ts.isShorthandPropertyAssignment(property) && property.name.text === "trainingDataPrepared") ||
+    (ts.isPropertyAssignment(property) &&
+      property.name.getText(sourceFile) === "trainingDataPrepared" &&
+      ts.isIdentifier(property.initializer) &&
+      property.initializer.text === "trainingDataPrepared")
+  ));
+  assert.equal(
+    consumers.length,
+    1,
+    "Profile debe consumir directamente el trainingDataPrepared canónico",
+  );
+}
+
 function validate(sources: Sources) {
   const overrides = new Map<string, string>(
     Object.entries(files).map(([key, path]) => [path, sources[key as keyof Sources]]),
@@ -207,13 +266,7 @@ function validate(sources: Sources) {
   assert.doesNotMatch(sources.root, /createTrainingCycleSnapshot/);
   assert.doesNotMatch(sources.root, /interface (?:TrainingCycleSnapshot|LegacyCycleHistorySnapshot) \{/);
   assert.doesNotMatch(sources.root, /ShareWorkoutCard|workout-share/);
-  assert.ok(
-    sources.root.includes(
-      'const trainingDataPrepared = trainingDataState.appData.status === "ready" ||\n' +
-      '    trainingDataState.appData.status === "error";',
-    ),
-    "Profile se prepara cuando TrainingData queda settled en ready o error",
-  );
+  assertTrainingDataPreparedProfileWiringAst(sources.root);
 
   assert.match(sources.profileController, /readRequestIds\[lane\] === owner\.requestId/);
   assert.match(sources.profileController, /const requestId = readRequestIds\[lane\] \+ 1/);
@@ -326,12 +379,48 @@ const sourceProbes: Array<{
   mutate(source: string): string;
 }> = [
   {
-    name: "volver a bloquear Profile cuando TrainingData termina en error",
+    name: "volver a acoplar Profile al snapshot legacy crítico",
     target: "root",
     mutate: (source) => source.replace(
-      'const trainingDataPrepared = trainingDataState.appData.status === "ready" ||\n' +
-      '    trainingDataState.appData.status === "error";',
+      'const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);',
       'const trainingDataPrepared = trainingDataState.appData.status === "ready";',
+    ),
+  },
+  {
+    name: "engañar el contrato con comentario canónico y booleano constante",
+    target: "root",
+    mutate: (source) => source.replace(
+      "  const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);",
+      "  // const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);\n  const trainingDataPrepared = true;",
+    ),
+  },
+  {
+    name: "engañar el contrato con string canónico y booleano constante",
+    target: "root",
+    mutate: (source) => source.replace(
+      "  const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);",
+      '  const trainingDataPreparedMarker = "const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);";\n  const trainingDataPrepared = true;',
+    ),
+  },
+  {
+    name: "consumir un alias desconectado en Profile",
+    target: "root",
+    mutate: (source) => source
+      .replace(
+        "  const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);",
+        "  const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);\n  const disconnectedTrainingDataPrepared = true;",
+      )
+      .replace(
+        "    trainingDataPrepared,",
+        "    trainingDataPrepared: disconnectedTrainingDataPrepared,",
+      ),
+  },
+  {
+    name: "desconectar Profile y dejar el símbolo sólo en comentario",
+    target: "root",
+    mutate: (source) => source.replace(
+      "    trainingDataPrepared,",
+      "    // trainingDataPrepared,\n    trainingDataPrepared: true,",
     ),
   },
   {
@@ -445,15 +534,15 @@ const runtimeProbes: Array<{
     name: "omitir expectedUserId en read de avatar",
     path: "avatarRepository",
     testPath: "src/lib/profile/profile-avatar.test.ts",
-    find: '  async function getCurrentProfileAvatar(\n    expectedUserId: string | undefined = undefined,\n  ): Promise<ProfileAvatarState> {\n    const { supabase, userId } = await getAuthenticatedProfileAvatarClient(expectedUserId);',
-    replacement: '  async function getCurrentProfileAvatar(\n    expectedUserId: string | undefined = undefined,\n  ): Promise<ProfileAvatarState> {\n    const { supabase, userId } = await getAuthenticatedProfileAvatarClient();',
+    find: '  async function getCurrentProfileAvatar(\n    expectedUserId: string | undefined = undefined,\n    metadata: ProfileAvatarMetadata | undefined = undefined,\n  ): Promise<ProfileAvatarState> {\n    const { supabase, userId } = await getAuthenticatedProfileAvatarClient(expectedUserId);',
+    replacement: '  async function getCurrentProfileAvatar(\n    expectedUserId: string | undefined = undefined,\n    metadata: ProfileAvatarMetadata | undefined = undefined,\n  ): Promise<ProfileAvatarState> {\n    const { supabase, userId } = await getAuthenticatedProfileAvatarClient();',
   },
   {
     name: "eliminar revalidación post-read de avatar",
     path: "avatarRepository",
     testPath: "src/lib/profile/profile-avatar.test.ts",
-    find: '  async function getCurrentProfileAvatar(\n    expectedUserId: string | undefined = undefined,\n  ): Promise<ProfileAvatarState> {\n    const { supabase, userId } = await getAuthenticatedProfileAvatarClient(expectedUserId);\n    const row = await getProfileAvatarRow(supabase, userId);\n    await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);\n    const avatarPath = getCanonicalStoredAvatarPath(userId, row.avatar_path);',
-    replacement: '  async function getCurrentProfileAvatar(\n    expectedUserId: string | undefined = undefined,\n  ): Promise<ProfileAvatarState> {\n    const { supabase, userId } = await getAuthenticatedProfileAvatarClient(expectedUserId);\n    const row = await getProfileAvatarRow(supabase, userId);\n    const avatarPath = getCanonicalStoredAvatarPath(userId, row.avatar_path);',
+    find: '    await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);\n    const avatarUrl = await createCanonicalSignedUrl(supabase, avatarPath);',
+    replacement: '    const avatarUrl = await createCanonicalSignedUrl(supabase, avatarPath);',
   },
   {
     name: "eliminar revalidación post-signed URL",
@@ -508,7 +597,7 @@ const runtimeProbes: Array<{
     name: "omitir refresh de avatar en bootstrap",
     path: "profileController",
     testPath: "src/features/profile/model/profile-controller.test.ts",
-    find: '        await runAvatarRead(avatarOwner, { force: true, avatarPath: profile.avatarPath }, false);',
+    find: '        await runAvatarRead(\n          avatarOwner,\n          { force: true, avatarPath: profile.avatarPath },\n          false,\n          authorizedMetadata,\n        );',
     replacement: '        await Promise.resolve(null);',
   },
   {

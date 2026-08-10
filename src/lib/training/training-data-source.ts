@@ -1,24 +1,24 @@
 import {
-  loadAppData,
+  ensureAppDataProfile,
+  loadAppDataSnapshot,
   type AppData,
   type RepositoryMode,
 } from "@/lib/data/repository";
 import {
+  assembleCycleScopedTrainingSessionData,
   getCycleScopedTrainingPlan,
-  getCycleScopedTrainingSessionData,
+  getCycleScopedTrainingSessionRawData,
+  type CycleScopedTrainingRequestGuard,
   type CycleScopedTrainingPlan,
+  type CycleScopedTrainingSessionRawData,
   type CycleScopedTrainingSessionData,
 } from "@/lib/training/cycle-scoped-training-repository";
 import {
   getActiveTrainingCycle,
   getTrainingCycleHistory,
+  type TrainingCycleRequestGuard,
   type TrainingCycle,
 } from "@/lib/training/training-cycles-repository";
-
-export interface TrainingDataCyclesResult {
-  active: TrainingCycle | null;
-  history: TrainingCycle[];
-}
 
 /**
  * Read adapter only. Authentication and row ownership stay inside the existing
@@ -26,44 +26,74 @@ export interface TrainingDataCyclesResult {
  * loader, whose existing identity assertion already supports it.
  */
 export interface TrainingDataSource {
-  loadAppData(mode: RepositoryMode, expectedUserId?: string | null): Promise<AppData>;
-  loadCycles(): Promise<TrainingDataCyclesResult>;
-  loadCyclePlan(cycleId: string): Promise<CycleScopedTrainingPlan>;
-  loadCycleSessions(
+  loadActiveCycle(
+    expectedUserId?: string,
+    isExpectedRequestCurrent?: TrainingCycleRequestGuard,
+  ): Promise<TrainingCycle | null>;
+  loadCycleHistory(): Promise<TrainingCycle[]>;
+  loadLegacySnapshot(mode: RepositoryMode, expectedUserId?: string | null): Promise<AppData>;
+  ensureProfile(mode: RepositoryMode, expectedUserId?: string | null): Promise<void>;
+  loadCyclePlan(
+    cycleId: string,
+    expectedUserId?: string,
+    isExpectedRequestCurrent?: CycleScopedTrainingRequestGuard,
+  ): Promise<CycleScopedTrainingPlan>;
+  loadCycleSessionRows(
+    cycleId: string,
+    expectedUserId?: string,
+    isExpectedRequestCurrent?: CycleScopedTrainingRequestGuard,
+  ): Promise<CycleScopedTrainingSessionRawData>;
+  assembleCycleSessions(
     cycleId: string,
     plan: CycleScopedTrainingPlan,
-  ): Promise<CycleScopedTrainingSessionData>;
+    rawData: CycleScopedTrainingSessionRawData,
+  ): CycleScopedTrainingSessionData;
 }
 
 export interface TrainingDataRepositoryDependencies {
-  loadAppData: typeof loadAppData;
+  loadLegacySnapshot: typeof loadAppDataSnapshot;
+  ensureProfile: typeof ensureAppDataProfile;
   getActiveCycle: typeof getActiveTrainingCycle;
   getCycleHistory: typeof getTrainingCycleHistory;
   getCyclePlan: typeof getCycleScopedTrainingPlan;
-  getCycleSessions: typeof getCycleScopedTrainingSessionData;
+  getCycleSessionRows: typeof getCycleScopedTrainingSessionRawData;
+  assembleCycleSessions: typeof assembleCycleScopedTrainingSessionData;
 }
 
 const repositoryDependencies: TrainingDataRepositoryDependencies = {
-  loadAppData,
+  loadLegacySnapshot: loadAppDataSnapshot,
+  ensureProfile: ensureAppDataProfile,
   getActiveCycle: getActiveTrainingCycle,
   getCycleHistory: getTrainingCycleHistory,
   getCyclePlan: getCycleScopedTrainingPlan,
-  getCycleSessions: getCycleScopedTrainingSessionData,
+  getCycleSessionRows: getCycleScopedTrainingSessionRawData,
+  assembleCycleSessions: assembleCycleScopedTrainingSessionData,
 };
 
 export function createRepositoryTrainingDataSource(
   dependencies: TrainingDataRepositoryDependencies = repositoryDependencies,
 ): TrainingDataSource {
   return {
-    loadAppData: dependencies.loadAppData,
-    async loadCycles() {
-      const [active, history] = await Promise.all([
-        dependencies.getActiveCycle(),
-        dependencies.getCycleHistory(),
-      ]);
-      return { active, history };
-    },
-    loadCyclePlan: dependencies.getCyclePlan,
-    loadCycleSessions: dependencies.getCycleSessions,
+    loadActiveCycle: dependencies.getActiveCycle,
+    loadCycleHistory: dependencies.getCycleHistory,
+    loadLegacySnapshot: dependencies.loadLegacySnapshot,
+    ensureProfile: dependencies.ensureProfile,
+    loadCyclePlan: (cycleId, expectedUserId, isExpectedRequestCurrent) => (
+      dependencies.getCyclePlan(
+        cycleId,
+        expectedUserId,
+        undefined,
+        isExpectedRequestCurrent,
+      )
+    ),
+    loadCycleSessionRows: (cycleId, expectedUserId, isExpectedRequestCurrent) => (
+      dependencies.getCycleSessionRows(
+        cycleId,
+        expectedUserId,
+        undefined,
+        isExpectedRequestCurrent,
+      )
+    ),
+    assembleCycleSessions: dependencies.assembleCycleSessions,
   };
 }

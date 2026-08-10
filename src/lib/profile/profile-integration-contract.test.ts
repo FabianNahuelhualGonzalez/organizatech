@@ -18,6 +18,7 @@ const profileAvatarStaticSource = readFileSync("src/lib/profile/profile-avatar.t
 const profileViewModelStaticSource = readFileSync("src/lib/profile/profile-view-model.ts", "utf8");
 const profileControllerStaticSource = readFileSync("src/features/profile/model/profile-controller.ts", "utf8");
 const profileHookStaticSource = readFileSync("src/features/profile/hooks/useProfileController.ts", "utf8");
+const profileAvatarRepositoryStaticSource = readFileSync("src/lib/profile/profile-avatar-repository.ts", "utf8");
 const packageStaticSource = readFileSync("package.json", "utf8");
 
 function extractStaticSourceSection(source: string, startMarker: string, endMarker: string): string {
@@ -468,6 +469,11 @@ function validatePerf02VersionedCacheContract(sources: {
     "rememberAvatar(owner.requestToken, owner.identityKey, avatar)",
     "      publish({\n        profileAvatar: avatar,",
   ]);
+  assert.ok(
+    avatarReadSection.indexOf("profileAvatar: avatar") >
+      avatarReadSection.indexOf("const preloadOutcome = await preloadAvatarForRead(owner, avatar)"),
+    "Avatar sólo se publica después de preload",
+  );
 
   const preloadReadSection = extractStaticSourceSection(
     sources.controller,
@@ -625,6 +631,187 @@ for (const probe of perf02MutationProbes) {
   assert.throws(
     () => validatePerf02VersionedCacheContract(probe.mutate()),
     `PERF-02 mutation debe morir: ${probe.name}`,
+  );
+}
+
+// PERF-05E: Profile puede prestar metadata a Avatar sólo durante la misma lectura
+// autorizada. La signed URL sigue siendo derivada, transitoria y publicada tras preload.
+function validatePerf05EReadCoalescingContract(sources: {
+  controller: string;
+  repository: string;
+}) {
+  const metadataCaptureSection = extractStaticSourceSection(
+    sources.controller,
+    "  function captureAuthorizedProfileAvatarMetadata(",
+    "  function reuseAuthorizedProfileAvatarMetadata(",
+  );
+  assertStaticMarkersInOrder(metadataCaptureSection, [
+    '!isReadCurrent("avatar", owner)',
+    "profile.id !== owner.userId",
+    "generation: owner.requestToken.generation",
+    "userId: owner.userId",
+    "scope: owner.requestToken.scope",
+    "identityKey: owner.identityKey",
+    "avatarPath: profile.avatarPath",
+    "avatarUpdatedAt: profile.avatarUpdatedAt",
+  ]);
+
+  const metadataReuseSection = extractStaticSourceSection(
+    sources.controller,
+    "  function reuseAuthorizedProfileAvatarMetadata(",
+    "  function getCurrentAvatarMemory(",
+  );
+  for (const marker of [
+    '!isReadCurrent("avatar", owner)',
+    "metadata.generation !== owner.requestToken.generation",
+    "metadata.userId !== owner.userId",
+    "metadata.scope !== owner.requestToken.scope",
+    "metadata.identityKey !== owner.identityKey",
+    "metadata.avatarPath !== avatarPath",
+    "!metadata.avatarUpdatedAt",
+  ]) assert.match(metadataReuseSection, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+  const avatarReadSection = extractStaticSourceSection(
+    sources.controller,
+    "  async function runAvatarRead(",
+    "  function startAvatarRead(",
+  );
+  assertStaticMarkersInOrder(avatarReadSection, [
+    "const reusableMetadata = reuseAuthorizedProfileAvatarMetadata(",
+    "authorizedMetadata = null",
+    "await input.source.readAvatar(owner.userId, reusableMetadata)",
+    "const preloadOutcome = await preloadAvatarForRead(owner, avatar)",
+    "rememberAvatar(owner.requestToken, owner.identityKey, avatar)",
+    "      publish({\n        profileAvatar: avatar,",
+  ]);
+  assert.ok(
+    avatarReadSection.indexOf("profileAvatar: avatar") >
+      avatarReadSection.indexOf("const preloadOutcome = await preloadAvatarForRead(owner, avatar)"),
+    "PERF-05E publica Avatar sólo después de preload",
+  );
+
+  const repositoryReadSection = extractStaticSourceSection(
+    sources.repository,
+    "  async function getCurrentProfileAvatar(",
+    "  async function uploadProfileAvatar(",
+  );
+  assertStaticMarkersInOrder(repositoryReadSection, [
+    "getAuthenticatedProfileAvatarClient(expectedUserId)",
+    "getReusableProfileAvatarRow(userId, metadata)",
+    "reusableRow ?? await getProfileAvatarRow(supabase, userId)",
+    "await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);\n    const avatarUrl = await createCanonicalSignedUrl(supabase, avatarPath)",
+    "const avatarUrl = await createCanonicalSignedUrl(supabase, avatarPath);\n    await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId)",
+    "return mapProfileAvatarState(row, avatarUrl)",
+  ]);
+  const reusableRowSection = extractStaticSourceSection(
+    sources.repository,
+    "function getReusableProfileAvatarRow(",
+    "async function getProfileAvatarRow(",
+  );
+  assert.match(reusableRowSection, /!metadata\?\.avatarPath \|\| !metadata\.avatarUpdatedAt/);
+  assert.match(reusableRowSection, /getCanonicalStoredAvatarPath\(userId, metadata\.avatarPath\)/);
+  assert.match(reusableRowSection, /avatar_updated_at: metadata\.avatarUpdatedAt/);
+
+  const uploadSection = extractStaticSourceSection(
+    sources.controller,
+    "    async uploadAvatar(file)",
+    "    invalidateIdentity()",
+  );
+  assertStaticMarkersInOrder(uploadSection, [
+    "readRequestIds.avatar += 1",
+    "invalidateAvatarMemory()",
+    "request: input.source.uploadAvatar(file, owner.userId)",
+  ]);
+
+  for (const source of [sources.controller, sources.repository]) {
+    assert.doesNotMatch(
+      source,
+      /localStorage|sessionStorage|indexedDB|caches\.|document\.cookie|console\.(?:log|info|warn|error)|location\.(?:search|hash)/,
+      "PERF-05E no persiste ni expone signed URLs",
+    );
+  }
+}
+
+const perf05eSources = {
+  controller: profileControllerStaticSource,
+  repository: profileAvatarRepositoryStaticSource,
+};
+validatePerf05EReadCoalescingContract(perf05eSources);
+
+const perf05eMutationProbes = [
+  {
+    name: "reutilizar metadata de A bajo B",
+    mutate: () => ({
+      ...perf05eSources,
+      controller: replacePerf02Mutation(
+        perf05eSources.controller,
+        "      metadata.identityKey !== owner.identityKey ||\n",
+        "",
+        "reutilizar metadata de A bajo B",
+      ),
+    }),
+  },
+  {
+    name: "ignorar avatarUpdatedAt",
+    mutate: () => ({
+      ...perf05eSources,
+      repository: replacePerf02Mutation(
+        perf05eSources.repository,
+        "  if (!metadata?.avatarPath || !metadata.avatarUpdatedAt) return null;",
+        "  if (!metadata?.avatarPath) return null;",
+        "ignorar avatarUpdatedAt",
+      ),
+    }),
+  },
+  {
+    name: "persistir signed URL",
+    mutate: () => ({
+      ...perf05eSources,
+      controller: `${perf05eSources.controller}\nlocalStorage.setItem("profile-avatar", "signed-url");\n`,
+    }),
+  },
+  {
+    name: "eliminar guard post-await",
+    mutate: () => ({
+      ...perf05eSources,
+      repository: replacePerf02Mutation(
+        perf05eSources.repository,
+        "    const avatarUrl = await createCanonicalSignedUrl(supabase, avatarPath);\n    await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);",
+        "    const avatarUrl = await createCanonicalSignedUrl(supabase, avatarPath);",
+        "eliminar guard post-await",
+      ),
+    }),
+  },
+  {
+    name: "permitir metadata stale después de upload",
+    mutate: () => ({
+      ...perf05eSources,
+      controller: replacePerf02Mutation(
+        perf05eSources.controller,
+        "      readRequestIds.avatar += 1;\n      invalidateAvatarMemory();",
+        "      invalidateAvatarMemory();",
+        "permitir metadata stale después de upload",
+      ),
+    }),
+  },
+  {
+    name: "publicar antes de preload",
+    mutate: () => ({
+      ...perf05eSources,
+      controller: replacePerf02Mutation(
+        perf05eSources.controller,
+        "        const preloadOutcome = await preloadAvatarForRead(owner, avatar);",
+        "      publish({ profileAvatar: avatar });\n        const preloadOutcome = await preloadAvatarForRead(owner, avatar);",
+        "publicar antes de preload",
+      ),
+    }),
+  },
+];
+
+for (const probe of perf05eMutationProbes) {
+  assert.throws(
+    () => validatePerf05EReadCoalescingContract(probe.mutate()),
+    `PERF-05E mutation debe morir: ${probe.name}`,
   );
 }
 

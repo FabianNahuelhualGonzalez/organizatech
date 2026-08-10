@@ -58,12 +58,18 @@ import {
   createAuthenticatedSessionCoordinator,
   type AuthenticatedSessionIntent,
 } from "@/features/app-shell/model/authenticated-session-coordinator";
+import {
+  createLoginSubmitOwnerController,
+  type LoginSubmitOwner,
+  type LoginSubmitOwnerController,
+} from "@/features/app-shell/model/login-submit-owner";
 import type { ComparisonScreenV2Props } from "@/features/progress/components/comparison-screen-v2";
 import { useTrainingDataController } from "@/features/training-data/hooks/useTrainingDataController";
 import type { TrainingDataRefreshResult } from "@/features/training-data/model/training-data-controller";
 import {
   getNextPersistedCycleNumber,
   isCycleScopedTrainingCycle,
+  isTrainingDataProfilePrepared,
   normalizeCycleScopedEntriesByCalendarWeek,
   normalizeCycleScopedSessionsByCalendarWeek,
   selectTrainingDataView,
@@ -406,6 +412,7 @@ export function OrganizatechApp({
   const sessionDataMountedRef = useRef(true);
   const authenticatedSessionCoordinatorRef = useRef(createAuthenticatedSessionCoordinator());
   const interactiveAuthAttemptRef = useRef(false);
+  const loginSubmitOwnerRef = useRef<LoginSubmitOwnerController | null>(null);
 
   const captureSessionDataRequestToken = useCallback((): SessionDataRequestToken => {
     return createSessionDataRequestToken(sessionDataEpochRef.current);
@@ -554,8 +561,7 @@ export function OrganizatechApp({
   );
   const canEditProfilePersonalData = Boolean(hasSupabaseSession && getSupabaseBrowserClient());
   const activeFeatureStorageScope = getBrowserStorageScope(dataMode, supabaseUser?.id);
-  const trainingDataPrepared = trainingDataState.appData.status === "ready" ||
-    trainingDataState.appData.status === "error";
+  const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);
   const profileBoundary = useProfileController({
     identity: trainingDataIdentityPort,
     enabled: canEditProfilePersonalData,
@@ -643,6 +649,15 @@ export function OrganizatechApp({
   const tryAcquireActiveWorkoutOperation = tryAcquireUserScopedOperation;
   const isActiveWorkoutOperationCurrent = isUserScopedOperationCurrent;
   const finalizeActiveWorkoutOperation = finalizeUserScopedOperation;
+
+  useEffect(() => {
+    const controller = createLoginSubmitOwnerController();
+    loginSubmitOwnerRef.current = controller;
+    return () => {
+      controller.dispose();
+      if (loginSubmitOwnerRef.current === controller) loginSubmitOwnerRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     sessionDataMountedRef.current = true;
@@ -799,6 +814,7 @@ export function OrganizatechApp({
 
       const previousStorageScope = activeBrowserStorageScopeRef.current;
       if (event === "SIGNED_OUT") {
+        loginSubmitOwnerRef.current?.invalidate();
         if (passwordUpdateSuccessRef.current) {
           completePasswordRecoveryUpdate(previousStorageScope);
           return;
@@ -820,7 +836,11 @@ export function OrganizatechApp({
         hasAuthenticatedSession: Boolean(session),
       }, {
         applySameIdentitySession: applySessionState,
-        applyNewIdentitySession: applySessionState,
+        applyNewIdentitySession: (state) => {
+          loginSubmitOwnerRef.current?.invalidate();
+          interactiveAuthAttemptRef.current = false;
+          applySessionState(state);
+        },
         canContinueAfterSessionApplied: () => {
           if (passwordRecoveryStateRef.current === "invalid" && event !== "PASSWORD_RECOVERY") {
             return false;
@@ -1354,7 +1374,7 @@ export function OrganizatechApp({
   ) {
     if (result.kind === "stale") return result;
     if (result.kind === "error") {
-      if (result.resource === "app-data") {
+      if (result.resource === "legacy-snapshot") {
         handlePersistenceError(result.error, { preserveSession: true });
       } else {
         setStatusMessage(translateTrainingCycleRepositoryError(result.error));
@@ -1514,6 +1534,7 @@ export function OrganizatechApp({
     const confirm = String(formData.get("register-confirm-password") || "");
     const supabase = getSupabaseBrowserClient();
     let appliedIdentityToken: SessionDataRequestToken | null = null;
+    let loginSubmitOwner: LoginSubmitOwner | null = null;
     if (mode === "registro" && !name) {
       setStatusMessage("Ingresa tu nombre.");
       return;
@@ -1580,13 +1601,30 @@ export function OrganizatechApp({
       return;
     }
 
+    const loginSubmitOwnerController = mode === "login" ? loginSubmitOwnerRef.current : null;
+    if (mode === "login") {
+      if (!loginSubmitOwnerController) return;
+      loginSubmitOwner = loginSubmitOwnerController.acquire();
+      if (!loginSubmitOwner) return;
+    }
+
     interactiveAuthAttemptRef.current = true;
     setIsBusy(true);
     try {
-      const result =
-        mode === "registro"
-          ? await supabase.auth.signUp({ email, password, options: { data: { display_name: name } } })
-          : await supabase.auth.signInWithPassword({ email, password });
+      let result:
+        | Awaited<ReturnType<typeof supabase.auth.signUp>>
+        | Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
+      if (mode === "registro") {
+        result = await supabase.auth.signUp({ email, password, options: { data: { display_name: name } } });
+      } else {
+        const settlement = await loginSubmitOwnerController!.settle(
+          loginSubmitOwner!,
+          supabase.auth.signInWithPassword({ email, password }),
+        );
+        if (settlement.kind === "stale") return;
+        if (settlement.kind === "error") throw settlement.error;
+        result = settlement.value;
+      }
 
       if (result.error) {
         setStatusMessage(translateAuthError(result.error));
@@ -1622,9 +1660,14 @@ export function OrganizatechApp({
       if (appliedIdentityToken && !isSessionDataRequestCurrent(appliedIdentityToken)) return;
       setStatusMessage(translateAuthError(error));
     } finally {
-      interactiveAuthAttemptRef.current = false;
-      if (!appliedIdentityToken || isSessionDataRequestCurrent(appliedIdentityToken)) {
-        setIsBusy(false);
+      const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController
+        ? loginSubmitOwnerController.finalize(loginSubmitOwner)
+        : true;
+      if (canFinalizeAuthAttempt) {
+        interactiveAuthAttemptRef.current = false;
+        if (!appliedIdentityToken || isSessionDataRequestCurrent(appliedIdentityToken)) {
+          setIsBusy(false);
+        }
       }
     }
   }

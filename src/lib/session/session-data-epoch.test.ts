@@ -452,7 +452,7 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   );
   assert.match(
     authListener,
-    /const authEventResult = coordinateAuthenticatedSessionEvent\([\s\S]*?intent: interactiveAuthAttemptRef\.current \? "dashboard" : "restore-active-flow"[\s\S]*?applySameIdentitySession: applySessionState[\s\S]*?applyNewIdentitySession: applySessionState[\s\S]*?return continueAuthenticatedSession\(state, intent\)/,
+    /const authEventResult = coordinateAuthenticatedSessionEvent\([\s\S]*?intent: interactiveAuthAttemptRef\.current \? "dashboard" : "restore-active-flow"[\s\S]*?applySameIdentitySession: applySessionState[\s\S]*?applyNewIdentitySession: \(state\) => \{[\s\S]*?loginSubmitOwnerRef\.current\?\.invalidate\(\);[\s\S]*?applySessionState\(state\);[\s\S]*?return continueAuthenticatedSession\(state, intent\)/,
   );
   assert.doesNotMatch(
     authListener,
@@ -2542,7 +2542,7 @@ async function run() {
   );
   assert.match(
     handleAuthSource,
-    /finally \{\s*interactiveAuthAttemptRef\.current = false;\s*if \(!appliedIdentityToken \|\| isSessionDataRequestCurrent\(appliedIdentityToken\)\) \{\s*setIsBusy\(false\);/,
+    /finally \{\s*const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController[\s\S]*?loginSubmitOwnerController\.finalize\(loginSubmitOwner\)[\s\S]*?if \(canFinalizeAuthAttempt\) \{\s*interactiveAuthAttemptRef\.current = false;\s*if \(!appliedIdentityToken \|\| isSessionDataRequestCurrent\(appliedIdentityToken\)\) \{\s*setIsBusy\(false\);/,
   );
 
   // ---------------------------------------------------------------------------------------------

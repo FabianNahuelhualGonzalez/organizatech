@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import test from "node:test";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import {
+  coordinateAuthenticatedSessionEvent,
+  createAuthenticatedSessionCoordinator,
+} from "@/features/app-shell/model/authenticated-session-coordinator";
+import { createLoginSubmitOwnerController } from "@/features/app-shell/model/login-submit-owner";
 import {
   createTrainingDataController,
   type TrainingDataController,
 } from "@/features/training-data/model/training-data-controller";
-import {
-  selectTrainingDataView,
-} from "@/features/training-data/model/training-data-selectors";
+import { selectTrainingDataView } from "@/features/training-data/model/training-data-selectors";
+import type { CycleScopedTrainingDataSnapshot } from "@/features/training-data/model/training-data-state";
 import {
   advanceSessionDataEpoch,
   captureSessionDataRequestToken,
@@ -15,9 +22,20 @@ import {
   isSessionDataRequestTokenCurrent,
   type SessionDataEpoch,
 } from "@/lib/session/session-data-epoch";
-import type { CycleScopedTrainingPlan } from "@/lib/training/cycle-scoped-training-repository";
+import {
+  assembleCycleScopedTrainingSessionData,
+  getCycleScopedTrainingPlan,
+  getCycleScopedTrainingSessionRawData,
+  type CycleScopedTrainingPlan,
+  type CycleScopedTrainingSessionData,
+  type CycleScopedTrainingSessionRawData,
+} from "@/lib/training/cycle-scoped-training-repository";
 import type { TrainingDataSource } from "@/lib/training/training-data-source";
-import type { TrainingCycle } from "@/lib/training/training-cycles-repository";
+import {
+  getActiveTrainingCycle,
+  TrainingCycleRepositoryError,
+  type TrainingCycle,
+} from "@/lib/training/training-cycles-repository";
 import { createDefaultTrainingPlan } from "@/lib/training/training-plan-rules";
 
 interface Deferred<T> {
@@ -34,6 +52,20 @@ function deferred<T>(): Deferred<T> {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+async function withWatchdog<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`timeout: ${label}`)), 300);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function createIdentityHarness(userId = "user-a") {
@@ -114,10 +146,10 @@ function createPlan(cycleId: string, empty = false): CycleScopedTrainingPlan {
   };
 }
 
-function createSession(id: string) {
+function createSession(id: string, cycleId = "cycle-a") {
   return {
     id,
-    routineId: "routine-a",
+    routineId: `routine-${cycleId}`,
     routine: "Torso",
     weekNumber: 1,
     calendarWeekStart: "2026-08-03",
@@ -129,8 +161,8 @@ function createSession(id: string) {
     entries: [{
       id: `entry-${id}`,
       sessionId: id,
-      exerciseId: "exercise-a",
-      exerciseName: "Press",
+      exerciseId: `exercise-${cycleId}`,
+      exerciseName: `Press ${cycleId}`,
       routine: "Torso",
       week: 1,
       date: "2026-08-03",
@@ -160,584 +192,949 @@ function appData(label: string) {
   };
 }
 
-function createController(
-  identityHarness: ReturnType<typeof createIdentityHarness>,
-  source: TrainingDataSource,
-): TrainingDataController {
-  return createTrainingDataController({
-    identity: identityHarness.identity,
-    source,
-    translateCycleError: (error) => error instanceof Error ? error.message : "cycle error",
-  });
+function rawSessionData(
+  data: CycleScopedTrainingSessionData,
+): CycleScopedTrainingSessionRawData {
+  return { mapped: data } as unknown as CycleScopedTrainingSessionRawData;
 }
 
-function unreachableSource(overrides: Partial<TrainingDataSource>): TrainingDataSource {
+function source(overrides: Partial<TrainingDataSource> = {}): TrainingDataSource {
   return {
-    loadAppData: async () => appData("default"),
-    loadCycles: async () => ({ active: null, history: [] }),
+    loadActiveCycle: async () => null,
+    loadCycleHistory: async () => [],
+    loadLegacySnapshot: async () => appData("default"),
+    ensureProfile: async () => undefined,
     loadCyclePlan: async (cycleId) => createPlan(cycleId),
-    loadCycleSessions: async () => ({ sessions: [], entries: [] }),
+    loadCycleSessionRows: async () => rawSessionData({ sessions: [], entries: [] }),
+    assembleCycleSessions: (_cycleId, _plan, rawData) => (
+      rawData as unknown as { mapped: CycleScopedTrainingSessionData }
+    ).mapped,
     ...overrides,
   };
 }
 
-async function testLatestAppDataAndStaleFinally() {
-  const identity = createIdentityHarness();
-  const first = deferred<ReturnType<typeof appData>>();
-  const second = deferred<ReturnType<typeof appData>>();
-  const queue = [first, second];
-  const controller = createController(identity, unreachableSource({
-    loadAppData: () => queue.shift()!.promise,
-  }));
-  controller.reset({ cyclesEnabled: false });
-
-  const requestA = controller.refreshAppData("supabase");
-  const requestB = controller.refreshAppData("supabase");
-  second.resolve(appData("b"));
-  assert.equal((await requestB).kind, "success");
-  first.resolve(appData("a"));
-  assert.equal((await requestA).kind, "stale");
-  assert.equal(controller.getState().appData.status, "ready");
-  const state = controller.getState();
-  assert.equal(state.appData.status === "ready" ? state.appData.data.exercises[0]?.name : null, "Press b");
-
-  const third = deferred<ReturnType<typeof appData>>();
-  const fourth = deferred<ReturnType<typeof appData>>();
-  queue.push(third, fourth);
-  const staleRequest = controller.refreshAppData("supabase");
-  const currentRequest = controller.refreshAppData("supabase");
-  third.resolve(appData("stale"));
-  assert.equal((await staleRequest).kind, "stale");
-  assert.equal(controller.getState().appData.status, "loading", "un settle stale no apaga loading nuevo");
-  fourth.resolve(appData("current"));
-  assert.equal((await currentRequest).kind, "success");
+function controller(
+  identity: ReturnType<typeof createIdentityHarness>,
+  dataSource: TrainingDataSource,
+): TrainingDataController {
+  return createTrainingDataController({
+    identity: identity.identity,
+    source: dataSource,
+    translateCycleError: (error) => error instanceof Error ? error.message : "cycle error",
+  });
 }
 
-async function testCycleRequestIdCycleIdAndAtomicPublication() {
+test("history y Profile deferred nunca retrasan dashboardReady", async () => {
   const identity = createIdentityHarness();
-  const planA1 = deferred<CycleScopedTrainingPlan>();
-  const planA2 = deferred<CycleScopedTrainingPlan>();
-  const planA3 = deferred<CycleScopedTrainingPlan>();
-  const planB = deferred<CycleScopedTrainingPlan>();
-  const plans = [planA1, planA2, planA3, planB];
-  const sessionA2 = deferred<{ sessions: ReturnType<typeof createSession>[]; entries: [] }>();
-  const sessionB = deferred<{ sessions: ReturnType<typeof createSession>[]; entries: [] }>();
-  const sessions = [sessionA2, sessionB];
-  const controller = createController(identity, unreachableSource({
-    loadCyclePlan: () => plans.shift()!.promise,
-    loadCycleSessions: () => sessions.shift()!.promise,
-  }));
-
-  const firstA = controller.reloadCycleSnapshot("cycle-a");
-  const secondA = controller.reloadCycleSnapshot("cycle-a");
-  planA2.resolve(createPlan("cycle-a"));
-  await Promise.resolve();
-  assert.equal(controller.getState().cycleScoped.status, "loading", "resolver plan no publica snapshot parcial");
-  sessionA2.resolve({ sessions: [createSession("session-a2")], entries: [] });
-  assert.equal((await secondA).kind, "success");
-  const readyA = controller.getState().cycleScoped;
-  assert.equal(readyA.status, "ready");
-  if (readyA.status === "ready") {
-    assert.equal("exercises" in readyA.snapshot, false, "exercises se derivan del plan y no forman un segundo canon");
-    assert.equal(readyA.snapshot.sessions[0]?.id, "session-a2");
-  }
-  planA1.resolve(createPlan("cycle-a"));
-  assert.equal((await firstA).kind, "stale", "requestId protege el mismo cycleId");
-
-  const requestA = controller.reloadCycleSnapshot("cycle-a");
-  const requestB = controller.reloadCycleSnapshot("cycle-b");
-  planB.resolve(createPlan("cycle-b"));
-  sessionB.resolve({ sessions: [createSession("session-b")], entries: [] });
-  assert.equal((await requestB).kind, "success");
-  // requestA no tiene un deferred restante: queda stale después de cambiar el cycleId.
-  assert.equal(controller.getState().cycleScoped.status, "ready");
-  const current = controller.getState().cycleScoped;
-  assert.equal(current.status === "ready" ? current.cycleId : null, "cycle-b");
-  controller.reset({ cyclesEnabled: false });
-  planA3.resolve(createPlan("cycle-a"));
-  assert.equal((await requestA).kind, "stale");
-}
-
-async function testIdentityEpochAndReentry() {
-  const identity = createIdentityHarness("user-a");
-  const requestA = deferred<ReturnType<typeof appData>>();
-  const requestB = deferred<ReturnType<typeof appData>>();
-  const requestAReentry = deferred<ReturnType<typeof appData>>();
-  const queue = [requestA, requestB, requestAReentry];
-  const controller = createController(identity, unreachableSource({
-    loadAppData: () => queue.shift()!.promise,
-  }));
-
-  const loadA = controller.refreshAppData("supabase");
-  identity.advance(null, true);
-  controller.reset({ cyclesEnabled: false });
-  identity.advance("user-b");
-  controller.reset({ cyclesEnabled: false });
-  const loadB = controller.refreshAppData("supabase");
-  requestA.resolve(appData("late-a"));
-  assert.equal((await loadA).kind, "stale", "A no publica después de SIGNED_OUT/B");
-  requestB.resolve(appData("b"));
-  assert.equal((await loadB).kind, "success");
-
-  identity.advance(null, true);
-  controller.reset({ cyclesEnabled: false });
-  identity.advance("user-a");
-  controller.reset({ cyclesEnabled: false });
-  const loadAAgain = controller.refreshAppData("supabase");
-  requestAReentry.resolve(appData("a-reentry"));
-  assert.equal((await loadAAgain).kind, "success", "el mismo user reingresa con generation nueva");
-}
-
-async function testDuplicateBootstrapLatestWins() {
-  const identity = createIdentityHarness();
-  const appA = deferred<ReturnType<typeof appData>>();
-  const appB = deferred<ReturnType<typeof appData>>();
-  const cyclesA = deferred<{ active: null; history: [] }>();
-  const cyclesB = deferred<{ active: null; history: [] }>();
-  const appQueue = [appA, appB];
-  const cyclesQueue = [cyclesA, cyclesB];
-  const controller = createController(identity, unreachableSource({
-    loadAppData: () => appQueue.shift()!.promise,
-    loadCycles: () => cyclesQueue.shift()!.promise,
-  }));
-  controller.reset({ cyclesEnabled: true });
-
-  const bootstrap = controller.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
-  const initialSession = controller.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
-  appB.resolve(appData("initial-session"));
-  cyclesB.resolve({ active: null, history: [] });
-  assert.equal((await initialSession).kind, "success");
-  appA.resolve(appData("late-bootstrap"));
-  cyclesA.resolve({ active: null, history: [] });
-  assert.equal((await bootstrap).kind, "stale");
-  const current = controller.getState().appData;
-  assert.equal(
-    current.status === "ready" ? current.data.exercises[0]?.name : null,
-    "Press initial-session",
-  );
-}
-
-async function testLifecycleInvalidatesEveryLane() {
-  const identity = createIdentityHarness();
-  const app = deferred<ReturnType<typeof appData>>();
-  const cycles = deferred<{ active: null; history: [] }>();
-  const controller = createController(identity, unreachableSource({
-    loadAppData: () => app.promise,
-    loadCycles: () => cycles.promise,
-  }));
-  controller.reset({ cyclesEnabled: true });
-  const pendingApp = controller.refreshAppData("supabase");
-  const pendingCycles = controller.refreshCycles();
-  controller.reset({ cyclesEnabled: false });
-  app.resolve(appData("late-reset"));
-  cycles.resolve({ active: null, history: [] });
-  assert.equal((await pendingApp).kind, "stale");
-  assert.equal((await pendingCycles).kind, "stale");
-
-  const unmountApp = deferred<ReturnType<typeof appData>>();
-  const unmountController = createController(identity, unreachableSource({
-    loadAppData: () => unmountApp.promise,
-  }));
-  const pendingUnmount = unmountController.refreshAppData("supabase");
-  unmountController.invalidateAll();
-  unmountApp.resolve(appData("late-unmount"));
-  assert.equal((await pendingUnmount).kind, "stale");
-}
-
-async function testCycleCompletionRefreshesOnlySelectedCycle() {
-  const identity = createIdentityHarness();
-  let activeCycle = createCycle("cycle-a");
-  const lateSessions = deferred<{ sessions: ReturnType<typeof createSession>[]; entries: [] }>();
-  let sessionLoadCount = 0;
-  const controller = createController(identity, unreachableSource({
-    loadCycles: async () => ({ active: activeCycle, history: [] }),
-    loadCycleSessions: async (cycleId) => {
-      if (cycleId === "cycle-b") return { sessions: [], entries: [] };
-      sessionLoadCount += 1;
-      if (sessionLoadCount === 1) return { sessions: [], entries: [] };
-      return lateSessions.promise;
+  const active = deferred<TrainingCycle | null>();
+  const history = deferred<TrainingCycle[]>();
+  const profile = deferred<void>();
+  let legacyLoads = 0;
+  let historyLoads = 0;
+  let profileLoads = 0;
+  const dataController = controller(identity, source({
+    loadActiveCycle: () => active.promise,
+    loadCycleHistory: () => { historyLoads += 1; return history.promise; },
+    ensureProfile: () => { profileLoads += 1; return profile.promise; },
+    loadLegacySnapshot: async () => { legacyLoads += 1; return appData("forbidden"); },
+    loadCycleSessionRows: async () => {
+      const session = createSession("session-a");
+      return rawSessionData({ sessions: [session], entries: [...session.entries] });
     },
   }));
-  controller.reset({ cyclesEnabled: true });
-  assert.equal((await controller.refreshCycles()).kind, "success");
-  const completionRefresh = controller.reloadCycleSessions("cycle-a");
-  activeCycle = createCycle("cycle-b");
-  assert.equal((await controller.refreshCycles()).kind, "success");
-  lateSessions.resolve({ sessions: [createSession("late-cycle-a")], entries: [] });
-  assert.equal((await completionRefresh).kind, "stale");
-  assert.equal((await controller.reloadCycleSessions("cycle-a")).kind, "stale");
-}
+  dataController.reset({ cyclesEnabled: true });
 
-async function testCycleScopedLoadingBlocksLoadedLegacyData() {
-  const identity = createIdentityHarness();
-  const cycleId = "cycle-loading";
-  const activeCycle = createCycle(cycleId);
-  const pendingPlan = deferred<CycleScopedTrainingPlan>();
-  const pendingSessions = deferred<Awaited<ReturnType<TrainingDataSource["loadCycleSessions"]>>>();
-  const legacySession = createSession("legacy-loaded");
-  const legacyData = {
-    ...appData("legacy-loaded"),
-    entries: [...legacySession.entries],
-    sessions: [legacySession],
-  };
-  const legacyPlan = {
-    ...createDefaultTrainingPlan(),
-    mesoObjective: "Resistencia",
-  };
-  const scopedSession = createSession("scoped-current");
-  scopedSession.routineId = `routine-${cycleId}`;
-  scopedSession.entries[0]!.exerciseId = `exercise-${cycleId}`;
-  scopedSession.entries[0]!.exerciseName = `Press ${cycleId}`;
-
-  const controller = createController(identity, unreachableSource({
-    loadAppData: async () => legacyData,
-    loadCycles: async () => ({ active: activeCycle, history: [] }),
-    loadCyclePlan: () => pendingPlan.promise,
-    loadCycleSessions: () => pendingSessions.promise,
-  }));
-  controller.reset({ cyclesEnabled: false });
-  assert.equal((await controller.refreshAppData("supabase")).kind, "success");
-
-  const loadedLegacyResource = controller.getState().appData;
-  assert.equal(loadedLegacyResource.status, "ready");
-  if (loadedLegacyResource.status !== "ready") return;
-  assert.equal(loadedLegacyResource.data.exercises[0]?.id, "exercise-legacy-loaded");
-  assert.equal(loadedLegacyResource.data.entries[0]?.id, "entry-legacy-loaded");
-  assert.equal(loadedLegacyResource.data.sessions[0]?.id, "legacy-loaded");
-  const loadedLegacyView = selectTrainingDataView(controller.getState(), legacyPlan);
-  assert.equal(loadedLegacyView.mode, "legacy");
-  assert.equal(loadedLegacyView.plan.mesoObjective, "Resistencia");
-
-  const emittedModes: string[] = [];
-  const unsubscribe = controller.subscribe((state) => {
-    emittedModes.push(selectTrainingDataView(state, legacyPlan).mode);
-  });
-  const cycleRefresh = controller.refreshCycles();
+  const milestones = dataController.startRefreshForIdentity({ mode: "supabase", cyclesEnabled: true });
   await Promise.resolve();
-
-  const loadingState = controller.getState();
-  assert.equal(loadingState.cycles.status, "ready", "el ciclo activo ya fue confirmado");
-  assert.equal(
-    loadingState.cycles.status === "ready" ? loadingState.cycles.data.active?.id : null,
-    cycleId,
+  assert.deepEqual(
+    { historyLoads, profileLoads },
+    { historyLoads: 0, profileLoads: 0 },
+    "background ni siquiera comienza antes del canon",
   );
-  assert.equal(loadingState.cycleScoped.status, "loading", "el snapshot sigue pendiente");
-  const loadingView = selectTrainingDataView(loadingState, legacyPlan);
-  assert.equal(loadingView.mode, "blocked");
-  if (loadingView.mode !== "blocked") return;
-  assert.equal(loadingView.reason, "cycle-loading");
-  assert.equal(loadingView.exercises.length, 0);
-  assert.equal(loadingView.entries.length, 0);
-  assert.equal(loadingView.sessions.length, 0);
-  assert.equal(loadedLegacyResource.data.exercises.length, 1, "legacy existe pero permanece oculto");
-  assert.equal(loadedLegacyResource.data.entries.length, 1, "entries legacy existen pero permanecen ocultas");
-  assert.equal(loadedLegacyResource.data.sessions.length, 1, "sessions legacy existen pero permanecen ocultas");
+  active.resolve(createCycle("cycle-a"));
+  const dashboard = await withWatchdog(milestones.dashboardReady, "dashboard no espera background");
+  assert.equal(dashboard.kind, "success");
+  assert.equal(legacyLoads, 0, "canon scoped no carga el snapshot legacy completo");
+  assert.equal(selectTrainingDataView(dataController.getState(), createDefaultTrainingPlan()).mode, "cycle-scoped");
+  assert.equal(dataController.getState().cycleHistory.status, "loading");
+  assert.equal(dataController.getState().profilePrerequisite.status, "loading");
+  assert.deepEqual({ historyLoads, profileLoads }, { historyLoads: 1, profileLoads: 1 });
 
-  pendingPlan.resolve(createPlan(cycleId));
+  history.resolve([createCycle("history-a", "legacy")]);
+  profile.resolve();
+  assert.equal((await milestones.backgroundSettled).kind, "success");
+});
+
+test("history tardío de A no publica bajo B", async () => {
+  const identity = createIdentityHarness("user-a");
+  const historyA = deferred<TrainingCycle[]>();
+  const historyB = deferred<TrainingCycle[]>();
+  const histories = [historyA, historyB];
+  const dataController = controller(identity, source({
+    loadCycleHistory: () => histories.shift()!.promise,
+  }));
+  dataController.reset({ cyclesEnabled: true });
+  const loadA = dataController.startRefreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+  await loadA.dashboardReady;
+
+  identity.advance(null, true);
+  dataController.reset({ cyclesEnabled: false });
+  identity.advance("user-b");
+  dataController.reset({ cyclesEnabled: true });
+  const loadB = dataController.startRefreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+  await loadB.dashboardReady;
+  const historyForB = createCycle("history-b", "legacy");
+  historyB.resolve([historyForB]);
+  await loadB.backgroundSettled;
+  historyA.resolve([createCycle("late-a", "legacy")]);
+  const settledA = await loadA.backgroundSettled;
+
+  assert.equal(settledA.results.find((result) => result.resource === "cycle-history")?.kind, "stale");
+  const state = dataController.getState();
+  assert.equal(state.cycleHistory.status, "ready");
+  assert.equal(state.cycleHistory.status === "ready" ? state.cycleHistory.data[0]?.id : null, "history-b");
+});
+
+test("elige un solo canon: scoped evita legacy y fallback legacy sigue funcionando", async () => {
+  const identity = createIdentityHarness();
+  const calls = { legacy: 0, plan: 0, sessions: 0 };
+  const scopedController = controller(identity, source({
+    loadActiveCycle: async () => createCycle("cycle-scoped"),
+    loadLegacySnapshot: async () => { calls.legacy += 1; return appData("legacy"); },
+    loadCyclePlan: async (cycleId) => { calls.plan += 1; return createPlan(cycleId); },
+    loadCycleSessionRows: async () => {
+      calls.sessions += 1;
+      return rawSessionData({ sessions: [], entries: [] });
+    },
+  }));
+  scopedController.reset({ cyclesEnabled: true });
+  await scopedController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+  assert.deepEqual(calls, { legacy: 0, plan: 1, sessions: 1 });
+
+  const legacyController = controller(identity, source({
+    loadActiveCycle: async () => createCycle("legacy", "ui-main-production"),
+    loadLegacySnapshot: async () => { calls.legacy += 1; return appData("legacy"); },
+    loadCyclePlan: async (cycleId) => { calls.plan += 1; return createPlan(cycleId); },
+  }));
+  legacyController.reset({ cyclesEnabled: true });
+  await legacyController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+  assert.deepEqual(calls, { legacy: 1, plan: 1, sessions: 1 });
+  assert.equal(selectTrainingDataView(legacyController.getState(), createDefaultTrainingPlan()).mode, "legacy");
+});
+
+test("plan y sesiones se publican atómicamente", async () => {
+  const identity = createIdentityHarness();
+  const plan = deferred<CycleScopedTrainingPlan>();
+  const sessions = deferred<{ sessions: ReturnType<typeof createSession>[]; entries: ReturnType<typeof createSession>["entries"] }>();
+  const dataController = controller(identity, source({
+    loadActiveCycle: async () => createCycle("cycle-a"),
+    loadCyclePlan: () => plan.promise,
+    loadCycleSessionRows: async () => rawSessionData(await sessions.promise),
+  }));
+  dataController.reset({ cyclesEnabled: true });
+  const load = dataController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
   await Promise.resolve();
-  assert.equal(controller.getState().cycleScoped.status, "loading", "resolver plan no publica parcialmente");
-  assert.equal(selectTrainingDataView(controller.getState(), legacyPlan).mode, "blocked");
-  assert.doesNotMatch(emittedModes.join(","), /legacy/, "no existe emision legacy durante la carga scoped");
+  plan.resolve(createPlan("cycle-a"));
+  await Promise.resolve();
+  assert.equal(dataController.getState().cycleScoped.status, "loading");
+  assert.equal("snapshot" in dataController.getState().cycleScoped, false, "plan aislado no se publica");
 
-  pendingSessions.resolve({
-    sessions: [scopedSession],
-    entries: [...scopedSession.entries],
+  const session = createSession("session-a");
+  sessions.resolve({ sessions: [session], entries: [...session.entries] });
+  assert.equal((await load).kind, "success");
+  const scoped = dataController.getState().cycleScoped;
+  assert.equal(scoped.status, "ready");
+  assert.equal(scoped.status === "ready" ? scoped.snapshot.sessions[0]?.id : null, "session-a");
+});
+
+test("refresh de misma identidad mantiene Dashboard visible y no activa blocker", async () => {
+  const identity = createIdentityHarness();
+  const secondPlan = deferred<CycleScopedTrainingPlan>();
+  const secondSessions = deferred<{ sessions: ReturnType<typeof createSession>[]; entries: ReturnType<typeof createSession>["entries"] }>();
+  let planLoads = 0;
+  let sessionLoads = 0;
+  const dataController = controller(identity, source({
+    loadActiveCycle: async () => createCycle("cycle-a"),
+    loadCyclePlan: async (cycleId) => {
+      planLoads += 1;
+      return planLoads === 1 ? createPlan(cycleId) : secondPlan.promise;
+    },
+    loadCycleSessionRows: async () => {
+      sessionLoads += 1;
+      if (sessionLoads === 1) {
+        const session = createSession("first");
+        return rawSessionData({ sessions: [session], entries: [...session.entries] });
+      }
+      return rawSessionData(await secondSessions.promise);
+    },
+  }));
+  dataController.reset({ cyclesEnabled: true });
+  await dataController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+
+  const refresh = dataController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+  await Promise.resolve();
+  assert.equal(selectTrainingDataView(dataController.getState(), createDefaultTrainingPlan()).mode, "cycle-scoped");
+  secondPlan.resolve(createPlan("cycle-a"));
+  await Promise.resolve();
+  assert.equal(dataController.getState().cycleScoped.status, "loading");
+  assert.equal(selectTrainingDataView(dataController.getState(), createDefaultTrainingPlan()).mode, "cycle-scoped");
+
+  const session = createSession("second");
+  secondSessions.resolve({ sessions: [session], entries: [...session.entries] });
+  assert.equal((await refresh).kind, "success");
+});
+
+test("error crítico bloquea y error background no reemplaza un canon válido", async () => {
+  const identity = createIdentityHarness();
+  const critical = controller(identity, source({
+    loadActiveCycle: async () => { throw new Error("active failed"); },
+    loadCycleHistory: async () => { throw new Error("history failed"); },
+    ensureProfile: async () => { throw new Error("profile failed"); },
+  }));
+  critical.reset({ cyclesEnabled: true });
+  const failed = critical.startRefreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+  assert.equal((await failed.dashboardReady).kind, "error");
+  const blocked = selectTrainingDataView(critical.getState(), createDefaultTrainingPlan());
+  assert.equal(blocked.mode, "blocked");
+  assert.equal(blocked.mode === "blocked" ? blocked.reason : null, "cycle-error");
+  assert.equal((await failed.backgroundSettled).kind, "error");
+
+  const valid = controller(identity, source({
+    loadActiveCycle: async () => createCycle("cycle-valid"),
+    loadCycleHistory: async () => { throw new Error("history failed"); },
+  }));
+  valid.reset({ cyclesEnabled: true });
+  const milestones = valid.startRefreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+  assert.equal((await milestones.dashboardReady).kind, "success");
+  assert.equal((await milestones.backgroundSettled).kind, "error");
+  assert.equal(selectTrainingDataView(valid.getState(), createDefaultTrainingPlan()).mode, "cycle-scoped");
+});
+
+test("SIGNED_IN produce una carga y navegación; TOKEN_REFRESHED no reinicia", async () => {
+  const identity = createIdentityHarness();
+  const coordinator = createAuthenticatedSessionCoordinator();
+  let loads = 0;
+  let navigations = 0;
+  const run = () => coordinator.continueSession(identity.capture(), "dashboard", {
+    refresh: async () => { loads += 1; return { kind: "success" as const }; },
+    isCurrent: identity.identity.isRequestTokenCurrent,
+    onStart: () => undefined,
+    onComplete: () => { navigations += 1; },
   });
-  assert.equal((await cycleRefresh).kind, "success");
-  unsubscribe();
+  const signedIn = coordinateAuthenticatedSessionEvent({
+    event: "SIGNED_IN",
+    state: { userId: "user-a" },
+    currentIdentity: { userId: "user-a", scope: "supabase:user-a" },
+    nextIdentity: { userId: "user-a", scope: "supabase:user-a" },
+    intent: "dashboard",
+    hasAuthenticatedSession: true,
+  }, {
+    applySameIdentitySession: () => undefined,
+    applyNewIdentitySession: () => assert.fail("identidad inesperada"),
+    canContinueAfterSessionApplied: () => true,
+    continueSession: run,
+  });
+  assert.ok(signedIn.continuation);
+  await signedIn.continuation;
+  assert.deepEqual({ loads, navigations }, { loads: 1, navigations: 1 });
 
-  const readyView = selectTrainingDataView(controller.getState(), legacyPlan);
-  assert.equal(readyView.mode, "cycle-scoped");
-  assert.equal(readyView.activeCycle?.id, cycleId);
-  assert.equal(readyView.plan.mesoObjective, activeCycle.goal);
-  assert.equal(readyView.cyclePlan?.routines[0]?.cycleId, cycleId);
-  assert.equal(readyView.exercises[0]?.id, `exercise-${cycleId}`);
-  assert.equal(readyView.entries[0]?.exerciseId, `exercise-${cycleId}`);
-  assert.equal(readyView.sessions[0]?.id, "scoped-current");
-  assert.deepEqual(emittedModes, ["blocked", "blocked", "blocked", "cycle-scoped"]);
-}
+  const refreshed = coordinateAuthenticatedSessionEvent({
+    event: "TOKEN_REFRESHED",
+    state: { userId: "user-a" },
+    currentIdentity: { userId: "user-a", scope: "supabase:user-a" },
+    nextIdentity: { userId: "user-a", scope: "supabase:user-a" },
+    intent: "dashboard",
+    hasAuthenticatedSession: true,
+  }, {
+    applySameIdentitySession: () => undefined,
+    applyNewIdentitySession: () => assert.fail("identidad inesperada"),
+    canContinueAfterSessionApplied: () => true,
+    continueSession: run,
+  });
+  assert.equal(refreshed.continuation, null);
+  assert.deepEqual({ loads, navigations }, { loads: 1, navigations: 1 });
+});
 
-async function testBlockedMatrixAndNoLegacyFallback() {
+test("A→SIGNED_OUT→A usa generación nueva y descarta success/error/finally antiguos", async () => {
+  const identity = createIdentityHarness("user-a");
+  const oldLegacy = deferred<ReturnType<typeof appData>>();
+  const newLegacy = deferred<ReturnType<typeof appData>>();
+  const queue = [oldLegacy, newLegacy];
+  const dataController = controller(identity, source({
+    loadLegacySnapshot: () => queue.shift()!.promise,
+  }));
+  dataController.reset({ cyclesEnabled: false });
+  const oldLoad = dataController.refreshForIdentity({ mode: "supabase", cyclesEnabled: false });
+  identity.advance(null, true);
+  dataController.reset({ cyclesEnabled: false });
+  identity.advance("user-a");
+  dataController.reset({ cyclesEnabled: false });
+  const newLoad = dataController.refreshForIdentity({ mode: "supabase", cyclesEnabled: false });
+  newLegacy.resolve(appData("new-generation"));
+  assert.equal((await newLoad).kind, "success");
+  oldLegacy.reject(new Error("late old error"));
+  assert.equal((await oldLoad).kind, "stale");
+  const current = dataController.getState().appData;
+  assert.equal(current.status === "ready" ? current.data.exercises[0]?.name : null, "Press new-generation");
+});
+
+test("ciclo activo descarta success/error/finally stale en A→B y nueva generación de A", async () => {
+  for (const nextUserId of ["user-b", "user-a"] as const) {
+    for (const outcome of ["success", "error"] as const) {
+      const identity = createIdentityHarness("user-a");
+      const active = deferred<TrainingCycle | null>();
+      let capturedGuard: (() => boolean) | undefined;
+      const dataController = controller(identity, source({
+        loadActiveCycle: (_expectedUserId, isExpectedRequestCurrent) => {
+          capturedGuard = isExpectedRequestCurrent;
+          return active.promise;
+        },
+      }));
+      dataController.reset({ cyclesEnabled: true });
+      const pending = dataController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+      await Promise.resolve();
+      assert.equal(capturedGuard?.(), true);
+
+      identity.advance(null, true);
+      dataController.reset({ cyclesEnabled: true });
+      identity.advance(nextUserId);
+      dataController.reset({ cyclesEnabled: true });
+      assert.equal(capturedGuard?.(), false);
+      const stateAfterTransition = structuredClone(dataController.getState());
+
+      if (outcome === "success") active.resolve(createCycle("cycle-old"));
+      else active.reject(new Error("late active error"));
+      assert.equal((await pending).kind, "stale");
+      assert.deepEqual(
+        dataController.getState(),
+        stateAfterTransition,
+        `${nextUserId}/${outcome}: success, error y finally stale no publican sobre la generación nueva`,
+      );
+    }
+  }
+});
+
+test("Active Workout sólo se restaura después del canon completo", async () => {
   const identity = createIdentityHarness();
-  const activeCycle = createCycle("cycle-a");
-  const cycleError = new Error("No pudimos resolver el ciclo activo.");
-  const errorController = createController(identity, unreachableSource({
-    loadAppData: async () => appData("legacy"),
-    loadCycles: async () => { throw cycleError; },
+  const plan = deferred<CycleScopedTrainingPlan>();
+  const sessions = deferred<{ sessions: ReturnType<typeof createSession>[]; entries: ReturnType<typeof createSession>["entries"] }>();
+  const dataController = controller(identity, source({
+    loadActiveCycle: async () => createCycle("cycle-a"),
+    loadCyclePlan: () => plan.promise,
+    loadCycleSessionRows: async () => rawSessionData(await sessions.promise),
   }));
-  errorController.reset({ cyclesEnabled: true });
-  const errorResult = await errorController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
-  assert.equal(errorResult.kind, "error");
-  const errorView = selectTrainingDataView(errorController.getState(), createDefaultTrainingPlan());
-  assert.equal(errorView.mode, "blocked");
-  assert.deepEqual(errorView.exercises, [], "error de ciclos no filtra legacy");
+  dataController.reset({ cyclesEnabled: true });
+  const coordinator = createAuthenticatedSessionCoordinator();
+  let restores = 0;
+  const continuation = coordinator.continueSession(identity.capture(), "restore-active-flow", {
+    refresh: () => dataController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true }),
+    isCurrent: identity.identity.isRequestTokenCurrent,
+    onStart: () => undefined,
+    onComplete: () => { restores += 1; },
+  });
+  await Promise.resolve();
+  plan.resolve(createPlan("cycle-a"));
+  await Promise.resolve();
+  assert.equal(restores, 0, "plan parcial no restaura Active Workout");
+  const session = createSession("session-a");
+  sessions.resolve({ sessions: [session], entries: [...session.entries] });
+  await continuation;
+  assert.equal(restores, 1);
+});
 
-  const emptyController = createController(identity, unreachableSource({
-    loadAppData: async () => appData("legacy"),
-    loadCycles: async () => ({ active: activeCycle, history: [] }),
-    loadCyclePlan: async () => createPlan(activeCycle.id, true),
-    loadCycleSessions: async () => ({ sessions: [], entries: [] }),
-  }));
-  emptyController.reset({ cyclesEnabled: true });
-  const emptyResult = await emptyController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
-  assert.equal(emptyResult.kind, "success");
-  const emptyView = selectTrainingDataView(emptyController.getState(), createDefaultTrainingPlan());
-  assert.equal(emptyView.mode, "blocked");
-  assert.deepEqual(emptyView.exercises, []);
-
-  const demoController = createController(identity, unreachableSource({
-    loadAppData: async () => appData("demo"),
-  }));
-  demoController.reset({ cyclesEnabled: false });
-  await demoController.refreshForIdentity({ mode: "demo", cyclesEnabled: false });
-  assert.equal(selectTrainingDataView(demoController.getState(), createDefaultTrainingPlan()).mode, "legacy");
-
-  const supabaseWithoutCycles = createController(identity, unreachableSource({
-    loadAppData: async () => appData("supabase-without-cycles"),
-  }));
-  supabaseWithoutCycles.reset({ cyclesEnabled: false });
-  await supabaseWithoutCycles.refreshForIdentity({ mode: "supabase", cyclesEnabled: false });
-  assert.equal(
-    selectTrainingDataView(supabaseWithoutCycles.getState(), createDefaultTrainingPlan()).mode,
-    "legacy",
-  );
-
-  const noCycleController = createController(identity, unreachableSource({
-    loadCycles: async () => ({ active: null, history: [] }),
-  }));
-  noCycleController.reset({ cyclesEnabled: true });
-  await noCycleController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
-  assert.equal(selectTrainingDataView(noCycleController.getState(), createDefaultTrainingPlan()).mode, "legacy");
-
-  const legacyCycleController = createController(identity, unreachableSource({
-    loadCycles: async () => ({ active: createCycle("legacy", "ui-main-production"), history: [] }),
-  }));
-  legacyCycleController.reset({ cyclesEnabled: true });
-  await legacyCycleController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
-  assert.equal(selectTrainingDataView(legacyCycleController.getState(), createDefaultTrainingPlan()).mode, "legacy");
-
-  const readyController = createController(identity, unreachableSource({
-    loadCycles: async () => ({ active: activeCycle, history: [] }),
-  }));
-  readyController.reset({ cyclesEnabled: true });
-  await readyController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
-  const readyView = selectTrainingDataView(readyController.getState(), createDefaultTrainingPlan());
-  assert.equal(readyView.mode, "cycle-scoped");
-  assert.equal(readyView.plan.mesoObjective, activeCycle.goal, "display plan se deriva del ciclo persistido");
-  assert.equal(readyView.exercises[0]?.name, "Press cycle-a", "exercises se derivan del plan atomico");
+interface ScheduledRead {
+  label: string;
+  resolve(value: { data: unknown; error: null }): void;
+  value: { data: unknown; error: null };
 }
 
-async function testTypedPostWriteCommandsInvalidateReads() {
+type CriticalReadScenario = "normal" | "no-sessions" | "historical-reference";
+
+function createCriticalReadHarness(scenario: CriticalReadScenario) {
+  const pending: ScheduledRead[] = [];
+  const labels: string[] = [];
+  const filters: Array<{ table: string; column: string; value: unknown }> = [];
+  const userId = "user-a";
+  let authLock = Promise.resolve();
+  const withSessions = scenario !== "no-sessions";
+  const referencedExerciseId = scenario === "historical-reference"
+    ? "exercise-historical"
+    : "exercise-a";
+  const relatedExercise = {
+    id: referencedExerciseId, user_id: userId, cycle_id: "cycle-a", day_id: "day-a",
+    name: scenario === "historical-reference" ? "Sentadilla histórica" : "Sentadilla",
+    target_sets: 3, target_reps: 8, base_weight: 80, side_weight: null, sort_order: 1,
+    created_at: "2026-08-01T00:00:00.000Z", deleted_at: null, notes: null,
+    source_legacy_exercise_id: null, exercise_lineage_id: "lineage-a",
+  };
+  const tableRows: Record<string, unknown[]> = {
+    training_cycles: [{
+      id: "cycle-a", user_id: userId, name: "Ciclo A", cycle_number: 1,
+      cycle_type: "meso", goal: "Hipertrofia", started_at: "2026-08-01T00:00:00.000Z",
+      ended_at: null, planned_start_date: "2026-08-01", planned_end_date: "2026-08-31",
+      status: "active", plan_snapshot: { source: "cycle-scoped" }, summary_snapshot: null,
+      created_at: "2026-08-01T00:00:00.000Z", updated_at: "2026-08-01T00:00:00.000Z",
+      deleted_at: null,
+    }],
+    training_cycle_routines: [{
+      id: "routine-a", cycle_id: "cycle-a", name: "Rutina A", sort_order: 1, notes: null,
+    }],
+    training_cycle_days: [{
+      id: "day-a", cycle_id: "cycle-a", routine_id: "routine-a", week_index: 1,
+      day_code: "monday", sort_order: 1, notes: null,
+    }],
+    training_cycle_exercises: [{
+      id: "exercise-a", cycle_id: "cycle-a", day_id: "day-a", name: "Sentadilla",
+      target_sets: 3, target_reps: 8, base_weight: 80, side_weight: null, sort_order: 1,
+      created_at: "2026-08-01T00:00:00.000Z", notes: null,
+      source_legacy_exercise_id: null, exercise_lineage_id: "lineage-a",
+    }],
+    training_sessions: withSessions ? [{
+      id: "session-a", cycle_id: "cycle-a", cycle_day_id: "day-a", week_number: 1,
+      trained_at: "2026-08-08T10:00:00.000Z", calendar_week_start: "2026-08-03",
+      planned_day: "monday", planned_date: "2026-08-08", trained_date: "2026-08-08",
+      status: "completed", completed_at: "2026-08-08T11:00:00.000Z", deleted_at: null,
+      notes: null, created_at: "2026-08-08T10:00:00.000Z",
+    }] : [],
+    exercise_entries: withSessions ? [{
+      id: "entry-a", session_id: "session-a", exercise_id: null,
+      training_cycle_exercise_id: referencedExerciseId, exercise_lineage_id: "lineage-a",
+      weight: 80, previous_weight: 75, reps: [8, 8, 7], rir: "2", notes: null,
+      created_at: "2026-08-08T10:10:00.000Z",
+      training_cycle_exercises: relatedExercise,
+    }] : [],
+  };
+
+  function schedule(label: string, data: unknown) {
+    labels.push(label);
+    return new Promise<{ data: unknown; error: null }>((resolve) => {
+      pending.push({ label, resolve, value: { data, error: null } });
+    });
+  }
+
+  function from(table: string) {
+    let selectColumns = "";
+    const query = {
+      select(columns: string) { selectColumns = columns; return query; },
+      eq(column: string, value: unknown) {
+        filters.push({ table, column, value });
+        return query;
+      },
+      is() { return query; },
+      in() { return query; },
+      order() { return query; },
+      maybeSingle() {
+        return schedule(table, tableRows[table]?.[0] ?? null);
+      },
+      then<TResult1 = { data: unknown; error: null }, TResult2 = never>(
+        onfulfilled?: ((value: { data: unknown; error: null }) => TResult1 | PromiseLike<TResult1>) | null,
+        onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+      ) {
+        const label = table === "exercise_entries" && selectColumns.includes("training_cycle_exercises(")
+          ? "exercise_entries+historical-references"
+          : table;
+        return schedule(label, tableRows[table] ?? []).then(onfulfilled, onrejected);
+      },
+    };
+    return query;
+  }
+
+  function getUserWithAuthLock() {
+    const request = authLock.then(() => schedule("auth.getUser", { user: { id: userId } }));
+    authLock = request.then(() => undefined, () => undefined);
+    return request;
+  }
+
+  const client = {
+    auth: {
+      getUser: getUserWithAuthLock,
+    },
+    from,
+  } as unknown as SupabaseClient;
+
+  return {
+    client,
+    labels,
+    filters,
+    signInWithPassword: () => schedule("auth.signInWithPassword", {
+      session: { user: { id: userId } },
+    }),
+    takeWave() {
+      const wave = pending.splice(0);
+      for (const read of wave) read.resolve(read.value);
+      return wave.map((read) => read.label);
+    },
+    get pendingCount() { return pending.length; },
+  };
+}
+
+async function flushCriticalReadHarness() {
+  for (let index = 0; index < 8; index += 1) await Promise.resolve();
+}
+
+test("ciclo activo filtra owner y rechaza A→B/nueva generación después del SELECT", async () => {
+  for (const transition of ["A→B", "misma cuenta/nueva generación"] as const) {
+    const harness = createCriticalReadHarness("no-sessions");
+    let generation = 1;
+    const capturedGeneration = generation;
+    const operation = getActiveTrainingCycle(
+      "user-a",
+      () => generation === capturedGeneration,
+      () => harness.client,
+    );
+
+    await flushCriticalReadHarness();
+    assert.deepEqual(harness.takeWave(), ["auth.getUser"]);
+    await flushCriticalReadHarness();
+    assert.deepEqual(harness.takeWave(), ["training_cycles"]);
+    generation += 1;
+
+    await assert.rejects(operation, (error: unknown) => (
+      error instanceof TrainingCycleRepositoryError && error.code === "session_expired"
+    ), transition);
+    assert.ok(
+      harness.filters.some((filter) => (
+        filter.table === "training_cycles" &&
+        filter.column === "user_id" &&
+        filter.value === "user-a"
+      )),
+      `${transition}: la fila se filtra por el owner autenticado`,
+    );
+  }
+});
+
+async function measureScopedCriticalReads(scenario: CriticalReadScenario) {
+  const harness = createCriticalReadHarness(scenario);
   const identity = createIdentityHarness();
-  const initial = deferred<ReturnType<typeof appData>>();
-  const initialController = createController(identity, unreachableSource({
-    loadAppData: () => initial.promise,
+  const loginOwner = createLoginSubmitOwnerController();
+  const history = deferred<TrainingCycle[]>();
+  const profile = deferred<void>();
+  const backgroundCalls = { history: 0, profile: 0 };
+  const dataController = controller(identity, source({
+    loadActiveCycle: (expectedUserId, isExpectedRequestCurrent) => getActiveTrainingCycle(
+      expectedUserId,
+      isExpectedRequestCurrent,
+      () => harness.client,
+    ),
+    loadCycleHistory: () => {
+      backgroundCalls.history += 1;
+      return history.promise;
+    },
+    ensureProfile: () => {
+      backgroundCalls.profile += 1;
+      return profile.promise;
+    },
+    loadLegacySnapshot: async () => assert.fail("el canon scoped no debe leer legacy"),
+    loadCyclePlan: (cycleId, expectedUserId, isExpectedRequestCurrent) => (
+      getCycleScopedTrainingPlan(
+        cycleId,
+        expectedUserId,
+        () => harness.client,
+        isExpectedRequestCurrent,
+      )
+    ),
+    loadCycleSessionRows: (cycleId, expectedUserId, isExpectedRequestCurrent) => (
+      getCycleScopedTrainingSessionRawData(
+        cycleId,
+        expectedUserId,
+        () => harness.client,
+        isExpectedRequestCurrent,
+      )
+    ),
+    assembleCycleSessions: assembleCycleScopedTrainingSessionData,
   }));
-  initialController.reset({ cyclesEnabled: false });
-  const initialLoad = initialController.refreshAppData("supabase");
-  initial.resolve(appData("initial"));
-  await initialLoad;
-  const staleRead = initialController.refreshAppData("supabase");
-  assert.equal(initialController.appendLegacySession(createSession("saved"), identity.capture()), true);
-  assert.equal((await staleRead).kind, "stale", "append invalida una lectura legacy anterior");
-  assert.equal(initialController.getState().appData.status, "ready");
-  const afterAppend = initialController.getState().appData;
-  assert.equal(afterAppend.status === "ready" ? afterAppend.data.sessions[0]?.id : null, "saved");
-  assert.equal(initialController.appendLegacySession(createSession("saved"), identity.capture()), true);
-  const afterDuplicateAppend = initialController.getState().appData;
-  assert.equal(
-    afterDuplicateAppend.status === "ready" ? afterDuplicateAppend.data.sessions.length : 0,
-    1,
-    "completion legacy agrega exactamente una sesion",
-  );
-  initialController.clearForCycleSetup(identity.capture());
-  const afterClear = initialController.getState().appData;
-  assert.deepEqual(afterClear.status === "ready" ? afterClear.data.sessions : null, []);
-  initialController.invalidateAll();
+  dataController.reset({ cyclesEnabled: true });
+  let settled = false;
+  let failure: unknown;
+  let milestones: ReturnType<TrainingDataController["startRefreshForIdentity"]> | undefined;
+  let sessionData: CycleScopedTrainingDataSnapshot | undefined;
+  const operation = (async () => {
+    const login = loginOwner.start(() => harness.signInWithPassword());
+    assert.equal(login.kind, "started");
+    if (login.kind !== "started") return;
+    assert.deepEqual(loginOwner.start(() => harness.signInWithPassword()), { kind: "busy" });
+    assert.equal((await login.promise).kind, "success");
+    milestones = dataController.startRefreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+    const dashboardResult = await milestones.dashboardReady;
+    assert.equal(dashboardResult.kind, "success");
+    const scoped = dataController.getState().cycleScoped;
+    assert.ok(scoped.status === "ready" || scoped.status === "empty");
+    sessionData = scoped.snapshot;
+  })()
+    .catch((error: unknown) => { failure = error; })
+    .finally(() => { settled = true; });
 
-  const pendingPlan = deferred<CycleScopedTrainingPlan>();
-  const pendingCycles = deferred<{ active: null; history: [] }>();
-  const invalidationController = createController(identity, unreachableSource({
-    loadCyclePlan: () => pendingPlan.promise,
-    loadCycles: () => pendingCycles.promise,
-  }));
-  invalidationController.reset({ cyclesEnabled: true });
-  const staleCycleSnapshot = invalidationController.reloadCycleSnapshot("cycle-a");
-  const staleCycles = invalidationController.refreshCycles();
-  invalidationController.clearForCycleSetup(identity.capture());
-  pendingPlan.resolve(createPlan("cycle-a"));
-  pendingCycles.resolve({ active: null, history: [] });
-  assert.equal((await staleCycleSnapshot).kind, "stale");
-  assert.equal((await staleCycles).kind, "stale");
+  const waves: string[][] = [];
+  for (let guard = 0; !settled && guard < 10; guard += 1) {
+    for (let flush = 0; flush < 8; flush += 1) await Promise.resolve();
+    if (harness.pendingCount > 0) waves.push(harness.takeWave());
+  }
+  await operation;
+  if (failure) throw failure;
+  assert.ok(milestones);
+  assert.deepEqual(backgroundCalls, { history: 1, profile: 1 });
+  const requestCountAtDashboard = harness.labels.length;
+  history.resolve([]);
+  profile.resolve();
+  assert.equal((await milestones.backgroundSettled).kind, "success");
+  assert.equal(harness.labels.length, requestCountAtDashboard, "background no agrega requests críticas");
+  loginOwner.dispose();
+  return {
+    requestCount: harness.labels.length,
+    waves,
+    labels: harness.labels,
+    sessionData,
+    state: dataController.getState(),
+  };
 }
 
-interface BoundaryContractSources {
+test("PERF-05C real incluye login y respeta ≤12 requests/≤6 ondas", async () => {
+  const normal = await measureScopedCriticalReads("normal");
+  const noSessions = await measureScopedCriticalReads("no-sessions");
+  const historical = await measureScopedCriticalReads("historical-reference");
+  const expectedLabels = [
+    "auth.signInWithPassword",
+    "auth.getUser",
+    "training_cycles",
+    "auth.getUser",
+    "auth.getUser",
+    "training_cycle_routines",
+    "training_cycle_days",
+    "training_cycle_exercises",
+    "training_sessions",
+    "exercise_entries+historical-references",
+  ];
+
+  for (const measurement of [normal, noSessions, historical]) {
+    assert.equal(measurement.requestCount, 10);
+    assert.equal(measurement.waves.length, 6);
+    assert.deepEqual(measurement.labels, expectedLabels);
+    assert.deepEqual(measurement.waves, [
+      ["auth.signInWithPassword"],
+      ["auth.getUser"],
+      ["training_cycles"],
+      ["auth.getUser"],
+      [
+        "auth.getUser",
+        "training_cycle_routines",
+        "training_cycle_days",
+        "training_cycle_exercises",
+      ],
+      ["training_sessions", "exercise_entries+historical-references"],
+    ]);
+    assert.ok(measurement.requestCount <= 12);
+    assert.ok(measurement.waves.length <= 6);
+    assert.ok(measurement.state.cycleScoped.status === "ready" || measurement.state.cycleScoped.status === "empty");
+  }
+  assert.deepEqual(
+    noSessions.sessionData && {
+      sessions: noSessions.sessionData.sessions,
+      entries: noSessions.sessionData.entries,
+    },
+    { sessions: [], entries: [] },
+  );
+  assert.equal(
+    historical.sessionData?.entries[0]?.exerciseName,
+    "Sentadilla histórica",
+    "la referencia histórica viaja consolidada en entries sin una solicitud posterior",
+  );
+});
+
+interface ContractSources {
   controller: string;
   owner: string;
-  selectors: string;
-  state: string;
-  app: string;
+  source: string;
+  coordinator: string;
+  repository: string;
+  cyclesRepository: string;
 }
 
-function assertTrainingDataBoundarySourceContract(sources: BoundaryContractSources) {
+function between(sourceText: string, start: string, end: string): string {
+  const startIndex = sourceText.indexOf(start);
+  const endIndex = sourceText.indexOf(end, startIndex + start.length);
+  assert.ok(startIndex >= 0 && endIndex > startIndex, `segmento ausente: ${start}`);
+  return sourceText.slice(startIndex, endIndex);
+}
+
+function assertPerf05cContract(sources: ContractSources) {
+  for (const port of [
+    "loadActiveCycle(",
+    "loadCycleHistory()",
+    "loadLegacySnapshot(",
+    "ensureProfile(",
+    "loadCyclePlan(",
+    "loadCycleSessionRows(",
+    "assembleCycleSessions(",
+  ]) assert.ok(sources.source.includes(port), `port ausente: ${port}`);
+  assert.doesNotMatch(sources.source, /\bloadCycles\s*\(/);
+
+  const critical = between(sources.controller, "async function refreshDashboardCanon", "function settleBackground");
+  assert.doesNotMatch(critical, /refreshCycleHistory|ensureProfile|backgroundSettled|Promise\.all/);
+  assert.equal((critical.match(/controller\.refreshAppData\(mode\)/g) ?? []).length, 2);
+  assert.ok(critical.indexOf("await refreshActiveCycle()") < critical.lastIndexOf("controller.refreshAppData(mode)"));
+  assert.match(critical, /isCycleScopedTrainingCycle\(activeCycle\)[\s\S]*return cyclesResult;[\s\S]*return controller\.refreshAppData\(mode\);/);
+
+  const start = between(sources.controller, "startRefreshForIdentity({", "refreshForIdentity(input)");
+  assert.match(start, /const dashboardReady = refreshDashboardCanon/);
+  assert.match(start, /backgroundSettled: dashboardReady\.then/);
+  assert.ok(start.indexOf("dashboardReady.then") < start.indexOf("controller.refreshCycleHistory()"));
+  assert.ok(start.indexOf("dashboardReady.then") < start.indexOf("refreshProfilePrerequisite(mode)"));
+  assert.match(start, /Promise\.all\(\[historySettled, profileSettled\]\)\.then\(settleBackground\)/);
+
+  const snapshotLoad = between(
+    sources.controller,
+    "async function loadCycleSnapshot",
+    "async function refreshProfilePrerequisite",
+  );
+  const parallelIndex = snapshotLoad.indexOf("const [plan, rawSessionData] = await Promise.all([");
+  const planIndex = snapshotLoad.indexOf("source.loadCyclePlan(", parallelIndex);
+  const sessionsIndex = snapshotLoad.indexOf("source.loadCycleSessionRows(", parallelIndex);
+  const parallelEnd = snapshotLoad.indexOf("]);", parallelIndex);
+  const assembleIndex = snapshotLoad.indexOf(
+    "source.assembleCycleSessions(cycleId, plan, rawSessionData)",
+    parallelEnd,
+  );
+  const snapshotIndex = snapshotLoad.indexOf("const snapshot: CycleScopedTrainingDataSnapshot", assembleIndex);
+  assert.ok(
+    parallelIndex >= 0 &&
+      planIndex > parallelIndex &&
+      sessionsIndex > parallelIndex &&
+      planIndex < parallelEnd &&
+      sessionsIndex < parallelEnd &&
+      assembleIndex > parallelEnd &&
+      snapshotIndex > assembleIndex,
+    "plan y filas de sesiones parten en paralelo y sólo luego se ensamblan",
+  );
+  assert.doesNotMatch(snapshotLoad.slice(parallelIndex, snapshotIndex), /publish\(/);
+  assert.equal(
+    (snapshotLoad.match(/if \(!owners\.isCurrent\(owner\)\) return \{ kind: "stale", state \};/g) ?? []).length,
+    3,
+    "se conserva el guard antes y después del ensamblado y en error",
+  );
+  assert.match(snapshotLoad, /entries: \[\.\.\.sessionData\.entries\],[\s\S]*sessions: \[\.\.\.sessionData\.sessions\],/);
+  assert.match(sources.controller, /previousForCycle[\s\S]*status: "loading", cycleId, previous: previousForCycle/);
+  assert.match(sources.controller, /return \{ kind: "error", state, resource: "active-cycle", error \};/);
+
+  const rawLoader = between(
+    sources.repository,
+    "export async function getCycleScopedTrainingSessionRawData",
+    "export function assembleCycleScopedTrainingSessionData",
+  );
+  assert.match(rawLoader, /\] = await Promise\.all\(\[/);
+  assert.match(rawLoader, /\.from\("training_sessions"\)[\s\S]*\.from\("exercise_entries"\)/);
+  assert.match(rawLoader, /training_sessions!inner\(id,user_id,cycle_id,deleted_at\)/);
+  assert.match(rawLoader, /training_cycle_exercises\(id,user_id,cycle_id,day_id,name,target_sets,target_reps/);
+  assert.doesNotMatch(rawLoader, /\.from\("training_cycle_exercises"\)/);
+  assert.equal(
+    (rawLoader.match(/assertExpectedCycleScopedRequestCurrent\(expectedUserId, isExpectedRequestCurrent\);/g) ?? []).length,
+    3,
+    "el owner síncrono fail-closed valida antes, después de auth y después de las lecturas raw",
+  );
+  assert.doesNotMatch(rawLoader, /await assertExpectedCycleScopedRepositoryUser/);
+
+  const activeController = between(
+    sources.controller,
+    "async function refreshActiveCycle",
+    "async function refreshDashboardCanon",
+  );
+  assert.match(activeController, /source\.loadActiveCycle\([\s\S]*owner\.requestToken\.userId \?\? undefined,[\s\S]*\(\) => owners\.isCurrent\(owner\)/);
+  assert.equal(
+    (activeController.match(/if \(!owners\.isCurrent\(owner\)\) return \{ kind: "stale", state \};/g) ?? []).length,
+    2,
+  );
+  const activeRepository = between(
+    sources.cyclesRepository,
+    "export async function getActiveTrainingCycle",
+    "export async function getNextTrainingCycleNumber",
+  );
+  assert.match(activeRepository, /\.eq\("user_id", userId\)/);
+  assert.equal(
+    (activeRepository.match(/assertExpectedTrainingCycleRequestCurrent\(expectedUserId, isExpectedRequestCurrent\);/g) ?? []).length,
+    3,
+    "ciclo activo valida owner antes de auth, antes del SELECT y post-await",
+  );
+
   assert.match(sources.owner, /requestToken: identity\.captureRequestToken\(\)/);
   assert.match(sources.owner, /owner\.lifecycle === lifecycle/);
   assert.match(sources.owner, /owner\.requestId === latestRequestIds\[owner\.resource\]/);
   assert.match(sources.owner, /identity\.isRequestTokenCurrent\(owner\.requestToken\)/);
   assert.match(sources.owner, /owner\.cycleId === selectedCycleId/);
-  assert.match(sources.controller, /owners\.isCurrent\(owner\)/);
-  assert.doesNotMatch(
-    sources.controller,
-    /finally\s*\{[\s\S]*?publish\(/,
-    "un finally no puede publicar ni apagar loading sin validar el owner",
-  );
+  assert.match(sources.owner, /"cycle-history": 0/);
 
-  const planAwait = sources.controller.indexOf("const plan = await source.loadCyclePlan(cycleId);");
-  const sessionsAwait = sources.controller.indexOf(
-    "const sessionData = await source.loadCycleSessions(cycleId, plan);",
-    planAwait,
+  const history = between(sources.controller, "async refreshCycleHistory()", "reloadCycleSnapshot(cycleId)");
+  assert.match(history, /const owner = owners\.begin\("cycle-history"\)/);
+  assert.equal(
+    (history.match(/if \(!owners\.isCurrent\(owner\)\) return \{ kind: "stale", resource: "cycle-history" \};/g) ?? []).length,
+    2,
   );
-  assert.ok(planAwait >= 0 && sessionsAwait > planAwait, "plan y sessions deben cargarse en orden");
-  assert.doesNotMatch(
-    sources.controller.slice(planAwait, sessionsAwait),
-    /publish\(/,
-    "el plan aislado no puede publicarse antes de sessions",
-  );
-  assert.match(sources.controller.slice(sessionsAwait), /const snapshot: CycleScopedTrainingDataSnapshot/);
+  assert.doesNotMatch(history, /appData:|cycleScoped:/);
 
-  assert.doesNotMatch(
-    sources.state.match(/export interface CycleScopedTrainingDataSnapshot \{[\s\S]*?\n\}/)?.[0] ?? "",
-    /\bexercises\s*:/,
-    "el snapshot no mantiene un segundo canon de exercises",
-  );
-  assert.match(
-    sources.selectors,
-    /if \(state\.cycles\.status === "error"\) \{\s*return createBlockedView\(/,
-  );
-  assert.match(
-    sources.selectors,
-    /if \(state\.cycleScoped\.status === "error"\) \{\s*return createBlockedView\(/,
-  );
-  assert.doesNotMatch(
-    sources.app,
-    /\bgetActiveTrainingCycle\b|\bgetTrainingCycleHistory\b|\bgetCycleScopedTrainingPlan\b|\bgetCycleScopedTrainingSessionData\b|\bloadAppData\b/,
-    "el root no puede recuperar reads extraidos del boundary",
-  );
-  assert.match(sources.app, /createCycleScopedTrainingCycleFromSetup[\s\S]*refreshTrainingCyclesBoundary\(\)/);
-  assert.match(sources.app, /addCycleScopedTrainingDaysAndExercises\([\s\S]*reloadCycleScopedBoundary\(activeCycle\.id\)/);
-  assert.match(sources.app, /executeCycleCreateAdapter[\s\S]*trainingDataController\.clearForCycleSetup\(operation\.requestToken\)/);
-  assert.match(sources.app, /executeCycleDeleteAdapter[\s\S]*refreshTrainingCyclesBoundary\(\)/);
-  assert.doesNotMatch(sources.app, /<ShareWorkoutCard\b|from ["'][^"']*workout-share/);
+  const continuation = between(sources.coordinator, "operation.promise = (async () =>", "return operation.promise");
+  assert.ok(continuation.indexOf("await ports.refresh()") < continuation.indexOf("ports.onComplete("));
 }
 
-function runTrainingDataBoundaryMutationProbes(sources: BoundaryContractSources) {
+function replaceLast(sourceText: string, find: string, replacement: string): string {
+  const index = sourceText.lastIndexOf(find);
+  assert.ok(index >= 0, `texto de mutación ausente: ${find}`);
+  return sourceText.slice(0, index) + replacement + sourceText.slice(index + find.length);
+}
+
+test("mutation probes PERF-05C detectan regresiones del DAG", () => {
+  const originals: ContractSources = {
+    controller: readFileSync("src/features/training-data/model/training-data-controller.ts", "utf8"),
+    owner: readFileSync("src/features/training-data/model/training-data-request-owner.ts", "utf8"),
+    source: readFileSync("src/lib/training/training-data-source.ts", "utf8"),
+    coordinator: readFileSync("src/features/app-shell/model/authenticated-session-coordinator.ts", "utf8"),
+    repository: readFileSync("src/lib/training/cycle-scoped-training-repository.ts", "utf8"),
+    cyclesRepository: readFileSync("src/lib/training/training-cycles-repository.ts", "utf8"),
+  };
+  assertPerf05cContract(originals);
+
   const probes: Array<{
     name: string;
-    target: keyof BoundaryContractSources;
-    mutate(source: string): string;
+    target: keyof ContractSources;
+    mutate(value: string): string;
   }> = [
     {
-      name: "eliminar token P3-41",
-      target: "owner",
-      mutate: (source) => source.replace(
-        "        identity.isRequestTokenCurrent(owner.requestToken) &&\n",
-        "",
+      name: "reintroducir history en el await crítico",
+      target: "controller",
+      mutate: (value) => value.replace(
+        "    if (!cyclesEnabled) return controller.refreshAppData(mode);",
+        "    await controller.refreshCycleHistory();\n    if (!cyclesEnabled) return controller.refreshAppData(mode);",
       ),
     },
     {
-      name: "eliminar requestId latest-wins y permitir publicacion tardia A-B",
-      target: "owner",
-      mutate: (source) => source.replace(
-        "        owner.requestId === latestRequestIds[owner.resource] &&\n",
-        "",
+      name: "cargar legacy y scoped completos simultáneamente",
+      target: "controller",
+      mutate: (value) => value.replace(
+        "    const cyclesResult = await refreshActiveCycle();",
+        "    void controller.refreshAppData(mode);\n    const cyclesResult = await refreshActiveCycle();",
       ),
     },
     {
-      name: "eliminar guard cycleId",
+      name: "navegar antes del canon",
+      target: "coordinator",
+      mutate: (value) => value.replace(
+        "          const refreshResult = await ports.refresh();",
+        "          ports.onComplete(operation.intent, \"success\");\n          const refreshResult = await ports.refresh();",
+      ),
+    },
+    {
+      name: "hacer esperar sesiones por el plan",
+      target: "controller",
+      mutate: (value) => value.replace(
+        `      const [plan, rawSessionData] = await Promise.all([`,
+        `      const [plan, rawSessionData] = await sequentialReads([`,
+      ),
+    },
+    {
+      name: "publicar plan parcial antes del ensamblado",
+      target: "controller",
+      mutate: (value) => value.replace(
+        "      if (!owners.isCurrent(owner)) return { kind: \"stale\", state };\n      const sessionData = source.assembleCycleSessions(cycleId, plan, rawSessionData);",
+        "      if (!owners.isCurrent(owner)) return { kind: \"stale\", state };\n      publish(state);\n      const sessionData = source.assembleCycleSessions(cycleId, plan, rawSessionData);",
+      ),
+    },
+    {
+      name: "omitir entries del canon",
+      target: "controller",
+      mutate: (value) => value.replace(
+        "        entries: [...sessionData.entries],",
+        "        entries: [],",
+      ),
+    },
+    {
+      name: "quitar guard post-await del snapshot",
+      target: "controller",
+      mutate: (value) => value.replace(
+        "      if (!owners.isCurrent(owner)) return { kind: \"stale\", state };\n      const sessionData = source.assembleCycleSessions(cycleId, plan, rawSessionData);",
+        "      const sessionData = source.assembleCycleSessions(cycleId, plan, rawSessionData);",
+      ),
+    },
+    {
+      name: "quitar guard post-await del repositorio raw",
+      target: "repository",
+      mutate: (value) => value.replace(
+        "  assertExpectedCycleScopedRequestCurrent(expectedUserId, isExpectedRequestCurrent);\n\n  if (sessionsError)",
+        "  if (sessionsError)",
+      ),
+    },
+    {
+      name: "quitar guard post-await del ciclo activo",
+      target: "cyclesRepository",
+      mutate: (value) => value.replace(
+        "  assertExpectedTrainingCycleRequestCurrent(expectedUserId, isExpectedRequestCurrent);\n  if (error)",
+        "  if (error)",
+      ),
+    },
+    {
+      name: "quitar token",
       target: "owner",
-      mutate: (source) => source.replace(
+      mutate: (value) => value.replace("        identity.isRequestTokenCurrent(owner.requestToken) &&\n", ""),
+    },
+    {
+      name: "quitar epoch/lifecycle",
+      target: "owner",
+      mutate: (value) => value.replace("return owner.lifecycle === lifecycle &&\n", "return "),
+    },
+    {
+      name: "quitar requestId",
+      target: "owner",
+      mutate: (value) => value.replace("        owner.requestId === latestRequestIds[owner.resource] &&\n", ""),
+    },
+    {
+      name: "quitar cycleId",
+      target: "owner",
+      mutate: (value) => value.replace(
         "        (owner.resource !== \"cycle-snapshot\" || owner.cycleId === selectedCycleId);",
         "        true;",
       ),
     },
     {
-      name: "finally stale apaga loading nuevo",
+      name: "reemplazar snapshot visible por loading vacío",
       target: "controller",
-      mutate: (source) => `${source}\nfinally { publish(state); }\n`,
+      mutate: (value) => value.replace(
+        "        ? { status: \"loading\", cycleId, previous: previousForCycle }",
+        "        ? { status: \"loading\", cycleId }",
+      ),
     },
     {
-      name: "publicacion parcial entre plan y sessions",
+      name: "ocultar error crítico",
       target: "controller",
-      mutate: (source) => source.replace(
-        "      const plan = await source.loadCyclePlan(cycleId);\n",
-        "      const plan = await source.loadCyclePlan(cycleId);\n      publish(state);\n",
+      mutate: (value) => value.replace(
+        "return { kind: \"error\", state, resource: \"active-cycle\", error };",
+        "return { kind: \"stale\", state };",
       ),
     },
     {
-      name: "fallback legacy durante error cycle-scoped",
-      target: "selectors",
-      mutate: (source) => source.replace(
-        "  if (state.cycleScoped.status === \"error\") {\n    return createBlockedView(",
-        "  if (state.cycleScoped.status === \"error\") {\n    return createLegacyView(",
+      name: "permitir background A→B",
+      target: "controller",
+      mutate: (value) => value.replace(
+        "if (!owners.isCurrent(owner)) return { kind: \"stale\", resource: \"cycle-history\" };",
+        "if (false) return { kind: \"stale\", resource: \"cycle-history\" };",
       ),
     },
     {
-      name: "segundo canon de exercises",
-      target: "state",
-      mutate: (source) => source.replace(
-        "  plan: CycleScopedTrainingPlan;\n",
-        "  plan: CycleScopedTrainingPlan;\n  exercises: readonly ExerciseTemplate[];\n",
+      name: "reintroducir Profile en el milestone",
+      target: "controller",
+      mutate: (value) => value.replace(
+        "    if (!cyclesEnabled) return controller.refreshAppData(mode);",
+        "    await source.ensureProfile(mode);\n    if (!cyclesEnabled) return controller.refreshAppData(mode);",
       ),
     },
     {
-      name: "conectar ShareWorkoutCard",
-      target: "app",
-      mutate: (source) => `${source}\nimport { ShareWorkoutCard } from \"@/features/active-workout/workout-share\";\n`,
+      name: "eliminar fallback legacy",
+      target: "controller",
+      mutate: (value) => replaceLast(value, "return controller.refreshAppData(mode);", "return cyclesResult;"),
     },
   ];
 
   for (const probe of probes) {
-    const mutated = probe.mutate(sources[probe.target]);
-    assert.notEqual(mutated, sources[probe.target], `probe sin mutacion efectiva: ${probe.name}`);
+    const mutated = probe.mutate(originals[probe.target]);
+    assert.notEqual(mutated, originals[probe.target], `mutación inefectiva: ${probe.name}`);
     assert.throws(
-      () => assertTrainingDataBoundarySourceContract({ ...sources, [probe.target]: mutated }),
+      () => assertPerf05cContract({ ...originals, [probe.target]: mutated }),
       `el contrato debe detectar: ${probe.name}`,
     );
   }
-}
-
-async function main() {
-  await testLatestAppDataAndStaleFinally();
-  await testCycleRequestIdCycleIdAndAtomicPublication();
-  await testIdentityEpochAndReentry();
-  await testDuplicateBootstrapLatestWins();
-  await testLifecycleInvalidatesEveryLane();
-  await testCycleCompletionRefreshesOnlySelectedCycle();
-  await testCycleScopedLoadingBlocksLoadedLegacyData();
-  await testBlockedMatrixAndNoLegacyFallback();
-  await testTypedPostWriteCommandsInvalidateReads();
-
-  const controllerSource = readFileSync("src/features/training-data/model/training-data-controller.ts", "utf8");
-  const stateSource = readFileSync("src/features/training-data/model/training-data-state.ts", "utf8");
-  const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
-  const boundarySources: BoundaryContractSources = {
-    controller: controllerSource,
-    owner: readFileSync("src/features/training-data/model/training-data-request-owner.ts", "utf8"),
-    selectors: readFileSync("src/features/training-data/model/training-data-selectors.ts", "utf8"),
-    state: stateSource,
-    app: appSource,
-  };
-  assertTrainingDataBoundarySourceContract(boundarySources);
-  runTrainingDataBoundaryMutationProbes(boundarySources);
-  assert.match(controllerSource, /requestToken/);
-  assert.match(controllerSource, /owners\.isCurrent/);
-  assert.match(controllerSource, /cycleId/);
-  assert.doesNotMatch(stateSource, /cycleScopedExercises/);
-  assert.doesNotMatch(appSource, /<ShareWorkoutCard\b|from ["'][^"']*workout-share/);
-  console.log("training data controller tests passed");
-}
-
-void main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
 });

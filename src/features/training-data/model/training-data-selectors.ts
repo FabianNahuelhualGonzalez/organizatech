@@ -27,6 +27,7 @@ import type {
 } from "@/lib/training/training-cycles-repository";
 
 import {
+  getCycleScopedTrainingDataValue,
   getTrainingDataResourceValue,
   type CycleScopedTrainingDataSnapshot,
   type PersistedTrainingCyclesSnapshot,
@@ -73,7 +74,10 @@ export function selectTrainingDataView(
   const legacySessions = [...(appData?.sessions ?? [])];
   const cycles = getPersistedCyclesValue(state);
   const activeCycle = cycles?.active ?? null;
-  const persistedCycleHistory = [...(cycles?.history ?? [])];
+  const persistedCycleHistory = state.cycleHistory.status === "disabled"
+    ? []
+    : [...(getTrainingDataResourceValue(state.cycleHistory) ?? [])];
+  const cycleScopedSnapshot = getCycleScopedTrainingDataValue(state.cycleScoped);
   const displayPlan = activeCycle
     ? createTrainingPlanFromPersistedCycle(activeCycle, legacyPlan)
     : legacyPlan;
@@ -89,7 +93,10 @@ export function selectTrainingDataView(
     );
   }
 
-  if (state.cycles.status === "idle" || state.cycles.status === "loading") {
+  if (
+    (state.cycles.status === "idle" || state.cycles.status === "loading") &&
+    !cycles
+  ) {
     return createBlockedView(
       "cycle-resolution",
       CYCLE_RESOLUTION_MESSAGE,
@@ -99,7 +106,7 @@ export function selectTrainingDataView(
     );
   }
 
-  if (state.cycles.status === "error") {
+  if (state.cycles.status === "error" && !cycles) {
     return createBlockedView(
       "cycle-error",
       state.cycles.message,
@@ -120,20 +127,16 @@ export function selectTrainingDataView(
     );
   }
 
-  if (state.cycleScoped.status === "loading" || state.cycleScoped.status === "disabled") {
+  if (
+    state.cycleScoped.status === "disabled" ||
+    ((state.cycleScoped.status === "loading" || state.cycleScoped.status === "error") &&
+      !cycleScopedSnapshot)
+  ) {
     return createBlockedView(
-      "cycle-loading",
-      CYCLE_LOADING_MESSAGE,
-      displayPlan,
-      activeCycle,
-      persistedCycleHistory,
-    );
-  }
-
-  if (state.cycleScoped.status === "error") {
-    return createBlockedView(
-      "cycle-error",
-      state.cycleScoped.message,
+      state.cycleScoped.status === "error" ? "cycle-error" : "cycle-loading",
+      state.cycleScoped.status === "error"
+        ? state.cycleScoped.message
+        : CYCLE_LOADING_MESSAGE,
       displayPlan,
       activeCycle,
       persistedCycleHistory,
@@ -141,8 +144,9 @@ export function selectTrainingDataView(
   }
 
   if (
+    !cycleScopedSnapshot ||
     state.cycleScoped.cycleId !== activeCycle.id ||
-    state.cycleScoped.snapshot.cycleId !== activeCycle.id
+    cycleScopedSnapshot.cycleId !== activeCycle.id
   ) {
     return createBlockedView(
       "cycle-loading",
@@ -154,7 +158,7 @@ export function selectTrainingDataView(
   }
 
   const cycleExercises = createExerciseTemplatesFromCycleScopedPlan(
-    state.cycleScoped.snapshot.plan,
+    cycleScopedSnapshot.plan,
   );
   if (state.cycleScoped.status === "empty" || cycleExercises.length === 0) {
     return createBlockedView(
@@ -165,7 +169,7 @@ export function selectTrainingDataView(
       displayPlan,
       activeCycle,
       persistedCycleHistory,
-      state.cycleScoped.snapshot.plan,
+      cycleScopedSnapshot.plan,
     );
   }
 
@@ -173,14 +177,19 @@ export function selectTrainingDataView(
     mode: "cycle-scoped",
     plan: displayPlan,
     exercises: dedupeExercisesByDayAndRoutine(cycleExercises),
-    entries: [...state.cycleScoped.snapshot.entries],
-    sessions: [...state.cycleScoped.snapshot.sessions],
+    entries: [...cycleScopedSnapshot.entries],
+    sessions: [...cycleScopedSnapshot.sessions],
     activeCycle,
     persistedCycleHistory,
-    cyclePlan: state.cycleScoped.snapshot.plan,
+    cyclePlan: cycleScopedSnapshot.plan,
     isCycleScoped: true,
     blockerMessage: "",
   };
+}
+
+export function isTrainingDataProfilePrepared(state: TrainingDataState): boolean {
+  return state.profilePrerequisite.status === "ready" ||
+    state.profilePrerequisite.status === "error";
 }
 
 export function createExerciseTemplatesFromCycleScopedPlan(

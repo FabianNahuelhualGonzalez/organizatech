@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 import type { ExerciseEntry } from "@/lib/progress/types";
 import type { CycleScopedExercise } from "./cycle-scoped-training-repository";
 import {
@@ -21,6 +22,111 @@ const cycleScopedRepositorySource = readFileSync(
   "src/lib/training/cycle-scoped-training-repository.ts",
   "utf8",
 );
+
+function parseRepositorySource(source: string) {
+  const sourceFile = ts.createSourceFile(
+    "cycle-scoped-training-repository.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  ) as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] };
+  assert.equal(sourceFile.parseDiagnostics.length, 0, "el mutante conserva sintaxis TypeScript válida");
+  return sourceFile;
+}
+
+function getCallChain(call: ts.CallExpression) {
+  const operations: Array<{ method: string; arguments: readonly ts.Expression[] }> = [];
+  let current: ts.Expression = call;
+  while (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
+    operations.unshift({
+      method: current.expression.name.text,
+      arguments: current.arguments,
+    });
+    current = current.expression.expression;
+  }
+  return operations;
+}
+
+function isStringArgument(expression: ts.Expression | undefined, value: string) {
+  return Boolean(expression && ts.isStringLiteral(expression) && expression.text === value);
+}
+
+function isNullArgument(expression: ts.Expression | undefined) {
+  return expression?.kind === ts.SyntaxKind.NullKeyword;
+}
+
+function assertEditPlanLinkedEntriesDeletedAtContract(source: string) {
+  const sourceFile = parseRepositorySource(source);
+  const loader = sourceFile.statements.find((statement): statement is ts.FunctionDeclaration => (
+    ts.isFunctionDeclaration(statement) &&
+    statement.name?.text === "addCycleScopedTrainingDaysAndExercises"
+  ));
+  assert.ok(loader?.body, "existe el loader ejecutable exacto de edición del plan");
+
+  const matchingChains: Array<ReturnType<typeof getCallChain>> = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node)) {
+      const chain = getCallChain(node);
+      const from = chain.find((operation) => operation.method === "from");
+      if (from && isStringArgument(from.arguments[0], "exercise_entries")) {
+        matchingChains.push(chain);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(loader.body);
+
+  const completeChains = matchingChains.filter((chain) => (
+    chain.at(-1)?.method === "is" &&
+    isStringArgument(chain.at(-1)?.arguments[0], "training_sessions.deleted_at") &&
+    isNullArgument(chain.at(-1)?.arguments[1])
+  ));
+  assert.equal(
+    completeChains.length,
+    1,
+    "la query exacta de linked entries contiene un único deleted_at IS NULL namespaced",
+  );
+  const chain = completeChains[0];
+  assert.deepEqual(
+    chain.map((operation) => operation.method),
+    ["from", "select", "eq", "in", "eq", "is"],
+    "el filtro pertenece a la cadena productiva correcta y permanece como operación terminal",
+  );
+  const select = chain.find((operation) => operation.method === "select");
+  assert.ok(
+    select &&
+      ts.isStringLiteral(select.arguments[0]) &&
+      select.arguments[0].text ===
+        "training_cycle_exercise_id,training_sessions!inner(id,user_id,deleted_at)",
+    "linked entries usa el join inner exacto con training_sessions",
+  );
+  assert.ok(chain.some((operation) => (
+    operation.method === "eq" &&
+    isStringArgument(operation.arguments[0], "user_id") &&
+    operation.arguments[1]?.getText(sourceFile) === "userId"
+  )));
+  assert.ok(chain.some((operation) => (
+    operation.method === "eq" &&
+    isStringArgument(operation.arguments[0], "training_sessions.user_id") &&
+    operation.arguments[1]?.getText(sourceFile) === "userId"
+  )));
+  assert.ok(chain.some((operation) => (
+    operation.method === "in" &&
+    isStringArgument(operation.arguments[0], "training_cycle_exercise_id") &&
+    operation.arguments[1]?.getText(sourceFile) === "affectedExerciseIds"
+  )));
+}
+
+function replaceContractLine(source: string, replacement: string) {
+  const target = '      .is("training_sessions.deleted_at", null)';
+  const loaderStart = source.indexOf("export async function addCycleScopedTrainingDaysAndExercises");
+  const loaderEnd = source.indexOf("export async function getCycleScopedTrainingPlan", loaderStart);
+  assert.ok(loaderStart >= 0 && loaderEnd > loaderStart, "se delimita el loader exacto para mutación");
+  const loader = source.slice(loaderStart, loaderEnd);
+  assert.equal(loader.split(target).length - 1, 1, "la mutación apunta al loader exacto una vez");
+  return `${source.slice(0, loaderStart)}${loader.replace(target, replacement)}${source.slice(loaderEnd)}`;
+}
 
 const existingExercises = [
   createExercise("registered", "Gemelos hack"),
@@ -169,16 +275,59 @@ assert.equal(
   "el dia queda Pendiente cuando ningun ejercicio tiene entry",
 );
 
-assert.match(
-  cycleScopedRepositorySource,
-  /from\("exercise_entries"\)[\s\S]*?training_sessions!inner\(id,user_id,deleted_at\)[\s\S]*?\.eq\("training_sessions\.user_id", userId\)[\s\S]*?\.is\("training_sessions\.deleted_at", null\)/,
-  "la edicion del plan considera historial solo de sesiones activas del usuario",
-);
-assert.match(
-  cycleScopedRepositorySource,
-  /export async function getCycleScopedTrainingSessionData[\s\S]*?\.from\("training_sessions"\)[\s\S]*?\.is\("deleted_at", null\)[\s\S]*?\.from\("exercise_entries"\)[\s\S]*?\.in\("session_id", sessionIds\)/,
-  "el loader cycle-scoped conserva entries de sesiones activas y excluye las soft-deleted desde los sessionIds",
-);
+assertEditPlanLinkedEntriesDeletedAtContract(cycleScopedRepositorySource);
+
+const deletedAtMutations = [
+  {
+    name: "eliminar filtro del loader exacto",
+    mutate: (source: string) => replaceContractLine(source, ""),
+  },
+  {
+    name: "conservar filtro sólo en otro loader",
+    mutate: (source: string) => `${replaceContractLine(source, "")}\nasync function decoyDeletedAtLoader() { return supabase.from("exercise_entries").is("training_sessions.deleted_at", null); }\n`,
+  },
+  {
+    name: "dejar filtro sólo en comentario",
+    mutate: (source: string) => replaceContractLine(
+      source,
+      '      // .is("training_sessions.deleted_at", null)',
+    ),
+  },
+  {
+    name: "dejar filtro sólo en string",
+    mutate: (source: string) => replaceContractLine(
+      source,
+      '      && ".is(\\\"training_sessions.deleted_at\\\", null)"',
+    ),
+  },
+  {
+    name: "cambiar a deleted_at IS NOT NULL",
+    mutate: (source: string) => replaceContractLine(
+      source,
+      '      .not("training_sessions.deleted_at", "is", null)',
+    ),
+  },
+  {
+    name: "usar filtro sin namespace",
+    mutate: (source: string) => replaceContractLine(source, '      .is("deleted_at", null)'),
+  },
+  {
+    name: "usar filtro sobre tabla incorrecta",
+    mutate: (source: string) => replaceContractLine(
+      source,
+      '      .is("exercise_entries.deleted_at", null)',
+    ),
+  },
+];
+
+for (const mutation of deletedAtMutations) {
+  const mutated = mutation.mutate(cycleScopedRepositorySource);
+  assert.notEqual(mutated, cycleScopedRepositorySource, `mutación efectiva: ${mutation.name}`);
+  assert.throws(
+    () => assertEditPlanLinkedEntriesDeletedAtContract(mutated),
+    `el contrato AST debe matar: ${mutation.name}`,
+  );
+}
 
 assert.deepEqual(
   getCycleScopedDayCodesToAdd(
