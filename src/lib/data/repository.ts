@@ -75,6 +75,18 @@ export async function loadAppData(
   mode: RepositoryMode = "demo",
   expectedUserId?: string | null,
 ): Promise<AppData> {
+  await ensureAppDataProfile(mode, expectedUserId);
+  return loadAppDataSnapshot(mode, expectedUserId);
+}
+
+/**
+ * Canonical legacy snapshot read. Profile provisioning is intentionally kept
+ * outside this read so session orchestration can settle it in a background lane.
+ */
+export async function loadAppDataSnapshot(
+  mode: RepositoryMode = "demo",
+  expectedUserId?: string | null,
+): Promise<AppData> {
   if (mode === "demo") return loadLocalData();
 
   const supabase = getSupabaseBrowserClient();
@@ -89,11 +101,28 @@ export async function loadAppData(
   if (!userId) throw createSessionRequiredError();
   if (expectedUserId && userId !== expectedUserId) throw createSessionExpiredError();
 
-  await ensureProfile(userId, user.email ?? "", expectedUserId ?? userId);
   const exercises = await fetchExercises(userId);
   const sessions = await fetchTrainingSessions(userId);
   const entries = sessions.flatMap((session) => session.entries);
   return { exercises, entries, sessions, source: "supabase" };
+}
+
+/** Profile provisioning is identity-owned background work, not canonical data. */
+export async function ensureAppDataProfile(
+  mode: RepositoryMode = "demo",
+  expectedUserId?: string | null,
+): Promise<void> {
+  if (mode === "demo") return;
+
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) throw createSessionRequiredError();
+  const { data: userData, error } = await supabase.auth.getUser();
+  if (error) throw createSessionExpiredError();
+  const user = userData.user;
+  const userId = user?.id;
+  if (!userId) throw createSessionRequiredError();
+  if (expectedUserId && userId !== expectedUserId) throw createSessionExpiredError();
+  await ensureProfile(userId, user.email ?? "", expectedUserId ?? userId);
 }
 
 export async function saveExercise(

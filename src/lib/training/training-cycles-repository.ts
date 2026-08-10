@@ -66,8 +66,16 @@ export class TrainingCycleRepositoryError extends Error {
   }
 }
 
-export async function getActiveTrainingCycle(): Promise<TrainingCycle | null> {
-  const { supabase, userId } = await getAuthenticatedCycleRepository();
+export type TrainingCycleRequestGuard = () => boolean;
+
+export async function getActiveTrainingCycle(
+  expectedUserId: string | undefined = undefined,
+  isExpectedRequestCurrent?: TrainingCycleRequestGuard,
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+): Promise<TrainingCycle | null> {
+  assertExpectedTrainingCycleRequestCurrent(expectedUserId, isExpectedRequestCurrent);
+  const { supabase, userId } = await getAuthenticatedCycleRepository(expectedUserId, getClient);
+  assertExpectedTrainingCycleRequestCurrent(expectedUserId, isExpectedRequestCurrent);
   const { data, error } = await supabase
     .from("training_cycles")
     .select(TRAINING_CYCLE_COLUMNS)
@@ -76,6 +84,7 @@ export async function getActiveTrainingCycle(): Promise<TrainingCycle | null> {
     .is("deleted_at", null)
     .maybeSingle();
 
+  assertExpectedTrainingCycleRequestCurrent(expectedUserId, isExpectedRequestCurrent);
   if (error) throw mapCycleRepositoryError(error);
   return data ? mapTrainingCycleRow(data as unknown as TrainingCycleRow) : null;
 }
@@ -221,8 +230,11 @@ async function finishActiveTrainingCycle(
   return mapTrainingCycleRow(data as unknown as TrainingCycleRow);
 }
 
-async function getAuthenticatedCycleRepository(expectedUserId?: string) {
-  const supabase = getSupabaseBrowserClient();
+async function getAuthenticatedCycleRepository(
+  expectedUserId?: string,
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+) {
+  const supabase = getClient();
   if (!supabase) {
     throw new TrainingCycleRepositoryError(
       "session_required",
@@ -254,6 +266,18 @@ async function getAuthenticatedCycleRepository(expectedUserId?: string) {
   }
 
   return { supabase, userId };
+}
+
+function assertExpectedTrainingCycleRequestCurrent(
+  expectedUserId: string | undefined,
+  isExpectedRequestCurrent: TrainingCycleRequestGuard | undefined,
+) {
+  if (expectedUserId && (!isExpectedRequestCurrent || !isExpectedRequestCurrent())) {
+    throw new TrainingCycleRepositoryError(
+      "session_expired",
+      "Tu sesion cambio. Intenta nuevamente con la cuenta activa.",
+    );
+  }
 }
 
 async function assertExpectedCycleRepositoryUser(

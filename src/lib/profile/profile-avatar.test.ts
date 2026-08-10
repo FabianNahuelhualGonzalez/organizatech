@@ -391,6 +391,54 @@ async function runRepositoryTests() {
 
   {
     const { calls, repository } = createAvatarRepositoryMock();
+    assert.deepEqual(await repository.getCurrentProfileAvatar(userId, {
+      avatarPath: `${userId}/avatar`,
+      avatarUpdatedAt: "2026-07-07T12:00:00.000Z",
+    }), {
+      avatarPath: `${userId}/avatar`,
+      avatarUrl: "signed-avatar",
+      avatarUpdatedAt: "2026-07-07T12:00:00.000Z",
+    });
+    assert.equal(calls.profileReads, 0, "la metadata vigente evita el SELECT duplicado");
+    assert.deepEqual(calls.signedUrls, [{ path: `${userId}/avatar`, expiresIn: 3600 }]);
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock();
+    assert.equal((await repository.getCurrentProfileAvatar(userId, {
+      avatarPath: `${userId}/avatar`,
+      avatarUpdatedAt: null,
+    })).avatarUpdatedAt, "2026-07-07T12:00:00.000Z");
+    assert.equal(calls.profileReads, 1, "sin avatarUpdatedAt no se reutiliza metadata incompleta");
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock();
+    await repository.getCurrentProfileAvatar(userId, {
+      avatarPath: `${otherUserId}/avatar`,
+      avatarUpdatedAt: "2026-07-07T12:00:00.000Z",
+    });
+    assert.equal(calls.profileReads, 1, "un path de otra identidad fuerza lectura autorizada");
+    assert.deepEqual(calls.signedUrls, [{ path: `${userId}/avatar`, expiresIn: 3600 }]);
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock(`${userId}/avatar`, {
+      switchUserAfterSignedUrl: otherUserId,
+    });
+    await assert.rejects(
+      repository.getCurrentProfileAvatar(userId, {
+        avatarPath: `${userId}/avatar`,
+        avatarUpdatedAt: "2026-07-07T12:00:00.000Z",
+      }),
+      /Tu sesión cambió/,
+    );
+    assert.equal(calls.profileReads, 0);
+    assert.deepEqual(calls.signedUrls, [{ path: `${userId}/avatar`, expiresIn: 3600 }]);
+  }
+
+  {
+    const { calls, repository } = createAvatarRepositoryMock();
     await assert.rejects(
       repository.getCurrentProfileAvatar(otherUserId),
       /Tu sesión cambió/,

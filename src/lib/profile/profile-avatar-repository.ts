@@ -12,6 +12,7 @@ import {
   normalizeProfileAvatarPath,
   validateProfileAvatarFile,
   type ProfileAvatarFileLike,
+  type ProfileAvatarMetadata,
   type ProfileAvatarState,
 } from "@/lib/profile/profile-avatar";
 
@@ -48,13 +49,20 @@ export function createProfileAvatarRepository(
 
   async function getCurrentProfileAvatar(
     expectedUserId: string | undefined = undefined,
+    metadata: ProfileAvatarMetadata | undefined = undefined,
   ): Promise<ProfileAvatarState> {
     const { supabase, userId } = await getAuthenticatedProfileAvatarClient(expectedUserId);
-    const row = await getProfileAvatarRow(supabase, userId);
-    await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);
+    const reusableRow = getReusableProfileAvatarRow(userId, metadata);
+    const row = reusableRow ?? await getProfileAvatarRow(supabase, userId);
     const avatarPath = getCanonicalStoredAvatarPath(userId, row.avatar_path);
-    if (!avatarPath) return mapProfileAvatarState(null, null);
+    if (!avatarPath) {
+      if (!reusableRow) {
+        await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);
+      }
+      return mapProfileAvatarState(null, null);
+    }
 
+    await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);
     const avatarUrl = await createCanonicalSignedUrl(supabase, avatarPath);
     await assertExpectedProfileAvatarUser(supabase, expectedUserId ?? userId);
     return mapProfileAvatarState(row, avatarUrl);
@@ -184,6 +192,25 @@ function getCanonicalStoredAvatarPath(userId: string, storedPath: string | null)
   return normalizedPath && isOwnProfileAvatarPath(userId, normalizedPath)
     ? buildProfileAvatarPath(userId)
     : null;
+}
+
+function getReusableProfileAvatarRow(
+  userId: string,
+  metadata: ProfileAvatarMetadata | undefined,
+): ProfileAvatarRow | null {
+  if (!metadata?.avatarPath || !metadata.avatarUpdatedAt) return null;
+  const avatarPath = getCanonicalStoredAvatarPath(userId, metadata.avatarPath);
+  if (!avatarPath) return null;
+  const avatar = mapProfileAvatarState({
+    avatar_path: avatarPath,
+    avatar_updated_at: metadata.avatarUpdatedAt,
+  }, null);
+  if (!avatar.avatarPath || !avatar.avatarUpdatedAt) return null;
+
+  return {
+    avatar_path: avatar.avatarPath,
+    avatar_updated_at: avatar.avatarUpdatedAt,
+  };
 }
 
 async function getProfileAvatarRow(supabase: SupabaseClient, userId: string): Promise<ProfileAvatarRow> {

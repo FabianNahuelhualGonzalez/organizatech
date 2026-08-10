@@ -238,7 +238,7 @@ for (const forbidden of [
 const testCommands = packageJson.scripts.test.split(" && ");
 const registeredCommand =
   "tsx src/features/routine-builder/model/routine-builder-save.test.ts";
-assert.equal(testCommands.length, 124);
+assert.equal(testCommands.length, 126);
 assert.equal(testCommands.filter((command) => command === registeredCommand).length, 1);
 
 console.log("routine-builder save preparation tests passed");

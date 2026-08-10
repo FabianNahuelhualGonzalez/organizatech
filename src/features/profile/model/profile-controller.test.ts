@@ -952,3 +952,83 @@ test("signed URL queda derivada y nunca entra al perfil canónico", async () => 
   assert.equal("avatarUrl" in (current.profilePersonalData ?? {}), false);
   assert.match(current.profileAvatar.avatarUrl ?? "", /^https:\/\/signed\.invalid\//);
 });
+
+test("bootstrap reutiliza una sola vez metadata autorizada de Profile para firmar Avatar", async () => {
+  const avatarReads: Array<{
+    userId: string;
+    metadata: Parameters<ProfileDataSource["readAvatar"]>[1];
+  }> = [];
+  const { controller } = harness(immediateSource({
+    readAvatar: async (userId, metadata) => {
+      avatarReads.push({ userId, metadata });
+      return avatar(userId);
+    },
+  }));
+
+  await controller.bootstrap();
+  assert.deepEqual(avatarReads, [{
+    userId: USER_A,
+    metadata: {
+      avatarPath: `${USER_A}/avatar`,
+      avatarUpdatedAt: "2026-08-04T12:00:00.000Z",
+    },
+  }]);
+
+  await controller.refreshAvatar({ force: true, avatarPath: `${USER_A}/avatar` });
+  assert.deepEqual(avatarReads[1], { userId: USER_A, metadata: undefined });
+});
+
+test("A -> SIGNED_OUT -> B no entrega metadata autorizada de A al source de B", async () => {
+  const avatarReads: Array<{
+    userId: string;
+    metadata: Parameters<ProfileDataSource["readAvatar"]>[1];
+  }> = [];
+  const { controller, signOut, switchToB } = harness(immediateSource({
+    readAvatar: async (userId, metadata) => {
+      avatarReads.push({ userId, metadata });
+      return avatar(userId);
+    },
+  }));
+
+  await controller.bootstrap();
+  signOut();
+  switchToB();
+  await controller.bootstrap();
+
+  assert.deepEqual(avatarReads, [
+    {
+      userId: USER_A,
+      metadata: {
+        avatarPath: `${USER_A}/avatar`,
+        avatarUpdatedAt: "2026-08-04T12:00:00.000Z",
+      },
+    },
+    {
+      userId: USER_B,
+      metadata: {
+        avatarPath: `${USER_B}/avatar`,
+        avatarUpdatedAt: "2026-08-04T12:00:00.000Z",
+      },
+    },
+  ]);
+});
+
+test("upload invalida metadata anterior y el siguiente foreground consulta metadata remota", async () => {
+  const metadataReads: Array<Parameters<ProfileDataSource["readAvatar"]>[1]> = [];
+  const { controller } = harness(immediateSource({
+    readAvatar: async (userId, metadata) => {
+      metadataReads.push(metadata);
+      return avatar(userId);
+    },
+    uploadAvatar: async () => {
+      throw new Error("upload failed");
+    },
+  }));
+
+  await controller.bootstrap();
+  await assert.rejects(controller.uploadAvatar({} as File), /upload failed/);
+  await controller.foreground();
+
+  assert.equal(metadataReads[0]?.avatarUpdatedAt, "2026-08-04T12:00:00.000Z");
+  assert.equal(metadataReads[1], undefined);
+});

@@ -14,6 +14,7 @@ import {
   mergeProfileAvatarMetadata,
   preloadProfileAvatarImage,
   selectProfileAvatarPath,
+  type ProfileAvatarMetadata,
   type ProfileAvatarState,
 } from "@/lib/profile/profile-avatar";
 import type { ProfilePersonalDataInput } from "@/lib/profile/profile-form";
@@ -28,7 +29,10 @@ export interface ProfileIdentityPort {
 
 export interface ProfileDataSource {
   readProfile(expectedUserId: string): Promise<ProfilePersonalData>;
-  readAvatar(expectedUserId: string): Promise<ProfileAvatarState>;
+  readAvatar(
+    expectedUserId: string,
+    metadata?: ProfileAvatarMetadata,
+  ): Promise<ProfileAvatarState>;
   saveProfile(input: ProfilePersonalDataInput, expectedUserId: string): Promise<ProfilePersonalData>;
   uploadAvatar(file: File, expectedUserId: string): Promise<ProfileAvatarState>;
 }
@@ -99,6 +103,13 @@ interface ProfileAvatarMemoryEntry {
 interface ProfileAvatarVersion {
   readonly avatarPath: string;
   readonly avatarUpdatedAt: string;
+}
+
+interface AuthorizedProfileAvatarMetadata extends ProfileAvatarVersion {
+  readonly generation: number;
+  readonly userId: string;
+  readonly scope: string;
+  readonly identityKey: string;
 }
 
 type AvatarPreloadOutcome = "loaded" | "failed" | "stale";
@@ -224,6 +235,50 @@ export function createProfileController(input: {
       currentVersion.avatarUpdatedAt === version.avatarUpdatedAt;
   }
 
+  function captureAuthorizedProfileAvatarMetadata(
+    owner: ReadOwner,
+    profile: ProfilePersonalData,
+  ): AuthorizedProfileAvatarMetadata | null {
+    if (
+      !isReadCurrent("avatar", owner) ||
+      profile.id !== owner.userId ||
+      !owner.requestToken.scope ||
+      !profile.avatarPath ||
+      !profile.avatarUpdatedAt
+    ) return null;
+
+    return {
+      generation: owner.requestToken.generation,
+      userId: owner.userId,
+      scope: owner.requestToken.scope,
+      identityKey: owner.identityKey,
+      avatarPath: profile.avatarPath,
+      avatarUpdatedAt: profile.avatarUpdatedAt,
+    };
+  }
+
+  function reuseAuthorizedProfileAvatarMetadata(
+    owner: ReadOwner,
+    metadata: AuthorizedProfileAvatarMetadata | null,
+    avatarPath: string,
+  ): ProfileAvatarMetadata | undefined {
+    if (
+      !metadata ||
+      !isReadCurrent("avatar", owner) ||
+      metadata.generation !== owner.requestToken.generation ||
+      metadata.userId !== owner.userId ||
+      metadata.scope !== owner.requestToken.scope ||
+      metadata.identityKey !== owner.identityKey ||
+      metadata.avatarPath !== avatarPath ||
+      !metadata.avatarUpdatedAt
+    ) return undefined;
+
+    return {
+      avatarPath: metadata.avatarPath,
+      avatarUpdatedAt: metadata.avatarUpdatedAt,
+    };
+  }
+
   function getCurrentAvatarMemory(version: ProfileAvatarVersion | null): ProfileAvatarMemoryEntry | null {
     if (
       !avatarMemory ||
@@ -315,6 +370,7 @@ export function createProfileController(input: {
     owner: ReadOwner,
     options: ProfileAvatarRefreshOptions,
     publishLoading: boolean,
+    authorizedMetadata: AuthorizedProfileAvatarMetadata | null = null,
   ): Promise<ProfileAvatarState | null> {
     if (!isReadCurrent("avatar", owner)) return null;
     let expectedVersion = getSnapshotAvatarVersion();
@@ -336,6 +392,7 @@ export function createProfileController(input: {
       if (!avatarPath && options.allowProfileLookup) {
         const profile = await input.source.readProfile(owner.userId);
         if (!isReadCurrent("avatar", owner)) return null;
+        authorizedMetadata = captureAuthorizedProfileAvatarMetadata(owner, profile);
         if (options.publishProfileLookup) publish({ profilePersonalData: profile });
         avatarPath = profile.avatarPath;
         expectedVersion = profile.avatarPath && profile.avatarUpdatedAt
@@ -354,7 +411,13 @@ export function createProfileController(input: {
         return emptyAvatar;
       }
 
-      const avatar = await input.source.readAvatar(owner.userId);
+      const reusableMetadata = reuseAuthorizedProfileAvatarMetadata(
+        owner,
+        authorizedMetadata,
+        avatarPath,
+      );
+      authorizedMetadata = null;
+      const avatar = await input.source.readAvatar(owner.userId, reusableMetadata);
       if (!isReadCurrent("avatar", owner)) return null;
       if (
         expectedVersion &&
@@ -481,8 +544,14 @@ export function createProfileController(input: {
       try {
         const profile = await input.source.readProfile(profileOwner.userId);
         if (!isReadCurrent("profile", profileOwner)) return null;
+        const authorizedMetadata = captureAuthorizedProfileAvatarMetadata(avatarOwner, profile);
         publish({ profilePersonalData: profile });
-        await runAvatarRead(avatarOwner, { force: true, avatarPath: profile.avatarPath }, false);
+        await runAvatarRead(
+          avatarOwner,
+          { force: true, avatarPath: profile.avatarPath },
+          false,
+          authorizedMetadata,
+        );
         if (!isReadCurrent("profile", profileOwner)) return null;
         return profile;
       } catch (error) {

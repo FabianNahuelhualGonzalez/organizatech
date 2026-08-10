@@ -157,6 +157,15 @@ export interface CycleScopedTrainingSessionData {
   entries: ExerciseEntry[];
 }
 
+export interface CycleScopedTrainingSessionRawData {
+  readonly ownerUserId: string;
+  readonly sessionRows: readonly CycleScopedTrainingSessionRow[];
+  readonly entryRows: readonly CycleScopedTrainingSessionEntryRow[];
+  readonly referencedExerciseRows: readonly CycleScopedReferencedExerciseRow[];
+}
+
+export type CycleScopedTrainingRequestGuard = () => boolean;
+
 export interface CycleScopedRoutine {
   id: string;
   cycleId: string;
@@ -731,40 +740,54 @@ export async function addCycleScopedTrainingDaysAndExercises(
   };
 }
 
-export async function getCycleScopedTrainingPlan(cycleId: string): Promise<CycleScopedTrainingPlan> {
-  const { supabase, userId } = await getAuthenticatedCycleScopedRepository();
+export async function getCycleScopedTrainingPlan(
+  cycleId: string,
+  expectedUserId: string | undefined = undefined,
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+  isExpectedRequestCurrent?: CycleScopedTrainingRequestGuard,
+): Promise<CycleScopedTrainingPlan> {
+  assertExpectedCycleScopedRequestCurrent(expectedUserId, isExpectedRequestCurrent);
+  const { supabase, userId } = await getAuthenticatedCycleScopedRepository(
+    getClient,
+    expectedUserId,
+  );
+  assertExpectedCycleScopedRequestCurrent(expectedUserId, isExpectedRequestCurrent);
 
-  const { data: routines, error: routinesError } = await supabase
-    .from("training_cycle_routines")
-    .select("id,cycle_id,name,sort_order,notes")
-    .eq("user_id", userId)
-    .eq("cycle_id", cycleId)
-    .is("deleted_at", null)
-    .order("sort_order", { ascending: true })
-    .order("created_at", { ascending: true });
+  const [
+    { data: routines, error: routinesError },
+    { data: days, error: daysError },
+    { data: exercises, error: exercisesError },
+  ] = await Promise.all([
+    supabase
+      .from("training_cycle_routines")
+      .select("id,cycle_id,name,sort_order,notes")
+      .eq("user_id", userId)
+      .eq("cycle_id", cycleId)
+      .is("deleted_at", null)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("training_cycle_days")
+      .select("id,cycle_id,routine_id,week_index,day_code,sort_order,notes")
+      .eq("user_id", userId)
+      .eq("cycle_id", cycleId)
+      .is("deleted_at", null)
+      .order("week_index", { ascending: true })
+      .order("sort_order", { ascending: true }),
+    supabase
+      .from("training_cycle_exercises")
+      .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,created_at,notes,source_legacy_exercise_id,exercise_lineage_id")
+      .eq("user_id", userId)
+      .eq("cycle_id", cycleId)
+      .is("deleted_at", null)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+  ]);
+
+  assertExpectedCycleScopedRequestCurrent(expectedUserId, isExpectedRequestCurrent);
 
   if (routinesError) throw mapCycleScopedRepositoryError(routinesError);
-
-  const { data: days, error: daysError } = await supabase
-    .from("training_cycle_days")
-    .select("id,cycle_id,routine_id,week_index,day_code,sort_order,notes")
-    .eq("user_id", userId)
-    .eq("cycle_id", cycleId)
-    .is("deleted_at", null)
-    .order("week_index", { ascending: true })
-    .order("sort_order", { ascending: true });
-
   if (daysError) throw mapCycleScopedRepositoryError(daysError);
-
-  const { data: exercises, error: exercisesError } = await supabase
-    .from("training_cycle_exercises")
-    .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,created_at,notes,source_legacy_exercise_id,exercise_lineage_id")
-    .eq("user_id", userId)
-    .eq("cycle_id", cycleId)
-    .is("deleted_at", null)
-    .order("sort_order", { ascending: true })
-    .order("created_at", { ascending: true });
-
   if (exercisesError) throw mapCycleScopedRepositoryError(exercisesError);
 
   return mapCycleScopedTrainingPlan(
@@ -777,59 +800,125 @@ export async function getCycleScopedTrainingPlan(cycleId: string): Promise<Cycle
 export async function getCycleScopedTrainingSessionData(
   cycleId: string,
   plan: CycleScopedTrainingPlan,
+  expectedUserId: string | undefined = undefined,
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+  isExpectedRequestCurrent?: CycleScopedTrainingRequestGuard,
 ): Promise<CycleScopedTrainingSessionData> {
-  const { supabase, userId } = await getAuthenticatedCycleScopedRepository();
-  const planIndex = createCycleScopedPlanIndex(plan);
+  const rawData = await getCycleScopedTrainingSessionRawData(
+    cycleId,
+    expectedUserId,
+    getClient,
+    isExpectedRequestCurrent,
+  );
+  return assembleCycleScopedTrainingSessionData(cycleId, plan, rawData);
+}
 
-  const { data: sessions, error: sessionsError } = await supabase
-    .from("training_sessions")
-    .select("id,cycle_id,cycle_day_id,week_number,trained_at,calendar_week_start,planned_day,planned_date,trained_date,status,completed_at,deleted_at,notes,created_at")
-    .eq("user_id", userId)
-    .eq("cycle_id", cycleId)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+export async function getCycleScopedTrainingSessionRawData(
+  cycleId: string,
+  expectedUserId: string | undefined = undefined,
+  getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
+  isExpectedRequestCurrent?: CycleScopedTrainingRequestGuard,
+): Promise<CycleScopedTrainingSessionRawData> {
+  assertExpectedCycleScopedRequestCurrent(expectedUserId, isExpectedRequestCurrent);
+  const { supabase, userId } = await getAuthenticatedCycleScopedRepository(
+    getClient,
+    expectedUserId,
+  );
+  assertExpectedCycleScopedRequestCurrent(expectedUserId, isExpectedRequestCurrent);
 
-  if (sessionsError) throw mapCycleScopedRepositoryError(sessionsError);
-
-  const sessionRows = (sessions ?? []) as unknown as CycleScopedTrainingSessionRow[];
-  if (sessionRows.length === 0) {
-    return { sessions: [], entries: [] };
-  }
-
-  const sessionIds = sessionRows.map((session) => session.id);
-  const { data: entries, error: entriesError } = await supabase
-    .from("exercise_entries")
-    .select("id,session_id,exercise_id,training_cycle_exercise_id,exercise_lineage_id,weight,previous_weight,reps,rir,notes,created_at")
-    .eq("user_id", userId)
-    .in("session_id", sessionIds)
-    .order("created_at", { ascending: true });
-
-  if (entriesError) throw mapCycleScopedRepositoryError(entriesError);
-  const entryRows = (entries ?? []) as unknown as CycleScopedTrainingSessionEntryRow[];
-  const historicalExerciseIds = Array.from(new Set(
-    entryRows
-      .map((entry) => entry.training_cycle_exercise_id)
-      .filter((id): id is string => typeof id === "string" && !planIndex.exercisesById.has(id)),
-  ));
-
-  if (historicalExerciseIds.length > 0) {
-    const { data: historicalExercises, error: historicalError } = await supabase
-      .from("training_cycle_exercises")
-      .select("id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,created_at,notes,source_legacy_exercise_id,exercise_lineage_id")
+  const [
+    { data: sessions, error: sessionsError },
+    { data: entries, error: entriesError },
+  ] = await Promise.all([
+    supabase
+      .from("training_sessions")
+      .select("id,cycle_id,cycle_day_id,week_number,trained_at,calendar_week_start,planned_day,planned_date,trained_date,status,completed_at,deleted_at,notes,created_at")
       .eq("user_id", userId)
       .eq("cycle_id", cycleId)
-      .in("id", historicalExerciseIds);
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("exercise_entries")
+      .select("id,session_id,exercise_id,training_cycle_exercise_id,exercise_lineage_id,weight,previous_weight,reps,rir,notes,created_at,training_sessions!inner(id,user_id,cycle_id,deleted_at),training_cycle_exercises(id,user_id,cycle_id,day_id,name,target_sets,target_reps,base_weight,side_weight,sort_order,created_at,deleted_at,notes,source_legacy_exercise_id,exercise_lineage_id)")
+      .eq("user_id", userId)
+      .eq("training_sessions.user_id", userId)
+      .eq("training_sessions.cycle_id", cycleId)
+      .is("training_sessions.deleted_at", null)
+      .eq("training_cycle_exercises.user_id", userId)
+      .eq("training_cycle_exercises.cycle_id", cycleId)
+      .is("training_cycle_exercises.deleted_at", null)
+      .order("created_at", { ascending: true }),
+  ]);
 
-    if (historicalError) throw mapCycleScopedRepositoryError(historicalError);
-    for (const exercise of (historicalExercises ?? []) as unknown as CycleScopedExerciseRow[]) {
+  const sessionRows = (sessions ?? []) as unknown as CycleScopedTrainingSessionRow[];
+  const entryQueryRows = (entries ?? []) as unknown as CycleScopedTrainingSessionEntryQueryRow[];
+  const entryRows: CycleScopedTrainingSessionEntryRow[] = entryQueryRows;
+  const referencedExercisesById = new Map<string, CycleScopedReferencedExerciseRow>();
+  for (const entry of entryQueryRows) {
+    const related = Array.isArray(entry.training_cycle_exercises)
+      ? entry.training_cycle_exercises
+      : entry.training_cycle_exercises
+        ? [entry.training_cycle_exercises]
+        : [];
+    for (const exercise of related) {
+      if (
+        exercise.user_id === userId &&
+        exercise.cycle_id === cycleId &&
+        exercise.deleted_at === null
+      ) referencedExercisesById.set(exercise.id, exercise);
+    }
+  }
+  const referencedExerciseRows = [...referencedExercisesById.values()];
+
+  assertExpectedCycleScopedRequestCurrent(expectedUserId, isExpectedRequestCurrent);
+
+  if (sessionsError) throw mapCycleScopedRepositoryError(sessionsError);
+  if (entriesError) throw mapCycleScopedRepositoryError(entriesError);
+
+  return { ownerUserId: userId, sessionRows, entryRows, referencedExerciseRows };
+}
+
+export function assembleCycleScopedTrainingSessionData(
+  cycleId: string,
+  plan: CycleScopedTrainingPlan,
+  rawData: CycleScopedTrainingSessionRawData,
+): CycleScopedTrainingSessionData {
+  const planIndex = createCycleScopedPlanIndex(plan);
+  for (const exercise of rawData.referencedExerciseRows) {
+    if (
+      exercise.user_id !== rawData.ownerUserId ||
+      exercise.cycle_id !== cycleId ||
+      exercise.deleted_at !== null
+    ) continue;
+    if (!hasCompleteCycleScopedExerciseMetadata(exercise)) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        "La referencia histórica de una serie tiene metadata incompleta.",
+      );
+    }
+    if (!planIndex.exercisesById.has(exercise.id)) {
       planIndex.exercisesById.set(exercise.id, mapCycleScopedExerciseRow(exercise));
     }
   }
-
   return mapCycleScopedTrainingSessionData(
-    sessionRows,
-    entryRows,
+    [...rawData.sessionRows],
+    [...rawData.entryRows],
     planIndex,
+  );
+}
+
+function hasCompleteCycleScopedExerciseMetadata(
+  exercise: CycleScopedReferencedExerciseRow,
+) {
+  return Boolean(
+    exercise.id &&
+    exercise.day_id &&
+    exercise.name?.trim() &&
+    Number.isFinite(Number(exercise.target_sets)) &&
+    Number.isFinite(Number(exercise.target_reps)) &&
+    Number.isFinite(Number(exercise.base_weight)) &&
+    Number.isFinite(Number(exercise.sort_order)) &&
+    exercise.created_at,
   );
 }
 
@@ -911,6 +1000,18 @@ async function assertExpectedCycleScopedRepositoryUser(
       "session_expired",
       "Tu sesion cambio. Intenta nuevamente con la cuenta activa.",
       error,
+    );
+  }
+}
+
+function assertExpectedCycleScopedRequestCurrent(
+  expectedUserId: string | undefined,
+  isExpectedRequestCurrent: CycleScopedTrainingRequestGuard | undefined,
+) {
+  if (expectedUserId && (!isExpectedRequestCurrent || !isExpectedRequestCurrent())) {
+    throw new CycleScopedTrainingRepositoryError(
+      "session_expired",
+      "Tu sesion cambio. Intenta nuevamente con la cuenta activa.",
     );
   }
 }
@@ -1289,6 +1390,11 @@ interface CycleScopedExerciseRow {
   exercise_lineage_id: string | null;
 }
 
+interface CycleScopedReferencedExerciseRow extends CycleScopedExerciseRow {
+  user_id: string;
+  deleted_at: string | null;
+}
+
 interface CycleScopedTrainingSessionRow {
   id: string;
   cycle_id: string;
@@ -1318,4 +1424,11 @@ interface CycleScopedTrainingSessionEntryRow {
   rir: string | null;
   notes: string | null;
   created_at: string;
+}
+
+interface CycleScopedTrainingSessionEntryQueryRow extends CycleScopedTrainingSessionEntryRow {
+  training_cycle_exercises:
+    | CycleScopedReferencedExerciseRow
+    | CycleScopedReferencedExerciseRow[]
+    | null;
 }

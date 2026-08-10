@@ -16,7 +16,6 @@ export interface LegacyTrainingDataSnapshot {
 
 export interface PersistedTrainingCyclesSnapshot {
   active: TrainingCycle | null;
-  history: readonly TrainingCycle[];
 }
 
 /**
@@ -40,17 +39,27 @@ export type PersistedTrainingCyclesState =
   | { status: "disabled" }
   | TrainingDataResourceState<PersistedTrainingCyclesSnapshot>;
 
+export type TrainingCycleHistoryState =
+  | { status: "disabled" }
+  | TrainingDataResourceState<readonly TrainingCycle[]>;
+
+export type TrainingDataProfilePrerequisiteState =
+  | { status: "disabled" }
+  | TrainingDataResourceState<true>;
+
 export type CycleScopedTrainingDataState =
   | { status: "disabled" }
-  | { status: "loading"; cycleId: string }
+  | { status: "loading"; cycleId: string; previous?: CycleScopedTrainingDataSnapshot }
   | { status: "ready"; cycleId: string; snapshot: CycleScopedTrainingDataSnapshot }
   | { status: "empty"; cycleId: string; snapshot: CycleScopedTrainingDataSnapshot; message: string }
-  | { status: "error"; cycleId: string; message: string };
+  | { status: "error"; cycleId: string; message: string; previous?: CycleScopedTrainingDataSnapshot };
 
 export interface TrainingDataState {
   appData: TrainingDataResourceState<LegacyTrainingDataSnapshot>;
   cycles: PersistedTrainingCyclesState;
+  cycleHistory: TrainingCycleHistoryState;
   cycleScoped: CycleScopedTrainingDataState;
+  profilePrerequisite: TrainingDataProfilePrerequisiteState;
 }
 
 export function createInitialTrainingDataState(
@@ -59,7 +68,9 @@ export function createInitialTrainingDataState(
   return {
     appData: { status: "idle" },
     cycles: cyclesEnabled ? { status: "loading" } : { status: "disabled" },
+    cycleHistory: cyclesEnabled ? { status: "idle" } : { status: "disabled" },
     cycleScoped: { status: "disabled" },
+    profilePrerequisite: { status: "disabled" },
   };
 }
 
@@ -67,6 +78,16 @@ export function getTrainingDataResourceValue<T>(
   resource: TrainingDataResourceState<T>,
 ): T | null {
   if (resource.status === "ready") return resource.data;
+  if (resource.status === "loading" || resource.status === "error") {
+    return resource.previous ?? null;
+  }
+  return null;
+}
+
+export function getCycleScopedTrainingDataValue(
+  resource: CycleScopedTrainingDataState,
+): CycleScopedTrainingDataSnapshot | null {
+  if (resource.status === "ready" || resource.status === "empty") return resource.snapshot;
   if (resource.status === "loading" || resource.status === "error") {
     return resource.previous ?? null;
   }
