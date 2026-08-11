@@ -52,7 +52,7 @@ npm run build
 El esquema base se encuentra en:
 
 - `supabase/schema.sql`
-- `supabase/migrations/20260513_add_exercise_day.sql`
+- `supabase/migrations/20260513000001_add_exercise_day.sql`
 
 Si Supabase no esta configurado, la aplicacion usa persistencia local en el navegador.
 

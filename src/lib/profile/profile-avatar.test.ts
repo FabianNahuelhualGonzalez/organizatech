@@ -604,7 +604,7 @@ async function runRepositoryTests() {
 function assertMigrationContract() {
   const migrationPath = path.join(
     process.cwd(),
-    "supabase/migrations/20260713_p0_h_profile_avatar_hardening.sql",
+    "supabase/migrations/20260713000001_p0_h_profile_avatar_hardening.sql",
   );
   const migration = readFileSync(migrationPath, "utf8");
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const migration = readFileSync("supabase/migrations/20260620_training_workout_readiness.sql", "utf8");
+const migration = readFileSync("supabase/migrations/20260620000001_training_workout_readiness.sql", "utf8");
 const postcheck = readFileSync("supabase/operations/qa/release-b/d2/01_postcheck_readonly.sql", "utf8");
 
 function normalizeLineEndings(value: string): string {

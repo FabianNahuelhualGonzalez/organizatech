@@ -13,9 +13,9 @@ import {
 } from "./training-daily-readiness-repository";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
-const baseMigration = readFileSync("supabase/migrations/20260608_training_daily_readiness.sql", "utf8");
+const baseMigration = readFileSync("supabase/migrations/20260608000001_training_daily_readiness.sql", "utf8");
 const ambiguityPatch = readFileSync(
-  "supabase/migrations/20260609_fix_training_daily_readiness_rpc_ambiguity.sql",
+  "supabase/migrations/20260609000001_fix_training_daily_readiness_rpc_ambiguity.sql",
   "utf8",
 );
 const repositorySource = readFileSync("src/lib/training/training-daily-readiness-repository.ts", "utf8");
