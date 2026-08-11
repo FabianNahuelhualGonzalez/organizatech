@@ -17,11 +17,23 @@ import { dirname, join, relative } from "node:path";
 
 const repositoryRoot = process.cwd();
 const migrationsDirectory = "supabase/migrations";
+const diagnosticsDirectory = "supabase/diagnostics";
+const diagnosticArtifact = "20260527_legacy_training_diagnostics.sql";
+const diagnosticSha256 = "bc08b6a49b01d1643d0ef99be45e2e5d88ca5ef913911baab4f144f943b206b9";
+const fingerprintArtifact = "perf-06-schema-fingerprint.sql";
+const fingerprintSha256 = "7da1bb6830207da2c8346a058854dd0c978468c2b8191168b6efabf28b2a58fa";
+const baselineFingerprintSha256 = "ebd6b8bb930d222700d7af69c0a9c69236bc9135ee123e5f7129599c8d7105f1";
+const finalFingerprintSha256 = "833c2db78f0caeb776bf04b54d05e9c52c2adb0ee1e03cdbc0f479fe2ea76bc9";
+const supersededFinalFingerprintSha256 = "1659325becce455f6e042cc4cb34c113552cc7b2562293a7f265f1162b578914";
+const schemaBaseline = "supabase/schema.sql";
+const legacyBaselineAcl = "supabase/baseline/perf-06-history-reconciliation-acl.sql";
 const normalizationDocument = "docs/perf-06-migration-history-normalization.md";
 const invariantSuffix = "_ensure_legacy_exercise_lineage_invariant.sql";
 const compensationSuffix = "_reconcile_legacy_exercise_lineages.sql";
 const invariantMigration = "20260811035538_ensure_legacy_exercise_lineage_invariant.sql";
 const compensationMigration = "20260811035542_reconcile_legacy_exercise_lineages.sql";
+const aclMigration = "20260811190144_perf_06r_daily_readiness_acl_normalization.sql";
+const aclMigrationSha256 = "3e49a2328f87bd09ad620287af801f71d82330aad2546aef324d4d50c1852749";
 const productRepository = "src/lib/data/repository.ts";
 const cycleScopedRepository = "src/lib/training/cycle-scoped-training-repository.ts";
 const lineageModel = "src/lib/training/training-exercise-lineage.ts";
@@ -30,7 +42,6 @@ const packageLockSha256 = "905a071c9ca8b20dcdd2c99e5f57fc1c51f163b2216aed11ca642
 
 const historicalMappings = [
   ["20260513_add_exercise_day.sql", "20260513000001_add_exercise_day.sql", "9e817d4aced1dade0b57ac942b67a4c06cf4cc937c6fc26f440c79d40bd24c27"],
-  ["20260527_legacy_training_diagnostics.sql", "20260527000001_legacy_training_diagnostics.sql", "bc08b6a49b01d1643d0ef99be45e2e5d88ca5ef913911baab4f144f943b206b9"],
   ["20260527_training_sessions_source_of_truth.sql", "20260527000002_training_sessions_source_of_truth.sql", "c8ec5b93657f399026a8725f4ce0787f09c1f04d94bbcc8e9636c710bc4b0c00"],
   ["20260531_training_cycles.sql", "20260531000001_training_cycles.sql", "457a52c1a99275b1e83482f5dc147a2809e79f14ecd474036a7e3260d5798d33"],
   ["20260604_training_cycle_scoped_model.sql", "20260604000001_training_cycle_scoped_model.sql", "9edfb5128a997300b9b2b295180429d2e2ce71c7ee95ed75c4dc005b0834420b"],
@@ -55,6 +66,122 @@ const protectedPerfMigrations = [
   ["20260810230014_perf_06c_rls_initplan.sql", "5848f53f3026f9e6aee33427765bdd2a06e0780323503c1cddb760c17dd50d29"],
   ["20260810230028_perf_06b_exercise_entries_user_session_created_id_index.sql", "ebddfe5324c6223af9c5f85e7567d067792fd1a9a65b651235bdb8ce0d0a5eaf"],
 ] as const;
+
+const protectedPerf06RMigrations = [
+  [invariantMigration, "85f43eb2e415b45866f8693779cda9da62b70ac960d42edb5c72f84316c6920a"],
+  [compensationMigration, "a62b9a41bfaa1a20fe1c594dca081618477ba467a56ed8b85969a23d2cbe0708"],
+] as const;
+
+type ProfileConstraint =
+  | {
+    kind: "primary-key";
+    name: string | null;
+    deferrable: boolean;
+    initiallyDeferred: boolean;
+    validated: true;
+  }
+  | {
+    kind: "foreign-key";
+    name: string | null;
+    referencedRelation: string;
+    referencedColumns: string[];
+    match: "simple" | "full" | "partial";
+    onUpdate: "no action" | "restrict" | "cascade" | "set null" | "set default";
+    onDelete: "no action" | "restrict" | "cascade" | "set null" | "set default";
+    deferrable: boolean;
+    initiallyDeferred: boolean;
+    validated: true;
+  }
+  | {
+    kind: "unique";
+    name: string | null;
+    deferrable: boolean;
+    initiallyDeferred: boolean;
+    validated: true;
+  }
+  | {
+    kind: "check";
+    name: string | null;
+    expression: string;
+    noInherit: boolean;
+    validated: true;
+  };
+
+type ProfileColumn = {
+  position: number;
+  name: string;
+  sqlType: string;
+  nullable: boolean;
+  defaultExpression: string | null;
+  identity: "always" | "by-default" | null;
+  generated: { expression: string; storage: "stored" } | null;
+  constraints: ProfileConstraint[];
+};
+
+type ProfileTableConstraint = {
+  columns: string[];
+  constraint: ProfileConstraint;
+};
+
+const profileGenderConstraint: ProfileConstraint = {
+  kind: "check",
+  name: "profiles_gender_allowed",
+  expression: "gender is null or gender in ('male', 'female', 'non_binary', 'prefer_not_to_say', 'not_specified')",
+  noInherit: false,
+  validated: true,
+};
+
+const expectedProfileColumns: ProfileColumn[] = [
+  {
+    position: 1,
+    name: "id",
+    sqlType: "uuid",
+    nullable: false,
+    defaultExpression: null,
+    identity: null,
+    generated: null,
+    constraints: [
+      { kind: "primary-key", name: null, deferrable: false, initiallyDeferred: false, validated: true },
+      {
+        kind: "foreign-key",
+        name: null,
+        referencedRelation: "auth.users",
+        referencedColumns: ["id"],
+        match: "simple",
+        onUpdate: "no action",
+        onDelete: "cascade",
+        deferrable: false,
+        initiallyDeferred: false,
+        validated: true,
+      },
+    ],
+  },
+  { position: 2, name: "display_name", sqlType: "text", nullable: false, defaultExpression: null, identity: null, generated: null, constraints: [] },
+  { position: 3, name: "email", sqlType: "text", nullable: false, defaultExpression: null, identity: null, generated: null, constraints: [] },
+  {
+    position: 4,
+    name: "current_streak",
+    sqlType: "integer",
+    nullable: false,
+    defaultExpression: "0",
+    identity: null,
+    generated: null,
+    constraints: [{ kind: "check", name: null, expression: "current_streak >= 0", noInherit: false, validated: true }],
+  },
+  { position: 5, name: "updated_at", sqlType: "timestamp with time zone", nullable: false, defaultExpression: "now()", identity: null, generated: null, constraints: [] },
+  { position: 6, name: "created_at", sqlType: "timestamp with time zone", nullable: false, defaultExpression: "now()", identity: null, generated: null, constraints: [] },
+  { position: 7, name: "first_name", sqlType: "text", nullable: true, defaultExpression: null, identity: null, generated: null, constraints: [] },
+  { position: 8, name: "last_name", sqlType: "text", nullable: true, defaultExpression: null, identity: null, generated: null, constraints: [] },
+  { position: 9, name: "birth_date", sqlType: "date", nullable: true, defaultExpression: null, identity: null, generated: null, constraints: [] },
+  { position: 10, name: "gender", sqlType: "text", nullable: true, defaultExpression: "'not_specified'::text", identity: null, generated: null, constraints: [profileGenderConstraint] },
+  { position: 11, name: "avatar_path", sqlType: "text", nullable: true, defaultExpression: null, identity: null, generated: null, constraints: [] },
+  { position: 12, name: "avatar_updated_at", sqlType: "timestamp with time zone", nullable: true, defaultExpression: null, identity: null, generated: null, constraints: [] },
+  { position: 13, name: "phone_number", sqlType: "text", nullable: true, defaultExpression: null, identity: null, generated: null, constraints: [] },
+];
+
+const expectedProfileTableConstraints: ProfileTableConstraint[] = [
+  { columns: ["gender"], constraint: profileGenderConstraint },
+];
 
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
@@ -171,6 +298,518 @@ function executableStatements(source: string): SqlStatement[] {
   const tail = masked.slice(start).replace(/\s+/g, " ").trim();
   assert.equal(tail, "", "toda sentencia SQL ejecutable termina en punto y coma");
   return statements;
+}
+
+type ProfileSqlToken = {
+  raw: string;
+  normalized: string;
+  kind: "word" | "number" | "string" | "quoted-identifier" | "symbol";
+};
+
+type ProfileDefinitionSpan = {
+  start: number;
+  end: number;
+  source: string;
+  tokens: ProfileSqlToken[];
+  kind: "column" | "constraint";
+  name: string;
+};
+
+type ProfileTableLayout = {
+  entries: ProfileDefinitionSpan[];
+};
+
+function tokenizeProfileSql(source: string): ProfileSqlToken[] {
+  const tokens: ProfileSqlToken[] = [];
+  let index = 0;
+  while (index < source.length) {
+    if (/\s/.test(source[index])) {
+      index += 1;
+      continue;
+    }
+    if (source.startsWith("--", index)) {
+      const newline = source.indexOf("\n", index + 2);
+      index = newline === -1 ? source.length : newline + 1;
+      continue;
+    }
+    if (source.startsWith("/*", index)) {
+      let depth = 1;
+      let cursor = index + 2;
+      while (cursor < source.length && depth > 0) {
+        if (source.startsWith("/*", cursor)) {
+          depth += 1;
+          cursor += 2;
+        } else if (source.startsWith("*/", cursor)) {
+          depth -= 1;
+          cursor += 2;
+        } else cursor += 1;
+      }
+      assert.equal(depth, 0, "profiles: comentario SQL de bloque balanceado");
+      index = cursor;
+      continue;
+    }
+    if (source[index] === "'") {
+      let cursor = index + 1;
+      while (cursor < source.length) {
+        if (source[cursor] === "'" && source[cursor + 1] === "'") cursor += 2;
+        else if (source[cursor] === "'") {
+          cursor += 1;
+          break;
+        } else cursor += 1;
+      }
+      assert.equal(source[cursor - 1], "'", "profiles: literal SQL balanceado");
+      const raw = source.slice(index, cursor);
+      tokens.push({ raw, normalized: raw, kind: "string" });
+      index = cursor;
+      continue;
+    }
+    if (source[index] === '"') {
+      let cursor = index + 1;
+      while (cursor < source.length) {
+        if (source[cursor] === '"' && source[cursor + 1] === '"') cursor += 2;
+        else if (source[cursor] === '"') {
+          cursor += 1;
+          break;
+        } else cursor += 1;
+      }
+      assert.equal(source[cursor - 1], '"', "profiles: identificador SQL citado balanceado");
+      const raw = source.slice(index, cursor);
+      tokens.push({ raw, normalized: raw, kind: "quoted-identifier" });
+      index = cursor;
+      continue;
+    }
+    const word = /^[A-Za-z_][A-Za-z_0-9$]*/.exec(source.slice(index))?.[0];
+    if (word) {
+      tokens.push({ raw: word, normalized: word.toLowerCase(), kind: "word" });
+      index += word.length;
+      continue;
+    }
+    const number = /^\d+(?:\.\d+)?/.exec(source.slice(index))?.[0];
+    if (number) {
+      tokens.push({ raw: number, normalized: number, kind: "number" });
+      index += number.length;
+      continue;
+    }
+    const operator = ["::", ">=", "<=", "<>", "!=", "||"].find((candidate) => source.startsWith(candidate, index));
+    if (operator) {
+      tokens.push({ raw: operator, normalized: operator, kind: "symbol" });
+      index += operator.length;
+      continue;
+    }
+    assert.match(source[index], /^[()[\],.;+*/=<>-]$/, `profiles: token SQL soportado en offset ${index}`);
+    tokens.push({ raw: source[index], normalized: source[index], kind: "symbol" });
+    index += 1;
+  }
+  return tokens;
+}
+
+function profileTokensSql(tokens: readonly ProfileSqlToken[]): string {
+  let result = "";
+  let previous: string | null = null;
+  for (const token of tokens) {
+    const value = token.normalized;
+    if (value === "." || value === "::" || value === ")" || value === "]" || value === ",") {
+      result = result.trimEnd();
+      result += value === "," ? ", " : value;
+    } else if (value === "(" || value === "[") {
+      const spacedKeyword = value === "(" && previous !== null && ["in", "exists"].includes(previous);
+      if (spacedKeyword && result && !result.endsWith(" ")) result += " ";
+      else result = result.trimEnd();
+      result += value;
+    } else {
+      const previousJoins = previous === "(" || previous === "[" || previous === "." || previous === "::";
+      if (result && !result.endsWith(" ") && !previousJoins) result += " ";
+      result += value;
+    }
+    previous = value;
+  }
+  return result.trim();
+}
+
+function matchingProfileTokenParen(tokens: readonly ProfileSqlToken[], opening: number): number {
+  assert.equal(tokens[opening]?.normalized, "(", "profiles: apertura de paréntesis esperada");
+  let depth = 0;
+  for (let index = opening; index < tokens.length; index += 1) {
+    if (tokens[index].normalized === "(") depth += 1;
+    else if (tokens[index].normalized === ")") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  assert.fail("profiles: paréntesis de definición balanceados");
+}
+
+function trimProfileSpan(source: string, start: number, end: number): { start: number; end: number } {
+  while (start < end && /\s/.test(source[start])) start += 1;
+  while (end > start && /\s/.test(source[end - 1])) end -= 1;
+  return { start, end };
+}
+
+function profileTableLayout(source: string): ProfileTableLayout {
+  const tableStatements = executableStatements(source).filter(({ code }) =>
+    /^create table public\.profiles\s*\(/.test(code)
+  );
+  assert.equal(tableStatements.length, 1, "profiles: existe un único CREATE TABLE public.profiles ejecutable");
+  const statement = tableStatements[0];
+  const masked = maskSqlPreservingOffsets(statement.original);
+  const header = /create\s+table\s+public\.profiles\s*\(/i.exec(masked);
+  assert.ok(header, "profiles: cabecera CREATE TABLE reconocible");
+  const opening = header.index + header[0].lastIndexOf("(");
+  let depth = 0;
+  let closing = -1;
+  for (let index = opening; index < masked.length; index += 1) {
+    if (masked[index] === "(") depth += 1;
+    else if (masked[index] === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        closing = index;
+        break;
+      }
+    }
+  }
+  assert.ok(closing > opening, "profiles: cuerpo CREATE TABLE balanceado");
+  assert.equal(masked.slice(closing + 1).trim(), ";", "profiles: CREATE TABLE no contiene SQL ejecutable residual");
+
+  const entries: ProfileDefinitionSpan[] = [];
+  let entryStart = opening + 1;
+  depth = 0;
+  for (let index = opening + 1; index <= closing; index += 1) {
+    const character = masked[index];
+    if (character === "(") depth += 1;
+    else if (character === ")" && index < closing) depth -= 1;
+    const boundary = (character === "," && depth === 0) || index === closing;
+    if (!boundary) continue;
+    const local = trimProfileSpan(statement.original, entryStart, index);
+    assert.ok(local.end > local.start, "profiles: definición no vacía entre comas top-level");
+    const start = statement.offset + local.start;
+    const end = statement.offset + local.end;
+    const definition = source.slice(start, end);
+    const tokens = tokenizeProfileSql(definition);
+    assert.ok(tokens.length >= 2, "profiles: definición contiene nombre y cuerpo");
+    const first = tokens[0].normalized;
+    const isConstraint = ["constraint", "check", "primary", "unique", "foreign", "exclude"].includes(first);
+    const name = isConstraint
+      ? (first === "constraint" ? tokens[1]?.normalized : `<${first}>`)
+      : first;
+    assert.ok(name, "profiles: definición tiene identificador");
+    entries.push({ start, end, source: definition, tokens, kind: isConstraint ? "constraint" : "column", name });
+    entryStart = index + 1;
+  }
+  return { entries };
+}
+
+const profileColumnClauseStarts = new Set([
+  "collate",
+  "constraint",
+  "not",
+  "null",
+  "default",
+  "generated",
+  "primary",
+  "unique",
+  "check",
+  "references",
+]);
+
+function nextProfileColumnClause(tokens: readonly ProfileSqlToken[], start: number): number {
+  let depth = 0;
+  for (let index = start; index < tokens.length; index += 1) {
+    if (tokens[index].normalized === "(") depth += 1;
+    else if (tokens[index].normalized === ")") depth -= 1;
+    else if (depth === 0 && profileColumnClauseStarts.has(tokens[index].normalized)) return index;
+  }
+  return tokens.length;
+}
+
+function normalizeProfileType(tokens: readonly ProfileSqlToken[]): string {
+  const type = profileTokensSql(tokens);
+  const aliases: Record<string, string> = {
+    int: "integer",
+    int4: "integer",
+    timestamptz: "timestamp with time zone",
+  };
+  return aliases[type] ?? type;
+}
+
+function normalizeProfileDefault(tokens: readonly ProfileSqlToken[], sqlType: string): string {
+  const expression = profileTokensSql(tokens);
+  if (sqlType === "text" && /^'(?:''|[^'])*'$/.test(expression)) return `${expression}::text`;
+  return expression;
+}
+
+function parseConstraintDeferrability(tokens: readonly ProfileSqlToken[]): {
+  deferrable: boolean;
+  initiallyDeferred: boolean;
+} {
+  let deferrable = false;
+  let initiallyDeferred = false;
+  let index = 0;
+  while (index < tokens.length) {
+    if (tokens[index].normalized === "deferrable") {
+      deferrable = true;
+      index += 1;
+    } else if (tokens[index].normalized === "not" && tokens[index + 1]?.normalized === "deferrable") {
+      deferrable = false;
+      index += 2;
+    } else if (tokens[index].normalized === "initially" && ["immediate", "deferred"].includes(tokens[index + 1]?.normalized)) {
+      initiallyDeferred = tokens[index + 1].normalized === "deferred";
+      index += 2;
+    } else assert.fail(`profiles: opción de constraint no soportada: ${profileTokensSql(tokens.slice(index))}`);
+  }
+  return { deferrable, initiallyDeferred };
+}
+
+function parseProfileForeignKey(
+  tokens: readonly ProfileSqlToken[],
+  name: string | null,
+): ProfileConstraint {
+  const opening = tokens.findIndex(({ normalized }) => normalized === "(");
+  assert.ok(opening > 0, "profiles: REFERENCES declara relación y columnas");
+  const closing = matchingProfileTokenParen(tokens, opening);
+  const referencedRelation = profileTokensSql(tokens.slice(0, opening));
+  const referencedColumns = profileTokensSql(tokens.slice(opening + 1, closing))
+    .split(",")
+    .map((column) => column.trim());
+  assert.ok(referencedColumns.every(Boolean), "profiles: REFERENCES contiene columnas válidas");
+
+  let match: "simple" | "full" | "partial" = "simple";
+  let onUpdate: "no action" | "restrict" | "cascade" | "set null" | "set default" = "no action";
+  let onDelete: "no action" | "restrict" | "cascade" | "set null" | "set default" = "no action";
+  let deferrable = false;
+  let initiallyDeferred = false;
+  let index = closing + 1;
+  const readAction = (): typeof onUpdate => {
+    const first = tokens[index]?.normalized;
+    const second = tokens[index + 1]?.normalized;
+    if (first === "no" && second === "action") {
+      index += 2;
+      return "no action";
+    }
+    if (first === "set" && second === "null") {
+      index += 2;
+      return "set null";
+    }
+    if (first === "set" && second === "default") {
+      index += 2;
+      return "set default";
+    }
+    assert.ok(first === "restrict" || first === "cascade", "profiles: acción REFERENCES reconocible");
+    index += 1;
+    return first;
+  };
+  while (index < tokens.length) {
+    if (tokens[index].normalized === "match") {
+      const value = tokens[index + 1]?.normalized;
+      assert.ok(value === "simple" || value === "full" || value === "partial", "profiles: MATCH de FK reconocido");
+      match = value;
+      index += 2;
+    } else if (tokens[index].normalized === "on") {
+      const event = tokens[index + 1]?.normalized;
+      assert.ok(event === "update" || event === "delete", "profiles: evento REFERENCES reconocido");
+      index += 2;
+      const action = readAction();
+      if (event === "update") onUpdate = action;
+      else onDelete = action;
+    } else if (tokens[index].normalized === "deferrable") {
+      deferrable = true;
+      index += 1;
+    } else if (tokens[index].normalized === "not" && tokens[index + 1]?.normalized === "deferrable") {
+      deferrable = false;
+      index += 2;
+    } else if (tokens[index].normalized === "initially" && ["immediate", "deferred"].includes(tokens[index + 1]?.normalized)) {
+      initiallyDeferred = tokens[index + 1].normalized === "deferred";
+      index += 2;
+    } else assert.fail(`profiles: opción REFERENCES no soportada: ${profileTokensSql(tokens.slice(index))}`);
+  }
+  return {
+    kind: "foreign-key",
+    name,
+    referencedRelation,
+    referencedColumns,
+    match,
+    onUpdate,
+    onDelete,
+    deferrable,
+    initiallyDeferred,
+    validated: true,
+  };
+}
+
+function parseProfileCheck(
+  tokens: readonly ProfileSqlToken[],
+  name: string | null,
+): ProfileConstraint {
+  assert.equal(tokens[0]?.normalized, "(", "profiles: CHECK contiene expresión parentizada");
+  const closing = matchingProfileTokenParen(tokens, 0);
+  let noInherit = false;
+  let index = closing + 1;
+  if (tokens[index]?.normalized === "no" && tokens[index + 1]?.normalized === "inherit") {
+    noInherit = true;
+    index += 2;
+  }
+  assert.equal(index, tokens.length, "profiles: CHECK consume todas sus opciones");
+  return {
+    kind: "check",
+    name,
+    expression: profileTokensSql(tokens.slice(1, closing)),
+    noInherit,
+    validated: true,
+  };
+}
+
+function parseProfileColumn(entry: ProfileDefinitionSpan, position: number): ProfileColumn {
+  const tokens = entry.tokens;
+  const name = tokens[0].normalized;
+  const firstClause = nextProfileColumnClause(tokens, 1);
+  assert.ok(firstClause > 1, `profiles.${name}: tipo SQL presente`);
+  const sqlType = normalizeProfileType(tokens.slice(1, firstClause));
+  let explicitNullable: boolean | null = null;
+  let defaultExpression: string | null = null;
+  let identity: ProfileColumn["identity"] = null;
+  let generated: ProfileColumn["generated"] = null;
+  const constraints: ProfileConstraint[] = [];
+  let pendingConstraintName: string | null = null;
+  let index = firstClause;
+
+  while (index < tokens.length) {
+    const keyword = tokens[index].normalized;
+    if (keyword === "constraint") {
+      assert.equal(pendingConstraintName, null, `profiles.${name}: nombre de constraint no duplicado`);
+      assert.ok(tokens[index + 1], `profiles.${name}: CONSTRAINT declara nombre`);
+      pendingConstraintName = tokens[index + 1].normalized;
+      index += 2;
+    } else if (keyword === "not" && tokens[index + 1]?.normalized === "null") {
+      assert.equal(explicitNullable, null, `profiles.${name}: nulabilidad declarada una vez`);
+      explicitNullable = false;
+      index += 2;
+    } else if (keyword === "null") {
+      assert.equal(explicitNullable, null, `profiles.${name}: nulabilidad declarada una vez`);
+      explicitNullable = true;
+      index += 1;
+    } else if (keyword === "default") {
+      assert.equal(defaultExpression, null, `profiles.${name}: default declarado una vez`);
+      const expressionStart = index + 1;
+      let expressionEnd = nextProfileColumnClause(tokens, expressionStart);
+      if (tokens[expressionStart]?.normalized === "null") expressionEnd = Math.max(expressionEnd, expressionStart + 1);
+      assert.ok(expressionEnd > expressionStart, `profiles.${name}: DEFAULT contiene expresión`);
+      defaultExpression = normalizeProfileDefault(tokens.slice(expressionStart, expressionEnd), sqlType);
+      index = expressionEnd;
+    } else if (keyword === "generated") {
+      assert.equal(identity, null, `profiles.${name}: identity declarada una vez`);
+      assert.equal(generated, null, `profiles.${name}: generated declarado una vez`);
+      if (tokens[index + 1]?.normalized === "always" && tokens[index + 2]?.normalized === "as" && tokens[index + 3]?.normalized === "identity") {
+        identity = "always";
+        index += 4;
+      } else if (
+        tokens[index + 1]?.normalized === "by"
+        && tokens[index + 2]?.normalized === "default"
+        && tokens[index + 3]?.normalized === "as"
+        && tokens[index + 4]?.normalized === "identity"
+      ) {
+        identity = "by-default";
+        index += 5;
+      } else {
+        assert.equal(tokens[index + 1]?.normalized, "always", `profiles.${name}: GENERATED usa ALWAYS`);
+        assert.equal(tokens[index + 2]?.normalized, "as", `profiles.${name}: GENERATED usa AS`);
+        assert.equal(tokens[index + 3]?.normalized, "(", `profiles.${name}: GENERATED contiene expresión`);
+        const closing = matchingProfileTokenParen(tokens, index + 3);
+        assert.equal(tokens[closing + 1]?.normalized, "stored", `profiles.${name}: GENERATED es STORED en PostgreSQL 17`);
+        generated = { expression: profileTokensSql(tokens.slice(index + 4, closing)), storage: "stored" };
+        index = closing + 2;
+      }
+    } else if (keyword === "primary" && tokens[index + 1]?.normalized === "key") {
+      const end = nextProfileColumnClause(tokens, index + 2);
+      const options = parseConstraintDeferrability(tokens.slice(index + 2, end));
+      constraints.push({ kind: "primary-key", name: pendingConstraintName, ...options, validated: true });
+      pendingConstraintName = null;
+      index = end;
+    } else if (keyword === "unique") {
+      const end = nextProfileColumnClause(tokens, index + 1);
+      const options = parseConstraintDeferrability(tokens.slice(index + 1, end));
+      constraints.push({ kind: "unique", name: pendingConstraintName, ...options, validated: true });
+      pendingConstraintName = null;
+      index = end;
+    } else if (keyword === "check") {
+      assert.equal(tokens[index + 1]?.normalized, "(", `profiles.${name}: CHECK contiene expresión`);
+      const closing = matchingProfileTokenParen(tokens, index + 1);
+      let end = closing + 1;
+      if (tokens[end]?.normalized === "no" && tokens[end + 1]?.normalized === "inherit") end += 2;
+      constraints.push(parseProfileCheck(tokens.slice(index + 1, end), pendingConstraintName));
+      pendingConstraintName = null;
+      index = end;
+    } else if (keyword === "references") {
+      const end = nextProfileColumnClause(tokens, index + 1);
+      constraints.push(parseProfileForeignKey(tokens.slice(index + 1, end), pendingConstraintName));
+      pendingConstraintName = null;
+      index = end;
+    } else assert.fail(`profiles.${name}: cláusula no soportada o residual: ${profileTokensSql(tokens.slice(index))}`);
+  }
+  assert.equal(pendingConstraintName, null, `profiles.${name}: CONSTRAINT siempre se asocia a una cláusula`);
+  const nullable = explicitNullable === false
+    ? false
+    : !(identity !== null || constraints.some(({ kind }) => kind === "primary-key"));
+  return { position, name, sqlType, nullable, defaultExpression, identity, generated, constraints };
+}
+
+function parseProfileTableConstraint(entry: ProfileDefinitionSpan, columnNames: readonly string[]): ProfileTableConstraint {
+  const tokens = entry.tokens;
+  let index = 0;
+  let name: string | null = null;
+  if (tokens[index].normalized === "constraint") {
+    name = tokens[index + 1]?.normalized ?? null;
+    assert.ok(name, "profiles: constraint de tabla declara nombre");
+    index += 2;
+  }
+  assert.equal(tokens[index]?.normalized, "check", "profiles: sólo CHECK de tabla esperado en baseline");
+  const constraint = parseProfileCheck(tokens.slice(index + 1), name);
+  const columnSet = new Set(columnNames);
+  const referenced = new Set(
+    tokens
+      .filter(({ kind, normalized }) => kind === "word" && columnSet.has(normalized))
+      .map(({ normalized }) => normalized),
+  );
+  const columns = columnNames.filter((column) => referenced.has(column));
+  return { columns, constraint };
+}
+
+function profileSchemaSemantics(source: string): {
+  columns: ProfileColumn[];
+  tableConstraints: ProfileTableConstraint[];
+} {
+  const layout = profileTableLayout(source);
+  const columnEntries = layout.entries.filter(({ kind }) => kind === "column");
+  const columns = columnEntries.map((entry, index) => parseProfileColumn(entry, index + 1));
+  assert.equal(new Set(columns.map(({ name }) => name)).size, columns.length, "profiles: nombres de columna únicos");
+  const columnNames = columns.map(({ name }) => name);
+  const tableConstraints = layout.entries
+    .filter(({ kind }) => kind === "constraint")
+    .map((entry) => parseProfileTableConstraint(entry, columnNames));
+  for (const tableConstraint of tableConstraints) {
+    for (const columnName of tableConstraint.columns) {
+      const column = columns.find(({ name }) => name === columnName);
+      assert.ok(column, `profiles: constraint referencia columna existente ${columnName}`);
+      column.constraints.push(tableConstraint.constraint);
+    }
+  }
+  return { columns, tableConstraints };
+}
+
+function validateProfileSchema(source: string): void {
+  const actual = profileSchemaSemantics(source);
+  assert.equal(actual.columns.length, expectedProfileColumns.length, "profiles: cantidad exacta de columnas");
+  for (let index = 0; index < expectedProfileColumns.length; index += 1) {
+    const expected = expectedProfileColumns[index];
+    const column = actual.columns[index];
+    assert.equal(column.position, expected.position, `profiles ordinal ${index + 1}: posición física`);
+    assert.equal(column.name, expected.name, `profiles ordinal ${index + 1}: nombre`);
+    assert.equal(column.sqlType, expected.sqlType, `profiles.${expected.name}: tipo SQL completo`);
+    assert.equal(column.nullable, expected.nullable, `profiles.${expected.name}: nulabilidad`);
+    assert.equal(column.identity, expected.identity, `profiles.${expected.name}: identity`);
+    assert.deepEqual(column.generated, expected.generated, `profiles.${expected.name}: generated`);
+    assert.equal(column.defaultExpression, expected.defaultExpression, `profiles.${expected.name}: default normalizado`);
+    assert.deepEqual(column.constraints, expected.constraints, `profiles.${expected.name}: constraints asociadas`);
+  }
+  assert.deepEqual(actual.tableConstraints, expectedProfileTableConstraints, "profiles: constraints de tabla exactas");
 }
 
 function executableBody(statement: SqlStatement): string {
@@ -490,6 +1129,175 @@ function validateCompensation(source: string): void {
   assert.match(source, /Proposed rollback \(documentation only; never automatic\)/, "rollback sólo comentado");
 }
 
+function validateAclMigration(root: string): void {
+  assert.equal(existsSync(join(root, legacyBaselineAcl)), false, "ACL suelto/no versionado permanece ausente");
+  const path = join(root, migrationsDirectory, aclMigration);
+  assert.ok(existsSync(path), "migración ACL versionada presente en migrations");
+  const source = readFileSync(path, "utf8");
+  assertLexicallyValidSql(source, aclMigration);
+  const statements = executableStatements(source).map(({ code }) => code);
+  assert.deepEqual(statements, [
+    "revoke all on function public.save_daily_training_readiness(jsonb) from public;",
+    "revoke all on function public.save_daily_training_readiness(jsonb) from anon;",
+    "revoke all on function public.save_daily_training_readiness(jsonb) from service_role;",
+    "grant execute on function public.save_daily_training_readiness(jsonb) to authenticated;",
+    "grant execute on function public.save_daily_training_readiness(jsonb) to postgres;",
+  ], "migración ACL exacta: sólo authenticated y postgres conservan EXECUTE");
+  assert.equal(sha256(source), aclMigrationSha256, "migración ACL conserva su SHA-256 aprobado");
+}
+
+function validateFingerprintArtifact(root: string): void {
+  const path = join(root, diagnosticsDirectory, fingerprintArtifact);
+  assert.ok(existsSync(path), "fingerprint v1 presente en diagnostics");
+  assert.equal(
+    migrationFiles(root).some((file) => /schema[-_]fingerprint/i.test(file)),
+    false,
+    "fingerprint diagnóstico ausente de migrations",
+  );
+
+  const source = readFileSync(path, "utf8");
+  assertLexicallyValidSql(source, fingerprintArtifact);
+  const withLiterals = commentFreeSql(source).replace(/\s+/g, " ").trim();
+  const structural = maskSqlPreservingOffsets(source).replace(/\s+/g, " ").trim().toLowerCase();
+  assert.doesNotMatch(withLiterals, /\b[a-f0-9]{64}\b/i, "fingerprint no contiene hashes resultado hardcodeados");
+
+  const statements = executableStatements(source);
+  assert.equal(statements.length, 1, "fingerprint contiene una única consulta SQL");
+  assert.match(statements[0].code, /^with\b/, "fingerprint es una consulta CTE read-only");
+  assert.doesNotMatch(
+    structural,
+    /\b(insert|update|delete|merge|alter|create|drop|truncate|grant|revoke|copy|call|do)\b/,
+    "fingerprint no contiene DML, DDL ni cambios de privilegios",
+  );
+  assert.doesNotMatch(
+    structural,
+    /\b(?:from|join)\s+(?:public|auth|storage)\./,
+    "fingerprint no lee filas de public, auth ni storage",
+  );
+
+  assert.match(
+    withLiterals,
+    /^with excluded_relation\(schema_name, relation_name\) as \( values \('public'::name, 'training_session_consolidation_audit'::name\) \), target_rel as \(/i,
+    "fingerprint declara una única exclusión explícita y dedicada",
+  );
+  assert.equal(
+    (withLiterals.match(/'training_session_consolidation_audit'/g) ?? []).length,
+    1,
+    "fingerprint menciona exactamente una relación excluida",
+  );
+  assert.equal(
+    (withLiterals.match(/from excluded_relation as excluded/gi) ?? []).length,
+    5,
+    "la única exclusión se aplica a relaciones, constraints, índices, policies y triggers",
+  );
+
+  const categories = [
+    "relation",
+    "column",
+    "constraint",
+    "index",
+    "policy",
+    "function",
+    "trigger",
+    "table_acl",
+    "column_acl",
+  ] as const;
+  for (const category of categories) {
+    assert.equal(
+      (withLiterals.match(new RegExp(`'${category}'`, "g")) ?? []).length,
+      1,
+      `fingerprint contiene una única categoría ${category}`,
+    );
+  }
+  assert.equal((withLiterals.match(/'OVERALL'/g) ?? []).length, 1, "fingerprint emite un único total OVERALL");
+  assert.equal(
+    (withLiterals.match(/pg_catalog\.concat_ws\( '\|'/g) ?? []).length,
+    categories.length,
+    "fingerprint serializa las nueve categorías con separador pipe",
+  );
+  assert.match(
+    withLiterals,
+    /pg_catalog\.string_agg\(line, E'\\n' order by line\)/,
+    "fingerprint ordena y serializa cada categoría con LF",
+  );
+  assert.match(
+    withLiterals,
+    /pg_catalog\.string_agg\( category \|\| '\|' \|\| line, E'\\n' order by category, line \)/,
+    "fingerprint ordena y serializa OVERALL con categoría, pipe y LF",
+  );
+  assert.equal(
+    (withLiterals.match(/pg_catalog\.sha256\(/g) ?? []).length,
+    2,
+    "fingerprint usa SHA-256 para categoría y OVERALL",
+  );
+  assert.equal(
+    (withLiterals.match(/pg_catalog\.convert_to\(/g) ?? []).length,
+    2,
+    "fingerprint fija serialización UTF-8 en ambos hashes",
+  );
+  assert.equal((withLiterals.match(/'UTF8'/g) ?? []).length, 2, "fingerprint fija UTF8 exactamente dos veces");
+
+  assert.match(withLiterals, /attribute\.attnum::text/, "column incorpora posición física attnum");
+  assert.match(withLiterals, /attribute\.attidentity::text/, "column incorpora identity");
+  assert.match(withLiterals, /attribute\.attgenerated::text/, "column incorpora generated");
+  assert.match(
+    withLiterals,
+    /namespace\.nspname = 'storage' and relation\.relname = 'objects'/,
+    "policy incluye storage.objects",
+  );
+  assert.match(
+    withLiterals,
+    /namespace\.nspname = 'auth' and relation\.relname = 'users'/,
+    "trigger incluye auth.users",
+  );
+  assert.match(withLiterals, /procedure\.proacl/, "function incorpora ACL ejecutable");
+  assert.match(withLiterals, /target\.relacl/, "table_acl incorpora ACL de relaciones");
+  assert.match(withLiterals, /attribute\.attacl is not null/, "column_acl incorpora sólo ACL explícito");
+  assert.match(
+    withLiterals,
+    /select category, item_count, sha256 from category_hashes union all select 'OVERALL', item_count, sha256 from overall order by category;/,
+    "fingerprint emite únicamente categoría, conteo y SHA-256",
+  );
+  assert.equal(sha256(source), fingerprintSha256, "consulta fingerprint conserva su SHA-256 aprobado");
+}
+
+function validateBaselineArtifacts(root: string): void {
+  const diagnosticPath = join(diagnosticsDirectory, diagnosticArtifact);
+  assert.equal(
+    sha256(readFileSync(join(root, diagnosticPath))),
+    diagnosticSha256,
+    "diagnóstico operativo conserva su SHA-256 byte-idéntico",
+  );
+  assert.equal(
+    migrationFiles(root).some((file) => /legacy_training_diagnostics/i.test(file)),
+    false,
+    "diagnóstico ausente de migrations",
+  );
+
+  const expectedMigrationFiles = [
+    ...historicalMappings.map(([, newName]) => newName),
+    ...protectedPerfMigrations.map(([file]) => file),
+    ...protectedPerf06RMigrations.map(([file]) => file),
+    aclMigration,
+  ].sort();
+  assert.equal(expectedMigrationFiles.length, 24, "inventario esperado: 18 históricas + 6 PERF-06");
+  const actualMigrationFiles = migrationFiles(root);
+  assert.deepEqual(actualMigrationFiles, expectedMigrationFiles, "inventario exacto de 24 versiones sin diagnóstico ni versión inventada");
+  assert.ok(
+    actualMigrationFiles.every((file) => /^\d{14}_.+\.sql$/.test(file)),
+    "las 24 migraciones usan versiones CLI de 14 dígitos",
+  );
+  assert.equal(
+    new Set(actualMigrationFiles.map((file) => file.slice(0, 14))).size,
+    24,
+    "las 24 versiones de migración son únicas",
+  );
+
+  validateProfileSchema(read(root, schemaBaseline));
+  validateAclMigration(root);
+  validateFingerprintArtifact(root);
+}
+
 function validateDocumentation(root: string): void {
   const document = read(root, normalizationDocument);
   for (const [oldName, newName, hash] of historicalMappings) {
@@ -498,10 +1306,37 @@ function validateDocumentation(root: string): void {
     assert.ok(document.includes(hash), `documenta SHA-256 de ${newName}`);
   }
   assert.match(document, /ordinales[\s\S]*no representan una hora histórica/i);
+  assert.match(document, /18 migraciones históricas materiales/i);
+  assert.match(document, /6 versiones PERF-06/i);
+  assert.match(document, /24 versiones totales/i);
+  assert.doesNotMatch(
+    document,
+    /19 migraciones históricas|19 históricas|5 versiones PERF-06|23 versiones totales|25 versiones totales/i,
+    "sin conteos residuales 19/5/23/25",
+  );
+  assert.match(document, /supabase\/diagnostics\/20260527_legacy_training_diagnostics\.sql/);
+  assert.match(document, /no es migración material[\s\S]*no recibe versión[\s\S]*no se registra/i);
+  assert.doesNotMatch(document, /\d{14}_legacy_training_diagnostics\.sql/i, "diagnóstico sin versión de historial inventada");
+  assert.match(document, new RegExp(aclMigration.replaceAll(".", "\\.")));
+  assert.ok(document.includes(aclMigrationSha256), "documenta SHA-256 de la migración ACL");
+  assert.match(document, /ACL suelto|baseline[\s\S]*no existe/i, "documenta ausencia del ACL no versionado");
+  assert.doesNotMatch(document, /ACL declarativo no versionado/i, "no prescribe un ACL manual fuera de migrations");
+  assert.match(document, /supabase\/diagnostics\/perf-06-schema-fingerprint\.sql/);
+  assert.ok(document.includes(fingerprintSha256), "documenta SHA-256 de la consulta fingerprint");
+  assert.match(document, /perf-06-schema-fingerprint\/v1/);
+  assert.match(document, /concat_ws\('\|'/);
+  assert.match(document, /346 elementos/);
+  assert.match(document, /377 elementos/);
+  assert.ok(document.includes(baselineFingerprintSha256), "documenta fingerprint baseline reproducible");
+  assert.ok(document.includes(finalFingerprintSha256), "documenta fingerprint final autorizado reproducible");
+  assert.ok(document.includes(supersededFinalFingerprintSha256), "explica el fingerprint final previo supersedido");
+  assert.match(document, /EXECUTE residual[\s\S]*service_role|service_role[\s\S]*EXECUTE residual/i, "explica deriva ACL previa");
+  assert.match(document, /attnum[\s\S]*profiles|orden físico[\s\S]*profiles|profiles[\s\S]*attnum/i, "explica deriva previa de profiles");
   assert.match(document, /QA no conserva actualmente filas de historial/i);
   assert.match(document, /No se permite asumir que PROD sea equivalente a QA/i);
   assert.match(document, /schema_paths = \[\]/);
-  assert.match(document, /schema\.sql` → 19 históricas → PERF-06A → PERF-06C → PERF-06B → invariant → compensatoria/);
+  assert.match(document, /schema\.sql` → 18 históricas → PERF-06A → PERF-06C → PERF-06B → invariant → compensatoria → ACL versionado/);
+  assert.match(document, /22 policies/);
   assert.match(document, /carrera|race/i, "documenta la carrera detectada");
   assert.match(document, /invariant permanente/i, "documenta la solución permanente");
   assert.match(document, /20260811035538_ensure_legacy_exercise_lineage_invariant\.sql/);
@@ -689,11 +1524,16 @@ function validateContractRegistration(root: string): void {
 }
 
 function validateFixture(root: string): void {
-  assert.equal(historicalMappings.length, 19, "mapping exacto de 19 históricos");
+  assert.equal(historicalMappings.length, 18, "mapping exacto de 18 históricos materiales");
+  assert.equal(
+    protectedPerfMigrations.length + protectedPerf06RMigrations.length + 1,
+    6,
+    "inventario PERF-06 exacto: A, C, B, invariant, compensatoria y ACL",
+  );
   const normalizedNames = historicalMappings.map(([, newName]) => newName);
   const versions = normalizedNames.map((name) => name.slice(0, 14));
-  assert.ok(normalizedNames.every((name) => /^\d{14}_.+\.sql$/.test(name)), "las 19 rutas usan 14 dígitos");
-  assert.equal(new Set(versions).size, 19, "las 19 versiones son únicas");
+  assert.ok(normalizedNames.every((name) => /^\d{14}_.+\.sql$/.test(name)), "las 18 rutas usan 14 dígitos");
+  assert.equal(new Set(versions).size, 18, "las 18 versiones son únicas");
   assert.deepEqual([...normalizedNames].sort(), normalizedNames, "orden lógico exacto");
 
   for (const [oldName, newName, expectedHash] of historicalMappings) {
@@ -704,6 +1544,9 @@ function validateFixture(root: string): void {
   }
 
   for (const [file, expectedHash] of protectedPerfMigrations) {
+    assert.equal(sha256(readFileSync(join(root, migrationsDirectory, file))), expectedHash, `${file} byte-idéntico`);
+  }
+  for (const [file, expectedHash] of protectedPerf06RMigrations) {
     assert.equal(sha256(readFileSync(join(root, migrationsDirectory, file))), expectedHash, `${file} byte-idéntico`);
   }
 
@@ -719,14 +1562,17 @@ function validateFixture(root: string): void {
   const compensation = compensationFile(root);
   const invariantVersion = invariant.slice(0, 14);
   const compensationVersion = compensation.slice(0, 14);
+  const aclVersion = aclMigration.slice(0, 14);
   const latestProtectedVersion = protectedPerfMigrations.at(-1)![0].slice(0, 14);
   assert.ok(invariantVersion > latestProtectedVersion, "invariant es posterior a PERF-06A/C/B");
   assert.ok(compensationVersion > invariantVersion, "invariant queda estrictamente antes de compensatoria");
   assert.ok(compensationVersion > latestProtectedVersion, "la compensatoria es posterior a PERF-06A/C/B");
+  assert.ok(aclVersion > compensationVersion, "ACL versionado queda estrictamente después de compensatoria");
   validateInvariant(read(root, join(migrationsDirectory, invariant)));
   validateCompensation(read(root, join(migrationsDirectory, compensation)));
   validateProductAndAccess(root);
   validateContractRegistration(root);
+  validateBaselineArtifacts(root);
   validateDocumentation(root);
 }
 
@@ -766,6 +1612,10 @@ function copyFixture(): string {
     ...protectedPerfMigrations.map(([file]) => join(migrationsDirectory, file)),
     join(migrationsDirectory, invariantFile(repositoryRoot)),
     join(migrationsDirectory, compensationFile(repositoryRoot)),
+    join(migrationsDirectory, aclMigration),
+    join(diagnosticsDirectory, diagnosticArtifact),
+    join(diagnosticsDirectory, fingerprintArtifact),
+    schemaBaseline,
     normalizationDocument,
     productRepository,
     cycleScopedRepository,
@@ -799,6 +1649,10 @@ function canonicalSourcesSha(): string {
     ...protectedPerfMigrations.map(([file]) => join(migrationsDirectory, file)),
     join(migrationsDirectory, invariantFile(repositoryRoot)),
     join(migrationsDirectory, compensationFile(repositoryRoot)),
+    join(migrationsDirectory, aclMigration),
+    join(diagnosticsDirectory, diagnosticArtifact),
+    join(diagnosticsDirectory, fingerprintArtifact),
+    schemaBaseline,
     normalizationDocument,
     productRepository,
     cycleScopedRepository,
@@ -821,6 +1675,22 @@ function mutateCompensation(root: string, mutate: (source: string) => string): v
   const source = readFileSync(path, "utf8");
   const mutated = mutate(source);
   assert.notEqual(mutated, source, "mutation probe efectivo");
+  writeFileSync(path, mutated);
+}
+
+function mutateAclMigration(root: string, mutate: (source: string) => string): void {
+  const path = join(root, migrationsDirectory, aclMigration);
+  const source = readFileSync(path, "utf8");
+  const mutated = mutate(source);
+  assert.notEqual(mutated, source, "mutation probe ACL efectivo");
+  writeFileSync(path, mutated);
+}
+
+function mutateFingerprint(root: string, mutate: (source: string) => string): void {
+  const path = join(root, diagnosticsDirectory, fingerprintArtifact);
+  const source = readFileSync(path, "utf8");
+  const mutated = mutate(source);
+  assert.notEqual(mutated, source, "mutation probe fingerprint efectivo");
   writeFileSync(path, mutated);
 }
 
@@ -872,9 +1742,422 @@ function removeCompensationPostcheck(source: string): string {
   return `${source.slice(0, start)}\n  perform 1;${source.slice(end)}`;
 }
 
-type MutationProbe = { name: string; apply: (root: string) => void };
+function mutateProfileDefinition(
+  root: string,
+  selector: { kind: ProfileDefinitionSpan["kind"]; name: string },
+  replacement: string,
+): void {
+  const path = join(root, schemaBaseline);
+  const source = readFileSync(path, "utf8");
+  const before = profileTableLayout(source);
+  const matches = before.entries.filter(({ kind, name }) => kind === selector.kind && name === selector.name);
+  assert.equal(matches.length, 1, `profile probe: selector estructural único ${selector.kind}.${selector.name}`);
+  const target = matches[0];
+  assert.notEqual(replacement, target.source, `profile probe: mutación efectiva ${selector.kind}.${selector.name}`);
+  const mutated = `${source.slice(0, target.start)}${replacement}${source.slice(target.end)}`;
+  writeFileSync(path, mutated);
+
+  const after = profileTableLayout(mutated);
+  const unaffectedBefore = before.entries
+    .filter(({ kind, name }) => kind !== selector.kind || name !== selector.name)
+    .map(({ kind, name, source: definition }) => ({ kind, name, definition }));
+  const unaffectedAfter = after.entries
+    .filter(({ kind, name }) => kind !== selector.kind || name !== selector.name)
+    .map(({ kind, name, source: definition }) => ({ kind, name, definition }));
+  assert.deepEqual(unaffectedAfter, unaffectedBefore, `profile probe: sólo muta nodo ${selector.kind}.${selector.name}`);
+}
+
+function mutateProfileColumn(root: string, name: string, replacement: string): void {
+  mutateProfileDefinition(root, { kind: "column", name }, replacement);
+}
+
+function mutateProfileConstraint(root: string, name: string, replacement: string): void {
+  mutateProfileDefinition(root, { kind: "constraint", name }, replacement);
+}
+
+function swapProfileColumns(root: string, firstName: string, secondName: string): void {
+  const path = join(root, schemaBaseline);
+  const source = readFileSync(path, "utf8");
+  const layout = profileTableLayout(source);
+  const firstMatches = layout.entries.filter(({ kind, name }) => kind === "column" && name === firstName);
+  const secondMatches = layout.entries.filter(({ kind, name }) => kind === "column" && name === secondName);
+  assert.equal(firstMatches.length, 1, `profile probe: primera columna única ${firstName}`);
+  assert.equal(secondMatches.length, 1, `profile probe: segunda columna única ${secondName}`);
+  const [left, right] = [firstMatches[0], secondMatches[0]].sort((a, b) => a.start - b.start);
+  const between = source.slice(left.end, right.start);
+  const mutated = `${source.slice(0, left.start)}${right.source}${between}${left.source}${source.slice(right.end)}`;
+  assert.notEqual(mutated, source, "profile probe: swap estructural efectivo");
+  writeFileSync(path, mutated);
+}
+
+function addUnexpectedProfileColumn(root: string): void {
+  const path = join(root, schemaBaseline);
+  const source = readFileSync(path, "utf8");
+  const layout = profileTableLayout(source);
+  const firstTableConstraint = layout.entries.find(({ kind }) => kind === "constraint");
+  assert.ok(firstTableConstraint, "profile probe: constraint de tabla delimita inserción estructural");
+  const mutated = `${source.slice(0, firstTableConstraint.start)}unexpected_profile_column text,\n  ${source.slice(firstTableConstraint.start)}`;
+  writeFileSync(path, mutated);
+  assert.equal(
+    profileTableLayout(mutated).entries.filter(({ kind }) => kind === "column").length,
+    expectedProfileColumns.length + 1,
+    "profile probe: columna inesperada añadida exactamente una vez",
+  );
+}
+
+type MutationProbe = {
+  name: string;
+  apply: (root: string) => void;
+  expectedFailure?: RegExp;
+};
 
 const mutationProbes: MutationProbe[] = [
+  {
+    name: "devolver diagnóstico a migrations",
+    apply: (root) => copyFileSync(
+      join(root, diagnosticsDirectory, diagnosticArtifact),
+      join(root, migrationsDirectory, "20260527000001_legacy_training_diagnostics.sql"),
+    ),
+  },
+  {
+    name: "registrar diagnóstico con versión inventada en historial",
+    apply: (root) => {
+      const path = join(root, normalizationDocument);
+      writeFileSync(path, `${readFileSync(path, "utf8")}\nschema_migrations: 20260527000001_legacy_training_diagnostics.sql\n`);
+    },
+  },
+  ...[
+    "19 migraciones históricas",
+    "5 versiones PERF-06",
+    "23 versiones totales",
+    "25 versiones totales",
+  ].map((residualCount): MutationProbe => ({
+    name: `reintroducir conteo residual: ${residualCount}`,
+    apply: (root) => {
+      const path = join(root, normalizationDocument);
+      writeFileSync(path, `${readFileSync(path, "utf8")}\n${residualCount}.\n`);
+    },
+    expectedFailure: /sin conteos residuales 19\/5\/23\/25/,
+  })),
+  {
+    name: "alterar bytes del diagnóstico operativo",
+    apply: (root) => {
+      const path = join(root, diagnosticsDirectory, diagnosticArtifact);
+      writeFileSync(path, `${readFileSync(path, "utf8")}\n-- mutation\n`);
+    },
+  },
+  {
+    name: "profiles: cambiar tipo UUID",
+    apply: (root) => mutateProfileColumn(root, "id", "id text primary key"),
+    expectedFailure: /profiles\.id: tipo SQL completo/,
+  },
+  {
+    name: "profiles: cambiar tipo text",
+    apply: (root) => mutateProfileColumn(root, "display_name", "display_name varchar(255) not null"),
+    expectedFailure: /profiles\.display_name: tipo SQL completo/,
+  },
+  {
+    name: "profiles: cambiar tipo integer",
+    apply: (root) => mutateProfileColumn(
+      root,
+      "current_streak",
+      "current_streak bigint not null default 0 check (current_streak >= 0)",
+    ),
+    expectedFailure: /profiles\.current_streak: tipo SQL completo/,
+  },
+  {
+    name: "profiles: cambiar tipo timestamptz",
+    apply: (root) => mutateProfileColumn(root, "avatar_updated_at", "avatar_updated_at timestamp"),
+    expectedFailure: /profiles\.avatar_updated_at: tipo SQL completo/,
+  },
+  {
+    name: "profiles: cambiar tipo date",
+    apply: (root) => mutateProfileColumn(root, "birth_date", "birth_date timestamptz"),
+    expectedFailure: /profiles\.birth_date: tipo SQL completo/,
+  },
+  {
+    name: "profiles: cambiar default numérico",
+    apply: (root) => mutateProfileColumn(
+      root,
+      "current_streak",
+      "current_streak integer not null default 1 check (current_streak >= 0)",
+    ),
+    expectedFailure: /profiles\.current_streak: default normalizado/,
+  },
+  {
+    name: "profiles: eliminar default de timestamp",
+    apply: (root) => mutateProfileColumn(root, "updated_at", "updated_at timestamptz not null"),
+    expectedFailure: /profiles\.updated_at: default normalizado/,
+  },
+  {
+    name: "profiles: cambiar default de timestamp",
+    apply: (root) => mutateProfileColumn(root, "created_at", "created_at timestamptz not null default clock_timestamp()"),
+    expectedFailure: /profiles\.created_at: default normalizado/,
+  },
+  {
+    name: "profiles: cambiar default literal",
+    apply: (root) => mutateProfileColumn(root, "gender", "gender text default 'male'"),
+    expectedFailure: /profiles\.gender: default normalizado/,
+  },
+  {
+    name: "profiles: eliminar default literal",
+    apply: (root) => mutateProfileColumn(root, "gender", "gender text"),
+    expectedFailure: /profiles\.gender: default normalizado/,
+  },
+  {
+    name: "profiles: retirar NOT NULL",
+    apply: (root) => mutateProfileColumn(root, "display_name", "display_name text"),
+    expectedFailure: /profiles\.display_name: nulabilidad/,
+  },
+  {
+    name: "profiles: agregar NOT NULL",
+    apply: (root) => mutateProfileColumn(root, "first_name", "first_name text not null"),
+    expectedFailure: /profiles\.first_name: nulabilidad/,
+  },
+  {
+    name: "profiles: eliminar PRIMARY KEY conservando nulabilidad",
+    apply: (root) => mutateProfileColumn(root, "id", "id uuid not null references auth.users(id) on delete cascade"),
+    expectedFailure: /profiles\.id: constraints asociadas/,
+  },
+  {
+    name: "profiles: alterar acción de FK",
+    apply: (root) => mutateProfileColumn(root, "id", "id uuid primary key references auth.users(id) on delete restrict"),
+    expectedFailure: /profiles\.id: constraints asociadas/,
+  },
+  {
+    name: "profiles: eliminar CHECK inline",
+    apply: (root) => mutateProfileColumn(root, "current_streak", "current_streak integer not null default 0"),
+    expectedFailure: /profiles\.current_streak: constraints asociadas/,
+  },
+  {
+    name: "profiles: alterar CHECK nombrado",
+    apply: (root) => mutateProfileConstraint(
+      root,
+      "profiles_gender_allowed",
+      "constraint profiles_gender_allowed check (gender is null or gender in ('male', 'female', 'non_binary', 'prefer_not_to_say'))",
+    ),
+    expectedFailure: /profiles\.gender: constraints asociadas/,
+  },
+  {
+    name: "profiles: agregar GENERATED inesperado",
+    apply: (root) => mutateProfileColumn(root, "first_name", "first_name text generated always as (last_name) stored"),
+    expectedFailure: /profiles\.first_name: generated/,
+  },
+  {
+    name: "profiles: agregar identity inesperada",
+    apply: (root) => mutateProfileColumn(
+      root,
+      "current_streak",
+      "current_streak integer generated by default as identity check (current_streak >= 0)",
+    ),
+    expectedFailure: /profiles\.current_streak: identity/,
+  },
+  {
+    name: "profiles: desordenar físicamente columnas",
+    apply: (root) => swapProfileColumns(root, "current_streak", "updated_at"),
+    expectedFailure: /profiles ordinal 4: nombre/,
+  },
+  {
+    name: "profiles: agregar columna inesperada",
+    apply: addUnexpectedProfileColumn,
+    expectedFailure: /profiles: cantidad exacta de columnas/,
+  },
+  {
+    name: "profiles: definición correcta sólo en comentario y string",
+    apply: (root) => {
+      mutateProfileColumn(root, "display_name", "display_name varchar(255) not null");
+      const path = join(root, schemaBaseline);
+      writeFileSync(
+        path,
+        `${readFileSync(path, "utf8")}\n-- display_name text not null\nselect 'display_name text not null';\n`,
+      );
+    },
+    expectedFailure: /profiles\.display_name: tipo SQL completo/,
+  },
+  ...(["public", "anon", "service_role"] as const).map((role): MutationProbe => ({
+    name: `reintroducir EXECUTE de ${role}`,
+    apply: (root) => mutateAclMigration(root, (source) => replaceExactlyOnce(
+        source,
+        `revoke all on function public.save_daily_training_readiness(jsonb) from ${role};`,
+        `grant execute on function public.save_daily_training_readiness(jsonb) to ${role};`,
+    )),
+    expectedFailure: /migración ACL exacta/,
+  })),
+  {
+    name: "retirar EXECUTE de authenticated",
+    apply: (root) => mutateAclMigration(root, (source) => replaceExactlyOnce(
+        source,
+        "grant execute on function public.save_daily_training_readiness(jsonb) to authenticated;",
+        "revoke all on function public.save_daily_training_readiness(jsonb) from authenticated;",
+    )),
+    expectedFailure: /migración ACL exacta/,
+  },
+  {
+    name: "retirar EXECUTE de postgres",
+    apply: (root) => mutateAclMigration(root, (source) => replaceExactlyOnce(
+      source,
+      "grant execute on function public.save_daily_training_readiness(jsonb) to postgres;",
+      "revoke all on function public.save_daily_training_readiness(jsonb) from postgres;",
+    )),
+    expectedFailure: /migración ACL exacta/,
+  },
+  {
+    name: "agregar grant ACL adicional",
+    apply: (root) => mutateAclMigration(
+      root,
+      (source) => `${source}\ngrant execute on function public.save_daily_training_readiness(jsonb) to anon;\n`,
+    ),
+    expectedFailure: /migración ACL exacta/,
+  },
+  {
+    name: "cambiar firma del ACL",
+    apply: (root) => mutateAclMigration(
+      root,
+      (source) => replaceExactlyOnce(
+        source,
+        "revoke all on function public.save_daily_training_readiness(jsonb) from public;",
+        "revoke all on function public.save_daily_training_readiness(json) from public;",
+      ),
+    ),
+    expectedFailure: /migración ACL exacta/,
+  },
+  {
+    name: "cambiar objeto del ACL",
+    apply: (root) => mutateAclMigration(
+      root,
+      (source) => replaceExactlyOnce(
+        source,
+        "revoke all on function public.save_daily_training_readiness(jsonb) from public;",
+        "revoke all on function public.save_training_workout_readiness_v2(jsonb) from public;",
+      ),
+    ),
+    expectedFailure: /migración ACL exacta/,
+  },
+  {
+    name: "ACL correcto sólo en comentario y string",
+    apply: (root) => mutateAclMigration(root, (source) => `${replaceExactlyOnce(
+      source,
+      "grant execute on function public.save_daily_training_readiness(jsonb) to authenticated;",
+      "revoke all on function public.save_daily_training_readiness(jsonb) from authenticated;",
+    )}\n-- grant execute on function public.save_daily_training_readiness(jsonb) to authenticated;\nselect 'grant execute on function public.save_daily_training_readiness(jsonb) to authenticated;';\n`),
+    expectedFailure: /migración ACL exacta/,
+  },
+  {
+    name: "alterar bytes de migración ACL",
+    apply: (root) => mutateAclMigration(root, (source) => `${source}\n-- mutation\n`),
+    expectedFailure: /migración ACL conserva su SHA-256 aprobado/,
+  },
+  {
+    name: "omitir migración ACL",
+    apply: (root) => rmSync(join(root, migrationsDirectory, aclMigration)),
+    expectedFailure: /inventario exacto de 24 versiones/,
+  },
+  {
+    name: "desregistrar migración ACL fuera de migrations",
+    apply: (root) => renameSync(
+      join(root, migrationsDirectory, aclMigration),
+      join(root, diagnosticsDirectory, aclMigration),
+    ),
+    expectedFailure: /inventario exacto de 24 versiones/,
+  },
+  {
+    name: "recrear ACL suelto no versionado",
+    apply: (root) => {
+      const destination = join(root, legacyBaselineAcl);
+      mkdirSync(dirname(destination), { recursive: true });
+      copyFileSync(join(root, migrationsDirectory, aclMigration), destination);
+    },
+    expectedFailure: /ACL suelto\/no versionado permanece ausente/,
+  },
+  {
+    name: "omitir consulta fingerprint",
+    apply: (root) => rmSync(join(root, diagnosticsDirectory, fingerprintArtifact)),
+    expectedFailure: /fingerprint v1 presente en diagnostics/,
+  },
+  {
+    name: "alterar bytes de consulta fingerprint",
+    apply: (root) => mutateFingerprint(root, (source) => `${source}\n-- mutation\n`),
+    expectedFailure: /consulta fingerprint conserva su SHA-256 aprobado/,
+  },
+  {
+    name: "agregar exclusión al fingerprint",
+    apply: (root) => mutateFingerprint(root, (source) => replaceExactlyOnce(
+      source,
+      "values ('public'::name, 'training_session_consolidation_audit'::name)",
+      "values ('public'::name, 'training_session_consolidation_audit'::name), ('public'::name, 'profiles'::name)",
+    )),
+    expectedFailure: /única exclusión explícita y dedicada/,
+  },
+  {
+    name: "quitar categoría policy del fingerprint",
+    apply: (root) => mutateFingerprint(root, (source) => replaceExactlyOnce(source, "    'policy',", "    'policy_shadow',")),
+    expectedFailure: /única categoría policy/,
+  },
+  {
+    name: "alterar orden de categoría fingerprint",
+    apply: (root) => mutateFingerprint(root, (source) => replaceExactlyOnce(
+      source,
+      "pg_catalog.string_agg(line, E'\\n' order by line)",
+      "pg_catalog.string_agg(line, E'\\n' order by line desc)",
+    )),
+    expectedFailure: /ordena y serializa cada categoría con LF/,
+  },
+  {
+    name: "alterar serialización pipe del fingerprint",
+    apply: (root) => mutateFingerprint(root, (source) => {
+      assert.equal((source.match(/      '\|',/g) ?? []).length, 9, "probe fingerprint encuentra nueve delimitadores");
+      return source.replace("      '|',", "      ':',");
+    }),
+    expectedFailure: /serializa las nueve categorías con separador pipe/,
+  },
+  {
+    name: "sustituir SHA-256 del fingerprint",
+    apply: (root) => mutateFingerprint(root, (source) => source.replaceAll("pg_catalog.sha256(", "pg_catalog.md5(")),
+    expectedFailure: /usa SHA-256 para categoría y OVERALL/,
+  },
+  {
+    name: "SHA-256 correcto sólo en comentario del fingerprint",
+    apply: (root) => mutateFingerprint(
+      root,
+      (source) => `${source.replaceAll("pg_catalog.sha256(", "pg_catalog.md5(")}\n-- pg_catalog.sha256(\n`,
+    ),
+    expectedFailure: /usa SHA-256 para categoría y OVERALL/,
+  },
+  {
+    name: "hardcodear resultado fingerprint",
+    apply: (root) => mutateFingerprint(root, (source) => `${source}\nselect '${baselineFingerprintSha256}';\n`),
+    expectedFailure: /no contiene hashes resultado hardcodeados/,
+  },
+  {
+    name: "quitar storage.objects del fingerprint",
+    apply: (root) => mutateFingerprint(
+      root,
+      (source) => replaceExactlyOnce(source, "namespace.nspname = 'storage'", "namespace.nspname = 'storage_shadow'"),
+    ),
+    expectedFailure: /policy incluye storage\.objects/,
+  },
+  {
+    name: "quitar auth.users del fingerprint",
+    apply: (root) => mutateFingerprint(
+      root,
+      (source) => replaceExactlyOnce(source, "namespace.nspname = 'auth'", "namespace.nspname = 'auth_shadow'"),
+    ),
+    expectedFailure: /trigger incluye auth\.users/,
+  },
+  ...historicalMappings.map(([, file]): MutationProbe => ({
+    name: `alterar SQL histórico material ${file}`,
+    apply: (root) => {
+      const path = join(root, migrationsDirectory, file);
+      writeFileSync(path, `${readFileSync(path, "utf8")}\n-- mutation\n`);
+    },
+  })),
+  ...[...protectedPerfMigrations, ...protectedPerf06RMigrations].map(([file]): MutationProbe => ({
+    name: `alterar bytes PERF-06 ${file}`,
+    apply: (root) => {
+      const path = join(root, migrationsDirectory, file);
+      writeFileSync(path, `${readFileSync(path, "utf8")}\n-- mutation\n`);
+    },
+  })),
   {
     name: "restaurar timestamp duplicado",
     apply: (root) => renameSync(
@@ -1264,7 +2547,13 @@ for (const probe of mutationProbes) {
     for (const file of migrationFiles(fixture)) {
       assertLexicallyValidSql(read(fixture, join(migrationsDirectory, file)), `${probe.name}: ${file}`);
     }
-    assert.throws(() => validateFixture(fixture), `${probe.name}: fallo semántico obligatorio`);
+    if (probe.expectedFailure) {
+      assert.throws(
+        () => validateFixture(fixture),
+        probe.expectedFailure,
+        `${probe.name}: debe morir por su aserción semántica propia`,
+      );
+    } else assert.throws(() => validateFixture(fixture), `${probe.name}: fallo semántico obligatorio`);
   } finally {
     assert.equal(canonicalSourcesSha(), canonicalSha, `${probe.name}: SHA-256 canónico restaurado/intacto`);
     rmSync(fixture, { recursive: true, force: true });
