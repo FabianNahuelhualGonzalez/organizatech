@@ -77,9 +77,9 @@ Este repositorio no versiona `supabase/config.toml`. Una configuración nueva ge
 
 La reconstrucción reproducible debe hacerse únicamente en PostgreSQL 17.6 local desechable, fuera del repositorio:
 
-1. Descargar el source oficial de PostgreSQL 17.6, verificar su SHA-256 y compilar runtime y cliente sólo dentro de un directorio temporal.
+1. Descargar el source oficial de PostgreSQL 17.6, verificar su SHA-256 y compilar el servidor sólo dentro de un directorio temporal.
 2. Inicializar un cluster sin datos, crear exclusivamente los roles y stubs locales de `auth`/`storage` necesarios y aplicar `supabase/schema.sql` primero.
-3. Aplicar después los 18 archivos históricos materiales normalizados, en orden y conservando sus bytes. Los cuatro archivos con transacciones propias se ejecutan como archivos independientes mediante `psql -v ON_ERROR_STOP=1`.
+3. Aplicar después los 18 archivos históricos materiales normalizados, en orden y conservando sus bytes. El bootstrap Node envía secuencialmente cada statement mediante `pg.Client`; los cuatro archivos con control transaccional propio se completan antes del siguiente archivo y cualquier error detiene la reconstrucción.
 4. Aplicar PERF-06A, PERF-06C y PERF-06B. El checkpoint inmediatamente anterior al invariant debe conservar 22 policies de `public` y presentar el initplan esperado; el fingerprint agrega además las policies de `storage.objects` a su categoría `policy`.
 5. Aplicar después el invariant, la compensatoria y, por último, `20260811190144_perf_06r_daily_readiness_acl_normalization.sql`. Éste es el orden cronológico real de las versiones creadas por Supabase CLI; el ACL no se adelanta ni se aplica por una vía paralela.
 6. Verificar que INSERT y UPDATE de exercises crean/reparan exactamente un lineage, que el rollback del write también revierte el lineage y que la función no es invocable directamente. Después validar caso cero; crear dentro de una transacción dos filas históricas sintéticas sin referencias; aplicar la compensatoria y comprobar dos lineages; reaplicarla y comprobar no-op; probar cardinalidad distinta de 0/2, ownership, referencias inválidas y ausencia del invariant; hacer rollback de fixtures.
@@ -115,6 +115,24 @@ El gate material en PostgreSQL 17.6 debe reproducir ambos fingerprints y confirm
 ## Tratamiento de QA y PROD
 
 QA es el único primer destino posible. Antes de bootstrap debe confirmarse read-only que su historial sigue ausente, que el esquema material coincide con el baseline esperado y que la cardinalidad pendiente es exactamente cero o dos. Luego corresponde reconciliar/crear el historial mediante un procedimiento separado y aprobado, ejecutar el bootstrap y aplicar la compensatoria, siempre con snapshot y rollback definidos.
+
+El procedimiento operativo vigente y único es el runner inspeccionable de
+[`supabase/operations/qa/perf-06-atomic/README.md`](../supabase/operations/qa/perf-06-atomic/README.md).
+Integra en una sola transacción `READ COMMITTED READ WRITE` la reparación manual
+de las 18 filas históricas, las seis migraciones PERF-06 y los escenarios A–I.
+Esa inicialización es equivalente en efecto a `migration repair`, aunque no usa
+el comando CLI: por eso requiere autorización explícita y debe revertirse junto
+con el resto ante cualquier diferencia. El runner no usa `db push`, MCP,
+PostgREST ni conexiones fragmentadas. Registra 18/255 primero y cada migración
+PERF sólo después de ejecutar sus statements; el estado final obligatorio es
+24/336. La tabla `training_session_consolidation_audit` permanece presente,
+vacía e intacta.
+
+Todo plan operativo anterior que cuente el diagnóstico como migración material,
+omita el ACL final, use un total distinto de 336 statements, `SERIALIZABLE`, un prelock global `ACCESS EXCLUSIVE`, un `DROP`
+de la tabla diagnóstica o la inserción anticipada de 24 filas queda expresamente
+obsoleto y no debe consumirse. Las referencias documentales archivadas sólo
+conservan contexto histórico.
 
 No se permite asumir que PROD sea equivalente a QA. Cualquier cardinalidad distinta de 0/2 aborta la compensatoria. Este cambio no es compatible con PROD por declaración y no puede mergearse hasta una auditoría separada de PROD, inicialmente read-only.
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
@@ -14,6 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import ts from "typescript";
 
 const repositoryRoot = process.cwd();
 const migrationsDirectory = "supabase/migrations";
@@ -28,6 +30,21 @@ const supersededFinalFingerprintSha256 = "1659325becce455f6e042cc4cb34c113552cc7
 const schemaBaseline = "supabase/schema.sql";
 const legacyBaselineAcl = "supabase/baseline/perf-06-history-reconciliation-acl.sql";
 const normalizationDocument = "docs/perf-06-migration-history-normalization.md";
+const runnerPath = "scripts/perf-06-atomic-runner.mjs";
+const runnerManifestLibrary = "scripts/perf-06-migration-manifest.mjs";
+const runnerOperationDirectory = "supabase/operations/qa/perf-06-atomic";
+const runnerArtifacts = [
+  runnerPath,
+  runnerManifestLibrary,
+  `${runnerOperationDirectory}/manifest.json`,
+  `${runnerOperationDirectory}/README.md`,
+  `${runnerOperationDirectory}/prechecks.sql`,
+  `${runnerOperationDirectory}/scenarios.sql`,
+  `${runnerOperationDirectory}/postchecks.sql`,
+  `${runnerOperationDirectory}/local-validation-bootstrap.sql`,
+  "scripts/perf-06-local-bootstrap.mjs",
+] as const;
+const runnerManifestSha256 = "2955e5eeb0e4b08060970803ac27c4811f76a304f75d99fded65642847a39848";
 const invariantSuffix = "_ensure_legacy_exercise_lineage_invariant.sql";
 const compensationSuffix = "_reconcile_legacy_exercise_lineages.sql";
 const invariantMigration = "20260811035538_ensure_legacy_exercise_lineage_invariant.sql";
@@ -38,7 +55,7 @@ const productRepository = "src/lib/data/repository.ts";
 const cycleScopedRepository = "src/lib/training/cycle-scoped-training-repository.ts";
 const lineageModel = "src/lib/training/training-exercise-lineage.ts";
 const productRepositorySha256 = "f1e1e38d8bce6ce2a4b86d03931338b63ec5ced883e9ceec63a9c3eb64ed4e98";
-const packageLockSha256 = "905a071c9ca8b20dcdd2c99e5f57fc1c51f163b2216aed11ca6428e5369c2251";
+const packageLockSha256 = "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5";
 
 const historicalMappings = [
   ["20260513_add_exercise_day.sql", "20260513000001_add_exercise_day.sql", "9e817d4aced1dade0b57ac942b67a4c06cf4cc937c6fc26f440c79d40bd24c27"],
@@ -1523,6 +1540,423 @@ function validateContractRegistration(root: string): void {
   assert.equal(scripts.split(contractPath).length - 1, 1, "contrato PERF-06R conectado exactamente una vez a npm test");
 }
 
+function validateAtomicRunner(root: string): void {
+  for (const artifact of runnerArtifacts) assert.ok(existsSync(join(root, artifact)), `runner artifact presente: ${artifact}`);
+  const runner = read(root, runnerPath);
+  const manifestLibrary = read(root, runnerManifestLibrary);
+  const localBootstrap = read(root, "scripts/perf-06-local-bootstrap.mjs");
+  const localBootstrapSql = read(root, `${runnerOperationDirectory}/local-validation-bootstrap.sql`);
+  const scenarios = read(root, `${runnerOperationDirectory}/scenarios.sql`);
+  const prechecks = read(root, `${runnerOperationDirectory}/prechecks.sql`);
+  const postchecks = read(root, `${runnerOperationDirectory}/postchecks.sql`);
+  const readme = read(root, `${runnerOperationDirectory}/README.md`);
+  const packageJson = JSON.parse(read(root, "package.json")) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  const manifest = JSON.parse(read(root, `${runnerOperationDirectory}/manifest.json`)) as {
+    sha256: string;
+    historicalVersions: number;
+    historicalStatements: number;
+    perf06Versions: number;
+    perf06Statements: number;
+    totalVersions: number;
+    totalStatements: number;
+    migrations: Array<{ version: string; statements: number }>;
+  };
+
+  assert.deepEqual(
+    [manifest.historicalVersions, manifest.historicalStatements, manifest.perf06Versions, manifest.perf06Statements, manifest.totalVersions, manifest.totalStatements],
+    [18, 255, 6, 81, 24, 336],
+    "manifiesto runner exacto 18/255 + 6/81 = 24/336",
+  );
+  assert.equal(manifest.sha256, runnerManifestSha256, "hash de manifiesto runner exacto");
+  assert.equal(manifest.migrations.length, 24, "manifiesto enumera 24 versiones");
+  assert.equal(manifest.migrations.reduce((sum, row) => sum + row.statements, 0), 336, "manifiesto enumera 336 statements");
+  assert.equal(new Set(manifest.migrations.map((row) => row.version)).size, 24, "versiones runner 1:1");
+
+  assert.equal(packageJson.devDependencies?.pg, "8.23.0", "pg es devDependency exacta");
+  assert.equal(packageJson.dependencies?.pg, undefined, "pg no entra en dependencies productivas");
+  assert.doesNotMatch(runner, /node:child_process|\b(?:spawn|exec|execFile|fork)\s*\(|\bpsql\b|PGPASSWORD|stdin|stdout marker/iu, "runner sin procesos ni cliente SQL externos");
+  assert.doesNotMatch(`${prechecks}\n${scenarios}\n${postchecks}\n${localBootstrapSql}`, /^\\[^\n]+/mu, "SQL sin metacomandos de cliente");
+  assert.doesNotMatch(runner, /\bPool\b|new\s+pg\.Pool/u, "Pool prohibido");
+  assert.equal((runner.match(/this\.client = new PgClient\(connection\)/g) ?? []).length, 1, "una sola instancia principal pg.Client");
+  assert.equal((runner.match(/const verifier = dependencies\.verifier \?\? new PgClient\(/g) ?? []).length, 1, "única conexión verificadora declarada");
+  assert.equal((runner.match(/new PgClient\(/g) ?? []).length, 2, "sólo cliente principal y verificador de incidentes");
+  assert.match(runner, /await this\.closeMain\(\);[\s\S]*verifyIncidentOutcome\(/, "verificador sólo después de cerrar el cliente principal");
+  assert.match(runner, /host: url\.hostname,[\s\S]*port,[\s\S]*user: username,[\s\S]*database,[\s\S]*ssl: options\.localValidation \? false : \{ rejectUnauthorized: true, servername: qaHost \}/, "conexión QA fija TLS y SNI estrictos");
+  assert.doesNotMatch(runner, /rejectUnauthorized:\s*false|ssl:\s*true/, "sin TLS permisivo");
+  assert.match(runner, /url\.hostname === qaHost && port === 5432 && database === "postgres"/, "QA usa host directo, 5432 y base postgres");
+  assert.match(runner, /url\.searchParams\.get\("sslmode"\) === "verify-full"/, "QA rechaza todo modo TLS distinto de verify-full");
+  assert.match(runner, /username === "postgres" && password/, "rol principal owner-capable postgres");
+  assert.match(runner, /BEGIN ISOLATION LEVEL READ COMMITTED READ WRITE/, "una transacción READ COMMITTED READ WRITE");
+  assert.match(runner, /options\.execute !== options\.generateOnly/, "ejecución o generación explícita y exclusiva");
+  assert.match(runner, /options\.confirmation === expected/, "COMMIT requiere flag y literal separado");
+  assert.match(runner, /if \(!this\.options\.commit\) \{[\s\S]*this\.query\("ROLLBACK"\)/, "ROLLBACK es terminal predeterminado");
+  assert.match(runner, /this\.transition\("commit_requested"\)[\s\S]*await this\.query\("COMMIT"\)[\s\S]*this\.transition\("commit_confirmed"\)/, "COMMIT protegido por lifecycle explícito");
+  assert.doesNotMatch(runner, /console\.log|process\.stdout\.write\([^\n]*(?:raw|password|connection)/i, "secreto no impreso");
+  assert.doesNotMatch(runner, /if \(false|false && setTimeout/, "gates ejecutables no pueden neutralizarse");
+  assert.match(runner, /process\.once\("SIGINT"[\s\S]*process\.once\("SIGTERM"[\s\S]*process\.removeListener\("SIGTERM"/, "señales controladas y handlers retirados");
+  assert.match(runner, /setTimeout\(\(\) => operation\.gate\.request\("timeout"\)/, "timeout global solicita interrupción");
+  assert.match(runner, /invariant\(!options\.injection \|\| options\.localValidation/, "inyecciones imposibles contra QA");
+  assert.doesNotMatch(runner, /\b(?:retry|retries|attempts)\b/i, "sin reintento automático");
+  assert.equal((runner.match(/await operation\.run\(\)/g) ?? []).length, 1, "operación principal se invoca una sola vez");
+  assert.doesNotMatch(runner, /db push|migration repair|postgrest|mcp/i, "sin caminos SQL fragmentados alternativos");
+  assert.match(runner, /historical: manifest\.slice\(0, HISTORICAL_MIGRATIONS\.length\)/, "bootstrap toma sólo 18 históricas");
+  assert.match(runner, /for \(let statementIndex[\s\S]*await this\.query\(row\.statements\[statementIndex\]\)[\s\S]*insert into supabase_migrations\.schema_migrations/, "registro PERF ocurre después del SQL");
+  assert.match(runner, /create table if not exists supabase_migrations\.schema_migrations \(version text not null primary key\)[\s\S]*add column if not exists statements text\[\][\s\S]*add column if not exists name text/, "historial Supabase exacto y transaccional");
+  const perfList = /export const PERF_06_MIGRATIONS = \[([\s\S]*?)\];/.exec(manifestLibrary)?.[1] ?? "";
+  assert.match(perfList, /20260811190144_perf_06r_daily_readiness_acl_normalization\.sql/, "ACL incluido como sexta PERF");
+  assert.match(manifestLibrary, new RegExp(runnerManifestSha256), "hash canónico fijado en generador");
+  assert.match(manifestLibrary, /historicalCount !== 255 \|\| perfCount !== 81 \|\| manifest\.length !== 24/, "cardinalidades derivadas fail-closed");
+  assert.match(manifestLibrary, /export function splitAndTrim/, "parser SplitAndTrim versionado");
+
+  for (const scenario of "ABCDEFGHI") {
+    assert.match(runner, new RegExp(`this\\.withScenario\\("${scenario}"`), `escenario ${scenario} tiene savepoint administrado`);
+  }
+  assert.match(runner, /async withScenario[\s\S]*SAVEPOINT_SQL[\s\S]*finally[\s\S]*sql\.rollback[\s\S]*sql\.release/, "savepoints se limpian mediante finally");
+  assert.match(runner, /observed !== expectedCode/, "SQLSTATE se compara exactamente");
+  assert.match(runner, /perf06_f_rebind_expected", rebindSql, rebindValues, "23514"/, "Scenario F acepta sólo SQLSTATE 23514 para rebind");
+  assert.doesNotMatch(runner, /\[\s*["']23514["']\s*,\s*["']42501["']\s*\]/, "Scenario F no permite SQLSTATE alternativo");
+  assert.match(runner, /await this\.query\(query\.insert_cycle[\s\S]*await this\.query\(query\.insert_cycle_routine[\s\S]*await this\.query\(query\.insert_cycle_day/, "Scenario G espera cada escritura antes de la siguiente");
+  assert.ok((scenarios.match(/\$\d+/g) ?? []).length >= 30, "fixtures variables usan parámetros PostgreSQL");
+  assert.match(scenarios, /values \(\$1::uuid, \$2::uuid, \$3::uuid, \$4::text, 1, 1, 0\)/, "fixture exercise completamente parametrizado");
+  assert.doesNotMatch(runner, /query\.[a-z_]+\.(?:replace|concat)\(/, "runner no concatena fixtures dentro del SQL");
+  assert.match(scenarios, /not exists \(select 1 from public\.exercises where name like '__perf06_fixture_%'\)/, "limpieza de fixtures entre escenarios");
+  assert.match(postchecks, /not exists \(select 1 from public\.training_exercise_lineages where metadata \? 'fixture'\)/, "cero fixtures al final");
+  assert.match(manifestLibrary, new RegExp(finalFingerprintSha256), "fingerprint final fijado en gate");
+  assert.match(`${runner}\n${manifestLibrary}`, new RegExp(baselineFingerprintSha256), "fingerprint baseline fijado");
+  assert.match(prechecks, /training_session_consolidation_audit/, "diagnóstico prevalidado");
+  assert.match(prechecks, /lock table public\.training_session_consolidation_audit in share mode;/i, "diagnóstico bloqueado SHARE hasta el cierre");
+  assert.match(prechecks, /select count\(\*\)::integer as marker_count\s+from public\.training_exercise_lineages\s+where metadata @>/i, "marker inicial contado globalmente, incluso huérfano");
+  assertUniqueOrderedRunnerStatements(runner);
+  assert.match(postchecks, /training_session_consolidation_audit/, "diagnóstico postvalidado");
+  assert.doesNotMatch(`${runner}\n${prechecks}\n${scenarios}\n${postchecks}`, /drop\s+table[\s\S]{0,80}training_session_consolidation_audit/i, "diagnóstico nunca eliminado");
+  assert.match(runner, /historyMatchesManifest\(snapshot\.historyRows, plan\.manifest\)/, "snapshot final usa manifiesto completo");
+  assert.match(runner, /row\.version === manifest\[index\]\.version[\s\S]*row\.name === manifest\[index\]\.name[\s\S]*exactJson\(row\.statements, manifest\[index\]\.statements\)/, "historial final compara versión, nombre y statements completos");
+  assert.match(runner, /await this\.postchecks\(\);\s*await this\.terminalAction\(\);/, "postchecks completos preceden toda decisión terminal");
+  assert.match(runner, /async query[\s\S]*invariant\(!this\.blocked,[\s\S]*if \(!expectedError\) this\.blocked = true/, "un error inesperado bloquea nuevas queries ordinarias");
+  assert.match(runner, /this\.blocked = true[\s\S]*rollbackAfterFailure/, "fallo solicita rollback controlado");
+  assert.match(runner, /state === "commit_requested"[\s\S]*verifyIncidentOutcome/, "resultado incierto después de COMMIT se verifica sin PASS nominal");
+  assert.match(runner, /result\.classification === "INDETERMINATE" \? "INDETERMINATE" : "INTERRUPTED"/, "commit incierto se rotula INDETERMINATE, no FAIL definitivo");
+  assert.match(runner, /BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY[\s\S]*select exists\(select 1 from pg_catalog\.pg_stat_activity[\s\S]*collectStateSnapshot[\s\S]*"ROLLBACK"/, "verificador limitado a postcheck read-only");
+  assert.match(runner, /pg_catalog\.pg_stat_clear_snapshot\(\)[\s\S]*pg_catalog\.pg_stat_activity/, "verificador refresca stats antes de decidir que el backend sigue activo");
+  const verifierBody = /async function verifyIncidentOutcome[\s\S]*?\n}\n\nfunction classifySnapshot/.exec(runner)?.[0] ?? "";
+  assert.doesNotMatch(verifierBody, /\b(?:insert|update|delete|create|alter|drop|truncate|grant|revoke)\b\s+(?:into|from|table|schema|function|on)/iu, "verificador no contiene writes");
+  assert.match(runner, /boundedVerifierOperation\(\(\) => verifier\.end\(\), timeoutMs, "end"\)[\s\S]*destroyClientSocket\(verifier\)/, "cierre verificador acotado y fail-closed");
+  assert.match(runner, /this\.assertMilestones\(true\);\s*const mainClosed = await this\.closeMain\(\);\s*if \(!mainClosed\) throw new IncidentError/, "cliente principal nominal exige cierre confirmado antes de retornar");
+  assert.match(runner, /const mainClosed = await this\.closeMain\(\);\s*incident \|\|= !mainClosed;[\s\S]*verifyIncidentOutcome/, "cierre principal no confirmado fuerza verificación");
+  assert.match(runner, /async function waitForPrincipalBackendToClose[\s\S]*while \(true\)[\s\S]*result\.rows\[0\]\.residual === false\) return/, "backend principal se espera sin escape global");
+  const backendWaitBody = /async function waitForPrincipalBackendToClose[\s\S]*?\n}\n\nasync function closeVerifier/.exec(runner)?.[0] ?? "";
+  assert.doesNotMatch(backendWaitBody, /deadline|Date\.now|BACKEND_CLOSE_TIMEOUT/, "polling del backend no tiene deadline permisivo");
+  assert.match(runner, /if \(!backendGone && Number\.isInteger\(backendPid\)\) await remainPendingWhenBackendCannotBeConfirmed\(\)/, "fallo del verificador tampoco permite terminar con PID sin confirmar");
+  const pendingBody = /async function remainPendingWhenBackendCannotBeConfirmed\(\)[\s\S]*?\n}\n\nfunction parseArguments/.exec(runner)?.[0] ?? "";
+  assert.equal((runner.match(/PERF06 runner INDETERMINATE backend_status=unconfirmed; process remains pending/g) ?? []).length, 1, "no-silent-exit: aviso estático exacto y único");
+  assert.match(pendingBody, /process\.exitCode = 1;[\s\S]*process\.stderr\.write\([\s\S]*const keepAlive = setInterval\([\s\S]*keepAlive\.ref\(\);[\s\S]*await new Promise\(\(\) => \{\}\);/, "no-silent-exit: exitCode, aviso, timer ref y espera eterna en orden");
+  assert.doesNotMatch(pendingBody, /process\.exit\s*\(|\breturn\b/, "no-silent-exit: camino indeterminado no retorna ni fuerza process.exit");
+  assert.match(runner, /options\.localValidation && new Set\(\["backend-close-hold", "connection-during-commit"\]\)\.has\(options\.injection\)/, "verificador inaccesible sólo se inyecta en los dos incidentes locales aprobados");
+  assert.match(runner, /options\.localValidation && \(options\.injection === "timeout" \|\| options\.verifierUnreachable\)[\s\S]*\? 750/, "probes no-silent-exit reducen sólo el timeout local");
+  assert.match(runner, /if \(!closed\.timedOut && closed\.value\.confirmed === true\) \{\s*this\.transition\("connection_closed"\)/, "connection_closed exige client.end confirmado");
+  assert.match(runner, /this\.destroySocket\(\);[\s\S]*this\.transition\("outcome_unknown"\);[\s\S]*return false;/, "cierre principal no confirmado destruye socket y queda incierto");
+  assert.match(runner, /const initial = await this\.collectPrecheck\(\)[\s\S]*const locked = await this\.collectPrecheck\(\)[\s\S]*this\.precheck = Object\.freeze\(\{ \.\.\.locked, complete: true \}\)/, "precheck sólo queda completo tras relectura bajo locks");
+  assert.match(runner, /completePrecheck\(precheck\)[\s\S]*snapshot\.diagnosticHash === precheck\.diagnosticHash[\s\S]*dataCountsEqual\(snapshot\.dataCounts, precheck\.dataCounts\)/, "rollback exige baseline completo y estado lateral exacto");
+  assert.match(runner, /snapshot\.markerCount === precheck\.pending[\s\S]*finalDataCountsMatch\(snapshot\.dataCounts, precheck\.dataCounts, precheck\.pending\)[\s\S]*snapshot\.completeStateValid === true/, "commit exige marker, allowlist lateral y postestado completo");
+  assert.match(runner, /snapshot\?\.backendGone !== true\) return "INDETERMINATE"/, "clasificación prohibida antes de desaparición material del backend");
+  assert.match(runner, /if \(!incident\) return \{ incident: false, classification: "INDETERMINATE" \}/, "rollback ordinario no suplanta verificación material del snapshot");
+  assert.equal((runner.match(/completePrecheck\(precheck\)/g) ?? []).length, 3, "captura, rollback y commit exigen precheck completo");
+  assert.match(runner, /snapshot\.markerCount === 0/, "rollback rechaza marker huérfano");
+  assert.equal((runner.match(/snapshot\.fixtureFree === true/g) ?? []).length, 2, "rollback y commit rechazan fixtures");
+  assert.equal((runner.match(/snapshot\.diagnosticCount === 0/g) ?? []).length, 2, "rollback y commit exigen diagnóstico vacío");
+  assert.equal((runner.match(/snapshot\.diagnosticHash === precheck\.diagnosticHash/g) ?? []).length, 2, "rollback y commit exigen hash diagnóstico exacto");
+  assert.equal((runner.match(/snapshot\.diagnosticConsumers === 0/g) ?? []).length, 2, "rollback y commit exigen cero consumidores diagnósticos");
+  assert.match(runner, /snapshot\.markerCount === precheck\.pending/, "commit exige marker derivado del precheck");
+  assert.match(runner, /finalDataCountsMatch\(snapshot\.dataCounts, precheck\.dataCounts, precheck\.pending\)/, "commit limita cambios laterales a lineage autorizado");
+  assert.equal((runner.match(/snapshot\?\.backendGone !== true\) return "INDETERMINATE"/g) ?? []).length, 1, "guard backend ejecutable único");
+  assert.match(runner, /const connectionTimeoutMs = dependencies\.connectionTimeoutMs \?\? VERIFIER_CONNECTION_TIMEOUT_MS;[\s\S]*connectionTimeoutMillis: connectionTimeoutMs,[\s\S]*query_timeout: VERIFIER_QUERY_TIMEOUT_MS/, "verificador tiene timeout de conexión inyectable sólo para prueba local y query timeout fijo");
+  assert.match(runner, /return boundedVerifierOperation\([\s\S]*verifier\.query\(\{ text, values, query_timeout: timeoutMs \}\)/, "cada query verificadora está acotada por cliente y wrapper");
+  assert.match(runner, /verifier\.query\(\{ text, values, query_timeout: timeoutMs \}\),\s*timeoutMs \+ 250,/, "timeout wrapper acompaña query_timeout del cliente");
+  assert.match(runner, /SET LOCAL statement_timeout[\s\S]*SET LOCAL lock_timeout[\s\S]*SET LOCAL idle_in_transaction_session_timeout/, "verificador tiene defensa server-side triple");
+  const verifierTransactionBody = /async function startVerifierTransaction[\s\S]*?\n}\n\nasync function waitForPrincipalBackendToClose/.exec(runner)?.[0] ?? "";
+  assert.match(verifierTransactionBody, /`SET LOCAL statement_timeout = '\$\{timeoutMs\}ms'`/, "statement_timeout local pertenece al verificador");
+  assert.match(verifierTransactionBody, /`SET LOCAL lock_timeout = '\$\{Math\.min\(VERIFIER_LOCK_TIMEOUT_MS, timeoutMs\)\}ms'`/, "lock_timeout local pertenece al verificador");
+  assert.match(verifierTransactionBody, /`SET LOCAL idle_in_transaction_session_timeout = '\$\{Math\.max\(VERIFIER_IDLE_TIMEOUT_MS, timeoutMs \* 2\)\}ms'`/, "idle transaction timeout local pertenece al verificador");
+  for (const label of [
+    "connect", "begin", "statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout",
+    "pg_stat_clear_snapshot", "pg_stat_activity", "fingerprint", "history", "lineage_state",
+    "fixtures", "diagnostic", "diagnostic_hash", "diagnostic_consumers", "data_counts", "rollback", "end",
+  ]) assert.match(runner, new RegExp(`"${label}"`), `operación verificadora acotada: ${label}`);
+  assert.match(postchecks, /select version, name, statements\s+from supabase_migrations\.schema_migrations\s+order by version;/, "query historial conserva arrays completos y orden exacto");
+  assert.match(runner, /const verifierClosed = await closeVerifier\(verifier, queryTimeoutMs\);\s*if \(!verifierClosed\) classification = "INDETERMINATE";/, "fallo de cierre verificador invalida toda clasificación definitiva");
+  assert.match(localBootstrap, /new pg\.Client[\s\S]*HISTORICAL_MIGRATIONS[\s\S]*EXPECTED_BASELINE_FINGERPRINT/, "bootstrap local también usa cliente nativo y valida baseline");
+  assert.match(readme, /reparación de historial equivalente en\s+efecto a `migration repair`/i, "bootstrap clasificado correctamente");
+  assert.match(readme, /No existe prelock global `ACCESS EXCLUSIVE`/, "locks mínimos documentados");
+  assert.doesNotMatch(`${runner}\n${prechecks}\n${scenarios}\n${postchecks}`, /serializable/i, "runner no usa SERIALIZABLE");
+}
+
+function validateRunnerExternalCliProbes(root: string): void {
+  const base = [
+    join(root, runnerPath),
+    "--mode", "qa",
+    "--project-ref", "fjjebhaqtrdbpxzxztmh",
+  ];
+  const secret = "never-forward-this-secret";
+  const invoke = (extra: string[]) => spawnSync(process.execPath, [...base, ...extra], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, PERF_06_DATABASE_URL: `postgresql://postgres:${secret}@127.0.0.1:1/perf06_probe?sslmode=disable` },
+  });
+
+  const removedClientArgument = invoke(["--execute", "--local-validation", "--psql", "/usr/bin/true"]);
+  assert.notEqual(removedClientArgument.status, 0, "probe externo: argumento de cliente eliminado");
+  assert.match(removedClientArgument.stderr, /Unknown argument: --psql/, "probe externo: no existe selección de ejecutable");
+  assert.doesNotMatch(`${removedClientArgument.stdout}${removedClientArgument.stderr}`, new RegExp(secret), "probe externo: secreto no impreso");
+
+  const arbitraryOutput = invoke(["--generate-only", "--output", "/tmp/perf06-forbidden.sql"]);
+  assert.notEqual(arbitraryOutput.status, 0, "probe externo: --output arbitrario rechazado");
+  assert.match(arbitraryOutput.stderr, /Unknown argument: --output/, "probe externo: no existe ruta de escritura CLI");
+
+  const badHost = spawnSync(process.execPath, [...base, "--execute"], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, PERF_06_DATABASE_URL: `postgresql://postgres:${secret}@example.invalid:5432/postgres?sslmode=verify-full` },
+  });
+  assert.notEqual(badHost.status, 0, "probe externo: host no aprobado rechazado antes de conectar");
+  assert.match(badHost.stderr, /exact direct project database endpoint/, "probe externo: destino QA fail-closed");
+  assert.doesNotMatch(`${badHost.stdout}${badHost.stderr}`, new RegExp(secret), "probe externo: credencial no impresa");
+}
+
+function validateIncidentVerifierBehavior(root: string): void {
+  const runnerAbsolute = join(root, runnerPath);
+  const pendingChildProbe = `
+    import { pathToFileURL } from "node:url";
+    const { remainPendingWhenBackendCannotBeConfirmed } = await import(pathToFileURL(${JSON.stringify(runnerAbsolute)}).href);
+    await remainPendingWhenBackendCannotBeConfirmed();
+  `;
+  const probe = String.raw`
+    import assert from "node:assert/strict";
+    import { spawn } from "node:child_process";
+    import { pathToFileURL } from "node:url";
+    const {
+      AtomicOperation,
+      buildPlan,
+      classifySnapshot,
+      remainPendingWhenBackendCannotBeConfirmed,
+      verifyIncidentOutcome,
+      waitForPrincipalBackendToClose,
+    } = await import(pathToFileURL(${JSON.stringify(runnerAbsolute)}).href);
+    const plan = buildPlan();
+    const relations = [
+      "exercise_entries", "exercises", "profiles", "routines", "training_cycle_days",
+      "training_cycle_exercises", "training_cycle_routines", "training_cycles",
+      "training_daily_readiness", "training_exercise_lineages", "training_sessions",
+      "training_workout_readiness",
+    ];
+    const baselineCounts = Object.fromEntries(relations.map((name, index) => [name, index + 10]));
+    const partial = (value) => ({
+      history_absent: value,
+      identity_function_absent: value,
+      invariant_function_absent: value,
+      lineage_function_absent: value,
+      perf_index_absent: value,
+      perf_triggers_absent: value,
+    });
+    const diagnosticHash = "a".repeat(64);
+    const precheck = {
+      complete: true,
+      fingerprint: { count: 346, hash: "ebd6b8bb930d222700d7af69c0a9c69236bc9135ee123e5f7129599c8d7105f1" },
+      pending: 2,
+      exerciseCount: 19,
+      markerCount: 0,
+      incompatibleCount: 0,
+      ownerId: "owner",
+      routineId: "routine",
+      fixtureFree: true,
+      diagnosticPresent: true,
+      diagnosticCount: 0,
+      diagnosticHash,
+      diagnosticConsumers: 0,
+      partialApplication: partial(true),
+      dataCounts: baselineCounts,
+    };
+    const baseline = {
+      backendGone: true,
+      fingerprint: precheck.fingerprint,
+      partialApplication: partial(true),
+      historyPresent: false,
+      historyRows: [],
+      historyStatements: 0,
+      pending: 2,
+      markerCount: 0,
+      exerciseCount: 19,
+      incompatibleCount: 0,
+      fixtureFree: true,
+      diagnosticPresent: true,
+      diagnosticCount: 0,
+      diagnosticHash,
+      diagnosticConsumers: 0,
+      dataCounts: baselineCounts,
+      catalogValid: false,
+      completeStateValid: false,
+    };
+    const finalCounts = { ...baselineCounts, training_exercise_lineages: baselineCounts.training_exercise_lineages + 2 };
+    const final = {
+      ...baseline,
+      fingerprint: { count: 377, hash: "833c2db78f0caeb776bf04b54d05e9c52c2adb0ee1e03cdbc0f479fe2ea76bc9" },
+      partialApplication: partial(false),
+      historyPresent: true,
+      historyRows: plan.manifest.map((row) => ({ version: row.version, name: row.name, statements: [...row.statements] })),
+      historyStatements: 336,
+      pending: 0,
+      markerCount: 2,
+      dataCounts: finalCounts,
+      catalogValid: true,
+      completeStateValid: true,
+    };
+    const clone = (value) => structuredClone(value);
+    assert.equal(classifySnapshot(baseline, precheck, plan), "ROLLED_BACK_VERIFIED", "baseline exacto clasifica rollback");
+    assert.equal(classifySnapshot(final, precheck, plan), "COMMITTED_VERIFIED_AFTER_INTERRUPTION", "final exacto clasifica commit");
+    const adversarial = [];
+    let value = clone(baseline); value.markerCount = 1; adversarial.push(["baseline marker huérfano", value, precheck]);
+    value = clone(baseline); value.fixtureFree = false; adversarial.push(["baseline fixture", value, precheck]);
+    value = clone(baseline); value.diagnosticCount = 1; adversarial.push(["baseline diagnóstico no vacío", value, precheck]);
+    value = clone(baseline); value.diagnosticHash = "b".repeat(64); adversarial.push(["baseline hash diagnóstico", value, precheck]);
+    adversarial.push(["baseline sin precheck", clone(baseline), null]);
+    value = clone(final); value.historyRows[3].version = "20990101000000"; adversarial.push(["versión sustituida", value, precheck]);
+    value = clone(final); value.historyRows[3].name += "_wrong"; adversarial.push(["nombre sustituido", value, precheck]);
+    value = clone(final); value.historyRows[3].statements[0] += " -- changed"; adversarial.push(["statements distintos", value, precheck]);
+    value = clone(final); value.markerCount = 1; adversarial.push(["marker final", value, precheck]);
+    value = clone(final); value.fixtureFree = false; adversarial.push(["fixture final", value, precheck]);
+    value = clone(final); value.diagnosticCount = 1; adversarial.push(["diagnóstico final no vacío", value, precheck]);
+    value = clone(final); value.diagnosticHash = "b".repeat(64); adversarial.push(["diagnóstico final alterado", value, precheck]);
+    value = clone(final); value.dataCounts.profiles += 1; adversarial.push(["conteo lateral", value, precheck]);
+    value = clone(final); value.historyRows.reverse(); adversarial.push(["orden historial", value, precheck]);
+    value = clone(final); value.historyRows.push(clone(value.historyRows[0])); adversarial.push(["historial adicional", value, precheck]);
+    value = clone(final); value.backendGone = false; adversarial.push(["backend presente", value, precheck]);
+    for (const [name, snapshot, captured] of adversarial) {
+      assert.equal(classifySnapshot(snapshot, captured, plan), "INDETERMINATE", name);
+    }
+
+    let residual = true;
+    let waitFinished = false;
+    const pollingVerifier = {
+      query: async ({ text }) => text.includes("pg_stat_activity")
+        ? { rows: [{ residual }] }
+        : { rows: [{}] },
+    };
+    const backendWait = waitForPrincipalBackendToClose(pollingVerifier, 42, { queryTimeoutMs: 50, pollIntervalMs: 10 })
+      .then(() => { waitFinished = true; });
+    await new Promise((resolve) => setTimeout(resolve, 5_100));
+    assert.equal(waitFinished, false, "PID residual sigue pendiente después del antiguo límite de cinco segundos");
+    residual = false;
+    await Promise.race([
+      backendWait,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("PID no liberó polling")), 1_000)),
+    ]);
+    assert.equal(waitFinished, true, "polling continúa sólo tras desaparecer el PID");
+
+    let mainSocketDestroyed = false;
+    const operation = Object.create(AtomicOperation.prototype);
+    Object.assign(operation, {
+      state: "rollback_confirmed",
+      stateHistory: ["rollback_confirmed"],
+      mainCloseAttempted: false,
+      client: {
+        end: () => new Promise(() => {}),
+        connection: { stream: { destroy: () => { mainSocketDestroyed = true; } } },
+      },
+    });
+    const closeConfirmed = await operation.closeMain();
+    assert.equal(closeConfirmed, false, "client.end colgado no confirma cierre principal");
+    assert.equal(operation.state, "outcome_unknown", "cierre principal no confirmado queda incierto");
+    assert.equal(operation.stateHistory.includes("connection_closed"), false, "no se emite connection_closed falso");
+    assert.equal(mainSocketDestroyed, true, "socket principal se destruye");
+
+    const fakeConnection = {};
+    let querySocketDestroyed = false;
+    const hungQueryVerifier = {
+      connect: async () => {},
+      end: async () => {},
+      connection: { stream: { destroy: () => { querySocketDestroyed = true; } } },
+      query: ({ text }) => {
+        if (text === plan.fingerprintSql) return new Promise(() => {});
+        if (text.includes("pg_stat_activity")) return Promise.resolve({ rows: [{ residual: false }] });
+        return Promise.resolve({ rows: [{}] });
+      },
+    };
+    const queryTimeoutResult = await verifyIncidentOutcome(fakeConnection, 42, plan, precheck, {
+      verifier: hungQueryVerifier,
+      queryTimeoutMs: 25,
+      pollIntervalMs: 1,
+    });
+    assert.equal(queryTimeoutResult.classification, "INDETERMINATE", "query verificadora colgada es indeterminada");
+    assert.equal(querySocketDestroyed, true, "query verificadora colgada destruye socket");
+
+    let endSocketDestroyed = false;
+    const completedVerifier = {
+      connect: async () => {},
+      end: () => new Promise(() => {}),
+      connection: { stream: { destroy: () => { endSocketDestroyed = true; } } },
+      query: async ({ text }) => {
+        if (text.includes("pg_stat_activity")) return { rows: [{ residual: false }] };
+        if (text === plan.prechecks.partial_application) return { rows: [partial(false)] };
+        if (text === plan.fingerprintSql) return { rows: [{ category: "OVERALL", item_count: 377, sha256: final.fingerprint.hash }] };
+        if (text === plan.postchecks.history) return { rows: final.historyRows };
+        if (text === plan.postchecks.lineage_state) return { rows: [{ pending: 0, markers: 2 }] };
+        if (text === plan.prechecks.lineage_counts) return { rows: [{ pending: 0, exercise_count: 19 }] };
+        if (text === plan.postchecks.fixtures) return { rows: [{ valid: true }] };
+        if (text === plan.postchecks.diagnostic) return { rows: [{ present: true, row_count: 0 }] };
+        if (text === plan.prechecks.diagnostic_hash) return { rows: [{ diagnostic_hash: diagnosticHash }] };
+        if (text === plan.prechecks.diagnostic_consumers) return { rows: [{ consumer_count: 0 }] };
+        if (text === plan.prechecks.incompatible_lineages) return { rows: [{ incompatible_count: 0 }] };
+        if (text === plan.prechecks.data_counts) return { rows: [{ counts: finalCounts }] };
+        if (text === plan.scenarios.catalog || text === plan.scenarios.complete_state) return { rows: [{ valid: true }] };
+        return { rows: [{}] };
+      },
+    };
+    const hungEndResult = await verifyIncidentOutcome(fakeConnection, 42, plan, precheck, {
+      verifier: completedVerifier,
+      queryTimeoutMs: 25,
+      pollIntervalMs: 1,
+    });
+    assert.equal(hungEndResult.classification, "INDETERMINATE", "end verificador colgado degrada resultado definitivo");
+    assert.equal(hungEndResult.verifierClosed, false, "end verificador no se declara cerrado");
+    assert.equal(endSocketDestroyed, true, "end verificador colgado destruye socket");
+
+    const pendingChildSource = ${JSON.stringify(pendingChildProbe)};
+    const pendingChild = spawn(process.execPath, ["--input-type=module", "--eval", pendingChildSource], {
+      cwd: ${JSON.stringify(root)},
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let pendingStdout = "";
+    let pendingStderr = "";
+    pendingChild.stdout.setEncoding("utf8");
+    pendingChild.stderr.setEncoding("utf8");
+    pendingChild.stdout.on("data", (chunk) => { pendingStdout += chunk; });
+    pendingChild.stderr.on("data", (chunk) => { pendingStderr += chunk; });
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    assert.equal(pendingChild.exitCode, null, "no-silent-exit: proceso sigue vivo tras el umbral reducido anterior");
+    assert.equal(pendingChild.signalCode, null, "no-silent-exit: proceso no se autotermina por señal");
+    assert.doesNotThrow(() => process.kill(pendingChild.pid, 0), "no-silent-exit: timer referenciado conserva el proceso");
+    assert.equal(
+      pendingStderr,
+      "PERF06 runner INDETERMINATE backend_status=unconfirmed; process remains pending\n",
+      "no-silent-exit: aviso sanitizado exactamente una vez",
+    );
+    assert.equal(pendingStdout, "", "no-silent-exit: no emite PASS ni clasificación terminal");
+    const forcedClose = new Promise((resolve) => pendingChild.once("close", (code, signal) => resolve({ code, signal })));
+    pendingChild.kill("SIGKILL");
+    const forcedResult = await forcedClose;
+    assert.equal(forcedResult.code, null, "no-silent-exit: terminación forzada no produce código cero");
+    assert.equal(forcedResult.signal, "SIGKILL", "no-silent-exit: terminación controlada y no exit(0)");
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", probe], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  assert.equal(result.status, 0, `probes conductuales del verificador: ${result.stderr || result.stdout}`);
+}
+
 function validateFixture(root: string): void {
   assert.equal(historicalMappings.length, 18, "mapping exacto de 18 históricos materiales");
   assert.equal(
@@ -1574,6 +2008,7 @@ function validateFixture(root: string): void {
   validateContractRegistration(root);
   validateBaselineArtifacts(root);
   validateDocumentation(root);
+  validateAtomicRunner(root);
 }
 
 function walkTestFiles(directory: string): string[] {
@@ -1617,6 +2052,7 @@ function copyFixture(): string {
     join(diagnosticsDirectory, fingerprintArtifact),
     schemaBaseline,
     normalizationDocument,
+    ...runnerArtifacts,
     productRepository,
     cycleScopedRepository,
     lineageModel,
@@ -1654,6 +2090,7 @@ function canonicalSourcesSha(): string {
     join(diagnosticsDirectory, fingerprintArtifact),
     schemaBaseline,
     normalizationDocument,
+    ...runnerArtifacts,
     productRepository,
     cycleScopedRepository,
     lineageModel,
@@ -1731,6 +2168,44 @@ function replaceLast(source: string, before: string, after: string): string {
   return `${source.slice(0, index)}${after}${source.slice(index + before.length)}`;
 }
 
+function assertUniqueOrderedRunnerStatements(source: string): void {
+  const sourceFile = ts.createSourceFile(runnerPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const parseDiagnostics = (sourceFile as unknown as { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? [];
+  assert.equal(parseDiagnostics.length, 0, "orden precheck/locks: runner JavaScript parseable");
+  const classes: ts.ClassDeclaration[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isClassDeclaration(node) && node.name?.text === "AtomicOperation") classes.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  assert.equal(classes.length, 1, "orden precheck/locks: clase AtomicOperation única");
+  const methods = classes[0].members.filter(
+    (member): member is ts.MethodDeclaration => ts.isMethodDeclaration(member)
+      && ts.isIdentifier(member.name)
+      && member.name.text === "prechecksAndLocks",
+  );
+  assert.equal(methods.length, 1, "orden precheck/locks: método prechecksAndLocks único");
+  assert.ok(methods[0].body, "orden precheck/locks: método prechecksAndLocks con cuerpo");
+  const statements = methods[0].body!.statements.map((statement) => statement.getText(sourceFile).replace(/\s+/gu, " ").trim());
+  const expected = [
+    "const initial = await this.collectPrecheck();",
+    "await this.query(this.plan.prechecks.lock_diagnostic);",
+    "await this.query(this.plan.prechecks.lock_auth_users);",
+    "await this.query(this.plan.prechecks.lock_exercises);",
+    "await this.query(this.plan.prechecks.lock_dependents);",
+    "const locked = await this.collectPrecheck();",
+    'invariant(exactJson(locked, initial), "Prechecks changed while locks were acquired");',
+    "this.precheck = Object.freeze({ ...locked, complete: true });",
+  ];
+  let previous = -1;
+  for (const anchor of expected) {
+    const matches = statements.flatMap((statement, index) => statement === anchor ? [index] : []);
+    assert.equal(matches.length, 1, `orden precheck/locks: ancla ejecutable única: ${anchor}`);
+    assert.ok(matches[0] > previous, `orden precheck/locks: secuencia exacta: ${anchor}`);
+    previous = matches[0];
+  }
+}
+
 function removeCompensationPostcheck(source: string): string {
   const marker = "message = 'PERF-06R aborted: legacy exercises remain without compatible lineage';";
   const markerIndex = source.indexOf(marker);
@@ -1805,6 +2280,14 @@ function addUnexpectedProfileColumn(root: string): void {
   );
 }
 
+function mutateRunnerArtifact(root: string, artifact: string, mutate: (source: string) => string): void {
+  const path = join(root, artifact);
+  const source = readFileSync(path, "utf8");
+  const mutated = mutate(source);
+  assert.notEqual(mutated, source, `mutation probe runner efectivo: ${artifact}`);
+  writeFileSync(path, mutated);
+}
+
 type MutationProbe = {
   name: string;
   apply: (root: string) => void;
@@ -1812,6 +2295,439 @@ type MutationProbe = {
 };
 
 const mutationProbes: MutationProbe[] = [
+  {
+    name: "M26: todos los locks se adelantan al precheck inicial",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      `    const initial = await this.collectPrecheck();
+    if (this.options.injection === "precheck") throw new Error("Injected precheck failure");
+    this.mark("prechecks_read_only");
+    await this.query(this.plan.prechecks.lock_diagnostic);
+    await this.query(this.plan.prechecks.lock_auth_users);
+    await this.query(this.plan.prechecks.lock_exercises);
+    await this.query(this.plan.prechecks.lock_dependents);`,
+      `    await this.query(this.plan.prechecks.lock_diagnostic);
+    await this.query(this.plan.prechecks.lock_auth_users);
+    await this.query(this.plan.prechecks.lock_exercises);
+    await this.query(this.plan.prechecks.lock_dependents);
+    const initial = await this.collectPrecheck();
+    if (this.options.injection === "precheck") throw new Error("Injected precheck failure");
+    this.mark("prechecks_read_only");`,
+    )),
+    expectedFailure: /orden precheck\/locks/,
+  },
+  {
+    name: "precheck inicial eliminado",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "    const initial = await this.collectPrecheck();",
+      "    const initial = Object.freeze({});",
+    )),
+    expectedFailure: /orden precheck\/locks/,
+  },
+  {
+    name: "precheck inicial sólo en comentario y string",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "    const initial = await this.collectPrecheck();",
+      `    // const initial = await this.collectPrecheck();
+    void "const initial = await this.collectPrecheck();";
+    const initial = Object.freeze({});`,
+    )),
+    expectedFailure: /orden precheck\/locks/,
+  },
+  {
+    name: "segundo precheck bajo locks eliminado",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "    const locked = await this.collectPrecheck();",
+      "    const locked = initial;",
+    )),
+    expectedFailure: /orden precheck\/locks/,
+  },
+  {
+    name: "precheck complete true antes de locks",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      replaceExactlyOnce(
+        source,
+        "    const initial = await this.collectPrecheck();",
+        "    const initial = await this.collectPrecheck();\n    this.precheck = Object.freeze({ ...locked, complete: true });",
+      ),
+      "    this.precheck = Object.freeze({ ...locked, complete: true });\n    invariant(completePrecheck(this.precheck),",
+      "    void this.precheck;\n    invariant(completePrecheck(this.precheck),",
+    )),
+    expectedFailure: /orden precheck\/locks/,
+  },
+  {
+    name: "reorden parcial de locks diagnóstico y auth",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      `    await this.query(this.plan.prechecks.lock_diagnostic);
+    await this.query(this.plan.prechecks.lock_auth_users);`,
+      `    await this.query(this.plan.prechecks.lock_auth_users);
+    await this.query(this.plan.prechecks.lock_diagnostic);`,
+    )),
+    expectedFailure: /orden precheck\/locks/,
+  },
+  {
+    name: "verificador rollback tolera marker huérfano",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "    && snapshot.markerCount === 0", "    && true")),
+  },
+  {
+    name: "verificador rollback tolera fixture residual",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => source.replace("    && snapshot.fixtureFree === true", "    && true")),
+  },
+  {
+    name: "verificador rollback tolera diagnóstico no vacío",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => source.replace("    && snapshot.diagnosticCount === 0", "    && true")),
+  },
+  {
+    name: "verificador rollback tolera hash diagnóstico distinto",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => source.replace("    && snapshot.diagnosticHash === precheck.diagnosticHash", "    && true")),
+  },
+  {
+    name: "verificador rollback acepta precheck incompleto",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => source.replace("  return completePrecheck(precheck)", "  return precheck != null")),
+  },
+  {
+    name: "verificador final tolera versión sustituida",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "return historyRows.every((row, index) => row.version === manifest[index].version", "return historyRows.every((row, index) => true")),
+  },
+  {
+    name: "verificador final tolera nombre incorrecto",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "    && row.name === manifest[index].name", "    && true")),
+  },
+  {
+    name: "verificador final tolera statements distintos",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "    && exactJson(row.statements, manifest[index].statements));", "    && row.statements.length === manifest[index].statements.length);")),
+  },
+  {
+    name: "verificador final tolera marker incorrecto",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "    && snapshot.markerCount === precheck.pending", "    && true")),
+  },
+  {
+    name: "verificador final tolera fixture residual",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceLast(source, "    && snapshot.fixtureFree === true", "    && true")),
+  },
+  {
+    name: "verificador final tolera diagnóstico no vacío",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceLast(source, "    && snapshot.diagnosticCount === 0", "    && true")),
+  },
+  {
+    name: "verificador final tolera estructura diagnóstica alterada",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceLast(source, "    && snapshot.diagnosticHash === precheck.diagnosticHash", "    && true")),
+  },
+  {
+    name: "verificador final tolera conteo lateral",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "    && finalDataCountsMatch(snapshot.dataCounts, precheck.dataCounts, precheck.pending)", "    && true")),
+  },
+  {
+    name: "verificador escapa con backend residual permanente",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "  while (true) {", "  for (let polls = 0; polls < 2; polls += 1) {")),
+  },
+  {
+    name: "verificador termina si no puede confirmar desaparición del backend",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "  if (!backendGone && Number.isInteger(backendPid)) await remainPendingWhenBackendCannotBeConfirmed();",
+      "  if (!backendGone && Number.isInteger(backendPid)) classification = \"INDETERMINATE\";",
+    )),
+  },
+  {
+    name: "verificador continúa antes de desaparecer backend temporal",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "    if (result.rows[0].residual === false) return;", "    return;")),
+  },
+  {
+    name: "closeMain declara cierre no confirmado",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "    if (!closed.timedOut && closed.value.confirmed === true) {", "    if (closed.timedOut || closed.value.confirmed === true) {")),
+  },
+  {
+    name: "query verificadora pierde timeout efectivo",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "    timeoutMs + 250,", "    Number.MAX_SAFE_INTEGER,")),
+  },
+  {
+    name: "end verificador colgado conserva resultado definitivo",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "  if (!verifierClosed) classification = \"INDETERMINATE\";", "  if (!verifierClosed) classification = classification;")),
+  },
+  {
+    name: "garantía backend sólo en comentario y string",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => `${replaceExactlyOnce(
+      source,
+      '  if (snapshot?.backendGone !== true) return "INDETERMINATE";',
+      '  if (snapshot == null) return "INDETERMINATE";',
+    )}\n// if (snapshot?.backendGone !== true) return "INDETERMINATE";\n'if (snapshot?.backendGone !== true) return "INDETERMINATE";';\n`),
+  },
+  {
+    name: "verificador elimina connectionTimeoutMillis",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "    connectionTimeoutMillis: connectionTimeoutMs,", "    keepAlive: true,")),
+  },
+  {
+    name: "verificador elimina query_timeout cliente",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "    query_timeout: VERIFIER_QUERY_TIMEOUT_MS,", "    keepAlive: true,")),
+  },
+  {
+    name: "verificador elimina statement_timeout local",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "`SET LOCAL statement_timeout = '${timeoutMs}ms'`", '"select 1"')),
+  },
+  {
+    name: "verificador elimina lock_timeout local",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "`SET LOCAL lock_timeout = '${Math.min(VERIFIER_LOCK_TIMEOUT_MS, timeoutMs)}ms'`", '"select 1"')),
+  },
+  {
+    name: "verificador elimina idle_in_transaction_session_timeout local",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(source, "`SET LOCAL idle_in_transaction_session_timeout = '${Math.max(VERIFIER_IDLE_TIMEOUT_MS, timeoutMs * 2)}ms'`", '"select 1"')),
+  },
+  {
+    name: "runner ausente",
+    apply: (root) => rmSync(join(root, runnerPath)),
+  },
+  {
+    name: "runner agrega proceso SQL externo",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => `${source}\nspawn("sql-client", []);\n`),
+  },
+  {
+    name: "runner introduce Pool",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => `${source}\nnew pg.Pool();\n`),
+  },
+  {
+    name: "runner abre segundo cliente principal",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "    this.client = new PgClient(connection);",
+      "    this.client = new PgClient(connection);\n    this.shadowClient = new PgClient(connection);",
+    )),
+  },
+  {
+    name: "runner cae en autocommit",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      '    await this.query("BEGIN ISOLATION LEVEL READ COMMITTED READ WRITE");',
+      '    await this.query("select 1");',
+    )),
+  },
+  {
+    name: "runner permite COMMIT sin literal",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      '    invariant(options.confirmation === expected, "Persistent mode requires the exact literal confirmation");',
+      '    invariant(true, "confirmation disabled");',
+    )),
+  },
+  {
+    name: "runner inserta 24 filas inicialmente",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "    historical: manifest.slice(0, HISTORICAL_MIGRATIONS.length),",
+      "    historical: manifest,",
+    )),
+  },
+  {
+    name: "runner registra migración antes de ejecutarla",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "      const row = this.plan.perf[migrationIndex];\n      for (let statementIndex",
+      "      const row = this.plan.perf[migrationIndex];\n      await this.query(\"insert into supabase_migrations.schema_migrations (version, name, statements) values ($1, $2, $3::text[])\", [row.version, row.name, row.statements]);\n      for (let statementIndex",
+    ).replace(
+      '      await this.query(\n        "insert into supabase_migrations.schema_migrations (version, name, statements) values ($1, $2, $3::text[])",\n        [row.version, row.name, row.statements],\n      );\n      this.mark(`migration_${row.version}`);',
+      '      this.mark(`migration_${row.version}`);',
+    )),
+  },
+  {
+    name: "runner omite ACL PERF-06R",
+    apply: (root) => mutateRunnerArtifact(root, runnerManifestLibrary, (source) => replaceExactlyOnce(
+      source,
+      '  "20260811190144_perf_06r_daily_readiness_acl_normalization.sql",',
+      '  "20260811190145_perf_06r_acl_omitted.sql",',
+    )),
+  },
+  {
+    name: "runner omite escenario A",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      '    await this.withScenario("A", async () => {',
+      '    await this.withScenario("B", async () => {',
+    )),
+  },
+  {
+    name: "runner omite savepoint administrado",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "    const sql = SAVEPOINT_SQL[letter];",
+      '    const sql = { create: "select 1", rollback: "select 1", release: "select 1" };',
+    )),
+  },
+  {
+    name: "runner no valida SQLSTATE exacto",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "    if (observed !== expectedCode) {",
+      "    if (false) {",
+    )),
+  },
+  {
+    name: "runner permite query posterior a error",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      '    invariant(!this.blocked, "Query attempted after an unexpected error");',
+      '    invariant(true, "query guard disabled");',
+    )),
+  },
+  {
+    name: "runner concatena valor de fixture en SQL",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "      await this.query(query.insert_exercise, [exercise, owner, routine, \"__perf06_fixture_c__\"]);",
+      "      await this.query(query.insert_exercise.replace(\"$4\", \"'fixture'\"), [exercise, owner, routine]);",
+    )),
+  },
+  {
+    name: "runner tolera fixture persistente",
+    apply: (root) => mutateRunnerArtifact(root, `${runnerOperationDirectory}/postchecks.sql`, (source) => replaceExactlyOnce(
+      source,
+      "  and not exists (select 1 from public.training_exercise_lineages where metadata ? 'fixture')",
+      "  and true",
+    )),
+  },
+  {
+    name: "runner elimina diagnóstico",
+    apply: (root) => mutateRunnerArtifact(root, `${runnerOperationDirectory}/postchecks.sql`, (source) => `${source}\ndrop table public.training_session_consolidation_audit;\n`),
+  },
+  {
+    name: "runner altera fingerprint final",
+    apply: (root) => mutateRunnerArtifact(root, runnerManifestLibrary, (source) => replaceExactlyOnce(
+      source,
+      finalFingerprintSha256,
+      supersededFinalFingerprintSha256,
+    )),
+  },
+  {
+    name: "runner agrega reintento automático",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "    const result = await operation.run();",
+      "    await operation.run();\n    const result = await operation.run();",
+    )),
+  },
+  {
+    name: "runner imprime secreto",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => `${source}\nconsole.log(process.env.PERF_06_DATABASE_URL);\n`),
+  },
+  {
+    name: "runner permite COMMIT antes de postchecks",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "    await this.postchecks();\n    await this.terminalAction();",
+      "    await this.terminalAction();\n    await this.postchecks();",
+    )),
+  },
+  {
+    name: "runner clasifica commit incierto como FAIL definitivo",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      '    const prefix = result.classification === "INDETERMINATE" ? "INDETERMINATE" : "INTERRUPTED";',
+      '    const prefix = result.classification === "INDETERMINATE" ? "FAIL" : "INTERRUPTED";',
+    )),
+  },
+  {
+    name: "verificador de incidente ejecuta writes",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      '    await boundedVerifierOperation(() => verifier.connect(), connectionTimeoutMs, "connect");',
+      '    await boundedVerifierOperation(() => verifier.connect(), connectionTimeoutMs, "connect");\n    await verifierQuery(verifier, "write", "delete from public.exercises", [], queryTimeoutMs);',
+    )),
+  },
+  {
+    name: "verificador conserva snapshot obsoleto de pg_stat_activity",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      '    await verifierQuery(verifier, "pg_stat_clear_snapshot", "select pg_catalog.pg_stat_clear_snapshot()", [], timeoutMs);',
+      "    // snapshot refresh removed",
+    )),
+  },
+  {
+    name: "runner no cierra cliente principal nominal",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "    this.assertMilestones(true);\n    const mainClosed = await this.closeMain();",
+      "    this.assertMilestones(true);\n    const mainClosed = true;",
+    )),
+  },
+  {
+    name: "runner elimina handler SIGINT",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      '  process.once("SIGINT", onSigint);',
+      "  onSigint;",
+    )),
+  },
+  {
+    name: "runner elimina timeout global",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      '  const timeout = setTimeout(() => operation.gate.request("timeout"), timeoutMs);',
+      '  const timeout = false && setTimeout(() => operation.gate.request("timeout"), timeoutMs);',
+    )),
+  },
+  {
+    name: "runner degrada TLS QA a require",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => source.replaceAll('"verify-full"', '"require"')),
+  },
+  {
+    name: "runner omite SNI verificado",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "ssl: options.localValidation ? false : { rejectUnauthorized: true, servername: qaHost },",
+      "ssl: options.localValidation ? false : { rejectUnauthorized: true },",
+    )),
+  },
+  {
+    name: "runner omite lock diagnóstico",
+    apply: (root) => mutateRunnerArtifact(root, `${runnerOperationDirectory}/prechecks.sql`, (source) => replaceExactlyOnce(
+      source,
+      "lock table public.training_session_consolidation_audit in share mode;",
+      "select true;",
+    )),
+  },
+  {
+    name: "runner ignora marker huérfano",
+    apply: (root) => mutateRunnerArtifact(root, `${runnerOperationDirectory}/prechecks.sql`, (source) => replaceExactlyOnce(
+      source,
+      "from public.training_exercise_lineages\nwhere metadata @>",
+      "from public.training_exercise_lineages tel join public.exercises e on e.id = tel.source_legacy_exercise_id\nwhere tel.metadata @>",
+    )),
+  },
+  {
+    name: "Scenario F vuelve a aceptar 42501",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      '      await this.expectSqlState("perf06_f_rebind_expected", rebindSql, rebindValues, "23514");',
+      '      await this.expectSqlState("perf06_f_rebind_expected", rebindSql, rebindValues, "42501");',
+    )),
+  },
+  {
+    name: "Scenario G continúa tras fallo intermedio",
+    apply: (root) => mutateRunnerArtifact(root, runnerPath, (source) => replaceExactlyOnce(
+      source,
+      "      await this.query(query.insert_cycle_routine, [fixture.cycleRoutine, owner, fixture.cycle, \"__perf06_fixture_g_routine__\"]);",
+      "      this.query(query.insert_cycle_routine, [fixture.cycleRoutine, owner, fixture.cycle, \"__perf06_fixture_g_routine__\"]);",
+    )),
+  },
+  {
+    name: "bootstrap local reintroduce metacomando",
+    apply: (root) => mutateRunnerArtifact(root, `${runnerOperationDirectory}/local-validation-bootstrap.sql`, (source) => replaceExactlyOnce(
+      source,
+      "-- PERF06_BOOTSTRAP_PHASE before_schema",
+      "\\set ON_ERROR_STOP on\n-- PERF06_BOOTSTRAP_PHASE before_schema",
+    )),
+  },
+  {
+    name: "runner altera hash de manifiesto",
+    apply: (root) => mutateRunnerArtifact(root, `${runnerOperationDirectory}/manifest.json`, (source) => replaceExactlyOnce(
+      source,
+      runnerManifestSha256,
+      "0955e5eeb0e4b08060970803ac27c4811f76a304f75d99fded65642847a39848",
+    )),
+  },
   {
     name: "devolver diagnóstico a migrations",
     apply: (root) => copyFileSync(
@@ -2535,6 +3451,8 @@ const mutationProbes: MutationProbe[] = [
 
 validateFixture(repositoryRoot);
 validateGlobalTestRegistry();
+validateRunnerExternalCliProbes(repositoryRoot);
+validateIncidentVerifierBehavior(repositoryRoot);
 
 const canonicalSha = canonicalSourcesSha();
 for (const probe of mutationProbes) {
