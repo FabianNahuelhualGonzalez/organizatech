@@ -4,13 +4,16 @@ create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   display_name text not null,
   email text not null,
+  current_streak integer not null default 0 check (current_streak >= 0),
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
   first_name text,
   last_name text,
   birth_date date,
   gender text default 'not_specified',
-  phone_number text,
   avatar_path text,
   avatar_updated_at timestamptz,
+  phone_number text,
   constraint profiles_gender_allowed check (
     gender is null or gender in (
       'male',
@@ -19,10 +22,7 @@ create table public.profiles (
       'prefer_not_to_say',
       'not_specified'
     )
-  ),
-  current_streak integer not null default 0 check (current_streak >= 0),
-  updated_at timestamptz not null default now(),
-  created_at timestamptz not null default now()
+  )
 );
 
 create table public.routines (

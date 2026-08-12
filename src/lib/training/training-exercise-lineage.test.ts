@@ -9,7 +9,7 @@ import {
 } from "@/lib/training/training-exercise-lineage";
 
 const migration = readFileSync(
-  "supabase/migrations/20260610_training_exercise_lineage.sql",
+  "supabase/migrations/20260610000001_training_exercise_lineage.sql",
   "utf8",
 );
 

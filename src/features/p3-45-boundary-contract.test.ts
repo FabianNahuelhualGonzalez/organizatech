@@ -1143,7 +1143,7 @@ try {
   cpSync("src", join(mutationDirectory, "src"), { recursive: true });
   cpSync("tsconfig.json", join(mutationDirectory, "tsconfig.json"));
   cpSync("package.json", join(mutationDirectory, "package.json"));
-  const avatarMigrationPath = "supabase/migrations/20260713_p0_h_profile_avatar_hardening.sql";
+  const avatarMigrationPath = "supabase/migrations/20260713000001_p0_h_profile_avatar_hardening.sql";
   mkdirSync(join(mutationDirectory, "supabase/migrations"), { recursive: true });
   cpSync(avatarMigrationPath, join(mutationDirectory, avatarMigrationPath));
   symlinkSync(resolve("node_modules"), join(mutationDirectory, "node_modules"), "dir");

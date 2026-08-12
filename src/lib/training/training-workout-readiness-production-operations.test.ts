@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 
 const packageJson = readFileSync("package.json", "utf8");
-const migration = readFileSync("supabase/migrations/20260620_training_workout_readiness.sql", "utf8");
+const migration = readFileSync("supabase/migrations/20260620000001_training_workout_readiness.sql", "utf8");
 const precheck = readFileSync("supabase/operations/production/release-b/01_precheck_readonly.sql", "utf8");
 const apply = readFileSync("supabase/operations/production/release-b/02_apply_training_workout_readiness_v2.sql", "utf8");
 const postcheck = readFileSync("supabase/operations/production/release-b/03_postcheck_readonly.sql", "utf8");

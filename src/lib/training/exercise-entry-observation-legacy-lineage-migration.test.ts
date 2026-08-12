@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const migration = readFileSync(
-  "supabase/migrations/20260718_exercise_entries_observation_legacy_lineage.sql",
+  "supabase/migrations/20260718000002_exercise_entries_observation_legacy_lineage.sql",
   "utf8",
 );
 const obs1Migration = readFileSync(
-  "supabase/migrations/20260718_exercise_entries_observation.sql",
+  "supabase/migrations/20260718000001_exercise_entries_observation.sql",
   "utf8",
 );
 

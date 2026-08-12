@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const migration = readFileSync(
-  "supabase/migrations/20260718_exercise_entries_observation.sql",
+  "supabase/migrations/20260718000001_exercise_entries_observation.sql",
   "utf8",
 );
 const previousMigration = readFileSync(
-  "supabase/migrations/20260709_p0_d1_harden_training_session_entries_writes.sql",
+  "supabase/migrations/20260709000001_p0_d1_harden_training_session_entries_writes.sql",
   "utf8",
 );
 
