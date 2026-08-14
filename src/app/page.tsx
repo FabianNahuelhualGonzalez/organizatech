@@ -86,7 +86,7 @@ export default function WebsitePreviewPage() {
           <p className={styles.heroLead}>
             Organizatech reúne tu rutina, tus sesiones y tu progreso para que dejes de entrenar a ciegas.
           </p>
-          <Link className={styles.heroCta} href="/login">
+          <Link className={styles.heroCta} href="/login?mode=registro&tipo=usuario">
             Crear mi cuenta <span aria-hidden="true">→</span>
           </Link>
           <p className={styles.heroNote}>Tu cuenta. Tus datos. Tu progreso.</p>
@@ -202,7 +202,7 @@ export default function WebsitePreviewPage() {
           <ul>
             {coachBenefits.map((benefit) => <li key={benefit}><span aria-hidden="true">✓</span>{benefit}</li>)}
           </ul>
-          <a className={styles.coachCta} href="#coach-preview">Quiero ser coach <span aria-hidden="true">→</span></a>
+          <Link className={styles.coachCta} href="/login?mode=registro&tipo=coach">Quiero ser coach <span aria-hidden="true">→</span></Link>
         </div>
 
         <div className={styles.coachPreview} id="coach-preview" aria-label="Vista conceptual para coaches">
@@ -226,7 +226,7 @@ export default function WebsitePreviewPage() {
       <section className={styles.finalCta}>
         <p>EMPIEZA POR TU PRÓXIMA SESIÓN</p>
         <h2>Menos notas sueltas.<br />Más claridad para avanzar.</h2>
-        <Link href="/login">Crear mi cuenta <span aria-hidden="true">→</span></Link>
+        <Link href="/login?mode=registro&tipo=usuario">Crear mi cuenta <span aria-hidden="true">→</span></Link>
         <small>Configura tu rutina y comienza a registrar.</small>
       </section>
 

@@ -367,7 +367,7 @@ const styles = {
   shell: {
     minHeight: "100vh",
     padding: 24,
-    background: "#f6f7f9",
+    background: "var(--background)",
     color: "#18202f",
     fontFamily: "Arial, sans-serif",
   },

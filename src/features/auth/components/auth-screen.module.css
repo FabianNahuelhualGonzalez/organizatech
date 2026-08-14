@@ -1,0 +1,397 @@
+.shell {
+  display: grid;
+  min-width: 0;
+  min-height: calc(100dvh - 42px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  align-content: start;
+  gap: clamp(28px, 6vw, 40px);
+  padding: clamp(42px, 9vh, 86px) clamp(8px, 3vw, 20px) 42px;
+  background-color: var(--background);
+}
+
+.header {
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+  text-align: center;
+}
+
+.brandLockup {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(14px, 4vw, 22px);
+}
+
+.logo {
+  width: clamp(66px, 18vw, 82px);
+  height: clamp(66px, 18vw, 82px);
+  flex: 0 0 auto;
+  border-radius: 18px;
+}
+
+.brandLockup h1 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(25px, 7vw, 36px);
+  font-weight: 900;
+  letter-spacing: -0.06em;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(12px, 3.2vw, 15px);
+  font-weight: 700;
+}
+
+.segmentedControl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+  min-height: 56px;
+  gap: 6px;
+  border: 1px solid rgba(220, 231, 255, 0.22);
+  border-radius: 8px;
+  background: #27313d;
+  padding: 6px;
+}
+
+.segmentedControl button {
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #b6c0cc;
+  background: transparent;
+  font-size: clamp(12px, 3.5vw, 15px);
+  font-weight: 800;
+}
+
+.segmentedControl button.activeTab {
+  border-color: rgba(255, 255, 255, 0.92);
+  color: #fff;
+  background: var(--primary);
+}
+
+.segmentedControl button:focus-visible,
+.primaryButton:focus-visible,
+.textButton:focus-visible,
+.googleButton:focus-visible,
+.switchButton:focus-visible,
+.field :is(input, select):focus-visible,
+.passwordWrap button:focus-visible {
+  outline: 3px solid rgba(60, 122, 255, 0.55);
+  outline-offset: 3px;
+}
+
+.card {
+  display: grid;
+  min-width: 0;
+  gap: 22px;
+  border: 2px solid rgba(220, 231, 255, 0.88);
+  border-radius: 10px;
+  background: var(--background);
+  padding: clamp(24px, 6vw, 34px) clamp(18px, 5vw, 30px) clamp(28px, 7vw, 42px);
+}
+
+.card h2 {
+  margin: 0 0 6px;
+  color: #fff;
+  font-size: clamp(20px, 5.7vw, 27px);
+  line-height: 1.15;
+}
+
+.loginCard {
+  gap: 24px;
+  padding-top: clamp(36px, 8vw, 52px);
+}
+
+.registrationCard {
+  gap: 26px;
+}
+
+.fields {
+  display: grid;
+  min-width: 0;
+  gap: 17px;
+}
+
+.field {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.field > span:first-child,
+.field > label {
+  padding-left: 2px;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 58px;
+  border: 1px solid rgba(220, 231, 255, 0.2);
+  border-radius: 8px;
+  color: #fff;
+  background: #27313d;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.field input::placeholder,
+.field select:invalid {
+  color: #aeb8c5;
+  opacity: 1;
+}
+
+.field input[type="date"] {
+  color-scheme: dark;
+}
+
+.field input[readonly] {
+  color: #c0c8d2;
+  cursor: default;
+}
+
+.birthRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(92px, 0.85fr);
+  min-width: 0;
+  gap: 14px;
+}
+
+.passwordWrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.passwordWrap input {
+  padding-right: 54px;
+}
+
+.passwordWrap button {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 7px;
+  color: #9ca8b8;
+  background: transparent;
+}
+
+.status {
+  margin: -6px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.statusInfo {
+  color: #dce7ff;
+}
+
+.statusSuccess {
+  color: #8de58a;
+}
+
+.statusError,
+.fieldError {
+  color: #ff9ca6;
+}
+
+.fieldError {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.field :is(input, select)[aria-invalid="true"] {
+  border-color: #ff9ca6;
+  box-shadow: 0 0 0 1px rgba(255, 156, 166, 0.2);
+}
+
+.primaryButton,
+.googleButton,
+.switchButton,
+.textButton {
+  justify-self: center;
+  min-height: 48px;
+  border-radius: 7px;
+  font-weight: 800;
+}
+
+.primaryButton {
+  display: inline-flex;
+  width: min(100%, 260px);
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  color: #fff;
+  background: var(--primary);
+  padding: 0 18px;
+}
+
+.primaryButton:disabled,
+.googleButton:disabled {
+  cursor: not-allowed;
+}
+
+.primaryButton:disabled {
+  opacity: 0.66;
+}
+
+.textButton {
+  min-height: 44px;
+  border: 0;
+  color: #aeb8c5;
+  background: transparent;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.separator {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  color: #aab4c1;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.separator span {
+  height: 1px;
+  background: rgba(220, 231, 255, 0.5);
+}
+
+.googleButton {
+  display: inline-flex;
+  width: min(100%, 390px);
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  border: 0;
+  color: #070b10;
+  background: #fff;
+  padding: 0 18px;
+}
+
+.googleButton:disabled {
+  opacity: 0.96;
+}
+
+.googleMark {
+  font-family: Arial, sans-serif;
+  font-size: 20px;
+  font-weight: 900;
+  background: conic-gradient(from -45deg, #4285f4 0 25%, #34a853 0 42%, #fbbc05 0 67%, #ea4335 0 83%, #4285f4 0);
+  background-clip: text;
+  color: transparent;
+}
+
+.switchButton {
+  width: min(100%, 390px);
+  border: 1px solid rgba(220, 231, 255, 0.16);
+  color: #bdc6d1;
+  background: #27313d;
+  padding: 0 14px;
+  font-size: 12px;
+}
+
+.flowCard {
+  gap: 24px;
+  padding-top: clamp(30px, 7vw, 44px);
+}
+
+.helperText {
+  margin: 0;
+  color: #b6c0cc;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.loadingCard {
+  justify-items: center;
+  min-height: 240px;
+  align-content: center;
+  text-align: center;
+}
+
+.loadingIcon {
+  color: var(--primary);
+  animation: auth-spin 900ms linear infinite;
+}
+
+@keyframes auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.segmentedControl button:hover,
+.textButton:hover,
+.switchButton:hover,
+.passwordWrap button:hover {
+  color: #fff;
+}
+
+@media (max-width: 360px) {
+  .shell {
+    padding-right: 2px;
+    padding-left: 2px;
+  }
+
+  .brandLockup {
+    gap: 10px;
+  }
+
+  .brandLockup h1 {
+    font-size: 23px;
+  }
+
+  .birthRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 720px) {
+  .shell {
+    width: 100%;
+    max-width: 580px;
+    margin: 0 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell *,
+  .shell *::before,
+  .shell *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .loadingIcon {
+    animation: none;
+  }
+}
