@@ -3,7 +3,7 @@ import { Pencil } from "lucide-react";
 import styles from "@/features/active-workout/active-workout.module.css";
 import { calculateExerciseMetrics } from "@/lib/progress/calculations";
 import type { ExerciseTemplate } from "@/lib/progress/types";
-import { formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
+import { formatDecimalEs, formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import {
   buildExerciseLastObservationPresentation,
   type ExerciseLastObservationPresentationInput,
@@ -202,7 +202,7 @@ export function GuidedTrainingScreen({
               aria-label="Editar rutina semanal"
               onClick={editRoutine}
             >
-              <Pencil size={17} aria-hidden="true" />
+              <Pencil size={15} aria-hidden="true" />
             </IconButton>
           </div>
         </header>
@@ -261,7 +261,7 @@ export function GuidedTrainingScreen({
                     </span>
                     <span>{exercise.targetSets}</span>
                     <span>{exercise.targetReps}</span>
-                    <span>{formatKg(exercise.baseWeight)}</span>
+                    <span>{formatDecimalEs(exercise.baseWeight)}</span>
                   </button>
                 );
               })}

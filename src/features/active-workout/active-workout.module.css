@@ -17,27 +17,28 @@
 .startIntro h2 {
   max-width: 36rem;
   margin: 0;
-  font-size: clamp(1.05rem, 4.8vw, 1.45rem);
+  font-size: clamp(0.58rem, 2.7vw, 1.1rem);
   line-height: 1.35;
+  white-space: nowrap;
 }
 
-.workoutCard {
+.workoutCard.workoutCard {
   display: grid;
   min-width: 0;
-  gap: clamp(24px, 6vw, 38px);
-  overflow: hidden;
+  gap: clamp(20px, 4.8vw, 30px);
+  overflow: visible;
   border: 1px solid color-mix(in srgb, var(--text) 88%, transparent);
   border-radius: 10px;
   background: var(--background);
   box-shadow: none;
-  padding: clamp(18px, 5vw, 30px) clamp(14px, 4.5vw, 26px);
+  padding: clamp(16px, 4vw, 24px) clamp(12px, 3.5vw, 20px);
 }
 
 .routineHeader {
   display: grid;
   min-width: 0;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 8px;
   align-items: start;
 }
 
@@ -48,17 +49,19 @@
 .routineTitle h2,
 .routineTitle h3 {
   margin: 0;
-  font-size: clamp(1rem, 4.7vw, 1.32rem);
+  font-size: clamp(0.68rem, 2.65vw, 0.95rem);
   line-height: 1.28;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
-.routineTitle p {
+.routineTitle.routineTitle p {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: clamp(0.92rem, 4vw, 1.12rem);
+  font-size: clamp(0.62rem, 2.35vw, 0.82rem);
   line-height: 1.25;
-  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .routineControls {
@@ -66,24 +69,26 @@
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
-  gap: 7px;
+  gap: 5px;
 }
 
 .daySelector {
   display: grid;
   min-width: 0;
+  min-height: 44px;
+  align-items: center;
 }
 
 .daySelector select {
-  width: clamp(96px, 25vw, 132px);
+  width: clamp(104px, 25vw, 120px);
   min-width: 0;
-  min-height: 44px;
+  min-height: 36px;
   border: 1px solid color-mix(in srgb, var(--text) 72%, transparent);
   border-radius: 8px;
   color: var(--text);
   color-scheme: dark;
   background: var(--background);
-  padding: 0 30px 0 10px;
+  padding: 0 26px 0 8px;
   font-size: 1rem;
 }
 
@@ -94,12 +99,22 @@
   outline-offset: 3px;
 }
 
-.editRoutineButton {
+.editRoutineButton.editRoutineButton {
+  position: relative;
   width: 44px;
   height: 44px;
   flex: 0 0 44px;
-  border-color: color-mix(in srgb, var(--text) 72%, transparent);
+  border: 0;
   background: transparent;
+}
+
+.editRoutineButton.editRoutineButton::before {
+  position: absolute;
+  inset: 5px;
+  border: 1px solid color-mix(in srgb, var(--text) 72%, transparent);
+  border-radius: 7px;
+  content: "";
+  pointer-events: none;
 }
 
 .srOnly {
@@ -133,8 +148,9 @@
 .newRecord h3,
 .objectives h3 {
   margin: 0;
-  font-size: clamp(1rem, 4.5vw, 1.3rem);
+  font-size: clamp(0.72rem, 3.2vw, 1.1rem);
   line-height: 1.3;
+  white-space: nowrap;
 }
 
 .sectionHeading p {
@@ -260,13 +276,13 @@
   min-width: 0;
 }
 
-.metricScope :global(.routine-metric-grid) {
+.metricScope.metricScope :global(.routine-metric-grid) {
   width: 100%;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: clamp(6px, 2.5vw, 12px);
 }
 
-.metricScope :global(.metric) {
+.metricScope.metricScope :global(.metric) {
   display: grid;
   min-height: clamp(116px, 30vw, 138px);
   align-content: space-between;
@@ -278,23 +294,23 @@
   text-align: center;
 }
 
-.metricScope :global(.metric-title-row) {
+.metricScope.metricScope :global(.metric-title-row) {
   justify-content: center;
 }
 
-.metricScope :global(.metric-title-row svg) {
+.metricScope.metricScope :global(.metric-title-row svg) {
   display: none;
 }
 
-.metricScope :global(.metric-title-row span) {
+.metricScope.metricScope :global(.metric-title-row span) {
   color: var(--text);
-  font-size: clamp(0.58rem, 2.7vw, 0.76rem);
+  font-size: clamp(0.5rem, 2vw, 0.7rem);
   font-weight: 700;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
-.metricScope :global(.metric strong) {
+.metricScope.metricScope :global(.metric strong) {
   margin: 10px 0 0;
   color: var(--text);
   font-size: clamp(1.15rem, 5.5vw, 1.5rem);
@@ -307,7 +323,7 @@
   justify-content: center;
 }
 
-.primaryAction {
+.primaryAction.primaryAction.primaryAction {
   width: min(100%, 280px);
   min-height: 46px;
   border: 1px solid var(--primary);
@@ -320,16 +336,16 @@
   box-shadow: none;
 }
 
-.primaryAction:hover:not(:disabled) {
+.primaryAction.primaryAction.primaryAction:hover:not(:disabled) {
   background: color-mix(in srgb, var(--primary-strong) 82%, var(--background));
 }
 
-.primaryAction:disabled {
+.primaryAction.primaryAction.primaryAction:disabled {
   cursor: not-allowed;
   opacity: 0.56;
 }
 
-.notice {
+.notice.notice {
   margin: -10px 0 0;
   border: 1px solid color-mix(in srgb, var(--primary) 70%, transparent);
   border-radius: 8px;
@@ -340,7 +356,7 @@
   line-height: 1.45;
 }
 
-.warningNotice {
+.warningNotice.warningNotice {
   border-color: color-mix(in srgb, var(--yellow) 72%, transparent);
   color: var(--yellow);
   background: color-mix(in srgb, var(--yellow) 10%, transparent);
@@ -377,7 +393,7 @@
   text-align: right;
 }
 
-.referencePanel {
+.referencePanel.referencePanel {
   display: grid;
   min-width: 0;
   gap: 12px;
@@ -459,7 +475,6 @@
 
 .historyTitle,
 .historyStatus,
-.historyComparison,
 .todayGoal {
   margin: 0;
   color: var(--muted);
@@ -471,10 +486,6 @@
 .historyTitle {
   color: var(--text);
   font-weight: 800;
-}
-
-.historyComparison {
-  color: var(--blue-soft);
 }
 
 .todayGoal {
@@ -729,8 +740,8 @@
 }
 
 @media (max-width: 420px) {
-  .workoutCard {
-    gap: 26px;
+  .workoutCard.workoutCard {
+    gap: 22px;
   }
 
   .routineHeader {
@@ -742,12 +753,8 @@
   }
 
   .daySelector select {
-    width: 102px;
+    width: 104px;
     padding-left: 8px;
-  }
-
-  .editRoutineButton {
-    width: 44px;
   }
 
   .tableHeader,
@@ -758,17 +765,24 @@
   }
 }
 
-@media (max-width: 360px) {
-  .workoutCard {
-    padding-inline: 11px;
-  }
-
+@media (max-width: 400px) {
   .routineHeader {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .routineTitle,
   .routineControls {
-    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .routineControls {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 360px) {
+  .workoutCard.workoutCard {
+    padding-inline: 11px;
   }
 
   .tableHeader,
@@ -778,7 +792,7 @@
     font-size: 0.64rem;
   }
 
-  .metricScope :global(.metric) {
+  .metricScope.metricScope :global(.metric) {
     min-height: 106px;
     padding-inline: 4px;
   }

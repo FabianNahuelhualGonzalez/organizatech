@@ -1,7 +1,7 @@
 import { Pencil } from "lucide-react";
 
 import styles from "@/features/active-workout/active-workout.module.css";
-import { formatKg } from "@/lib/progress/weight-format";
+import { formatDecimalEs } from "@/lib/progress/weight-format";
 import type { ExerciseTemplate } from "@/lib/progress/types";
 import { IconButton } from "@/ui/buttons/icon-button";
 import { RoutineMetricGrid } from "@/ui/data-display/metric-grid";
@@ -59,7 +59,7 @@ export function TrainingStartScreen({
               aria-label="Editar rutina semanal"
               onClick={editRoutine}
             >
-              <Pencil size={17} aria-hidden="true" />
+              <Pencil size={15} aria-hidden="true" />
             </IconButton>
           </div>
         </header>
@@ -87,7 +87,7 @@ export function TrainingStartScreen({
                   <span className={styles.exerciseNameCell} role="cell">{exercise.name}</span>
                   <span role="cell">{exercise.targetSets}</span>
                   <span role="cell">{exercise.targetReps}</span>
-                  <span role="cell">{formatKg(exercise.baseWeight)}</span>
+                  <span role="cell">{formatDecimalEs(exercise.baseWeight)}</span>
                 </div>
               ))}
             </div>

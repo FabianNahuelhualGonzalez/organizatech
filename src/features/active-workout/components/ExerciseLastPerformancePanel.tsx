@@ -62,7 +62,6 @@ export function ExerciseLastPerformancePanel({
               {presentation.lastSummaryText}
             </p>
           )}
-          <p className={styles.historyComparison}>{presentation.comparisonText}</p>
           <p className={styles.todayGoal}>{presentation.todayGoalText}</p>
         </div>
       </details>
