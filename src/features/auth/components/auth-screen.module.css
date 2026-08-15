@@ -167,6 +167,25 @@
   grid-template-columns: minmax(0, 1.45fr) minmax(92px, 0.85fr);
   min-width: 0;
   gap: 14px;
+  align-items: start;
+}
+
+.birthRow > .field {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.birthRow > .field > input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 
 .passwordWrap {
