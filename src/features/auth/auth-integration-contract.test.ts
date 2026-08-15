@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 
 function readSource(path: string) {
   return readFileSync(path, "utf8");
@@ -74,8 +75,9 @@ for (const marker of [
 }
 
 assert.match(authScreen, /<Image[^>]+src="\/icon\.svg"/);
-assert.match(authScreen, /id="register-age" value=\{age \?\? ""\}[^>]+readOnly/);
-assert.doesNotMatch(authScreen, /id="register-age"[^>]+name=/);
+assertAuthRegistrationInputContract(authScreen);
+runAuthRegistrationInputOrderControls(authScreen);
+runAuthRegistrationInputMutationProbes(authScreen);
 assert.match(authScreen, /COACH_REGISTRATION_SUBMIT_ENABLED/);
 assert.match(authScreen, /disabled=\{isBusy \|\| \(isCoachRegistration && !COACH_REGISTRATION_SUBMIT_ENABLED\)\}/);
 assert.doesNotMatch(authScreen, /auth-tab-coach[\s\S]{0,300}disabled/);
@@ -111,6 +113,475 @@ for (const [foreground, background, label] of [
 
 console.log("auth-integration contract tests passed");
 
+type AuthJsxOpeningLikeElement = ts.JsxOpeningElement | ts.JsxSelfClosingElement;
+
+interface ParsedAuthJsx {
+  sourceFile: ts.SourceFile;
+  elements: AuthJsxOpeningLikeElement[];
+}
+
+interface AuthJsxTarget {
+  parsed: ParsedAuthJsx;
+  element: AuthJsxOpeningLikeElement;
+  attributes: ts.JsxAttribute[];
+}
+
+function parseAuthJsx(source: string): ParsedAuthJsx {
+  const sourceFile = ts.createSourceFile(
+    "auth-screen.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const parseDiagnostics = (sourceFile as ts.SourceFile & {
+    parseDiagnostics?: readonly ts.Diagnostic[];
+  }).parseDiagnostics ?? [];
+  assert.equal(
+    parseDiagnostics.length,
+    0,
+    `[auth-jsx.syntax] La mutación debe conservar sintaxis TSX válida: ${parseDiagnostics.map((diagnostic) => diagnostic.messageText).join(" | ")}`,
+  );
+
+  const elements: AuthJsxOpeningLikeElement[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) elements.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return { sourceFile, elements };
+}
+
+function findUniqueFunctionDeclaration(
+  parsed: ParsedAuthJsx,
+  name: string,
+  assertionName: string,
+): ts.FunctionDeclaration & { body: ts.Block } {
+  const functions = parsed.sourceFile.statements.filter((statement): statement is ts.FunctionDeclaration => (
+    ts.isFunctionDeclaration(statement) && statement.name?.text === name
+  ));
+  assert.equal(
+    functions.length,
+    1,
+    `[${assertionName}] ${name} debe tener una única implementación ejecutable.`,
+  );
+  assert.ok(functions[0].body, `[${assertionName}] ${name} debe conservar su cuerpo ejecutable.`);
+  return functions[0] as ts.FunctionDeclaration & { body: ts.Block };
+}
+
+function collectJsxElements(node: ts.Node) {
+  const elements: AuthJsxOpeningLikeElement[] = [];
+  const visit = (current: ts.Node) => {
+    if (ts.isJsxOpeningElement(current) || ts.isJsxSelfClosingElement(current)) {
+      elements.push(current);
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return elements;
+}
+
+function jsxAttributeName(attribute: ts.JsxAttribute, sourceFile: ts.SourceFile) {
+  return attribute.name.getText(sourceFile);
+}
+
+function jsxAttributes(
+  element: AuthJsxOpeningLikeElement,
+  sourceFile: ts.SourceFile,
+  name: string,
+) {
+  return element.attributes.properties.filter((property): property is ts.JsxAttribute => (
+    ts.isJsxAttribute(property) && jsxAttributeName(property, sourceFile) === name
+  ));
+}
+
+function literalJsxString(attribute: ts.JsxAttribute | undefined) {
+  return attribute?.initializer && ts.isStringLiteral(attribute.initializer)
+    ? attribute.initializer.text
+    : null;
+}
+
+function findAuthJsxTarget(parsed: ParsedAuthJsx, id: string, assertionName: string): AuthJsxTarget {
+  const matches = parsed.elements.filter((element) => (
+    jsxAttributes(element, parsed.sourceFile, "id").some((attribute) => (
+      literalJsxString(attribute) === id
+    ))
+  ));
+  assert.equal(
+    matches.length,
+    1,
+    `[${assertionName}.unique-id] Debe existir exactamente un elemento JSX con id literal "${id}".`,
+  );
+  const element = matches[0];
+  const idAttributes = jsxAttributes(element, parsed.sourceFile, "id");
+  assert.equal(
+    idAttributes.length,
+    1,
+    `[${assertionName}.id-attribute] El elemento ${id} debe declarar id exactamente una vez.`,
+  );
+  assert.equal(
+    literalJsxString(idAttributes[0]),
+    id,
+    `[${assertionName}.id-literal] El id ${id} debe ser un literal estático.`,
+  );
+  return {
+    parsed,
+    element,
+    attributes: element.attributes.properties.filter(ts.isJsxAttribute),
+  };
+}
+
+function assertNoTargetSpreads(target: AuthJsxTarget, assertionName: string) {
+  const spreads = target.element.attributes.properties.filter(ts.isJsxSpreadAttribute);
+  assert.equal(
+    spreads.length,
+    0,
+    `[${assertionName}] El elemento auditado no puede reconstruir atributos mediante spread.`,
+  );
+}
+
+function getUniqueTargetAttribute(target: AuthJsxTarget, name: string, assertionName: string) {
+  const attributes = target.attributes.filter((attribute) => (
+    jsxAttributeName(attribute, target.parsed.sourceFile) === name
+  ));
+  assert.equal(
+    attributes.length,
+    1,
+    `[${assertionName}] ${name} debe existir exactamente una vez en el elemento auditado.`,
+  );
+  return attributes[0];
+}
+
+function assertLiteralTargetAttribute(
+  target: AuthJsxTarget,
+  name: string,
+  expected: string,
+  assertionName: string,
+) {
+  const attribute = getUniqueTargetAttribute(target, name, assertionName);
+  assert.equal(
+    literalJsxString(attribute),
+    expected,
+    `[${assertionName}] ${name} debe ser el literal "${expected}".`,
+  );
+}
+
+function assertForwardedIdentifierAttribute(
+  target: AuthJsxTarget,
+  name: string,
+  identifier: string,
+) {
+  const assertionName = `auth-text-field.${name}-forwarding`;
+  const attribute = getUniqueTargetAttribute(target, name, assertionName);
+  const initializer = attribute.initializer;
+  assert.ok(
+    initializer && ts.isJsxExpression(initializer) && initializer.expression
+      && ts.isIdentifier(initializer.expression) && initializer.expression.text === identifier,
+    `[${assertionName}] El input nativo debe reenviar ${name}={${identifier}} sin reconstrucciones.`,
+  );
+}
+
+function assertAuthTextFieldInputForwarding(parsed: ParsedAuthJsx) {
+  const component = findUniqueFunctionDeclaration(
+    parsed,
+    "AuthTextField",
+    "auth-text-field.unique-component",
+  );
+  const nativeInputs = collectJsxElements(component.body).filter((element) => (
+    element.tagName.getText(parsed.sourceFile) === "input"
+  ));
+  assert.equal(
+    nativeInputs.length,
+    1,
+    "[auth-text-field.unique-native-input] AuthTextField debe renderizar exactamente un input nativo.",
+  );
+  const target: AuthJsxTarget = {
+    parsed,
+    element: nativeInputs[0],
+    attributes: nativeInputs[0].attributes.properties.filter(ts.isJsxAttribute),
+  };
+  assertNoTargetSpreads(target, "auth-text-field.attributes-spread");
+  assertForwardedIdentifierAttribute(target, "id", "id");
+  assertForwardedIdentifierAttribute(target, "name", "name");
+  assertForwardedIdentifierAttribute(target, "type", "type");
+}
+
+function assertRegistrationFieldsOwnership(
+  parsed: ParsedAuthJsx,
+  targets: readonly AuthJsxTarget[],
+) {
+  const registrationFields = findUniqueFunctionDeclaration(
+    parsed,
+    "RegistrationFields",
+    "registration-fields.unique-component",
+  );
+  const ownedElements = collectJsxElements(registrationFields.body);
+  const ownedElementSet = new Set(ownedElements);
+  for (const target of targets) {
+    assert.ok(
+      ownedElementSet.has(target.element),
+      "[registration-fields.target-ownership] Los IDs auditados deben pertenecer a RegistrationFields, no a elementos señuelo.",
+    );
+  }
+
+  for (const element of ownedElements) {
+    assert.equal(
+      element.attributes.properties.filter(ts.isJsxSpreadAttribute).length,
+      0,
+      "[registration-fields.attributes-spread] RegistrationFields no puede reconstruir atributos mediante spreads.",
+    );
+    for (const idAttribute of jsxAttributes(element, parsed.sourceFile, "id")) {
+      assert.ok(
+        literalJsxString(idAttribute) !== null,
+        "[registration-fields.id-literal] Los IDs de RegistrationFields deben ser literales estáticos.",
+      );
+    }
+  }
+}
+
+function assertAuthRegistrationInputContract(source: string) {
+  const parsed = parseAuthJsx(source);
+  assertAuthTextFieldInputForwarding(parsed);
+
+  const birthDate = findAuthJsxTarget(parsed, "register-birth-date", "register-birth-date");
+  assert.equal(
+    birthDate.element.tagName.getText(parsed.sourceFile),
+    "AuthTextField",
+    "[register-birth-date.element] La fecha debe usar el campo que renderiza el input nativo auditado.",
+  );
+  assertNoTargetSpreads(birthDate, "register-birth-date.attributes-spread");
+  assertLiteralTargetAttribute(birthDate, "type", "date", "register-birth-date.type");
+
+  const age = findAuthJsxTarget(parsed, "register-age", "register-age");
+  assert.equal(
+    age.element.tagName.getText(parsed.sourceFile),
+    "input",
+    "[register-age.element] Edad debe permanecer como un input nativo único.",
+  );
+  assertNoTargetSpreads(age, "register-age.name-spread");
+  assert.equal(
+    jsxAttributes(age.element, parsed.sourceFile, "name").length,
+    0,
+    "[register-age.name-absent] El input Edad no puede declarar name en ninguna posición.",
+  );
+
+  const readOnly = getUniqueTargetAttribute(age, "readOnly", "register-age.readOnly");
+  assert.equal(
+    readOnly.initializer,
+    undefined,
+    "[register-age.readOnly] Edad debe conservar readOnly como atributo booleano estático.",
+  );
+  assertLiteralTargetAttribute(age, "aria-readonly", "true", "register-age.aria-readonly");
+
+  const tabIndex = getUniqueTargetAttribute(age, "tabIndex", "register-age.tabIndex");
+  const tabIndexInitializer = tabIndex.initializer;
+  assert.ok(
+    tabIndexInitializer
+      && ts.isJsxExpression(tabIndexInitializer)
+      && tabIndexInitializer.expression
+      && ts.isPrefixUnaryExpression(tabIndexInitializer.expression)
+      && tabIndexInitializer.expression.operator === ts.SyntaxKind.MinusToken
+      && ts.isNumericLiteral(tabIndexInitializer.expression.operand)
+      && tabIndexInitializer.expression.operand.text === "1",
+    "[register-age.tabIndex] Edad debe conservar tabIndex={-1} sin reconstrucciones.",
+  );
+
+  assertRegistrationFieldsOwnership(parsed, [birthDate, age]);
+}
+
+function getTargetAndAttributeForMutation(source: string, id: string, attributeName: string) {
+  const parsed = parseAuthJsx(source);
+  const target = findAuthJsxTarget(parsed, id, `probe.${id}`);
+  const attribute = getUniqueTargetAttribute(target, attributeName, `probe.${id}.${attributeName}`);
+  return { parsed, target, attribute };
+}
+
+function replaceJsxAttribute(source: string, id: string, attributeName: string, replacement: string) {
+  const { parsed, attribute } = getTargetAndAttributeForMutation(source, id, attributeName);
+  return `${source.slice(0, attribute.getStart(parsed.sourceFile))}${replacement}${source.slice(attribute.end)}`;
+}
+
+function removeJsxAttribute(source: string, id: string, attributeName: string) {
+  return replaceJsxAttribute(source, id, attributeName, "");
+}
+
+function insertJsxAttributeRelativeToId(
+  source: string,
+  id: string,
+  attributeSource: string,
+  position: "before" | "after",
+) {
+  const { parsed, attribute } = getTargetAndAttributeForMutation(source, id, "id");
+  const insertionIndex = position === "before" ? attribute.getStart(parsed.sourceFile) : attribute.end;
+  const insertion = position === "before" ? `${attributeSource} ` : ` ${attributeSource}`;
+  return `${source.slice(0, insertionIndex)}${insertion}${source.slice(insertionIndex)}`;
+}
+
+function insertSiblingAfterTarget(source: string, id: string, siblingSource: string) {
+  const parsed = parseAuthJsx(source);
+  const target = findAuthJsxTarget(parsed, id, `probe.${id}`);
+  return `${source.slice(0, target.element.end)}\n        ${siblingSource}${source.slice(target.element.end)}`;
+}
+
+function duplicateTargetElement(source: string, id: string) {
+  const parsed = parseAuthJsx(source);
+  const target = findAuthJsxTarget(parsed, id, `probe.${id}`);
+  const elementSource = source.slice(target.element.getStart(parsed.sourceFile), target.element.end);
+  return `${source.slice(0, target.element.end)}\n        ${elementSource}${source.slice(target.element.end)}`;
+}
+
+function moveJsxAttributeBefore(source: string, id: string, attributeName: string) {
+  const { parsed, attribute } = getTargetAndAttributeForMutation(source, id, attributeName);
+  const attributeSource = source.slice(attribute.getStart(parsed.sourceFile), attribute.end);
+  const withoutAttribute = `${source.slice(0, attribute.getStart(parsed.sourceFile))}${source.slice(attribute.end)}`;
+  return insertJsxAttributeRelativeToId(withoutAttribute, id, attributeSource, "before");
+}
+
+function runAuthRegistrationInputOrderControls(source: string) {
+  const reorderedBirthDate = moveJsxAttributeBefore(source, "register-birth-date", "type");
+  const reordered = moveJsxAttributeBefore(reorderedBirthDate, "register-age", "tabIndex");
+  assert.notEqual(reordered, source, "El control de orden debe reordenar atributos realmente.");
+  parseAuthJsx(reordered);
+  assertAuthRegistrationInputContract(reordered);
+  assert.equal(
+    readSource("src/features/auth/components/auth-screen.tsx"),
+    source,
+    "El control de orden debe conservar auth-screen.tsx byte a byte.",
+  );
+  console.log("AUTH-01 registration input AST order controls passed");
+}
+
+function runAuthRegistrationInputMutationProbes(source: string) {
+  const probes: Array<{
+    name: string;
+    assertion: string;
+    mutate: (current: string) => string;
+  }> = [
+    {
+      name: "cambiar fecha a type text",
+      assertion: "register-birth-date.type",
+      mutate: (current) => replaceJsxAttribute(current, "register-birth-date", "type", 'type="text"'),
+    },
+    {
+      name: "eliminar type de fecha",
+      assertion: "register-birth-date.type",
+      mutate: (current) => removeJsxAttribute(current, "register-birth-date", "type"),
+    },
+    {
+      name: "dejar type date sólo en comentario JSX",
+      assertion: "register-birth-date.type",
+      mutate: (current) => insertSiblingAfterTarget(
+        removeJsxAttribute(current, "register-birth-date", "type"),
+        "register-birth-date",
+        '{/* type="date" */}',
+      ),
+    },
+    {
+      name: "dejar type date sólo dentro de un string JSX",
+      assertion: "register-birth-date.type",
+      mutate: (current) => insertSiblingAfterTarget(
+        removeJsxAttribute(current, "register-birth-date", "type"),
+        "register-birth-date",
+        '<span data-contract-decoy={\'type="date"\'} />',
+      ),
+    },
+    {
+      name: "mover type date a un input señuelo",
+      assertion: "register-birth-date.type",
+      mutate: (current) => insertSiblingAfterTarget(
+        removeJsxAttribute(current, "register-birth-date", "type"),
+        "register-birth-date",
+        '<input type="date" aria-hidden="true" />',
+      ),
+    },
+    {
+      name: "duplicar id register-birth-date",
+      assertion: "register-birth-date.unique-id",
+      mutate: (current) => duplicateTargetElement(current, "register-birth-date"),
+    },
+    {
+      name: "agregar name antes del id de Edad",
+      assertion: "register-age.name-absent",
+      mutate: (current) => insertJsxAttributeRelativeToId(
+        current,
+        "register-age",
+        'name="register-age"',
+        "before",
+      ),
+    },
+    {
+      name: "agregar name después del id de Edad",
+      assertion: "register-age.name-absent",
+      mutate: (current) => insertJsxAttributeRelativeToId(
+        current,
+        "register-age",
+        'name="register-age"',
+        "after",
+      ),
+    },
+    {
+      name: "agregar name dinámico a Edad",
+      assertion: "register-age.name-absent",
+      mutate: (current) => insertJsxAttributeRelativeToId(
+        current,
+        "register-age",
+        'name={String("register-age")}',
+        "after",
+      ),
+    },
+    {
+      name: "inyectar name de Edad mediante spread",
+      assertion: "register-age.name-spread",
+      mutate: (current) => insertJsxAttributeRelativeToId(
+        current,
+        "register-age",
+        '{...{ name: "register-age" }}',
+        "after",
+      ),
+    },
+    {
+      name: "duplicar id register-age",
+      assertion: "register-age.unique-id",
+      mutate: (current) => duplicateTargetElement(current, "register-age"),
+    },
+    {
+      name: "eliminar readOnly de Edad",
+      assertion: "register-age.readOnly",
+      mutate: (current) => removeJsxAttribute(current, "register-age", "readOnly"),
+    },
+    {
+      name: "eliminar aria-readonly de Edad",
+      assertion: "register-age.aria-readonly",
+      mutate: (current) => removeJsxAttribute(current, "register-age", "aria-readonly"),
+    },
+    {
+      name: "eliminar tabIndex de Edad",
+      assertion: "register-age.tabIndex",
+      mutate: (current) => removeJsxAttribute(current, "register-age", "tabIndex"),
+    },
+  ];
+
+  for (const probe of probes) {
+    const mutated = probe.mutate(source);
+    assert.notEqual(mutated, source, `El probe no alteró auth-screen.tsx: ${probe.name}`);
+    parseAuthJsx(mutated);
+    assert.throws(
+      () => assertAuthRegistrationInputContract(mutated),
+      (error: unknown) => (
+        error instanceof assert.AssertionError && error.message.includes(`[${probe.assertion}]`)
+      ),
+      `El contrato AST no rechazó por su aserción específica: ${probe.name}`,
+    );
+    assert.equal(
+      readSource("src/features/auth/components/auth-screen.tsx"),
+      source,
+      `El probe no conservó auth-screen.tsx byte a byte: ${probe.name}`,
+    );
+  }
+
+  console.log(`AUTH-01 registration input AST mutation probes passed (${probes.length}/${probes.length})`);
+}
+
 function contrastRatio(foreground: string, background: string) {
   const foregroundLuminance = relativeLuminance(foreground);
   const backgroundLuminance = relativeLuminance(background);
@@ -145,6 +616,12 @@ function topLevelRule(rule: StructuredCssRule) {
 
 function mobileRule(rule: StructuredCssRule) {
   return rule.atRules.some((atRule) => normalizeCssText(atRule) === "@media (max-width: 360px)");
+}
+
+function iosWebKitRule(rule: StructuredCssRule) {
+  return rule.atRules.some((atRule) => (
+    normalizeCssText(atRule) === "@supports (-webkit-touch-callout: none)"
+  ));
 }
 
 function assertBirthDateAgeCssContract(source: string) {
@@ -189,6 +666,24 @@ function assertBirthDateAgeCssContract(source: string) {
     "1fr",
     "birth-mobile.grid-template-columns",
   );
+
+  const iosDateInput = getUniqueCssRule(
+    rules,
+    '.field input[type="date"]',
+    iosWebKitRule,
+    "birth-ios-date.selector",
+  );
+  assertCssDeclaration(iosDateInput, "-webkit-appearance", "none", "birth-ios-date.webkit-appearance");
+  assertCssDeclaration(iosDateInput, "appearance", "none", "birth-ios-date.appearance");
+
+  const iosDateValue = getUniqueCssRule(
+    rules,
+    '.field input[type="date"]::-webkit-date-and-time-value',
+    iosWebKitRule,
+    "birth-ios-date-value.selector",
+  );
+  assertCssDeclaration(iosDateValue, "height", "1.5em", "birth-ios-date-value.height");
+  assertCssDeclaration(iosDateValue, "text-align", "left", "birth-ios-date-value.text-align");
 }
 
 function runBirthDateAgeMutationProbes(source: string) {
