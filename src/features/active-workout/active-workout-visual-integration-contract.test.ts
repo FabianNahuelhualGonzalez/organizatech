@@ -599,7 +599,13 @@ const files = {
 const globalStyles = readSource("src/app/globals.css");
 
 const protectedFileHashes = {
+  "AGENTS.md": "f0c3ef88979a0ab085551a656ebb1843bfa56138d948ca4236bce6fcd1fa9dd0",
+  "package.json": "f4801711dc5fbd91b8f9eea718ce2aed3a44d3afc86dfee4cfb878f938e6ea93",
+  "package-lock.json": "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5",
+  "src/app/globals.css": "d8be7877288dcfdb101a17a2b5ffe3e678ce69091d1f3112ba45f54fb266e2b2",
   "src/components/organizatech-app.tsx": "3b75b4018ff4d53842a07fc1c268ae4cba939a40919dfcaf4fda997343351e51",
+  "src/features/progress/components/comparison-screen-v2.tsx": "bff390e44cf5a04fe59b0f2a594fcb53fb2a50602c850362f1a88ca136765743",
+  "src/features/progress/progress-visual-integration-contract.test.ts": "9c0f432417b1a98a0cd3b9542b2e6a4c3dd4a8126989c6f17bc3a65133a56821",
   "src/features/active-workout/model/active-workout-controller-state.ts": "37006210eabda3f99217bd98b6ebf876780ed5ecc33bb8fba936eda7fd085ea5",
   "src/features/active-workout/hooks/useActiveWorkoutController.ts": "c7b475636a3b8731a9e8b9a46702584b9c2a4a06333b75139791bf3ef2ce25bf",
   "src/features/active-workout/hooks/useActiveWorkoutBoundary.ts": "5ee8be6ccea0e751659c0d20b76184874f161be04a89ea3a4f41c640b8aef1e9",
@@ -1752,10 +1758,13 @@ const approvedRoutineHeaderDays = [
   "Domingo",
 ] as const;
 
-const approvedRoutineHeadingMinimumPixels = 0.68 * 16;
+const approvedRoutineTextPixels = 15;
+const approvedDaySelectPixels = 92;
+const approvedDaySelectUsefulInlinePixels = 76;
 // Roboto Mono avanza nominalmente ~0.60em. El contrato usa 0.64em y redondea hacia arriba para
 // absorber rasterización/subpíxeles sin fingir una medición de navegador.
 const conservativeMonospaceAdvanceEm = 0.64;
+const nominalMonospaceAdvanceEm = 0.6;
 
 interface RoutineHeaderGeometryResult {
   viewportWidth: number;
@@ -1764,6 +1773,7 @@ interface RoutineHeaderGeometryResult {
   titleTrackWidth: number;
   controlsWidth: number;
   headingFontSize: number;
+  headingLetterSpacing: number;
   criticalDay: string;
   criticalTextWidth: number;
   minimumSlack: number;
@@ -1911,6 +1921,22 @@ function readEffectiveLength(input: {
   return evaluateCssLength(value, input.viewportWidth, input.percentageBase);
 }
 
+function readEffectiveLetterSpacing(input: {
+  rules: readonly CssExecutableRule[];
+  target: CssAuditTarget;
+  viewportWidth: number;
+  percentageBase: number;
+}) {
+  const value = readEffectiveCssProperty({
+    ...input,
+    property: "letter-spacing",
+    required: false,
+  });
+  return value === null || value === "normal"
+    ? 0
+    : evaluateCssLength(value, input.viewportWidth, input.percentageBase);
+}
+
 function assertRoutineHeaderGeometry(
   sources: TrainUi01AuditSources,
   rules: readonly CssExecutableRule[],
@@ -2002,6 +2028,12 @@ function assertRoutineHeaderGeometry(
     });
     assert.ok(headerColumns !== null);
     const layout = headerColumns === "minmax(0, 1fr)" ? "stacked" : "side-by-side";
+    const shouldStack = viewportWidth <= 400;
+    assert.equal(
+      layout === "stacked",
+      shouldStack,
+      `breakpoint adaptativo: ${viewportWidth}px debe usar layout ${shouldStack ? "apilado" : "lado a lado"} con corte real en 400px`,
+    );
     const selectorWidth = readEffectiveLength({
       rules,
       target: cssAuditTargets.daySelect,
@@ -2023,10 +2055,59 @@ function assertRoutineHeaderGeometry(
       viewportWidth,
       percentageBase: selectorWidth,
     });
+    const selectorBorderLeft = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "border-left-width",
+      viewportWidth,
+      percentageBase: selectorWidth,
+    });
+    const selectorBorderRight = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "border-right-width",
+      viewportWidth,
+      percentageBase: selectorWidth,
+    });
     assert.ok(
       selectorWidth >= selectorPaddingLeft + selectorPaddingRight,
       `geometría del header: padding del selector excede su ancho a ${viewportWidth}px`,
     );
+    const selectorUsefulInlineWidth = selectorWidth - selectorPaddingLeft - selectorPaddingRight -
+      selectorBorderLeft - selectorBorderRight;
+    assert.equal(
+      selectorUsefulInlineWidth,
+      approvedDaySelectUsefulInlinePixels,
+      `geometría del selector: debe conservar ${approvedDaySelectUsefulInlinePixels}px útiles a ${viewportWidth}px`,
+    );
+    const selectorFontSize = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "font-size",
+      viewportWidth,
+      percentageBase: selectorUsefulInlineWidth,
+    });
+    assert.ok(
+      selectorFontSize >= 16,
+      `tipografía del selector: ${selectorFontSize}px queda bajo 16px a ${viewportWidth}px`,
+    );
+    const selectorLetterSpacing = readEffectiveLetterSpacing({
+      rules,
+      target: cssAuditTargets.daySelect,
+      viewportWidth,
+      percentageBase: selectorUsefulInlineWidth,
+    });
+    for (const day of days) {
+      const glyphCount = [...day].length;
+      const dayTextWidth = Math.ceil(
+        (glyphCount * selectorFontSize * nominalMonospaceAdvanceEm) +
+        (Math.max(0, glyphCount - 1) * selectorLetterSpacing),
+      );
+      assert.ok(
+        dayTextWidth <= selectorUsefulInlineWidth,
+        `geometría del selector: “${day}” no cabe completo a ${viewportWidth}px (${dayTextWidth}px > ${selectorUsefulInlineWidth}px)`,
+      );
+    }
     const editWidth = readEffectiveLength({
       rules,
       target: cssAuditTargets.editButton,
@@ -2060,9 +2141,28 @@ function assertRoutineHeaderGeometry(
       viewportWidth,
       percentageBase: titleTrackWidth,
     });
-    assert.ok(
-      headingFontSize >= approvedRoutineHeadingMinimumPixels,
-      `tipografía geométrica: ${headingFontSize.toFixed(2)}px queda bajo el mínimo aprobado de ${approvedRoutineHeadingMinimumPixels.toFixed(2)}px a ${viewportWidth}px`,
+    assert.equal(
+      headingFontSize,
+      approvedRoutineTextPixels,
+      `tipografía geométrica: el título debe medir exactamente ${approvedRoutineTextPixels}px a ${viewportWidth}px`,
+    );
+    const headingLetterSpacing = readEffectiveLetterSpacing({
+      rules,
+      target: cssAuditTargets.routineHeading,
+      viewportWidth,
+      percentageBase: titleTrackWidth,
+    });
+    const routineNameFontSize = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.routineSubheading,
+      property: "font-size",
+      viewportWidth,
+      percentageBase: titleTrackWidth,
+    });
+    assert.equal(
+      routineNameFontSize,
+      approvedRoutineTextPixels,
+      `tipografía geométrica: el nombre de rutina debe medir exactamente ${approvedRoutineTextPixels}px a ${viewportWidth}px`,
     );
 
     let minimumSlack = Number.POSITIVE_INFINITY;
@@ -2070,7 +2170,11 @@ function assertRoutineHeaderGeometry(
     let criticalTextWidth = 0;
     for (const day of days) {
       const text = `${startPrefix}${day}`;
-      const textWidth = Math.ceil([...text].length * headingFontSize * conservativeMonospaceAdvanceEm);
+      const glyphCount = [...text].length;
+      const textWidth = Math.ceil(
+        (glyphCount * headingFontSize * conservativeMonospaceAdvanceEm) +
+        (Math.max(0, glyphCount - 1) * headingLetterSpacing),
+      );
       const slack = titleTrackWidth - textWidth;
       if (slack < minimumSlack) {
         minimumSlack = slack;
@@ -2083,12 +2187,6 @@ function assertRoutineHeaderGeometry(
       );
     }
 
-    const shouldStack = viewportWidth <= 400;
-    assert.equal(
-      layout === "stacked",
-      shouldStack,
-      `breakpoint adaptativo: ${viewportWidth}px debe usar layout ${shouldStack ? "apilado" : "lado a lado"} con corte real en 400px`,
-    );
     if (layout === "stacked") {
       assertEffectiveCssValue({
         rules,
@@ -2164,6 +2262,7 @@ function assertRoutineHeaderGeometry(
       titleTrackWidth,
       controlsWidth,
       headingFontSize,
+      headingLetterSpacing,
       criticalDay,
       criticalTextWidth,
       minimumSlack,
@@ -2657,9 +2756,9 @@ function assertEffectiveVisualCascade(rules: readonly CssExecutableRule[]) {
       rules,
       target: cssAuditTargets.daySelect,
       property: "width",
-      expected: viewportWidth <= 420 ? "104px" : "clamp(104px, 25vw, 120px)",
+      expected: `${approvedDaySelectPixels}px`,
       viewportWidth,
-      message: "ancho compacto efectivo incorrecto en selector de día",
+      message: `ancho aprobado incorrecto en selector de día; debe medir ${approvedDaySelectPixels}px`,
     });
     for (const property of ["width", "height"] as const) {
       assertEffectiveCssValue({
@@ -2679,6 +2778,20 @@ function assertEffectiveVisualCascade(rules: readonly CssExecutableRule[]) {
       viewportWidth,
       message: "tamaño compacto efectivo incorrecto en caja visual Editar",
     });
+  }
+
+  for (const viewportWidth of [...mobileAuditWidths, 800]) {
+    const selectorFontSize = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "font-size",
+      viewportWidth,
+      percentageBase: approvedDaySelectUsefulInlinePixels,
+    });
+    assert.ok(
+      selectorFontSize >= 16,
+      `fuente efectiva del selector: ${selectorFontSize}px queda bajo 16px a ${viewportWidth}px`,
+    );
   }
 
   assertEffectiveCssValue({
@@ -2716,7 +2829,8 @@ function assertEffectiveVisualCascade(rules: readonly CssExecutableRule[]) {
 
   const compactFonts = [
     [cssAuditTargets.startHeading, "clamp(0.58rem, 2.7vw, 1.1rem)"],
-    [cssAuditTargets.routineHeading, "clamp(0.68rem, 2.65vw, 0.95rem)"],
+    [cssAuditTargets.routineHeading, "15px"],
+    [cssAuditTargets.routineSubheading, "15px"],
     [cssAuditTargets.sectionHeading, "clamp(0.72rem, 3.2vw, 1.1rem)"],
     [cssAuditTargets.newRecordHeading, "clamp(0.72rem, 3.2vw, 1.1rem)"],
     [cssAuditTargets.objectivesHeading, "clamp(0.72rem, 3.2vw, 1.1rem)"],
@@ -2996,14 +3110,39 @@ function assertTrainUi01AuditContracts(
   }
   const daySelectorRule = readCssRule(sources.workoutStyles, ".daySelector");
   const daySelectRule = readCssRule(sources.workoutStyles, ".daySelector select");
+  const routineHeadingRule = readCssRule(
+    sources.workoutStyles,
+    `.routineTitle h2,
+.routineTitle h3`,
+  );
+  const routineNameRule = readCssRule(sources.workoutStyles, ".routineTitle.routineTitle p");
   const editButtonRule = readCssRule(sources.workoutStyles, ".editRoutineButton.editRoutineButton");
   const editButtonVisualRule = readCssRule(
     sources.workoutStyles,
     ".editRoutineButton.editRoutineButton::before",
   );
-  assert.equal(readCssProperty(daySelectorRule.body, "min-height"), "44px");
+  assert.equal(
+    readCssProperty(daySelectorRule.body, "min-height"),
+    "44px",
+    "selector de día: el target táctil estructural debe medir al menos 44px",
+  );
   assert.equal(readCssProperty(daySelectRule.body, "min-height"), "36px");
-  assert.equal(readCssProperty(daySelectRule.body, "width"), "clamp(104px, 25vw, 120px)");
+  assert.equal(
+    readCssProperty(daySelectRule.body, "width"),
+    `${approvedDaySelectPixels}px`,
+    `selector de día: el ancho estructural debe medir exactamente ${approvedDaySelectPixels}px`,
+  );
+  assert.equal(readCssProperty(daySelectRule.body, "padding"), "0 7px");
+  assert.equal(
+    readCssProperty(routineHeadingRule.body, "font-size"),
+    `${approvedRoutineTextPixels}px`,
+    `título de rutina: el tamaño estructural debe medir exactamente ${approvedRoutineTextPixels}px`,
+  );
+  assert.equal(
+    readCssProperty(routineNameRule.body, "font-size"),
+    `${approvedRoutineTextPixels}px`,
+    `nombre de rutina: el tamaño estructural debe medir exactamente ${approvedRoutineTextPixels}px`,
+  );
   assert.equal(readCssProperty(editButtonRule.body, "width"), "44px");
   assert.equal(readCssProperty(editButtonRule.body, "height"), "44px");
   assert.equal(readCssProperty(editButtonVisualRule.body, "inset"), "5px");
@@ -3313,6 +3452,22 @@ const trainUi01ReauditProbes: TrainUi01ReauditProbe[] = [
     target: { kind: "protected", path: "src/lib/training/workout-registration.ts" },
     mutate: (source) => `${source}\nexport const trainUi01MutationProbe = true;\n`,
   },
+  {
+    name: "G · modificar accidentalmente Progreso",
+    diskPath: "src/features/progress/components/comparison-screen-v2.tsx",
+    syntax: "tsx",
+    expectedFailure: /integridad byte a byte: cambió el archivo protegido .*comparison-screen-v2\.tsx/,
+    target: { kind: "protected", path: "src/features/progress/components/comparison-screen-v2.tsx" },
+    mutate: (source) => `${source}\nexport const trainUi01ProgressMutationProbe = true;\n`,
+  },
+  {
+    name: "H · modificar accidentalmente CSS global prohibido",
+    diskPath: "src/app/globals.css",
+    syntax: "css",
+    expectedFailure: /integridad byte a byte: cambió el archivo protegido .*globals\.css/,
+    target: { kind: "protected", path: "src/app/globals.css" },
+    mutate: (source) => `${source}\n.train-ui-01-forbidden-probe { color: var(--text); }\n`,
+  },
 ];
 
 function runTrainUi01IsolatedProbe(probe: TrainUi01ReauditProbe) {
@@ -3373,7 +3528,7 @@ const trainUi01HeaderGeometryProbes: TrainUi01ReauditProbe[] = [
     name: "G1 · devolver breakpoint apilado a 360px",
     diskPath: "src/features/active-workout/active-workout.module.css",
     syntax: "css",
-    expectedFailure: /geometría del header: colisión a 361px/,
+    expectedFailure: /breakpoint adaptativo: 361px debe usar layout apilado/,
     target: { kind: "audit", key: "workoutStyles" },
     mutate: (source) => replaceAuditOnce(
       source,
@@ -3397,7 +3552,7 @@ const trainUi01HeaderGeometryProbes: TrainUi01ReauditProbe[] = [
     name: "G3 · mantener controles en la misma fila a 390px",
     diskPath: "src/features/active-workout/active-workout.module.css",
     syntax: "css",
-    expectedFailure: /geometría del header: colisión a 390px/,
+    expectedFailure: /breakpoint adaptativo: 390px debe usar layout apilado/,
     target: { kind: "audit", key: "workoutStyles" },
     mutate: (source) => `${source}\n@media (min-width: 390px) and (max-width: 390px) {\n  .routineHeader {\n    grid-template-columns: minmax(0, 1fr) auto;\n  }\n}\n`,
   },
@@ -3405,7 +3560,7 @@ const trainUi01HeaderGeometryProbes: TrainUi01ReauditProbe[] = [
     name: "G4 · aumentar selector hasta provocar colisión",
     diskPath: "src/features/active-workout/active-workout.module.css",
     syntax: "css",
-    expectedFailure: /geometría del header: colisión a 401px/,
+    expectedFailure: /geometría del selector: debe conservar 76px útiles a 401px/,
     target: { kind: "audit", key: "workoutStyles" },
     mutate: (source) => `${source}\n@media (min-width: 401px) and (max-width: 401px) {\n  .daySelector select {\n    width: 120px;\n  }\n}\n`,
   },
@@ -3445,7 +3600,7 @@ const trainUi01HeaderGeometryProbes: TrainUi01ReauditProbe[] = [
     name: "G9 · reducir tipografía bajo el mínimo aprobado",
     diskPath: "src/features/active-workout/active-workout.module.css",
     syntax: "css",
-    expectedFailure: /tipografía geométrica: .* bajo el mínimo aprobado/,
+    expectedFailure: /tipografía geométrica: el título debe medir exactamente 15px/,
     target: { kind: "audit", key: "workoutStyles" },
     mutate: (source) => `${source}\n.routineTitle h2,\n.routineTitle h3 {\n  font-size: 0.6rem;\n}\n`,
   },
@@ -3456,6 +3611,87 @@ const trainUi01HeaderGeometryProbes: TrainUi01ReauditProbe[] = [
     expectedFailure: /alineación apilada: selector y Editar deben permanecer juntos a la derecha/,
     target: { kind: "audit", key: "workoutStyles" },
     mutate: (source) => `${source}\n@media (max-width: 400px) {\n  .routineControls {\n    justify-content: center;\n  }\n}\n`,
+  },
+  {
+    name: "G11 · aumentar título sobre 15px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /tipografía geométrica: el título debe medir exactamente 15px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.routineTitle h2,\n.routineTitle h3 {\n  font-size: 16px;\n}\n`,
+  },
+  {
+    name: "G12 · aumentar nombre de rutina sobre 15px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /nombre de rutina: el tamaño estructural debe medir exactamente 15px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".routineTitle.routineTitle p",
+      "font-size: 15px;",
+      "font-size: 16px;",
+    ),
+  },
+  {
+    name: "G13 · reducir selector bajo 92px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /selector de día: el ancho estructural debe medir exactamente 92px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "width: 92px;",
+      "width: 91px;",
+    ),
+  },
+  {
+    name: "G14 · aumentar selector sobre 92px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /selector de día: el ancho estructural debe medir exactamente 92px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "width: 92px;",
+      "width: 93px;",
+    ),
+  },
+  {
+    name: "G15 · reducir fuente del selector bajo 16px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /selector de día: 15px provoca autozoom en iOS/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "font-size: 1rem;",
+      "font-size: 15px;",
+    ),
+  },
+  {
+    name: "G16 · reducir target táctil del selector bajo 44px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /selector de día: el target táctil estructural debe medir al menos 44px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector",
+      "min-height: 44px;",
+      "min-height: 43px;",
+    ),
+  },
+  {
+    name: "G17 · reducir fuente efectiva del selector en viewport amplio",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /fuente efectiva del selector: 15px queda bajo 16px a 800px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n@media (min-width: 800px) {\n  .daySelector select {\n    font-size: 15px;\n  }\n}\n`,
   },
 ];
 

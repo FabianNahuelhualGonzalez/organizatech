@@ -49,7 +49,7 @@
 .routineTitle h2,
 .routineTitle h3 {
   margin: 0;
-  font-size: clamp(0.68rem, 2.65vw, 0.95rem);
+  font-size: 15px;
   line-height: 1.28;
   white-space: nowrap;
 }
@@ -57,7 +57,7 @@
 .routineTitle.routineTitle p {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: clamp(0.62rem, 2.35vw, 0.82rem);
+  font-size: 15px;
   line-height: 1.25;
   overflow: visible;
   text-overflow: clip;
@@ -80,7 +80,7 @@
 }
 
 .daySelector select {
-  width: clamp(104px, 25vw, 120px);
+  width: 92px;
   min-width: 0;
   min-height: 36px;
   border: 1px solid color-mix(in srgb, var(--text) 72%, transparent);
@@ -88,8 +88,9 @@
   color: var(--text);
   color-scheme: dark;
   background: var(--background);
-  padding: 0 26px 0 8px;
+  padding: 0 7px;
   font-size: 1rem;
+  letter-spacing: -1.4px;
 }
 
 .daySelector select:focus-visible,
@@ -744,19 +745,6 @@
     gap: 22px;
   }
 
-  .routineHeader {
-    gap: 8px;
-  }
-
-  .routineControls {
-    gap: 5px;
-  }
-
-  .daySelector select {
-    width: 104px;
-    padding-left: 8px;
-  }
-
   .tableHeader,
   .tableRow,
   .selectableTableRow {
@@ -777,6 +765,18 @@
 
   .routineControls {
     justify-content: flex-end;
+  }
+}
+
+@media (min-width: 401px) and (max-width: 479px) {
+  .routineHeader,
+  .routineControls {
+    gap: 2px;
+  }
+
+  .routineTitle h2,
+  .routineTitle h3 {
+    letter-spacing: -1.6px;
   }
 }
 
@@ -819,10 +819,6 @@
 @media (min-width: 800px) {
   .screen {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .daySelector select {
-    font-size: 0.78rem;
   }
 
   .referencePanel :global(.exercise-observation-textarea) {
