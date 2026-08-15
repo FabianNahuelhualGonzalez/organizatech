@@ -14,6 +14,7 @@ import {
   type ActiveWorkoutControllerAction,
 } from "@/features/active-workout/model/active-workout-controller-state";
 import type { TrainingCompletionSummary } from "@/lib/training/training-completion-summary";
+import { isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
 import type { TrainingReadiness } from "@/lib/training/training-readiness-draft";
 import type { PendingWorkoutReadinessLink } from "@/lib/training/workout-draft-storage";
@@ -587,7 +588,12 @@ const files = {
   performancePanel: readSource("src/features/active-workout/components/ExerciseLastPerformancePanel.tsx"),
   seriesResult: readSource("src/features/active-workout/components/SeriesResult.tsx"),
   guided: readSource("src/features/active-workout/components/GuidedTrainingScreen.tsx"),
+  workoutStyles: readSource("src/features/active-workout/active-workout.module.css"),
+  exerciseDraft: readSource("src/lib/training/training-exercise-draft.ts"),
+  metricGrid: readSource("src/ui/data-display/metric-grid.tsx"),
+  workoutRegistration: readSource("src/lib/training/workout-registration.ts"),
 };
+const globalStyles = readSource("src/app/globals.css");
 
 // =============================================================================================
 // ESTÁTICO: wiring productivo del hook. No renderiza React, no ejecuta el hook y no presenta estas
@@ -797,7 +803,8 @@ assert.match(files.start, /import \{ RoutineMetricGrid \} from "@\/ui\/data-disp
 assert.doesNotMatch(files.start, /^\s*function RoutineMetricGrid\b/m);
 assert.match(files.completion, /className="training-completion-table" role="table"/);
 assert.match(files.performancePanel, /className="exercise-observation-textarea"/);
-assert.match(files.seriesResult, /className={`series-result session-summary \$\{result\.tone\}`}/);
+assert.match(files.seriesResult, /buildExerciseCurrentResultPresentation\(\{/);
+assert.match(files.seriesResult, /className=\{styles\.objectives\} data-tone=\{result\.tone\}/);
 
 // =============================================================================================
 // ESTÁTICO/SOURCE-BASED HOTFIX: el resumen de cierre debe conservar una única presentación. La
@@ -837,11 +844,13 @@ assert.match(
 );
 assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 126);
 
-// GuidedTrainingScreen (P3-30): extraccion mecanica. Conserva el contrato de props, reutiliza el
-// normalizador canonico de P3-29 sin redeclararlo, y no introduce estado ni efectos propios.
+// GuidedTrainingScreen conserva el boundary de P3-30: TRAIN-UI-01 cambia su presentacion,
+// reutiliza el normalizador canonico de P3-29 y no introduce estado ni efectos propios.
 assert.match(files.guided, /export interface GuidedTrainingScreenProps \{/);
-assert.match(files.guided, /className="card wide mobile-series-card"/);
+assert.match(files.guided, /mobile-series-card \$\{styles\.workoutCard\}/);
 assert.match(files.guided, /import \{ RoutineMetricGrid \} from "@\/ui\/data-display\/metric-grid";/);
+assert.match(files.guided, /<RoutineMetricGrid targetSummary=\{targetSummary\} \/>/);
+assert.match(files.guided, /<div className=\{styles\.srOnly\} aria-hidden="true">\s*<RoutineMetricGrid targetSummary=\{targetSummary\} \/>/);
 assert.doesNotMatch(files.guided, /^\s*function RoutineMetricGrid\b/m);
 assert.match(
   files.guided,
@@ -858,6 +867,463 @@ for (const prop of [
 ]) {
   assert.match(files.guided, new RegExp(`^\\s{2}${prop}[?]?:`, "m"), `GuidedTrainingScreenProps debe declarar ${prop}`);
 }
+
+// =============================================================================================
+// TRAIN-UI-01 — contrato ESTATICO/source-based del rediseño. Verifica wiring de presentacion y
+// accesibilidad sin afirmar render, interaccion real ni ausencia visual de overflow en navegador.
+// =============================================================================================
+
+// Estado A: selector y tabla consumen exclusivamente props productivas; el inicio conserva el
+// callback y el estado busy existentes.
+assert.match(files.start, /<select value=\{day\} onChange=\{\(event\) => switchDay\(event\.target\.value\)\}>/);
+assert.match(files.start, /\{routineDays\.map\(\(item\) => \(/);
+assert.match(files.start, /\{exercises\.map\(\(exercise\) => \(/);
+for (const field of ["exercise.name", "exercise.targetSets", "exercise.targetReps", "exercise.baseWeight"]) {
+  assert.match(files.start, new RegExp(field.replace(".", "\\.")), `la tabla inicial debe leer ${field}`);
+}
+assert.match(files.start, /role="table"/);
+assert.equal((files.start.match(/role="columnheader"/g) ?? []).length, 4);
+assert.match(files.start, /onClick=\{startTraining\}/);
+assert.match(files.start, /disabled=\{isStartingTraining\}/);
+assert.match(files.start, /aria-busy=\{isStartingTraining\}/);
+
+// Estado B: selector, lista de botones y estado activo conservan callbacks/identidad reales sin
+// simular un grid ARIA incompleto.
+assert.match(files.guided, /<select value=\{day\} onChange=\{\(event\) => switchDay\(event\.target\.value\)\}>/);
+assert.match(files.guided, /role="group"/);
+assert.match(files.guided, /\{exercises\.map\(\(exercise, index\) => \{/);
+assert.doesNotMatch(files.guided, /role="grid"|role="row"|role="rowgroup"|role="gridcell"/);
+assert.match(files.guided, /aria-pressed=\{isActive\}/);
+assert.match(files.guided, /onClick=\{\(\) => setActiveIndex\(index\)\}/);
+assert.match(files.workoutStyles, /\.selectableTableRow\[aria-pressed="true"\]/);
+assert.match(files.workoutStyles, /\.selectableTableRow:focus-visible/);
+
+// Drafts/inputs: cantidad de series deriva de targetSets mediante el normalizador canonico; el
+// JSX mapea ese draft, admite decimales y rechaza negativos/invalidos con parsers productivos.
+assert.match(files.exerciseDraft, /Array\.from\(\{ length: exercise\.targetSets \}/);
+assert.match(files.guided, /const draft = activeExercise \? normalizeExerciseDraft\(activeExercise, drafts\[activeExercise\.id\]\) : null;/);
+assert.match(files.guided, /\{draft\.reps\.map\(\(reps, index\) => \(/);
+assert.match(files.guided, /inputMode="decimal"/);
+assert.match(files.guided, /isDecimalWeightDraftInput\(value\)/);
+assert.match(files.guided, /parseDecimalWeightInput\(value\) \?\? ""/);
+assert.equal(isDecimalWeightDraftInput("5,"), true, "5, se conserva como draft decimal intermedio");
+assert.equal(isDecimalWeightDraftInput("5."), true, "5. se conserva como draft decimal intermedio");
+assert.equal(parseDecimalWeightInput("5,"), null, "el registro final sigue rechazando un decimal incompleto");
+assert.match(files.guided, /min=\{0\}/);
+assert.match(files.guided, /step=\{1\}/);
+
+// Historial y observacion: mantiene found/loading/empty/error de las presentaciones, acordeones
+// nativos, historial anterior, textarea controlada y borrador por ejercicio.
+assert.match(files.guided, /buildExerciseLastPerformancePresentation\(\{/);
+assert.match(files.guided, /latest: latestExercisePerformance/);
+assert.match(files.guided, /loading: latestExercisePerformanceLoading/);
+assert.match(files.guided, /error: latestExercisePerformanceError/);
+assert.match(files.performancePanel, /presentation\.status === "found"\s*\? presentation\.seriesDetailTitle\s*: presentation\.lastSummaryText/);
+assert.match(files.performancePanel, /presentation\.seriesRows\.length > 0/);
+assert.match(files.performancePanel, /presentation\.status === "loading"/);
+assert.match(files.performancePanel, /presentation\.status === "error" \? "alert" : "status"/);
+assert.match(files.performancePanel, /observationPresentation\.status === "loading"/);
+assert.match(files.performancePanel, /observationPresentation\.status === "error" \? "alert" : "status"/);
+assert.match(files.performancePanel, /value=\{observationValue\}/);
+assert.match(files.guided, /onObservationChange=\{\(value\) => updateDraft\(activeExercise, \{ observation: value \}\)\}/);
+
+// Objetivos: SeriesResult solo presenta calculos canonicos de reps/peso/series. Los tonos de
+// alcanzado/superado son verdes y el pendiente es rojo; el detalle canonico queda visible.
+for (const metric of [
+  "totalReps: entry.totalReps",
+  "targetTotalReps: entry.targetTotalReps",
+  "completedSets: entry.completedSets",
+  "targetSets: entry.targetSets",
+  "actualWeight: entry.weight",
+  "targetWeight: entry.previousWeight",
+]) {
+  assert.match(files.seriesResult, new RegExp(metric.replaceAll(".", "\\.")));
+}
+assert.match(files.seriesResult, /\{result\.headline\}/);
+assert.match(files.seriesResult, /\{result\.message\}/);
+assert.match(files.seriesResult, /\{item\.detail\}/);
+assert.match(files.seriesResult, /item\.tone === "partial" \? styles\.pendingGoal : styles\.reachedGoal/);
+assert.match(files.seriesResult, /item\.tone === "partial" \? <X size=\{20\} \/> : <Check size=\{20\} \/>/);
+assert.match(files.workoutStyles, /--workout-goal-success: color-mix\([^;]+var\(--green\)[^;]+\);/);
+assert.match(files.workoutStyles, /--workout-goal-pending: var\(--red\);/);
+assert.match(files.workoutStyles, /border: 1px solid var\(--primary\);/);
+
+// Registro/finalizacion: se conservan las tres ramas productivas sin introducir writes.
+assert.match(files.guided, /!allRegistered && !activeExerciseAlreadyRegistered/);
+assert.match(files.guided, /onClick=\{registerExercise\}/);
+assert.match(files.guided, /Ejercicio ya registrado/);
+assert.match(files.guided, /onClick=\{saveCompletedTraining\}/);
+assert.match(files.guided, /disabled=\{isBusy\}/);
+assert.match(files.guided, /isExerciseRegisteredInCurrentWorkout/);
+
+// Encapsulacion visual/responsive: consume el token global aprobado, evita scroll horizontal
+// propio y declara adaptaciones para movil pequeño, desktop y reduced motion.
+assert.match(globalStyles, /--background: #07101a;/);
+assert.match(files.workoutStyles, /background: var\(--background\);/);
+assert.doesNotMatch(files.workoutStyles, /#07101a/i);
+assert.doesNotMatch(files.workoutStyles, /overflow-x:\s*(?:auto|scroll)/);
+assert.match(files.workoutStyles, /@media \(max-width: 360px\)/);
+assert.match(files.workoutStyles, /@media \(min-width: 800px\)/);
+assert.match(files.workoutStyles, /@media \(prefers-reduced-motion: reduce\)/);
+
+// No se agregan hooks, repositories, requests, storage ni writes desde presentacion.
+for (const source of [files.start, files.guided, files.performancePanel, files.seriesResult]) {
+  assert.doesNotMatch(source, /\buseState\b|\buseEffect\b|\bfetch\s*\(|\blocalStorage\b|\bsessionStorage\b/);
+  assert.doesNotMatch(source, /-repository"|@\/lib\/(?:data|supabase|storage)\//);
+}
+
+interface TrainUi01AuditSources {
+  start: string;
+  guided: string;
+  performancePanel: string;
+  seriesResult: string;
+  workoutStyles: string;
+  metricGrid: string;
+  workoutRegistration: string;
+  globalStyles: string;
+}
+
+function readCssRule(source: string, selector: string) {
+  const marker = `${selector} {`;
+  const selectorIndex = source.indexOf(marker);
+  assert.ok(selectorIndex >= 0, `falta la regla CSS exacta ${selector}`);
+  const openingBraceIndex = source.indexOf("{", selectorIndex + selector.length);
+  let depth = 0;
+
+  for (let index = openingBraceIndex; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] !== "}") continue;
+    depth -= 1;
+    if (depth === 0) {
+      return {
+        body: source.slice(openingBraceIndex + 1, index),
+        end: index + 1,
+        start: selectorIndex,
+      };
+    }
+  }
+
+  assert.fail(`regla CSS sin cierre para ${selector}`);
+}
+
+function readCssProperty(ruleBody: string, property: string) {
+  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = ruleBody.match(new RegExp(`(?:^|\\n)\\s*${escapedProperty}:\\s*([^;]+);`));
+  assert.ok(match, `falta ${property} en la regla CSS auditada`);
+  return match[1].trim();
+}
+
+function readHexToken(styles: string, token: string) {
+  const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = styles.match(new RegExp(`${escapedToken}:\\s*(#[0-9a-f]{6});`, "i"));
+  assert.ok(match, `falta el token hexadecimal ${token}`);
+  return match[1];
+}
+
+function relativeLuminance(hex: string) {
+  const channels = hex.slice(1).match(/.{2}/g);
+  assert.ok(channels && channels.length === 3, `color hexadecimal inválido: ${hex}`);
+  const [red, green, blue] = channels.map((channel) => {
+    const value = Number.parseInt(channel, 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
+}
+
+function contrastRatio(foreground: string, background: string) {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function assertAccessibleSmallTextContrast(input: {
+  globalStyles: string;
+  ruleBody: string;
+  label: string;
+}) {
+  const foregroundValue = readCssProperty(input.ruleBody, "color");
+  const backgroundValue = readCssProperty(input.ruleBody, "background");
+  const foregroundToken = foregroundValue.match(/^var\((--[a-z-]+)\)$/)?.[1];
+  const backgroundToken = backgroundValue.match(/^var\((--[a-z-]+)\)$/)?.[1];
+  assert.ok(foregroundToken, `${input.label}: el foreground debe usar un token global directo`);
+  assert.ok(backgroundToken, `${input.label}: el background debe usar un token global directo`);
+  const ratio = contrastRatio(
+    readHexToken(input.globalStyles, foregroundToken),
+    readHexToken(input.globalStyles, backgroundToken),
+  );
+  assert.ok(ratio >= 4.5, `${input.label}: contraste ${ratio.toFixed(2)} menor que WCAG AA 4.5:1`);
+}
+
+function assertMobileFontAtLeast16Px(ruleBody: string, label: string) {
+  const fontSize = readCssProperty(ruleBody, "font-size");
+  const match = fontSize.match(/^(\d*\.?\d+)(px|rem)$/);
+  assert.ok(match, `${label}: font-size móvil debe expresarse en px o rem`);
+  const sizeInPixels = Number(match[1]) * (match[2] === "rem" ? 16 : 1);
+  assert.ok(sizeInPixels >= 16, `${label}: ${sizeInPixels}px provoca autozoom en iOS`);
+}
+
+function assertTrainUi01AuditContracts(sources: TrainUi01AuditSources) {
+  // El h1 pertenece al topbar; estas pantallas comienzan en h2 y sus secciones usan h3.
+  assert.doesNotMatch(sources.start, /<h1\b/);
+  assert.doesNotMatch(sources.guided, /<h1\b/);
+  assert.match(sources.start, /<h2 id="training-start-title">/);
+  assert.match(sources.guided, /<h2 id="guided-routine-title">/);
+  assert.match(sources.guided, /<h3 id="guided-plan-title">/);
+  assert.match(sources.seriesResult, /<h3 id="exercise-objectives-title">Objetivos<\/h3>/);
+
+  // El summary cerrado usa la presentación canónica con fecha cuando existe y estados legibles
+  // para loading/empty/error; no conserva un título estático alternativo.
+  const firstSummaryStart = sources.performancePanel.indexOf("<summary>");
+  const firstSummaryEnd = sources.performancePanel.indexOf("</summary>", firstSummaryStart);
+  assert.ok(firstSummaryStart >= 0 && firstSummaryEnd > firstSummaryStart);
+  const firstSummary = sources.performancePanel.slice(firstSummaryStart, firstSummaryEnd);
+  assert.match(firstSummary, /presentation\.status === "found"/);
+  assert.match(firstSummary, /presentation\.seriesDetailTitle/);
+  assert.match(firstSummary, /presentation\.lastSummaryText/);
+  assert.doesNotMatch(firstSummary, /Rendimiento anterior/);
+
+  // Las tarjetas presentan el detalle/estado canónico y derivan icono/tono del mismo item.
+  assert.match(sources.seriesResult, /import \{ Check, X \} from "lucide-react";/);
+  assert.match(sources.seriesResult, /data-tone=\{item\.tone\}/);
+  assert.match(sources.seriesResult, /\{item\.detail\}/);
+  assert.match(sources.seriesResult, /item\.tone === "partial" \? <X size=\{20\} \/> : <Check size=\{20\} \/>/);
+
+  // La API local de labels preserva los defaults del resto del producto y sólo la pantalla
+  // inicial solicita el copy de las referencias.
+  assert.match(sources.metricGrid, /weightLabel\?: string;/);
+  assert.match(sources.metricGrid, /repsLabel\?: string;/);
+  assert.match(sources.metricGrid, /weightLabel = "KG totales de la rutina"/);
+  assert.match(sources.metricGrid, /repsLabel = "Total reps"/);
+  assert.match(
+    sources.start,
+    /weightLabel="Total de KG de la rutina"\s*repsLabel="Total Reps"\s*exerciseLabel="Total ejercicios registrados"/,
+  );
+
+  // La selección conserva botones nativos: no hay grid/row ARIA simulado, y aria-pressed comunica
+  // el estado manteniendo activación Tab/Enter/Space propia de button.
+  assert.match(sources.guided, /<button\s*className=\{styles\.selectableTableRow\}\s*type="button"\s*aria-pressed=\{isActive\}/);
+  assert.doesNotMatch(sources.guided, /role="grid"|role="row"|role="rowgroup"|role="gridcell"/);
+  assert.match(sources.guided, /data-complete=\{isDone \? "true" : undefined\}/);
+
+  // El status vacío está fuera del rowgroup de la tabla estática.
+  assert.match(
+    sources.start,
+    /<div role="rowgroup">[\s\S]*<\/div>\s*<\/div>\s*\{exercises\.length === 0 \? \(\s*<p className=\{styles\.emptyTableMessage\} role="status">/,
+  );
+
+  // La grilla de métricas conservada por compatibilidad queda fuera del árbol accesible; el texto
+  // único de progreso permanece disponible para tecnologías asistivas.
+  assert.match(
+    sources.guided,
+    /<div className=\{styles\.srOnly\} aria-hidden="true">\s*<RoutineMetricGrid targetSummary=\{targetSummary\} \/>\s*<\/div>\s*<p className=\{styles\.srOnly\}>\s*Ejercicio/,
+  );
+
+  // La alerta de peso sólo aparece después del intento de registro canónico; 5, y 5. siguen siendo
+  // drafts permitidos durante escritura. El boundary de registro mantiene el rechazo final.
+  assert.match(
+    sources.guided,
+    /function isIntermediateDecimalWeightInput\(value: string\) \{[\s\S]*isDecimalWeightDraftInput\(value\)[\s\S]*normalized\.endsWith\(","\) \|\| normalized\.endsWith\("\."\)[\s\S]*const hasSubmittedInvalidWeight = draft\s*\? notice === incompleteCurrentExerciseMessage && \(\s*parseDecimalWeightInput\(draft\.weight\) === null &&\s*!isIntermediateDecimalWeightInput\(draft\.weight\)\s*\)\s*: false;/,
+  );
+  assert.match(sources.guided, /\{hasSubmittedInvalidWeight \? \(\s*<p className=\{styles\.fieldError\} id="exercise-weight-error" role="alert">/);
+  assert.doesNotMatch(sources.guided, /\bhasInvalidWeight\b/);
+  assert.match(sources.workoutRegistration, /parseDecimalWeightInput\(draft\.weight\) === null/);
+  assert.match(sources.workoutRegistration, /kind: "invalid_draft"/);
+
+  const selectedRule = readCssRule(sources.workoutStyles, '.selectableTableRow[aria-pressed="true"]');
+  const completedRule = readCssRule(
+    sources.workoutStyles,
+    '.selectableTableRow[data-complete="true"]:not([aria-pressed="true"])',
+  );
+  const primaryActionRule = readCssRule(sources.workoutStyles, ".primaryAction");
+  const screenRule = readCssRule(sources.workoutStyles, ".screen");
+  assert.equal(readCssProperty(selectedRule.body, "background"), "var(--primary-strong)");
+  assert.equal(readCssProperty(completedRule.body, "color"), "var(--workout-row-complete)");
+  assert.equal(readCssProperty(screenRule.body, "--workout-row-complete"), "var(--green)");
+  assertAccessibleSmallTextContrast({
+    globalStyles: sources.globalStyles,
+    ruleBody: selectedRule.body,
+    label: "fila seleccionada",
+  });
+  assertAccessibleSmallTextContrast({
+    globalStyles: sources.globalStyles,
+    ruleBody: primaryActionRule.body,
+    label: "botón primario",
+  });
+
+  const mobileInputSelector = `.newRecord :global(.series-weight-field input),
+.newRecord :global(.series-rep-box input)`;
+  assertMobileFontAtLeast16Px(
+    readCssRule(sources.workoutStyles, mobileInputSelector).body,
+    "inputs de peso/repeticiones",
+  );
+  assertMobileFontAtLeast16Px(
+    readCssRule(sources.workoutStyles, ".daySelector select").body,
+    "selector de día",
+  );
+  assertMobileFontAtLeast16Px(
+    readCssRule(sources.workoutStyles, ".referencePanel :global(.exercise-observation-textarea)").body,
+    "textarea de observación",
+  );
+
+  // Los colores con token global no pueden reaparecer hardcodeados en el CSS local.
+  assert.doesNotMatch(sources.workoutStyles, /#[0-9a-f]{3,8}\b|rgba?\(/i);
+  assert.match(sources.workoutStyles, /background: var\(--background\);/);
+}
+
+function replaceAuditOnce(source: string, search: string, replacement: string) {
+  assert.equal(source.split(search).length - 1, 1, `marcador de probe ambiguo: ${search}`);
+  return source.replace(search, replacement);
+}
+
+function mutateCssRule(
+  source: string,
+  selector: string,
+  search: string,
+  replacement: string,
+) {
+  const rule = readCssRule(source, selector);
+  const mutatedBody = replaceAuditOnce(rule.body, search, replacement);
+  return `${source.slice(0, rule.start)}${selector} {${mutatedBody}}${source.slice(rule.end)}`;
+}
+
+const trainUi01AuditSources: TrainUi01AuditSources = {
+  start: files.start,
+  guided: files.guided,
+  performancePanel: files.performancePanel,
+  seriesResult: files.seriesResult,
+  workoutStyles: files.workoutStyles,
+  metricGrid: files.metricGrid,
+  workoutRegistration: files.workoutRegistration,
+  globalStyles,
+};
+assertTrainUi01AuditContracts(trainUi01AuditSources);
+
+const trainUi01MutationProbes: Array<{
+  name: string;
+  target: keyof TrainUi01AuditSources;
+  mutate(source: string): string;
+}> = [
+  {
+    name: "eliminar título dinámico del historial",
+    target: "performancePanel",
+    mutate: (source) => replaceAuditOnce(
+      source,
+      "presentation.seriesDetailTitle",
+      '"Rendimiento anterior"',
+    ),
+  },
+  {
+    name: "sustituir estado de objetivos por label genérico",
+    target: "seriesResult",
+    mutate: (source) => replaceAuditOnce(source, "{item.detail}", "{item.label}"),
+  },
+  {
+    name: "reintroducir segundo h1",
+    target: "guided",
+    mutate: (source) => replaceAuditOnce(
+      replaceAuditOnce(source, '<h2 id="guided-routine-title">', '<h1 id="guided-routine-title">'),
+      "</h2>",
+      "</h1>",
+    ),
+  },
+  {
+    name: "aplicar role row al botón seleccionable",
+    target: "guided",
+    mutate: (source) => replaceAuditOnce(
+      source,
+      'type="button"\n                    aria-pressed={isActive}',
+      'type="button"\n                    role="row"\n                    aria-pressed={isActive}',
+    ),
+  },
+  {
+    name: "emitir alert durante el draft 5,",
+    target: "guided",
+    mutate: (source) => replaceAuditOnce(
+      source,
+      "!isIntermediateDecimalWeightInput(draft.weight)",
+      "true",
+    ),
+  },
+  {
+    name: "reducir inputs móviles bajo 16px",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      `.newRecord :global(.series-weight-field input),
+.newRecord :global(.series-rep-box input)`,
+      "font-size: 1rem;",
+      "font-size: 0.875rem;",
+    ),
+  },
+  {
+    name: "degradar contraste de fila seleccionada",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      '.selectableTableRow[aria-pressed="true"]',
+      "background: var(--primary-strong);",
+      "background: var(--primary);",
+    ),
+  },
+  {
+    name: "mover el estilo seleccionado a un bloque señuelo",
+    target: "workoutStyles",
+    mutate: (source) => `${mutateCssRule(
+      source,
+      '.selectableTableRow[aria-pressed="true"]',
+      "background: var(--primary-strong);",
+      "background: transparent;",
+    )}\n.decoy-selected { background: var(--primary-strong); }\n`,
+  },
+  {
+    name: "convertir data-complete en literal no ejecutable",
+    target: "guided",
+    mutate: (source) => replaceAuditOnce(
+      source,
+      'data-complete={isDone ? "true" : undefined}',
+      'data-complete="true"',
+    ),
+  },
+  {
+    name: "eliminar verde del estado completado",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      '.selectableTableRow[data-complete="true"]:not([aria-pressed="true"])',
+      "color: var(--workout-row-complete);",
+      "color: var(--muted);",
+    ),
+  },
+  {
+    name: "hardcodear fondo TRAIN-UI-01",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "background: var(--background);",
+      "background: #07101a;",
+    ),
+  },
+];
+
+for (const probe of trainUi01MutationProbes) {
+  const original = trainUi01AuditSources[probe.target];
+  const mutated = probe.mutate(original);
+  assert.notEqual(mutated, original, `probe sin mutación efectiva: ${probe.name}`);
+  assert.throws(
+    () => assertTrainUi01AuditContracts({
+      ...trainUi01AuditSources,
+      [probe.target]: mutated,
+    }),
+    `el contrato debe matar la mutación: ${probe.name}`,
+  );
+}
+
+console.log(
+  `TRAIN-UI-01 focal mutation probes passed (${trainUi01MutationProbes.length}): ${trainUi01MutationProbes.map((probe) => probe.name).join(" | ")}`,
+);
 
 const registration = "tsx src/features/active-workout/active-workout-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);

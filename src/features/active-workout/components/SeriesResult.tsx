@@ -1,5 +1,8 @@
-import { buildExerciseCurrentResultPresentation } from "@/lib/training/exercise-current-result-presentation";
+import { Check, X } from "lucide-react";
+
+import styles from "@/features/active-workout/active-workout.module.css";
 import type { ExerciseMetrics } from "@/lib/progress/types";
+import { buildExerciseCurrentResultPresentation } from "@/lib/training/exercise-current-result-presentation";
 
 export interface SeriesResultProps {
   entry: ExerciseMetrics;
@@ -14,23 +17,31 @@ export function SeriesResult({ entry }: SeriesResultProps) {
     actualWeight: entry.weight,
     targetWeight: entry.previousWeight,
   });
+  const supportingItems = result.items.filter((item) => item.label !== "Repeticiones");
 
   return (
-    <div className={`series-result session-summary ${result.tone}`}>
-      <p className="series-result-label">Resumen de tu sesión</p>
-      <div className="session-summary-hero">
+    <section className={styles.objectives} data-tone={result.tone} aria-labelledby="exercise-objectives-title">
+      <h3 id="exercise-objectives-title">Objetivos</h3>
+      <div className={styles.repetitionGoal}>
         <strong>{result.headline}</strong>
         <span>{result.message}</span>
       </div>
-      <div className="session-summary-grid">
-        {result.items.map((item) => (
-          <div className={`session-summary-item ${item.tone}`} key={item.label}>
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-            <em>{item.detail}</em>
+      <div className={styles.goalGrid}>
+        {supportingItems.map((item) => (
+          <div
+            className={`${styles.goalCard} ${item.tone === "partial" ? styles.pendingGoal : styles.reachedGoal}`}
+            data-tone={item.tone}
+            key={item.label}
+          >
+            <span className={styles.goalIcon} aria-hidden="true">
+              {item.tone === "partial" ? <X size={20} /> : <Check size={20} />}
+            </span>
+            <strong>{item.detail}</strong>
+            <span className={styles.goalLabel}>{item.label}</span>
+            <span className={styles.goalValue}>{item.value}</span>
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }

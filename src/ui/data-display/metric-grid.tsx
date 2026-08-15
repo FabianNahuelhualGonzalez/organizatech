@@ -11,25 +11,29 @@ export interface RoutineMetricGridProps {
     reps: number;
     exerciseCount: number;
   };
+  weightLabel?: string;
+  repsLabel?: string;
   exerciseLabel?: string;
 }
 
 export function RoutineMetricGrid({
   targetSummary,
+  weightLabel = "KG totales de la rutina",
+  repsLabel = "Total reps",
   exerciseLabel = "Ejercicios total",
 }: RoutineMetricGridProps) {
   return (
     <div className="metric-grid wide dashboard-metric-grid routine-metric-grid">
       <div className="metric">
         <div className="metric-title-row">
-          <span>KG totales de la rutina</span>
+          <span>{weightLabel}</span>
           <Dumbbell size={18} />
         </div>
         <strong>{formatKg(targetSummary.totalWeight)}</strong>
       </div>
       <div className="metric">
         <div className="metric-title-row">
-          <span>Total reps</span>
+          <span>{repsLabel}</span>
           <Activity size={18} />
         </div>
         <strong>{targetSummary.reps}</strong>

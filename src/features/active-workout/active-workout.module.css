@@ -1,0 +1,837 @@
+.screen {
+  --workout-row-complete: var(--green);
+  --workout-goal-success: color-mix(in srgb, var(--green) 82%, var(--text));
+  --workout-goal-pending: var(--red);
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(18px, 5vw, 28px);
+  min-width: 0;
+  padding: 4px 0 calc(26px + env(safe-area-inset-bottom));
+  background: var(--background);
+}
+
+.startIntro {
+  min-width: 0;
+  padding: clamp(10px, 3vw, 16px) clamp(4px, 2vw, 10px) 0;
+}
+
+.startIntro h2 {
+  max-width: 36rem;
+  margin: 0;
+  font-size: clamp(1.05rem, 4.8vw, 1.45rem);
+  line-height: 1.35;
+}
+
+.workoutCard {
+  display: grid;
+  min-width: 0;
+  gap: clamp(24px, 6vw, 38px);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--text) 88%, transparent);
+  border-radius: 10px;
+  background: var(--background);
+  box-shadow: none;
+  padding: clamp(18px, 5vw, 30px) clamp(14px, 4.5vw, 26px);
+}
+
+.routineHeader {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.routineTitle {
+  min-width: 0;
+}
+
+.routineTitle h2,
+.routineTitle h3 {
+  margin: 0;
+  font-size: clamp(1rem, 4.7vw, 1.32rem);
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+}
+
+.routineTitle p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: clamp(0.92rem, 4vw, 1.12rem);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.routineControls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.daySelector {
+  display: grid;
+  min-width: 0;
+}
+
+.daySelector select {
+  width: clamp(96px, 25vw, 132px);
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid color-mix(in srgb, var(--text) 72%, transparent);
+  border-radius: 8px;
+  color: var(--text);
+  color-scheme: dark;
+  background: var(--background);
+  padding: 0 30px 0 10px;
+  font-size: 1rem;
+}
+
+.daySelector select:focus-visible,
+.editRoutineButton:focus-visible,
+.primaryAction:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.editRoutineButton {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-color: color-mix(in srgb, var(--text) 72%, transparent);
+  background: transparent;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}
+
+.planSection,
+.selectedExercise,
+.newRecord,
+.objectives {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.sectionHeading {
+  display: grid;
+  gap: 7px;
+}
+
+.sectionHeading h3,
+.newRecord h3,
+.objectives h3 {
+  margin: 0;
+  font-size: clamp(1rem, 4.5vw, 1.3rem);
+  line-height: 1.3;
+}
+
+.sectionHeading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(0.7rem, 3.1vw, 0.86rem);
+  line-height: 1.55;
+}
+
+.exerciseTable {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+}
+
+.exerciseRows {
+  display: grid;
+  min-width: 0;
+}
+
+.tableHeader,
+.tableRow,
+.selectableTableRow {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 2.25fr) repeat(3, minmax(38px, 0.72fr));
+  gap: clamp(4px, 1.8vw, 10px);
+  align-items: center;
+}
+
+.tableHeader {
+  min-height: 42px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 45%, transparent);
+  font-size: clamp(0.76rem, 3.5vw, 1rem);
+  font-weight: 800;
+}
+
+.tableHeader span,
+.tableRow span,
+.selectableTableRow > span {
+  min-width: 0;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.tableHeader span:first-child,
+.exerciseNameCell {
+  text-align: left;
+}
+
+.tableRow,
+.selectableTableRow {
+  min-height: 44px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 34%, transparent);
+  border-radius: 0;
+  color: var(--text);
+  background: transparent;
+  padding: 6px 4px;
+  font-size: clamp(0.68rem, 3vw, 0.85rem);
+}
+
+.tableRow:last-child,
+.selectableTableRow:last-child {
+  border-bottom-color: transparent;
+}
+
+.selectableTableRow {
+  cursor: pointer;
+  font-weight: 400;
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.selectableTableRow:hover {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+.selectableTableRow:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--text);
+  outline-offset: -3px;
+}
+
+.selectableTableRow[aria-pressed="true"] {
+  border-bottom-color: var(--primary);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--primary-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 38%, transparent);
+}
+
+.selectableTableRow[data-complete="true"]:not([aria-pressed="true"]) {
+  color: var(--workout-row-complete);
+}
+
+.exerciseNameCell {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.25;
+}
+
+.rowStatus {
+  flex: 0 0 auto;
+  color: currentColor;
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.emptyTableMessage {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.metricScope {
+  min-width: 0;
+}
+
+.metricScope :global(.routine-metric-grid) {
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(6px, 2.5vw, 12px);
+}
+
+.metricScope :global(.metric) {
+  display: grid;
+  min-height: clamp(116px, 30vw, 138px);
+  align-content: space-between;
+  justify-items: center;
+  border: 1px solid color-mix(in srgb, var(--text) 88%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  padding: clamp(10px, 3vw, 15px) clamp(5px, 2vw, 10px);
+  text-align: center;
+}
+
+.metricScope :global(.metric-title-row) {
+  justify-content: center;
+}
+
+.metricScope :global(.metric-title-row svg) {
+  display: none;
+}
+
+.metricScope :global(.metric-title-row span) {
+  color: var(--text);
+  font-size: clamp(0.58rem, 2.7vw, 0.76rem);
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.metricScope :global(.metric strong) {
+  margin: 10px 0 0;
+  color: var(--text);
+  font-size: clamp(1.15rem, 5.5vw, 1.5rem);
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.actionRow {
+  display: flex;
+  justify-content: center;
+}
+
+.primaryAction {
+  width: min(100%, 280px);
+  min-height: 46px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--primary-strong);
+  padding: 0 18px;
+  font-size: clamp(0.76rem, 3.3vw, 0.9rem);
+  font-weight: 800;
+  box-shadow: none;
+}
+
+.primaryAction:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-strong) 82%, var(--background));
+}
+
+.primaryAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.notice {
+  margin: -10px 0 0;
+  border: 1px solid color-mix(in srgb, var(--primary) 70%, transparent);
+  border-radius: 8px;
+  color: var(--blue-soft);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  padding: 10px 12px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.warningNotice {
+  border-color: color-mix(in srgb, var(--yellow) 72%, transparent);
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 10%, transparent);
+}
+
+.overline {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(0.68rem, 3vw, 0.8rem);
+}
+
+.selectedExercise {
+  gap: 12px;
+}
+
+.selectedExerciseHeading {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.selectedExerciseHeading h3,
+.selectedExerciseHeading strong {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(1rem, 4.6vw, 1.28rem);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.selectedExerciseHeading strong {
+  text-align: right;
+}
+
+.referencePanel {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.referencePanel [data-disclosure] {
+  display: grid;
+  min-width: 0;
+  gap: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--text);
+}
+
+.referencePanel [data-disclosure] > summary {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--text) 90%, transparent);
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: clamp(0.67rem, 3vw, 0.8rem);
+  font-weight: 400;
+  line-height: 1.25;
+  list-style: none;
+  text-transform: none;
+}
+
+.referencePanel [data-disclosure] > summary::-webkit-details-marker {
+  display: none;
+}
+
+.referencePanel [data-disclosure] > summary span {
+  min-width: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+  text-transform: none;
+}
+
+.referencePanel [data-disclosure] > summary svg {
+  flex: 0 0 auto;
+  color: var(--text);
+  transition: transform 150ms ease;
+}
+
+.referencePanel [data-disclosure][open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.referencePanel [data-disclosure] > summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.disclosureContent {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 4px 4px;
+}
+
+.historyTitle,
+.historyStatus,
+.historyComparison,
+.todayGoal {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(0.68rem, 3vw, 0.8rem);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.historyTitle {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.historyComparison {
+  color: var(--blue-soft);
+}
+
+.todayGoal {
+  border-left: 2px solid var(--primary);
+  padding-left: 9px;
+}
+
+.loadingState {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.referencePanel :global(.exercise-series-detail-list) {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.referencePanel :global(.exercise-series-detail-row) {
+  display: grid;
+  grid-template-columns: minmax(68px, 0.62fr) minmax(0, 1.38fr);
+  gap: 10px;
+  align-items: baseline;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 45%, transparent);
+  border-radius: 0;
+  background: transparent;
+  padding: 7px 8px;
+}
+
+.referencePanel :global(.exercise-series-detail-row span),
+.referencePanel :global(.exercise-series-detail-row strong) {
+  color: var(--muted);
+  font-size: clamp(0.68rem, 3vw, 0.8rem);
+}
+
+.referencePanel :global(.exercise-series-detail-row strong) {
+  color: var(--text);
+  text-align: right;
+}
+
+.referencePanel :global(.exercise-observation-content) {
+  margin: 0;
+}
+
+.referencePanel :global(.exercise-observation-history) {
+  display: grid;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--text) 28%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  padding: 10px 12px;
+}
+
+.referencePanel :global(.exercise-observation-history-label),
+.referencePanel :global(.exercise-observation-field-label) {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.referencePanel :global(.exercise-observation-history-text) {
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.referencePanel :global(.exercise-observation-textarea) {
+  min-height: 118px;
+  border: 1px solid color-mix(in srgb, var(--text) 90%, transparent);
+  border-radius: 8px;
+  color: var(--text);
+  background: transparent;
+  padding: 11px 12px;
+  font-size: 1rem;
+}
+
+.referencePanel :global(.exercise-observation-textarea:focus) {
+  border-color: var(--primary);
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.referencePanel :global(.exercise-observation-hint) {
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.newRecord {
+  gap: 18px;
+  padding-top: 4px;
+}
+
+.newRecord :global(.series-weight-field) {
+  width: min(100%, 180px);
+  margin-left: clamp(12px, 5vw, 28px);
+}
+
+.newRecord :global(.series-weight-field span),
+.newRecord :global(.series-rep-box span),
+.repGridLabel {
+  color: var(--muted);
+  font-size: clamp(0.68rem, 3vw, 0.78rem);
+  font-weight: 700;
+}
+
+.newRecord :global(.series-weight-field small) {
+  color: var(--muted);
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.newRecord :global(.series-weight-field input),
+.newRecord :global(.series-rep-box input) {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid color-mix(in srgb, var(--text) 90%, transparent);
+  border-radius: 8px;
+  color: var(--text);
+  background: transparent;
+  padding: 0 10px;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.newRecord :global(.series-weight-field input:focus),
+.newRecord :global(.series-rep-box input:focus) {
+  border-color: var(--primary);
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.newRecord :global(.series-weight-field input[aria-invalid="true"]) {
+  border-color: var(--red);
+}
+
+.fieldError {
+  margin: -12px 0 0 clamp(12px, 5vw, 28px);
+  color: var(--red);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.repGridLabel {
+  margin: 2px 0 -7px clamp(12px, 5vw, 28px);
+}
+
+.newRecord :global(.series-rep-grid) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 8px;
+  padding: 0 clamp(12px, 5vw, 28px);
+}
+
+.objectives {
+  gap: 14px;
+  padding-top: 4px;
+}
+
+.repetitionGoal {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  padding: 13px 15px;
+}
+
+.repetitionGoal strong {
+  color: var(--text);
+  font-size: clamp(1rem, 4.8vw, 1.35rem);
+  line-height: 1.2;
+}
+
+.repetitionGoal span {
+  color: var(--muted);
+  font-size: clamp(0.68rem, 3vw, 0.78rem);
+  line-height: 1.45;
+}
+
+.goalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(12px, 5vw, 28px);
+  padding: 0 clamp(6px, 3vw, 14px);
+}
+
+.goalCard {
+  display: grid;
+  min-width: 0;
+  min-height: 142px;
+  align-content: space-between;
+  justify-items: center;
+  gap: 8px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: transparent;
+  padding: 11px 8px;
+  text-align: center;
+}
+
+.reachedGoal {
+  color: var(--workout-goal-success);
+}
+
+.pendingGoal {
+  color: var(--workout-goal-pending);
+}
+
+.goalIcon {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: currentColor;
+}
+
+.goalIcon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.goalLabel {
+  color: currentColor;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.goalCard strong {
+  color: currentColor;
+  font-size: clamp(0.72rem, 3vw, 0.84rem);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.goalValue {
+  color: var(--muted);
+  font-size: clamp(0.76rem, 3.5vw, 0.94rem);
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 420px) {
+  .workoutCard {
+    gap: 26px;
+  }
+
+  .routineHeader {
+    gap: 8px;
+  }
+
+  .routineControls {
+    gap: 5px;
+  }
+
+  .daySelector select {
+    width: 102px;
+    padding-left: 8px;
+  }
+
+  .editRoutineButton {
+    width: 44px;
+  }
+
+  .tableHeader,
+  .tableRow,
+  .selectableTableRow {
+    grid-template-columns: minmax(0, 1.9fr) repeat(3, minmax(34px, 0.68fr));
+    gap: 4px;
+  }
+}
+
+@media (max-width: 360px) {
+  .workoutCard {
+    padding-inline: 11px;
+  }
+
+  .routineHeader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .routineControls {
+    justify-content: flex-start;
+  }
+
+  .tableHeader,
+  .tableRow,
+  .selectableTableRow {
+    grid-template-columns: minmax(0, 1.7fr) repeat(3, minmax(31px, 0.66fr));
+    font-size: 0.64rem;
+  }
+
+  .metricScope :global(.metric) {
+    min-height: 106px;
+    padding-inline: 4px;
+  }
+
+  .newRecord :global(.series-rep-grid) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .selectedExerciseHeading {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .selectedExerciseHeading strong {
+    text-align: left;
+  }
+}
+
+@media (max-width: 330px) {
+  .goalGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 800px) {
+  .screen {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .daySelector select {
+    font-size: 0.78rem;
+  }
+
+  .referencePanel :global(.exercise-observation-textarea) {
+    font-size: 0.82rem;
+  }
+
+  .newRecord :global(.series-weight-field input),
+  .newRecord :global(.series-rep-box input) {
+    font-size: 0.85rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen {
+    animation: none;
+  }
+
+  .selectableTableRow,
+  .referencePanel [data-disclosure] > summary svg {
+    transition: none;
+  }
+
+  .referencePanel :global(.exercise-performance-skeleton) {
+    animation: none;
+  }
+}
