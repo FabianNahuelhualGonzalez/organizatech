@@ -28,7 +28,7 @@ body {
   margin: 0;
   color: var(--text);
   background-color: var(--background);
-  background-image: radial-gradient(circle at 50% 0%, rgba(60, 122, 255, 0.2), transparent 34rem);
+  background-image: none;
   font-family: "Roboto Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
@@ -57,6 +57,7 @@ a {
     clamp(10px, 3.6vw, 16px)
     calc(28px + env(safe-area-inset-bottom));
   background-color: var(--background);
+  background-image: none;
 }
 
 .topbar {
@@ -70,8 +71,10 @@ a {
   width: calc(100% + clamp(10px, 3.6vw, 16px) * 2);
   margin-inline: calc(clamp(10px, 3.6vw, 16px) * -1);
   padding: 10px clamp(10px, 3.6vw, 16px) 12px;
-  background: linear-gradient(180deg, rgba(7, 16, 26, 0.96), rgba(7, 16, 26, 0.72));
-  backdrop-filter: blur(16px);
+  background: var(--background);
+  background-image: none;
+  box-shadow: none;
+  backdrop-filter: none;
   transition: transform 180ms ease, opacity 180ms ease;
 }
 
@@ -4380,6 +4383,9 @@ h3 {
 .section-back-row {
   display: flex;
   margin-bottom: 12px;
+  background: var(--background);
+  background-image: none;
+  box-shadow: none;
 }
 
 .section-back-button {

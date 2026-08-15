@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import ts from "typescript";
 
 /**
@@ -29,6 +30,20 @@ import ts from "typescript";
 
 function readSource(path: string): string {
   return readFileSync(path, "utf8");
+}
+
+interface ProductTsxFile {
+  path: string;
+  source: string;
+}
+
+function readProductTsxFiles(root: string): ProductTsxFile[] {
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) return readProductTsxFiles(path);
+    if (!entry.name.endsWith(".tsx") || entry.name.endsWith(".test.tsx")) return [];
+    return [{ path, source: readSource(path) }];
+  });
 }
 
 function sourceSection(source: string, startMarker: string, endMarker: string): string {
@@ -127,8 +142,14 @@ function assertProfileForegroundWiring(source: string) {
 }
 
 const appSource = readSource("src/components/organizatech-app.tsx");
+const packageSource = readSource("package.json");
 const profileHookSource = readSource("src/features/profile/hooks/useProfileController.ts");
 const profileControllerSource = readSource("src/features/profile/model/profile-controller.ts");
+const authScreenSource = readSource("src/features/auth/components/auth-screen.tsx");
+const appBackButtonSource = readSource("src/ui/navigation/app-back-button.tsx");
+const appBackButtonStyles = readSource("src/ui/navigation/app-back-button.module.css");
+const productTsxFiles = readProductTsxFiles("src");
+const productTsxSource = productTsxFiles.map((file) => file.source).join("\n");
 
 const components = {
   shellLayout: readSource("src/features/app-shell/components/app-shell-layout.tsx"),
@@ -222,8 +243,8 @@ assert.match(components.drawer, /<button className="drawer-empty" type="button" 
 // Roles de navegacion intactos.
 assert.match(components.drawer, /role="menu" aria-label="Menú principal"/);
 assert.equal((components.drawer.match(/role="menuitem"/g) ?? []).length, 2, "menuitem en items y logout");
-assert.match(components.screenHeader, /section-back-button/);
-assert.match(components.screenHeader, />\s*Volver\s*</);
+assert.match(components.screenHeader, /import \{ AppBackButton \} from "@\/ui\/navigation\/app-back-button";/);
+assert.match(components.screenHeader, /<AppBackButton onBack=\{onBack\} \/>/);
 
 // 5. Los componentes de App Shell no importan logica prohibida.
 function assertNoForbiddenImports(source: string, label: string) {
@@ -236,6 +257,7 @@ function assertNoForbiddenImports(source: string, label: string) {
   });
 }
 Object.entries(components).forEach(([label, source]) => assertNoForbiddenImports(source, label));
+assertNoForbiddenImports(appBackButtonSource, "appBackButton");
 
 // 6. El refresh de avatar permanece en el API público de Profile. El root sólo conecta el callback
 //    estrecho de App Shell y los componentes visuales no conocen el controller.
@@ -313,6 +335,378 @@ assert.match(components.drawer, /onClick={\(\) => onNavigate\(item\.id\)}/);
 //     componente en si no tiene guard interno, asi que el gating debe vivir en el root.
 assert.match(appSource, /screenHeader={canGoBackFromScreen\(screen\) \? <AppScreenHeader onBack={goBack} \/> : null}/);
 assert.doesNotMatch(components.screenHeader, /screen !== "dashboard"|canGoBackFromScreen/, "AppScreenHeader no debe reimplementar el gating, lo recibe del root");
+
+// ---------------------------------------------------------------------------------------------
+// TRAIN-UI-01 — contrato focal ESTATICO/source-based del Back canonico. No simula click ni
+// teclado; comprueba que el elemento nativo conserva una unica conexion onClick al controller.
+// ---------------------------------------------------------------------------------------------
+assert.match(appBackButtonSource, /export interface AppBackButtonProps \{\s*onBack: \(\) => void;\s*\}/);
+assert.match(appBackButtonSource, /<button[\s\S]*type="button"[\s\S]*aria-label="Volver"[\s\S]*onClick=\{onBack\}/);
+assert.equal((appBackButtonSource.match(/onClick=\{onBack\}/g) ?? []).length, 1);
+assert.doesNotMatch(appBackButtonSource, /onKeyDown|onKeyUp|onKeyPress/, "el button nativo posee la activacion de teclado");
+assert.match(appBackButtonSource, /<svg[\s\S]*width="24"[\s\S]*height="24"[\s\S]*viewBox="0 0 24 24"/);
+for (const svgAttribute of [
+  /fill="none"/,
+  /stroke="currentColor"/,
+  /strokeWidth=\{2\}/,
+  /strokeLinecap="round"/,
+  /strokeLinejoin="round"/,
+  /aria-hidden="true"/,
+]) {
+  assert.match(appBackButtonSource, svgAttribute);
+}
+assert.equal((appBackButtonSource.match(/<path\b/g) ?? []).length, 4, "el icono oficial conserva cuatro paths");
+for (const pathContract of [
+  /<path stroke="none" d="M0 0h24v24H0z" fill="none" \/>/,
+  /<path d="M5 12h6m3 0h1\.5m3 0h\.5" \/>/,
+  /<path d="M5 12l4 4" \/>/,
+  /<path d="M5 12l4 -4" \/>/,
+]) {
+  assert.match(appBackButtonSource, pathContract);
+}
+assert.match(appBackButtonStyles, /min-width: 44px;/);
+assert.match(appBackButtonStyles, /min-height: 44px;/);
+assert.match(appBackButtonStyles, /\.button:focus-visible/);
+assert.doesNotMatch(appBackButtonSource, /dangerouslySetInnerHTML|history\.back|ChevronLeft/);
+assert.doesNotMatch(components.screenHeader, /ChevronLeft|history\.back|<svg/);
+assert.doesNotMatch(packageSource, /@tabler\/icons-react/);
+assert.doesNotMatch(productTsxSource, /history\.back\s*\(/, "ninguna pantalla productiva suplanta el controller con history.back()");
+assert.equal(
+  (productTsxSource.match(/d="M5 12h6m3 0h1\.5m3 0h\.5"/g) ?? []).length,
+  1,
+  "el trazado canonico no debe duplicarse en features",
+);
+assert.equal(
+  (productTsxSource.match(/aria-label="Volver"/g) ?? []).length,
+  1,
+  "el nombre Back visible pertenece al componente canonico",
+);
+
+interface CanonicalBackAuditSources {
+  appBackButton: string;
+  appBackButtonStyles: string;
+  screenHeader: string;
+  authScreen: string;
+  otherProductComponents: string;
+}
+
+const forbiddenBackIconNames = new Set([
+  "ChevronLeft",
+  "ArrowLeft",
+  "MoveLeft",
+  "CornerUpLeft",
+]);
+const forbiddenBackCallbackNames = new Set([
+  "onBack",
+  "goBack",
+  "handleBack",
+  "navigateBack",
+]);
+const alternateBackText = /\b(?:Volver|Atrás|Atras|Regresar)\b/i;
+
+function parseTsx(path: string, source: string) {
+  return ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+}
+
+function jsxTagName(node: ts.JsxOpeningLikeElement, sourceFile: ts.SourceFile) {
+  return node.tagName.getText(sourceFile);
+}
+
+function findJsxAttribute(node: ts.JsxOpeningLikeElement, name: string) {
+  return node.attributes.properties.find((property): property is ts.JsxAttribute => (
+    ts.isJsxAttribute(property) && property.name.getText() === name
+  ));
+}
+
+function readStaticJsxAttribute(attribute: ts.JsxAttribute | undefined): string | null {
+  if (!attribute?.initializer) return null;
+  if (ts.isStringLiteral(attribute.initializer)) return attribute.initializer.text;
+  const expression = ts.isJsxExpression(attribute.initializer)
+    ? attribute.initializer.expression
+    : undefined;
+  return expression && ts.isStringLiteralLike(expression) ? expression.text : null;
+}
+
+function containsIdentifier(node: ts.Node, names: ReadonlySet<string>) {
+  let found = false;
+  function visit(current: ts.Node) {
+    if (ts.isIdentifier(current) && names.has(current.text)) found = true;
+    if (!found) ts.forEachChild(current, visit);
+  }
+  visit(node);
+  return found;
+}
+
+function assertNoDivergentBackVisuals(path: string, source: string) {
+  const sourceFile = parseTsx(path, source);
+
+  function visit(node: ts.Node) {
+    if (ts.isImportDeclaration(node) && node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)) {
+      for (const specifier of node.importClause.namedBindings.elements) {
+        const importedName = specifier.propertyName?.text ?? specifier.name.text;
+        assert.ok(
+          !forbiddenBackIconNames.has(importedName) && !forbiddenBackIconNames.has(specifier.name.text),
+          `${path}: import visual Back prohibido (${specifier.getText(sourceFile)})`,
+        );
+      }
+    }
+
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const tagName = jsxTagName(node, sourceFile);
+      assert.ok(!forbiddenBackIconNames.has(tagName), `${path}: elemento visual Back prohibido <${tagName}>`);
+
+      const ariaLabel = readStaticJsxAttribute(findJsxAttribute(node, "aria-label"));
+      assert.ok(!ariaLabel || !alternateBackText.test(ariaLabel), `${path}: aria-label Back fuera del owner canónico`);
+
+      if (tagName === "button") {
+        const onClick = findJsxAttribute(node, "onClick");
+        const callbackExpression = onClick?.initializer && ts.isJsxExpression(onClick.initializer)
+          ? onClick.initializer.expression
+          : undefined;
+        assert.ok(
+          !callbackExpression || !containsIdentifier(callbackExpression, forbiddenBackCallbackNames),
+          `${path}: callback Back conectado a un button alternativo`,
+        );
+      }
+    }
+
+    if (ts.isJsxText(node) && node.text.trim()) {
+      assert.doesNotMatch(node.text, alternateBackText, `${path}: texto JSX Back alternativo`);
+    }
+    if (
+      ts.isStringLiteralLike(node) &&
+      ts.isJsxExpression(node.parent) &&
+      alternateBackText.test(node.text)
+    ) {
+      assert.fail(`${path}: texto JSX Back alternativo`);
+    }
+
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const owner = node.expression.expression.getText(sourceFile);
+      const method = node.expression.name.text;
+      assert.ok(
+        method !== "back" || !/(?:^|\.)(?:history|router)$/.test(owner),
+        `${path}: navegación Back implícita mediante ${owner}.back()`,
+      );
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+}
+
+function findNamedFunction(sourceFile: ts.SourceFile, name: string) {
+  const matches: ts.FunctionDeclaration[] = [];
+  function visit(node: ts.Node) {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) matches.push(node);
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  assert.equal(matches.length, 1, `${name}: se esperaba una función inequívoca`);
+  return matches[0];
+}
+
+function assertAuthBackAndKeyboard(source: string) {
+  const sourceFile = parseTsx("src/features/auth/components/auth-screen.tsx", source);
+  const appBackImports = sourceFile.statements.filter((statement): statement is ts.ImportDeclaration => (
+    ts.isImportDeclaration(statement) &&
+    ts.isStringLiteral(statement.moduleSpecifier) &&
+    statement.moduleSpecifier.text === "@/ui/navigation/app-back-button"
+  ));
+  assert.equal(appBackImports.length, 1, "AUTH importa AppBackButton desde el owner canónico");
+  assert.match(appBackImports[0].getText(sourceFile), /import \{ AppBackButton \}/);
+
+  const recovery = findNamedFunction(sourceFile, "PasswordRecoveryScreen");
+  const recoveryBackButtons: ts.JsxSelfClosingElement[] = [];
+  function visitRecovery(node: ts.Node) {
+    if (ts.isJsxSelfClosingElement(node) && jsxTagName(node, sourceFile) === "AppBackButton") {
+      recoveryBackButtons.push(node);
+    }
+    ts.forEachChild(node, visitRecovery);
+  }
+  visitRecovery(recovery);
+  assert.equal(recoveryBackButtons.length, 1, "recuperación consume exactamente un AppBackButton");
+  assert.equal(recoveryBackButtons[0].attributes.properties.length, 1, "AUTH conecta sólo el callback contextual");
+  const onBack = findJsxAttribute(recoveryBackButtons[0], "onBack");
+  assert.ok(onBack?.initializer && ts.isJsxExpression(onBack.initializer));
+  assert.ok(onBack.initializer.expression && ts.isIdentifier(onBack.initializer.expression));
+  assert.equal(onBack.initializer.expression.text, "onBack", "recuperación conserva el callback onBack");
+
+  const allAuthBackButtons: ts.JsxSelfClosingElement[] = [];
+  function visitAuth(node: ts.Node) {
+    if (ts.isJsxSelfClosingElement(node) && jsxTagName(node, sourceFile) === "AppBackButton") {
+      allAuthBackButtons.push(node);
+    }
+    ts.forEachChild(node, visitAuth);
+  }
+  visitAuth(sourceFile);
+  assert.equal(allAuthBackButtons.length, 1, "AUTH no duplica la acción Back canónica");
+  assert.doesNotMatch(source, />\s*Volver a iniciar sesión\s*</i);
+
+  const handleTabKeyDown = findNamedFunction(sourceFile, "handleTabKeyDown");
+  const handleSource = handleTabKeyDown.getText(sourceFile);
+  const arrowKeys: string[] = [];
+  function visitHandle(node: ts.Node) {
+    if (ts.isStringLiteral(node) && (node.text === "ArrowLeft" || node.text === "ArrowRight")) {
+      arrowKeys.push(node.text);
+    }
+    ts.forEachChild(node, visitHandle);
+  }
+  visitHandle(handleTabKeyDown);
+  assert.deepEqual(arrowKeys, ["ArrowLeft", "ArrowRight"], "el selector conserva ambas teclas direccionales");
+  assert.match(handleSource, /if \(event\.key !== "ArrowLeft" && event\.key !== "ArrowRight"\) return;/);
+  assert.equal((handleSource.match(/event\.preventDefault\(\);/g) ?? []).length, 1);
+  assert.match(handleSource, /selectAccountType\(nextAccountType\);/);
+  assert.match(handleSource, /\(nextAccountType === "usuario" \? userTabRef : coachTabRef\)\.current\?\.focus\(\);/);
+
+  const selectAccountType = findNamedFunction(sourceFile, "selectAccountType").getText(sourceFile);
+  assert.match(selectAccountType, /onAccountTypeChange\(nextAccountType\);/);
+}
+
+function readExactCssRuleBody(source: string, selector: string) {
+  const marker = `${selector} {`;
+  const selectorIndex = source.indexOf(marker);
+  assert.ok(selectorIndex >= 0, `falta la regla CSS exacta ${selector}`);
+  const openingBraceIndex = source.indexOf("{", selectorIndex + selector.length);
+  let depth = 0;
+
+  for (let index = openingBraceIndex; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] !== "}") continue;
+    depth -= 1;
+    if (depth === 0) return source.slice(openingBraceIndex + 1, index);
+  }
+
+  assert.fail(`regla CSS sin cierre para ${selector}`);
+}
+
+function assertCanonicalBackAuditContracts(sources: CanonicalBackAuditSources) {
+  // AppScreenHeader delega toda la UI a una única instancia canónica: no puede añadir texto,
+  // botón, SVG ni icono alternativo alrededor de ella.
+  assert.equal((sources.screenHeader.match(/<AppBackButton\b/g) ?? []).length, 1);
+  assert.match(
+    sources.screenHeader,
+    /return \(\s*<div className="section-back-row">\s*<AppBackButton onBack=\{onBack\} \/>\s*<\/div>\s*\);/,
+  );
+  assertAuthBackAndKeyboard(sources.authScreen);
+  assertNoDivergentBackVisuals("src/features/app-shell/components/app-screen-header.tsx", sources.screenHeader);
+  assertNoDivergentBackVisuals("src/features/auth/components/auth-screen.tsx", sources.authScreen);
+  assertNoDivergentBackVisuals("resto de superficies productivas", sources.otherProductComponents);
+
+  assert.match(sources.appBackButton, /aria-label="Volver"/);
+  assert.equal((sources.appBackButton.match(/onClick=\{onBack\}/g) ?? []).length, 1);
+  assert.equal((sources.appBackButton.match(/<path\b/g) ?? []).length, 4);
+  assert.doesNotMatch(sources.appBackButton, /history\.back|dangerouslySetInnerHTML|ChevronLeft/);
+  assert.equal(
+    ([sources.appBackButton, sources.screenHeader, sources.authScreen, sources.otherProductComponents]
+      .join("\n")
+      .match(/d="M5 12h6m3 0h1\.5m3 0h\.5"/g) ?? []).length,
+    1,
+    "el SVG canónico tiene una única implementación productiva",
+  );
+
+  const buttonRule = readExactCssRuleBody(sources.appBackButtonStyles, ".button");
+  for (const targetDeclaration of [
+    /width: 44px;/,
+    /min-width: 44px;/,
+    /height: 44px;/,
+    /min-height: 44px;/,
+  ]) {
+    assert.match(buttonRule, targetDeclaration);
+  }
+  assert.doesNotMatch(
+    sources.appBackButtonStyles,
+    /transform\s*:[^;]*(?:scale|matrix)|\bscale\s*:|\bzoom\s*:/i,
+    "ningún estado puede reducir visualmente el target táctil 44x44",
+  );
+  assert.doesNotMatch(sources.appBackButtonStyles, /#[0-9a-f]{3,8}\b|rgba?\(/i);
+}
+
+function replaceBackAuditOnce(source: string, search: string, replacement: string) {
+  assert.equal(source.split(search).length - 1, 1, `marcador de probe ambiguo: ${search}`);
+  return source.replace(search, replacement);
+}
+
+const canonicalBackAuditSources: CanonicalBackAuditSources = {
+  appBackButton: appBackButtonSource,
+  appBackButtonStyles,
+  screenHeader: components.screenHeader,
+  authScreen: authScreenSource,
+  otherProductComponents: productTsxFiles
+    .filter((file) => ![
+      "src/features/app-shell/components/app-screen-header.tsx",
+      "src/features/auth/components/auth-screen.tsx",
+      "src/ui/navigation/app-back-button.tsx",
+    ].includes(file.path))
+    .map((file) => file.source)
+    .join("\n"),
+};
+assert.doesNotThrow(
+  () => assertCanonicalBackAuditContracts(canonicalBackAuditSources),
+  "los literales ArrowLeft/ArrowRight de teclado no son iconos Back",
+);
+
+const canonicalBackMutationProbes: Array<{
+  name: string;
+  target: keyof CanonicalBackAuditSources;
+  mutate(source: string): string;
+}> = [
+  {
+    name: "agregar botón textual Back divergente",
+    target: "otherProductComponents",
+    mutate: (source) => `${source}\nfunction DivergentBack({ onBack }: { onBack: () => void }) { return <button onClick={onBack}>Regresar</button>; }\n`,
+  },
+  {
+    name: "agregar icono visual ArrowLeft",
+    target: "otherProductComponents",
+    mutate: (source) => `${source}\nfunction DivergentBackIcon() { return <ArrowLeft />; }\n`,
+  },
+  {
+    name: "eliminar AppBackButton de recuperación AUTH",
+    target: "authScreen",
+    mutate: (source) => replaceBackAuditOnce(
+      source,
+      "        <AppBackButton onBack={onBack} />",
+      "        <span />",
+    ),
+  },
+  {
+    name: "eliminar navegación ArrowLeft/ArrowRight del selector AUTH",
+    target: "authScreen",
+    mutate: (source) => replaceBackAuditOnce(
+      source,
+      '    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;',
+      '    if (event.key !== "Enter") return;',
+    ),
+  },
+  {
+    name: "reducir target táctil mediante transform",
+    target: "appBackButtonStyles",
+    mutate: (source) => replaceBackAuditOnce(
+      source,
+      "  place-items: center;",
+      "  place-items: center;\n  transform: scale(0.5);",
+    ),
+  },
+];
+
+for (const probe of canonicalBackMutationProbes) {
+  const original = canonicalBackAuditSources[probe.target];
+  const mutated = probe.mutate(original);
+  assert.notEqual(mutated, original, `probe sin mutación efectiva: ${probe.name}`);
+  assert.throws(
+    () => assertCanonicalBackAuditContracts({
+      ...canonicalBackAuditSources,
+      [probe.target]: mutated,
+    }),
+    `el contrato debe matar la mutación: ${probe.name}`,
+  );
+}
+
+console.log(
+  `TRAIN-UI-01 canonical Back mutation probes passed (${canonicalBackMutationProbes.length}): ${canonicalBackMutationProbes.map((probe) => probe.name).join(" | ")}`,
+);
 
 // ---------------------------------------------------------------------------------------------
 // P3-47B — IconButton compartido.

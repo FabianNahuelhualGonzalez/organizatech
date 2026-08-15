@@ -1,0 +1,36 @@
+.button {
+  display: inline-grid;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text);
+  background: transparent;
+  padding: 0;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.button svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+}

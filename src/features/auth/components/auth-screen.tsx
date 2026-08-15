@@ -18,6 +18,7 @@ import {
   calculateAgeFromBirthDate,
   profileGenderLabels,
 } from "@/lib/profile/profile-form";
+import { AppBackButton } from "@/ui/navigation/app-back-button";
 
 import styles from "./auth-screen.module.css";
 
@@ -306,9 +307,7 @@ export function PasswordRecoveryScreen({
           <Mail aria-hidden="true" size={20} />
           {isBusy ? "Enviando enlace..." : "Enviar enlace"}
         </button>
-        <button className={styles.textButton} type="button" onClick={onBack}>
-          Volver a iniciar sesión
-        </button>
+        <AppBackButton onBack={onBack} />
       </form>
     </AuthFrame>
   );
