@@ -21,6 +21,9 @@ const routeStates: PasswordRecoveryRouteState[] = ["none", "active", "expired"];
 assert.equal(resolveInitialAuthScreen("expired"), "recovery-expired");
 assert.equal(resolveInitialAuthScreen("active"), "nueva-password");
 assert.equal(resolveInitialAuthScreen("none"), "login");
+assert.equal(resolveInitialAuthScreen("none", "registro"), "registro");
+assert.equal(resolveInitialAuthScreen("active", "registro"), "nueva-password");
+assert.equal(resolveInitialAuthScreen("expired", "registro"), "recovery-expired");
 
 // CASO — mensaje de estado inicial por cada estado de ruta (paridad literal, incluye tildes).
 assert.equal(resolveInitialAuthStatusMessage("expired"), "El enlace de recuperación expiró o ya fue utilizado.");
@@ -43,5 +46,6 @@ for (const routeState of routeStates) {
 
 // CASO — determinismo: misma entrada produce siempre la misma salida.
 assert.deepEqual(resolveInitialAuthState("active"), resolveInitialAuthState("active"));
+assert.equal(resolveInitialAuthState("none", "registro").screen, "registro");
 
 console.log("app-auth-screen-resolver tests passed");

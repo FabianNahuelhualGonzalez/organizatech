@@ -1,5 +1,5 @@
 :root {
-  --background: #07101a;
+  --background: #07101A;
   --panel: #101b27;
   --line: rgba(220, 231, 255, 0.12);
   --text: #ffffff;
@@ -27,9 +27,8 @@ body {
   min-height: 100vh;
   margin: 0;
   color: var(--text);
-  background:
-    radial-gradient(circle at 50% 0%, rgba(60, 122, 255, 0.2), transparent 34rem),
-    linear-gradient(180deg, #0b121b 0%, #07101a 48%, #050b12 100%);
+  background-color: var(--background);
+  background-image: radial-gradient(circle at 50% 0%, rgba(60, 122, 255, 0.2), transparent 34rem);
   font-family: "Roboto Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
@@ -57,6 +56,7 @@ a {
     calc(14px + env(safe-area-inset-top))
     clamp(10px, 3.6vw, 16px)
     calc(28px + env(safe-area-inset-bottom));
+  background-color: var(--background);
 }
 
 .topbar {
@@ -926,6 +926,7 @@ h3 {
   align-content: center;
   justify-items: center;
   gap: 68px;
+  background-color: var(--background);
 }
 
 .empty-hero {
@@ -4979,6 +4980,7 @@ h3 {
   min-height: calc(100vh - 120px);
   align-content: center;
   gap: 18px;
+  background-color: var(--background);
 }
 
 .login-logo {

@@ -3,15 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
-  Dumbbell,
-  Eye,
-  EyeOff,
-  Lock,
-  Mail,
-  Save,
-  UserPlus,
-} from "lucide-react";
-import {
   deactivateActiveCycle,
   deleteExercise,
   replaceLocalData,
@@ -47,6 +38,26 @@ import {
 import { TrainingCompletionSummaryScreen } from "@/features/active-workout/components/TrainingCompletionSummaryScreen";
 import { TrainingReadinessScreen } from "@/features/active-workout/components/TrainingReadinessScreen";
 import { TrainingStartScreen } from "@/features/active-workout/components/TrainingStartScreen";
+import {
+  AuthLoadingScreen,
+  AuthScreen,
+  NewPasswordScreen,
+  PasswordRecoveryScreen,
+  RecoveryExpiredScreen,
+  type AuthStatusTone,
+} from "@/features/auth/components/auth-screen";
+import { useAuthRouteController } from "@/features/auth/hooks/use-auth-route-controller";
+import {
+  buildLoginPayload,
+  buildUserSignupPayload,
+  type AuthFieldErrors,
+  type AuthFieldName,
+} from "@/features/auth/model/auth-form";
+import {
+  DEFAULT_AUTH_ROUTE,
+  type AuthAccountType,
+  type AuthRouteState,
+} from "@/features/auth/model/auth-route";
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
@@ -370,18 +381,21 @@ interface OrganizatechAppProps {
   trainingCyclesRepositoryEnabled?: boolean;
   trainingCyclesSnapshotSource?: "ui-main-production" | "ui-main-qa";
   trainingWorkoutReadinessV2Enabled?: boolean;
+  initialAuthRoute?: AuthRouteState;
 }
 
 export function OrganizatechApp({
   trainingCyclesRepositoryEnabled = false,
   trainingCyclesSnapshotSource = "ui-main-qa",
   trainingWorkoutReadinessV2Enabled = false,
+  initialAuthRoute = DEFAULT_AUTH_ROUTE,
 }: OrganizatechAppProps) {
   const initialPasswordRecoveryRouteStateRef = useRef<ReturnType<typeof getPasswordRecoveryRouteState> | null>(null);
   const initialPasswordRecoveryRouteState = initialPasswordRecoveryRouteStateRef.current
     ?? getPasswordRecoveryRouteState();
   initialPasswordRecoveryRouteStateRef.current = initialPasswordRecoveryRouteState;
-  const initialAuthState = resolveInitialAuthState(initialPasswordRecoveryRouteState);
+  const initialAuthState = resolveInitialAuthState(initialPasswordRecoveryRouteState, initialAuthRoute.mode);
+  const authRouteController = useAuthRouteController(initialAuthRoute);
   const [sessionName, setSessionName] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -393,6 +407,8 @@ export function OrganizatechApp({
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
   const [statusMessage, setStatusMessage] = useState(initialAuthState.statusMessage);
+  const [authStatusTone, setAuthStatusTone] = useState<AuthStatusTone>("info");
+  const [authFieldErrors, setAuthFieldErrors] = useState<AuthFieldErrors>({});
   const [dataMode, setDataMode] = useState<DataMode>("demo");
   const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
@@ -672,6 +688,25 @@ export function OrganizatechApp({
     };
   }, []);
 
+  function setAuthStatus(message: string, tone: AuthStatusTone) {
+    setStatusMessage(message);
+    setAuthStatusTone(tone);
+  }
+
+  function setAuthFieldError(field: AuthFieldName, message: string) {
+    setAuthFieldErrors({ [field]: message });
+    setAuthStatus("", "info");
+  }
+
+  function clearAuthFieldError(field: AuthFieldName) {
+    setAuthFieldErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  }
+
   function confirmPasswordRecoverySession(session: SupabaseSessionState["session"]) {
     const recoveryUserId = normalizePasswordRecoveryUserId(session?.user.id);
     if (!recoveryUserId) {
@@ -684,7 +719,7 @@ export function OrganizatechApp({
     setIsPasswordRecoveryConfirmed(true);
     confirmPasswordRecoveryFlow(recoveryUserId);
     setIsAuthLoading(false);
-    setStatusMessage(resolveInitialAuthStatusMessage("active"));
+    setAuthStatus(resolveInitialAuthStatusMessage("active"), "info");
     navigation.transition(resolvePasswordRecoveryRouteTransition("active"));
   }
 
@@ -697,7 +732,7 @@ export function OrganizatechApp({
     clearPasswordRecoveryUrl();
     setIsBusy(false);
     setIsAuthLoading(false);
-    setStatusMessage(resolveInitialAuthStatusMessage("expired"));
+    setAuthStatus(resolveInitialAuthStatusMessage("expired"), "error");
     navigation.transition(resolvePasswordRecoveryRouteTransition("expired"));
   }
 
@@ -711,6 +746,7 @@ export function OrganizatechApp({
     clearUserSessionState(
       "Contraseña actualizada correctamente. Ya puedes iniciar sesión.",
       storageScope,
+      { statusTone: "success" },
     );
     return true;
   }
@@ -733,10 +769,10 @@ export function OrganizatechApp({
         passwordRecoveryStateRef.current = "pending";
         setIsPasswordRecoveryConfirmed(false);
         setIsAuthLoading(true);
-        setStatusMessage(resolveInitialAuthStatusMessage("none"));
+        setAuthStatus(resolveInitialAuthStatusMessage("none"), "info");
       } else {
         setIsAuthLoading(true);
-        setStatusMessage(resolveInitialAuthStatusMessage("none"));
+        setAuthStatus(resolveInitialAuthStatusMessage("none"), "info");
       }
       try {
         const authState = await getInitialSupabaseSession();
@@ -769,7 +805,7 @@ export function OrganizatechApp({
         if (authState.session) {
           await continueAuthenticatedSession(authState, "restore-active-flow");
         } else {
-          setStatusMessage(authState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
+          setAuthStatus(authState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage(), "info");
         }
       } catch (error) {
         if (isMounted && isSessionDataRequestCurrent(requestToken)) {
@@ -788,9 +824,9 @@ export function OrganizatechApp({
             passwordRecoveryStateRef.current = recoveryDecision;
             setIsPasswordRecoveryConfirmed(false);
             setIsAuthLoading(true);
-            setStatusMessage(resolveInitialAuthStatusMessage("none"));
+            setAuthStatus(resolveInitialAuthStatusMessage("none"), "info");
           } else {
-            setStatusMessage(translateAuthError(error));
+            setAuthStatus(translateAuthError(error), "error");
           }
         }
       } finally {
@@ -820,7 +856,7 @@ export function OrganizatechApp({
           return;
         }
         passwordRecoveryUpdateOwnerRef.current = null;
-        clearUserSessionState("Sesión cerrada correctamente.", previousStorageScope);
+        clearUserSessionState("Sesión cerrada correctamente.", previousStorageScope, { statusTone: "success" });
         return;
       }
 
@@ -882,7 +918,7 @@ export function OrganizatechApp({
       if (!authEventResult.proceedAfterSessionApplied) return;
       if (event === "INITIAL_SESSION" && !session) {
         setIsAuthLoading(false);
-        setStatusMessage(nextState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
+        setAuthStatus(nextState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage(), "info");
       }
     }).data.subscription;
 
@@ -1230,7 +1266,7 @@ export function OrganizatechApp({
   function clearUserSessionState(
     message: string,
     storageScope = activeBrowserStorageScopeRef.current,
-    options: { navigate?: boolean } = {},
+    options: { navigate?: boolean; statusTone?: AuthStatusTone } = {},
   ) {
     if (
       activeBrowserStorageScopeRef.current === null &&
@@ -1271,9 +1307,10 @@ export function OrganizatechApp({
     setIsBusy(false);
     routineBuilder.replaceIdentityScope(null);
     if (options.navigate !== false) {
+      authRouteController.replace({ mode: "login", accountType: "usuario" });
       navigation.reset("login");
     }
-    setStatusMessage(message);
+    setAuthStatus(message, options.statusTone ?? "info");
     return true;
   }
 
@@ -1521,66 +1558,30 @@ export function OrganizatechApp({
       dataMode === "supabase" &&
       (isSessionExpiredError(error) || message.includes("iniciar sesión"))
     ) {
-      clearUserSessionState(message);
+      clearUserSessionState(message, activeBrowserStorageScopeRef.current, { statusTone: "error" });
     }
     return message;
   }
 
   async function handleAuth(mode: "login" | "registro", formData: FormData) {
-    const name = String(formData.get("register-name") || "").trim();
-    const rawEmail = String(formData.get(mode === "registro" ? "register-email" : "login-email") || "");
-    const email = rawEmail.trim().toLowerCase();
-    const password = String(formData.get(mode === "registro" ? "register-password" : "login-password") || "");
-    const confirm = String(formData.get("register-confirm-password") || "");
+    const signupPreparation = mode === "registro" ? buildUserSignupPayload(formData) : null;
+    const loginPreparation = mode === "login" ? buildLoginPayload(formData) : null;
+    const preparation = signupPreparation ?? loginPreparation;
+    if (!preparation) return;
+    if (!preparation.ok) {
+      setAuthFieldError(preparation.field, preparation.message);
+      return;
+    }
+
+    setAuthFieldErrors({});
+    setAuthStatus("", "info");
+
+    const { email, password } = preparation.payload;
+    const signupPayload = signupPreparation?.ok ? signupPreparation.payload : null;
+    const name = signupPayload?.options.data.display_name ?? "";
     const supabase = getSupabaseBrowserClient();
     let appliedIdentityToken: SessionDataRequestToken | null = null;
     let loginSubmitOwner: LoginSubmitOwner | null = null;
-    if (mode === "registro" && !name) {
-      setStatusMessage("Ingresa tu nombre.");
-      return;
-    }
-
-    const signupEmailValidation = mode === "registro" ? validateSignupEmail(rawEmail) : null;
-
-    if (!email) {
-      setStatusMessage("Ingresa tu correo electr\u00f3nico.");
-      return;
-    }
-
-    if (signupEmailValidation) {
-      setStatusMessage(signupEmailValidation);
-      return;
-    }
-
-    if (mode === "login" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setStatusMessage("Ingresa un correo electr\u00f3nico v\u00e1lido.");
-      return;
-    }
-
-    if (!password) {
-      setStatusMessage(mode === "registro" ? "Crea una contrase\u00f1a." : "Ingresa tu contrase\u00f1a.");
-      return;
-    }
-
-    if (mode === "registro" && password.length < 8) {
-      setStatusMessage("La contrase\u00f1a debe tener al menos 8 caracteres.");
-      return;
-    }
-
-    if (mode === "registro" && (!/[a-zA-Z]/.test(password) || !/\d/.test(password))) {
-      setStatusMessage("La contrase\u00f1a debe incluir letras y n\u00fameros.");
-      return;
-    }
-
-    if (mode === "registro" && !confirm) {
-      setStatusMessage("Confirma tu contrase\u00f1a.");
-      return;
-    }
-
-    if (mode === "registro" && password !== confirm) {
-      setStatusMessage("Las contraseñas no coinciden.");
-      return;
-    }
 
     if (!supabase) {
       setSessionName(name || email.split("@")[0] || "Usuario");
@@ -1591,11 +1592,11 @@ export function OrganizatechApp({
         user: null,
       });
       appliedIdentityToken = captureSessionDataRequestToken();
-      setStatusMessage(getMissingSupabaseMessage());
+      setAuthStatus(getMissingSupabaseMessage(), "info");
       const refreshResult = await refreshTrainingDataForSession("demo");
       if (refreshResult.kind !== "success") return;
       if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
-      setStatusMessage(getMissingSupabaseMessage());
+      setAuthStatus(getMissingSupabaseMessage(), "info");
       clearAuthForms();
       navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
       return;
@@ -1615,7 +1616,8 @@ export function OrganizatechApp({
         | Awaited<ReturnType<typeof supabase.auth.signUp>>
         | Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
       if (mode === "registro") {
-        result = await supabase.auth.signUp({ email, password, options: { data: { display_name: name } } });
+        if (!signupPayload) return;
+        result = await supabase.auth.signUp(signupPayload);
       } else {
         const settlement = await loginSubmitOwnerController!.settle(
           loginSubmitOwner!,
@@ -1627,14 +1629,14 @@ export function OrganizatechApp({
       }
 
       if (result.error) {
-        setStatusMessage(translateAuthError(result.error));
+        setAuthStatus(translateAuthError(result.error), "error");
         return;
       }
 
       const existingRegisteredUser =
         mode === "registro" && Array.isArray(result.data.user?.identities) && result.data.user.identities.length === 0;
       if (existingRegisteredUser) {
-        setStatusMessage("Este correo ya está registrado. Intenta iniciar sesión.");
+        setAuthStatus("Este correo ya está registrado. Intenta iniciar sesión.", "error");
         return;
       }
 
@@ -1649,8 +1651,9 @@ export function OrganizatechApp({
       appliedIdentityToken = captureSessionDataRequestToken();
 
       if (!session && mode === "registro") {
-        setStatusMessage("Cuenta creada. Revisa tu correo para confirmar el registro.");
+        setAuthStatus("Cuenta creada. Revisa tu correo para confirmar el registro.", "success");
         clearAuthForms();
+        authRouteController.replace({ mode: "login", accountType: "usuario" });
         navigation.transition(createAuthNavigationReset("login", "signup-confirmation-pending"));
         return;
       }
@@ -1658,7 +1661,7 @@ export function OrganizatechApp({
       await continueAuthenticatedSession(authenticatedState, "dashboard");
     } catch (error) {
       if (appliedIdentityToken && !isSessionDataRequestCurrent(appliedIdentityToken)) return;
-      setStatusMessage(translateAuthError(error));
+      setAuthStatus(translateAuthError(error), "error");
     } finally {
       const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController
         ? loginSubmitOwnerController.finalize(loginSubmitOwner)
@@ -1679,32 +1682,34 @@ export function OrganizatechApp({
     const supabase = getSupabaseBrowserClient();
 
     if (!email) {
-      setStatusMessage("Ingresa tu correo electr\u00f3nico.");
+      setAuthFieldError("recovery-email", "Ingresa tu correo electr\u00f3nico.");
       return;
     }
 
     if (emailValidation) {
-      setStatusMessage(emailValidation);
+      setAuthFieldError("recovery-email", emailValidation);
       return;
     }
 
     if (!supabase) {
-      setStatusMessage("No pudimos completar la acci\u00f3n. Intenta nuevamente.");
+      setAuthStatus("No pudimos completar la acci\u00f3n. Intenta nuevamente.", "error");
       return;
     }
 
+    setAuthFieldErrors({});
+    setAuthStatus("", "info");
     setIsBusy(true);
     try {
       const redirectTo = getPasswordRecoveryRedirectUrl();
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       if (error) {
-        setStatusMessage(translateAuthError(error));
+        setAuthStatus(translateAuthError(error), "error");
         return;
       }
       setRecoveryEmail("");
-      setStatusMessage("Si el correo est\u00e1 registrado, enviaremos un enlace para restablecer tu contrase\u00f1a.");
+      setAuthStatus("Si el correo est\u00e1 registrado, enviaremos un enlace para restablecer tu contrase\u00f1a.", "success");
     } catch (error) {
-      setStatusMessage(translateAuthError(error));
+      setAuthStatus(translateAuthError(error), "error");
     } finally {
       setIsBusy(false);
     }
@@ -1716,34 +1721,37 @@ export function OrganizatechApp({
     const supabase = getSupabaseBrowserClient();
 
     if (!password) {
-      setStatusMessage("Crea una contrase\u00f1a.");
+      setAuthFieldError("new-password", "Crea una contrase\u00f1a.");
       return;
     }
 
     if (password.length < 8) {
-      setStatusMessage("La contrase\u00f1a debe tener al menos 8 caracteres.");
+      setAuthFieldError("new-password", "La contrase\u00f1a debe tener al menos 8 caracteres.");
       return;
     }
 
     if (!/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
-      setStatusMessage("La contrase\u00f1a debe incluir letras y n\u00fameros.");
+      setAuthFieldError("new-password", "La contrase\u00f1a debe incluir letras y n\u00fameros.");
       return;
     }
 
     if (!confirm) {
-      setStatusMessage("Confirma tu contrase\u00f1a.");
+      setAuthFieldError("new-password-confirm", "Confirma tu contrase\u00f1a.");
       return;
     }
 
     if (password !== confirm) {
-      setStatusMessage("Las contrase\u00f1as no coinciden.");
+      setAuthFieldError("new-password-confirm", "Las contrase\u00f1as no coinciden.");
       return;
     }
 
     if (!supabase) {
-      setStatusMessage("No pudimos completar la acci\u00f3n. Intenta nuevamente.");
+      setAuthStatus("No pudimos completar la acci\u00f3n. Intenta nuevamente.", "error");
       return;
     }
+
+    setAuthFieldErrors({});
+    setAuthStatus("", "info");
 
     const confirmedUserId = passwordRecoveryUserIdRef.current;
     if (
@@ -1799,7 +1807,7 @@ export function OrganizatechApp({
       }
       if (result.kind === "update-error" || result.kind === "sign-out-error") {
         passwordUpdateSuccessRef.current = false;
-        setStatusMessage(translateAuthError(result.error));
+        setAuthStatus(translateAuthError(result.error), "error");
         return;
       }
 
@@ -1809,7 +1817,7 @@ export function OrganizatechApp({
       if (
         !isActiveWorkoutOperationCurrent(passwordRecoveryUpdateOwnerRef, operationOwner)
       ) return;
-      setStatusMessage(translateAuthError(error));
+      setAuthStatus(translateAuthError(error), "error");
     } finally {
       const operationStillAuthorized = isActiveWorkoutOperationCurrent(
         passwordRecoveryUpdateOwnerRef,
@@ -2348,7 +2356,7 @@ export function OrganizatechApp({
         if (error) throw error;
       }
       if (isSessionDataRequestCurrent(requestToken)) {
-        clearUserSessionState("Sesión cerrada correctamente.", currentStorageScope);
+        clearUserSessionState("Sesión cerrada correctamente.", currentStorageScope, { statusTone: "success" });
       }
     } catch (error) {
       if (isSessionDataRequestCurrent(requestToken)) setStatusMessage(translateAuthError(error));
@@ -2567,7 +2575,7 @@ export function OrganizatechApp({
         if (error instanceof TrainingCycleRepositoryError) {
           setStatusMessage(translateTrainingCycleRepositoryError(error));
         } else if (isSessionExpiredError(error)) {
-          clearUserSessionState("Tu sesión expiró. Inicia sesión nuevamente.");
+          clearUserSessionState("Tu sesión expiró. Inicia sesión nuevamente.", activeBrowserStorageScopeRef.current, { statusTone: "error" });
         } else {
           setStatusMessage(translatePersistenceError(error));
         }
@@ -3348,6 +3356,7 @@ export function OrganizatechApp({
     setRecoveryEmail("");
     setNewPassword("");
     setNewPasswordConfirm("");
+    setAuthFieldErrors({});
   }
 
   function switchAuthScreen(nextScreen: "login" | "registro" | "recuperar-password") {
@@ -3358,8 +3367,21 @@ export function OrganizatechApp({
     clearPasswordRecoveryFlow();
     clearPasswordRecoveryUrl();
     clearAuthForms();
-    setStatusMessage("");
+    setAuthStatus("", "info");
+    if (nextScreen === "login" || nextScreen === "registro") {
+      authRouteController.replace({
+        mode: nextScreen,
+        accountType: authRouteController.route.accountType,
+      });
+    }
     navigation.transition(createAuthNavigationReset(nextScreen, "auth-screen-switch"));
+  }
+
+  function switchAuthAccountType(accountType: AuthAccountType) {
+    if (screen !== "login" && screen !== "registro") return;
+    setAuthFieldErrors({});
+    setAuthStatus("", "info");
+    authRouteController.replace({ mode: screen, accountType });
   }
 
   if (screen === "recovery-expired") {
@@ -3380,10 +3402,13 @@ export function OrganizatechApp({
           password={newPassword}
           confirmPassword={newPasswordConfirm}
           message={statusMessage}
+          statusTone={authStatusTone}
+          fieldErrors={authFieldErrors}
           isBusy={isBusy}
           onPasswordChange={setNewPassword}
           onConfirmPasswordChange={setNewPasswordConfirm}
           onSubmit={handleUpdatePassword}
+          onFieldErrorClear={clearAuthFieldError}
         />
       </main>
     );
@@ -3392,31 +3417,21 @@ export function OrganizatechApp({
   if (isAuthLoading) {
     return (
       <main className="app-shell">
-        <section className="login-shell">
-          <div className="login-logo">
-            <div className="brand-mark">
-              <Dumbbell size={28} />
-            </div>
-            <div>
-              <h1>Organizatech</h1>
-              <p className="eyebrow">Validando sesión...</p>
-            </div>
-          </div>
-          <div className="card wide">
-            <h2>Validando sesión...</h2>
-            <p className="eyebrow">Estamos revisando si ya tienes una sesión activa.</p>
-          </div>
-        </section>
+        <AuthLoadingScreen />
       </main>
     );
   }
 
-  if (screen === "login") {
+  if (screen === "login" || screen === "registro") {
     return (
       <main className="app-shell">
         <AuthScreen
-          mode="login"
+          key={screen}
+          mode={screen}
+          accountType={authRouteController.route.accountType}
           message={statusMessage}
+          statusTone={authStatusTone}
+          fieldErrors={authFieldErrors}
           isBusy={isBusy}
           loginEmail={loginEmail}
           loginPassword={loginPassword}
@@ -3430,36 +3445,11 @@ export function OrganizatechApp({
           onRegisterEmailChange={setRegisterEmail}
           onRegisterPasswordChange={setRegisterPassword}
           onRegisterConfirmPasswordChange={setRegisterConfirmPassword}
-          onSubmit={(data) => handleAuth("login", data)}
+          onSubmit={(data) => handleAuth(screen, data)}
           onForgotPassword={() => switchAuthScreen("recuperar-password")}
-          onSwitch={() => switchAuthScreen("registro")}
-        />
-      </main>
-    );
-  }
-
-  if (screen === "registro") {
-    return (
-      <main className="app-shell">
-        <AuthScreen
-          mode="registro"
-          message={statusMessage}
-          isBusy={isBusy}
-          loginEmail={loginEmail}
-          loginPassword={loginPassword}
-          registerName={registerName}
-          registerEmail={registerEmail}
-          registerPassword={registerPassword}
-          registerConfirmPassword={registerConfirmPassword}
-          onLoginEmailChange={setLoginEmail}
-          onLoginPasswordChange={setLoginPassword}
-          onRegisterNameChange={setRegisterName}
-          onRegisterEmailChange={setRegisterEmail}
-          onRegisterPasswordChange={setRegisterPassword}
-          onRegisterConfirmPasswordChange={setRegisterConfirmPassword}
-          onSubmit={(data) => handleAuth("registro", data)}
-          onForgotPassword={() => switchAuthScreen("recuperar-password")}
-          onSwitch={() => switchAuthScreen("login")}
+          onModeChange={switchAuthScreen}
+          onAccountTypeChange={switchAuthAccountType}
+          onFieldErrorClear={clearAuthFieldError}
         />
       </main>
     );
@@ -3471,10 +3461,13 @@ export function OrganizatechApp({
         <PasswordRecoveryScreen
           email={recoveryEmail}
           message={statusMessage}
+          statusTone={authStatusTone}
+          fieldErrors={authFieldErrors}
           isBusy={isBusy}
           onEmailChange={setRecoveryEmail}
           onSubmit={handlePasswordRecovery}
           onBack={() => switchAuthScreen("login")}
+          onFieldErrorClear={clearAuthFieldError}
         />
       </main>
     );
@@ -3780,262 +3773,6 @@ export function OrganizatechApp({
   );
 }
 
-function AuthScreen({
-  mode,
-  message,
-  isBusy,
-  loginEmail,
-  loginPassword,
-  registerName,
-  registerEmail,
-  registerPassword,
-  registerConfirmPassword,
-  onLoginEmailChange,
-  onLoginPasswordChange,
-  onRegisterNameChange,
-  onRegisterEmailChange,
-  onRegisterPasswordChange,
-  onRegisterConfirmPasswordChange,
-  onSubmit,
-  onForgotPassword,
-  onSwitch,
-}: {
-  mode: "login" | "registro";
-  message: string;
-  isBusy: boolean;
-  loginEmail: string;
-  loginPassword: string;
-  registerName: string;
-  registerEmail: string;
-  registerPassword: string;
-  registerConfirmPassword: string;
-  onLoginEmailChange: (value: string) => void;
-  onLoginPasswordChange: (value: string) => void;
-  onRegisterNameChange: (value: string) => void;
-  onRegisterEmailChange: (value: string) => void;
-  onRegisterPasswordChange: (value: string) => void;
-  onRegisterConfirmPasswordChange: (value: string) => void;
-  onSubmit: (data: FormData) => void;
-  onForgotPassword: () => void;
-  onSwitch: () => void;
-}) {
-  const isRegister = mode === "registro";
-  const [showLoginPassword, setShowLoginPassword] = useState(false);
-  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
-  const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] = useState(false);
-
-  return (
-    <section className="login-shell">
-      <div className="login-logo">
-        <div className="brand-mark">
-          <Dumbbell size={28} />
-        </div>
-        <div>
-          <h1>Organizatech</h1>
-          <p className="eyebrow">Evoluciona tu rendimiento.</p>
-        </div>
-      </div>
-      <form className="card form-grid" action={onSubmit} autoComplete={isRegister ? "off" : "on"} key={mode}>
-        <h2>{isRegister ? "Crea tu cuenta" : "Iniciar sesión"}</h2>
-        {isRegister ? (
-          <>
-            <TextField name="register-name" label="Nombre" placeholder="Ej: Fabian" autoComplete="name" value={registerName} onChange={onRegisterNameChange} required />
-            <TextField name="register-email" label="Correo electrónico" placeholder="tu@email.com" type="email" autoComplete="email" value={registerEmail} onChange={onRegisterEmailChange} required />
-            <PasswordField name="register-password" label="Contraseña" placeholder="Crea una contraseña" autoComplete="new-password" value={registerPassword} onChange={onRegisterPasswordChange} visible={showRegisterPassword} onToggle={() => setShowRegisterPassword((current) => !current)} required />
-            <PasswordField name="register-confirm-password" label="Confirmar contraseña" placeholder="Repite tu contraseña" autoComplete="new-password" value={registerConfirmPassword} onChange={onRegisterConfirmPasswordChange} visible={showRegisterConfirmPassword} onToggle={() => setShowRegisterConfirmPassword((current) => !current)} required />
-          </>
-        ) : (
-          <>
-            <TextField name="login-email" label="Correo electrónico" placeholder="tu@email.com" type="email" autoComplete="username" value={loginEmail} onChange={onLoginEmailChange} required />
-            <PasswordField name="login-password" label="Contraseña" placeholder="Ingresa tu contraseña" autoComplete="current-password" value={loginPassword} onChange={onLoginPasswordChange} visible={showLoginPassword} onToggle={() => setShowLoginPassword((current) => !current)} required />
-          </>
-        )}
-        <p className="eyebrow">{message}</p>
-        <button className="button" type="submit" disabled={isBusy}>
-          {isRegister ? <UserPlus size={17} /> : <Lock size={17} />}
-          {isBusy ? (isRegister ? "Creando cuenta..." : "Iniciando sesión...") : isRegister ? "Crear cuenta" : "Iniciar sesión"}
-        </button>
-        {!isRegister ? (
-          <button className="tab" type="button" onClick={onForgotPassword}>
-            ¿Olvidaste tu contraseña?
-          </button>
-        ) : null}
-        <div className="socials">
-          <button className="button secondary" type="button" aria-label="Google">G</button>
-          <button className="button secondary" type="button" aria-label="Apple">A</button>
-          <button className="button secondary" type="button" aria-label="Correo"><Mail size={17} /></button>
-        </div>
-        <button className="tab" type="button" onClick={onSwitch}>
-          {isRegister ? "¿Ya tienes cuenta? Iniciar sesión" : "¿No tienes cuenta? Crear cuenta"}
-        </button>
-      </form>
-    </section>
-  );
-}
-
-function PasswordRecoveryScreen({
-  email,
-  message,
-  isBusy,
-  onEmailChange,
-  onSubmit,
-  onBack,
-}: {
-  email: string;
-  message: string;
-  isBusy: boolean;
-  onEmailChange: (value: string) => void;
-  onSubmit: (data: FormData) => void;
-  onBack: () => void;
-}) {
-  return (
-    <section className="login-shell">
-      <div className="login-logo">
-        <div className="brand-mark">
-          <Dumbbell size={28} />
-        </div>
-        <div>
-          <h1>Organizatech</h1>
-          <p className="eyebrow">Recupera el acceso a tu cuenta.</p>
-        </div>
-      </div>
-      <form className="card form-grid" action={onSubmit} autoComplete="on">
-        <h2>Recuperar contraseña</h2>
-        <p className="eyebrow">Ingresa tu correo y enviaremos las instrucciones si la cuenta existe.</p>
-        <TextField name="recovery-email" label="Correo electrónico" placeholder="tu@email.com" type="email" autoComplete="username" value={email} onChange={onEmailChange} required />
-        <p className="eyebrow">{message}</p>
-        <button className="button" type="submit" disabled={isBusy}>
-          <Mail size={17} />
-          {isBusy ? "Enviando enlace..." : "Enviar enlace"}
-        </button>
-        <button className="tab" type="button" onClick={onBack}>
-          Volver a iniciar sesión
-        </button>
-      </form>
-    </section>
-  );
-}
-
-function RecoveryExpiredScreen({
-  message,
-  onRequestNewLink,
-}: {
-  message: string;
-  onRequestNewLink: () => void;
-}) {
-  return (
-    <section className="login-shell">
-      <div className="login-logo">
-        <div className="brand-mark">
-          <Dumbbell size={28} />
-        </div>
-        <div>
-          <h1>Organizatech</h1>
-          <p className="eyebrow">Recupera el acceso a tu cuenta.</p>
-        </div>
-      </div>
-      <div className="card form-grid">
-        <h2>Enlace expirado</h2>
-        <p className="eyebrow">{message || "El enlace de recuperación expiró o ya fue utilizado."}</p>
-        <p className="eyebrow">Solicita un nuevo enlace para restablecer tu contraseña.</p>
-        <button className="button" type="button" onClick={onRequestNewLink}>
-          <Mail size={17} />
-          Solicitar nuevo enlace
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function NewPasswordScreen({
-  password,
-  confirmPassword,
-  message,
-  isBusy,
-  onPasswordChange,
-  onConfirmPasswordChange,
-  onSubmit,
-}: {
-  password: string;
-  confirmPassword: string;
-  message: string;
-  isBusy: boolean;
-  onPasswordChange: (value: string) => void;
-  onConfirmPasswordChange: (value: string) => void;
-  onSubmit: (data: FormData) => void;
-}) {
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  return (
-    <section className="login-shell">
-      <div className="login-logo">
-        <div className="brand-mark">
-          <Dumbbell size={28} />
-        </div>
-        <div>
-          <h1>Organizatech</h1>
-          <p className="eyebrow">Define una nueva contraseña.</p>
-        </div>
-      </div>
-      <form className="card form-grid" action={onSubmit} autoComplete="off">
-        <h2>Crear nueva contraseña</h2>
-        <PasswordField name="new-password" label="Nueva contraseña" placeholder="Crea una contraseña" autoComplete="new-password" value={password} onChange={onPasswordChange} visible={showPassword} onToggle={() => setShowPassword((current) => !current)} required />
-        <PasswordField name="new-password-confirm" label="Confirmar nueva contraseña" placeholder="Repite tu contraseña" autoComplete="new-password" value={confirmPassword} onChange={onConfirmPasswordChange} visible={showConfirmPassword} onToggle={() => setShowConfirmPassword((current) => !current)} required />
-        <p className="eyebrow">{message}</p>
-        <button className="button" type="submit" disabled={isBusy}>
-          <Save size={17} />
-          {isBusy ? "Actualizando..." : "Cambiar contraseña"}
-        </button>
-      </form>
-    </section>
-  );
-}
-
-function PasswordField({
-  name,
-  label,
-  value,
-  onChange,
-  placeholder = "",
-  autoComplete,
-  visible,
-  onToggle,
-  required = false,
-}: {
-  name: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  autoComplete?: string;
-  visible: boolean;
-  onToggle: () => void;
-  required?: boolean;
-}) {
-  const toggleLabel = visible ? "Ocultar contraseña" : "Mostrar contraseña";
-
-  return (
-    <label className="field password-field">
-      <span>{label}</span>
-      <div className="password-input-wrap">
-        <input
-          name={name}
-          type={visible ? "text" : "password"}
-          value={value}
-          placeholder={placeholder}
-          autoComplete={autoComplete}
-          required={required}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <button className="password-toggle" type="button" aria-label={toggleLabel} title={toggleLabel} onClick={onToggle}>
-          {visible ? <EyeOff size={17} /> : <Eye size={17} />}
-        </button>
-      </div>
-    </label>
-  );
-}
-
 function InitialTrainingScreen({
   day,
   setDay,
@@ -4138,41 +3875,6 @@ function InitialTrainingScreen({
         onSave={saveRoutine}
       />
     </section>
-  );
-}
-
-function TextField({
-  name,
-  label,
-  value,
-  onChange,
-  placeholder = "",
-  type = "text",
-  autoComplete,
-  required = false,
-}: {
-  name: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  type?: string;
-  autoComplete?: string;
-  required?: boolean;
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <input
-        name={name}
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        autoComplete={autoComplete}
-        required={required}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
   );
 }
 

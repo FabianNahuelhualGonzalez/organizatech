@@ -1,5 +1,4 @@
 .site {
-  --paper: #07101a;
   --paper-raised: #101b27;
   --ink: #ffffff;
   --muted: #9ca8b8;
@@ -11,9 +10,8 @@
   min-height: 100vh;
   overflow: clip;
   color: var(--ink);
-  background:
-    radial-gradient(circle at 50% 0%, rgba(60, 122, 255, 0.18), transparent 36rem),
-    linear-gradient(180deg, #0b121b 0%, var(--paper) 48%, var(--night) 100%);
+  background-color: var(--background);
+  background-image: radial-gradient(circle at 50% 0%, rgba(60, 122, 255, 0.18), transparent 36rem);
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
@@ -1068,7 +1066,7 @@
   border-radius: 999px;
   padding: 0 22px;
   color: #fff;
-  background: var(--paper);
+  background: var(--background);
   font-size: 14px;
   font-weight: 600;
   transition: background 150ms ease, transform 150ms ease;

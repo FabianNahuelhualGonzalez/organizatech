@@ -2538,7 +2538,7 @@ async function run() {
   );
   assert.match(
     handleAuthSource,
-    /catch \(error\) \{\s*if \(appliedIdentityToken && !isSessionDataRequestCurrent\(appliedIdentityToken\)\) return;\s*setStatusMessage/,
+    /catch \(error\) \{\s*if \(appliedIdentityToken && !isSessionDataRequestCurrent\(appliedIdentityToken\)\) return;\s*setAuthStatus/,
   );
   assert.match(
     handleAuthSource,
