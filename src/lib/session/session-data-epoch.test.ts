@@ -380,7 +380,7 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   const logout = extractBetween(sources.app, "async function handleLogout", "function openRoutineDay");
   assert.doesNotMatch(logout, /clearBrowserStorageScope|clearPasswordRecoveryFlow/);
   assertMarkersInOrder(logout, [
-    "await supabase.auth.signOut()",
+    'await supabase.auth.signOut({ scope: "local" })',
     "if (error) throw error;",
     "clearUserSessionState",
   ], "signOut antes de cleanup");
@@ -2114,16 +2114,16 @@ async function run() {
       name: "limpiar storage antes de signOut",
       target: "app",
       mutate: (source) => source.replace(
-        "      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut();",
-        "      clearBrowserStorageScope(currentStorageScope);\n      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut();",
+        "      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut({ scope: \"local\" });",
+        "      clearBrowserStorageScope(currentStorageScope);\n      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut({ scope: \"local\" });",
       ),
     },
     {
       name: "ignorar error de signOut",
       target: "app",
       mutate: (source) => source.replace(
-        "        const { error } = await supabase.auth.signOut();\n        if (error) throw error;",
-        "        await supabase.auth.signOut();",
+        "        const { error } = await supabase.auth.signOut({ scope: \"local\" });\n        if (error) throw error;",
+        "        await supabase.auth.signOut({ scope: \"local\" });",
       ),
     },
     {

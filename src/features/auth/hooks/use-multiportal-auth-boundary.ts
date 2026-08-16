@@ -114,16 +114,20 @@ export function useMultiportalAuthBoundary(input: {
     userRegistrationOwnersRef.current.invalidate();
   }
 
+  function invalidatePortalOperations() {
+    portalResolutionOwnersRef.current.invalidate();
+    coachRegistrationOwnersRef.current.invalidate();
+    userRegistrationOwnersRef.current.invalidate();
+    initialResolutionPendingRef.current = false;
+  }
+
   function resolveSessionEventDecision(
     event: string,
     currentUserId: string | null,
     deferForInteractiveAttempt = false,
   ): PortalSessionEventDecision {
     if (event === "SIGNED_OUT") {
-      portalResolutionOwnersRef.current.invalidate();
-      coachRegistrationOwnersRef.current.invalidate();
-      userRegistrationOwnersRef.current.invalidate();
-      initialResolutionPendingRef.current = false;
+      invalidatePortalOperations();
     } else if (currentUserId) {
       const replacedIdentity = portalResolutionOwnersRef.current.acceptIdentity(currentUserId);
       coachRegistrationOwnersRef.current.acceptIdentity(currentUserId);
@@ -260,6 +264,7 @@ export function useMultiportalAuthBoundary(input: {
     endUserRegistrationSubmit,
     isUserRegistrationSubmitCurrent,
     invalidateUserRegistrationSubmits,
+    invalidatePortalOperations,
     resolveSessionEventDecision,
     resolveInitialSessionDecision,
     completeInitialResolution,

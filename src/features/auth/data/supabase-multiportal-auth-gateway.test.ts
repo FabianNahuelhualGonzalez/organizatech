@@ -39,12 +39,26 @@ const registration: CoachRegistrationWritePayload = {
 function registrationRow(userId: TestUserId, suffix: string) {
   return {
     user_id: userId,
+    created_at: `2026-08-16T12:00:0${suffix === "A" ? "1" : "2"}.000Z`,
     first_name: `Coach ${suffix}`,
     last_name: `Apellido ${suffix}`,
     birth_date: "1990-01-01",
     gender: "male",
     phone_number: `+5690000000${suffix}`,
     professional_title: `Título ${suffix}`,
+  };
+}
+
+function mappedRegistrationRow(row: ReturnType<typeof registrationRow>) {
+  return {
+    userId: row.user_id,
+    createdAt: row.created_at,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    birthDate: row.birth_date,
+    gender: row.gender,
+    phoneNumber: row.phone_number,
+    professionalTitle: row.professional_title,
   };
 }
 
@@ -211,7 +225,11 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
       professional_title: String(payload.p_professional_title),
     };
     insertedPayloads.push(writePayload);
-    const row = { user_id: jwtUserId, ...writePayload };
+    const row = {
+      user_id: jwtUserId,
+      created_at: "2026-08-16T12:00:00.000Z",
+      ...writePayload,
+    };
     rows.set(jwtUserId, row);
     return { data: row, error: null };
   };
@@ -311,16 +329,22 @@ test("fake stateful A/B materializa lectura own-only y bloquea selección cruzad
   const gateway = createSupabaseMultiportalAuthGateway(fake.client);
 
   fake.setActiveUserId("user-a");
-  assert.equal(await gateway.hasCoachRegistration("user-a"), true);
+  assert.deepEqual(
+    await gateway.getCoachRegistration("user-a"),
+    mappedRegistrationRow(registrationRow("user-a", "A")),
+  );
   assert.deepEqual(fake.readOwners, ["user-a"]);
 
   fake.setActiveUserId("user-b");
-  assert.equal(await gateway.hasCoachRegistration("user-b"), true);
+  assert.deepEqual(
+    await gateway.getCoachRegistration("user-b"),
+    mappedRegistrationRow(registrationRow("user-b", "B")),
+  );
   assert.deepEqual(fake.readOwners, ["user-a", "user-b"]);
 
   const readsBeforeCrossAttempt = fake.relationReads;
   await assert.rejects(
-    gateway.hasCoachRegistration("user-a"),
+    gateway.getCoachRegistration("user-a"),
     /identidad autenticada cambió/,
   );
   assert.equal(fake.relationReads, readsBeforeCrossAttempt, "B no alcanza SELECT al declarar expectedUserId A");
@@ -661,7 +685,7 @@ test("H3 · fila Usuario cruzada B al solicitar A falla cerrada y sanitizada", a
   );
 });
 
-test("E9 · forma productiva con owner vigente retorna true sólo después del SELECT propio", async () => {
+test("E9 · forma productiva con owner vigente retorna la fila sólo después del SELECT propio", async () => {
   const fake = createStatefulFakeClient({
     activeUserId: "user-a",
     rows: [registrationRow("user-a", "A")],
@@ -669,9 +693,9 @@ test("E9 · forma productiva con owner vigente retorna true sólo después del S
   const gateway = createSupabaseMultiportalAuthGateway(fake.client);
   const { owner } = beginPortalOwner("user-a");
 
-  assert.equal(
-    await gateway.hasCoachRegistration("user-a", owner),
-    true,
+  assert.deepEqual(
+    await gateway.getCoachRegistration("user-a", owner),
+    mappedRegistrationRow(registrationRow("user-a", "A")),
     "[AUTH-COACH-01.E9.owner-select-runtime] owner vigente sólo autoriza con fila SELECT propia",
   );
   assert.equal(
@@ -684,14 +708,14 @@ test("E9 · forma productiva con owner vigente retorna true sólo después del S
   assert.equal(fake.sessionReads, 2, "la sesión se valida antes y después del SELECT");
 });
 
-test("E9 · forma productiva con owner vigente retorna false cuando no existe fila", async () => {
+test("E9 · forma productiva con owner vigente retorna null cuando no existe fila", async () => {
   const fake = createStatefulFakeClient({ activeUserId: "user-a", rows: [] });
   const gateway = createSupabaseMultiportalAuthGateway(fake.client);
   const { owner } = beginPortalOwner("user-a");
 
   assert.equal(
-    await gateway.hasCoachRegistration("user-a", owner),
-    false,
+    await gateway.getCoachRegistration("user-a", owner),
+    null,
     "[AUTH-COACH-01.E9.owner-select-runtime] owner por sí solo nunca concede acceso Coach",
   );
   assert.equal(fake.relationReads, 1, "E9 ejecuta exactamente el SELECT own-only");
@@ -708,7 +732,7 @@ test("E9 · owner stale falla cerrado antes de lecturas o efectos", async () => 
   owners.invalidate();
 
   await assert.rejects(
-    gateway.hasCoachRegistration("user-a", owner),
+    gateway.getCoachRegistration("user-a", owner),
     /identidad autenticada cambió/,
     "[AUTH-COACH-01.E9.stale-owner-runtime] un owner stale no autoriza",
   );
@@ -729,7 +753,7 @@ test("E9 · expectedUserId distinto de la sesión falla cerrado antes del SELECT
   const { owner } = beginPortalOwner("user-a");
 
   await assert.rejects(
-    gateway.hasCoachRegistration("user-a", owner),
+    gateway.getCoachRegistration("user-a", owner),
     /identidad autenticada cambió/,
     "[AUTH-COACH-01.E9.identity-mismatch-runtime] expectedUserId ajeno no autoriza",
   );
@@ -765,7 +789,7 @@ test("E9 · respuesta SELECT errónea, cruzada o malformada falla cerrado con ow
     const gateway = createSupabaseMultiportalAuthGateway(fake.client);
     const { owner } = beginPortalOwner("user-a");
     await assert.rejects(
-      gateway.hasCoachRegistration("user-a", owner),
+      gateway.getCoachRegistration("user-a", owner),
       `[AUTH-COACH-01.E9.invalid-response-runtime] ${name} debe fallar cerrado`,
     );
     assert.equal(fake.relationReads, 1, `${name} sí materializa el SELECT autoritativo`);
@@ -932,7 +956,7 @@ for (const operation of ["read", "write"] as const) {
     const gateway = createSupabaseMultiportalAuthGateway(fake.client);
     const { owners, owner } = beginRegistrationOwner("user-a");
     const pending = operation === "read"
-      ? gateway.hasCoachRegistration("user-a")
+      ? gateway.getCoachRegistration("user-a")
       : gateway.createCoachRegistration(registration, "user-a", owner);
 
     await lookupStarted.promise;

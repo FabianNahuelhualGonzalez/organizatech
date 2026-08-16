@@ -41,6 +41,7 @@ export interface AuthenticatedPortalIdentity<TAuthState> {
 
 export interface CoachRegistrationRecord {
   userId: string;
+  createdAt: string;
   firstName: string;
   lastName: string;
   birthDate: string;
@@ -91,10 +92,10 @@ export interface MultiportalAuthGateway<TAuthState> {
     expectedUserId: string,
     owner?: PortalResolutionOwner | UserRegistrationOwner,
   ): Promise<boolean>;
-  hasCoachRegistration(
+  getCoachRegistration(
     expectedUserId: string,
     owner?: PortalResolutionOwner | CoachRegistrationOwner,
-  ): Promise<boolean>;
+  ): Promise<CoachRegistrationRecord | null>;
   createCoachRegistration(
     payload: CoachRegistrationWritePayload,
     expectedUserId: string,
@@ -128,6 +129,7 @@ export type PortalAccessResult =
     state: "coach_authorized";
     requestedPortal: "coach";
     userId: string;
+    coach: CoachRegistrationRecord;
   }
   | {
     state: "coach_registration_required";
@@ -159,6 +161,7 @@ export type CoachRegistrationResult<TAuthState> =
     state: "coach_authorized";
     requestedPortal: "coach";
     userId: string;
+    coach: CoachRegistrationRecord;
     authState: TAuthState;
   }
   | {
@@ -307,13 +310,17 @@ async function resolvePortalAccess<TAuthState>(
       return rejectPortalSession(input, gateway, "user_registration_required");
     }
 
-    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, input.owner);
+    const coachRegistration = await gateway.getCoachRegistration(identity.userId, input.owner);
     if (!ownsPortalResolution(input)) return stalePortalResolution(input.requestedPortal);
-    if (hasCoachRegistration) {
+    if (coachRegistration && coachRegistration.userId !== identity.userId) {
+      return rejectPortalSession(input, gateway, "authorization_error");
+    }
+    if (coachRegistration) {
       return {
         state: "coach_authorized",
         requestedPortal: "coach",
         userId: identity.userId,
+        coach: coachRegistration,
       };
     }
 
@@ -437,18 +444,16 @@ async function registerCoach<TAuthState>(
       };
     }
 
-    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, owner);
+    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);
     if (!owner.isCurrent()) return staleCoachRegistration();
-    if (!hasCoachRegistration) {
-      const registration = await gateway.createCoachRegistration(
-        input.registration,
-        identity.userId,
-        owner,
-      );
-      if (!owner.isCurrent()) return staleCoachRegistration();
-      if (registration.userId !== identity.userId) {
-        return controlledCoachRegistrationError();
-      }
+    const coachRegistration = existingCoachRegistration ?? await gateway.createCoachRegistration(
+      input.registration,
+      identity.userId,
+      owner,
+    );
+    if (!owner.isCurrent()) return staleCoachRegistration();
+    if (coachRegistration.userId !== identity.userId) {
+      return controlledCoachRegistrationError();
     }
 
     const activatedIdentity = await gateway.activateCoachRegistrationIdentity(identity, owner);
@@ -460,6 +465,7 @@ async function registerCoach<TAuthState>(
       state: "coach_authorized",
       requestedPortal: "coach",
       userId: activatedIdentity.userId,
+      coach: coachRegistration,
       authState: activatedIdentity.authState,
     };
   } catch {

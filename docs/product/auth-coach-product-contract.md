@@ -1,11 +1,11 @@
 # Contrato de producto AUTH-COACH
 
 - Estado: aprobado por el dueño de producto
-- Versión: 1.0
+- Versión: 1.1
 - Fecha de consolidación: 2026-08-16
 - Fuente de verdad: este documento
-- Alcance actual: registro Coach y autorización multipportal
-- Alcance futuro documentado: vinculación Coach-alumno, portal Coach, chat y documentos
+- Alcance actual: registro Coach, autorización multipportal y portal Coach provisional
+- Alcance futuro documentado: correos Coach, vinculación Coach-alumno, funciones Coach, chat y documentos
 
 Este contrato congela las decisiones de producto aprobadas para evitar que una
 implementación, auditoría o tarea futura complete vacíos mediante supuestos. Una
@@ -225,9 +225,35 @@ alumno, no de los documentos privados de una pareja. Permanecen almacenados y el
 alumno y su Coach activo pueden descargarlos. Un antiguo Coach tiene ese acceso
 suspendido mientras esté desvinculado.
 
-## 9. Portal Coach futuro
+## 9. Portal Coach provisional
 
-### AC-029 — Funciones previstas
+### AC-029 — Destino Coach independiente
+
+Una autorización `coach_authorized` abre un portal Coach propio y no continúa al
+portal Usuario. Una autorización `user_authorized` conserva el portal Usuario.
+Si una identidad tiene ambas membresías, se respeta el portal seleccionado de
+forma explícita y no existe fallback cruzado.
+
+### AC-034 — Inicio provisional aprobado
+
+El inicio Coach provisional muestra exclusivamente el copy aprobado, el nombre
+derivado de `first_name` y `last_name` de `coach_registrations`, y un menú móvil.
+`Mi perfil` y `Cerrar sesión` son las únicas opciones funcionales. Las demás
+opciones permanecen semánticamente deshabilitadas y no montan pantallas, enlaces,
+navegación ni handlers de dominio futuros.
+
+### AC-035 — Perfil Coach de solo lectura
+
+El perfil Coach provisional utiliza la fila autoritativa ya obtenida al autorizar:
+`user_id`, `created_at`, `first_name`, `last_name`, `birth_date`, `gender`,
+`phone_number` y `professional_title`. El correo visible procede únicamente de
+la identidad autenticada y la edad se deriva de `birth_date`; no se almacena ni
+se toma de metadata, `profiles` o estado cliente.
+
+No se habilitan edición, avatar, writes, policies, RPC ni migraciones para este
+perfil. La navegación de regreso utiliza el control canónico de la aplicación.
+
+### AC-036 — Funciones previstas posteriores
 
 El portal Coach futuro incluirá, bajo autorización y RLS:
 
@@ -244,9 +270,49 @@ El portal Coach futuro incluirá, bajo autorización y RLS:
 - documentos compartidos individualmente.
 
 Estas funciones están especificadas para orientar el modelo, pero no están
-autorizadas para implementarse anticipadamente en AUTH-COACH-01.
+autorizadas para implementarse anticipadamente desde el shell provisional.
 
-## 10. Seguridad obligatoria
+## 10. Correos Coach futuros — AUTH-COACH-02
+
+AUTH-COACH-01 no envía correos Coach adicionales ni agrega proveedores,
+dependencias, variables de entorno, funciones o plantillas ejecutables. La
+confirmación normal de Supabase Auth para una identidad nueva se conserva.
+
+AUTH-COACH-02 implementará entrega exactamente una vez desde un evento backend
+idempotente. Los reintentos no duplicarán el correo y una falla de entrega no
+revertirá la membresía ya creada.
+
+### AC-037 — Identidad existente agrega Coach
+
+Asunto: `Ahora también eres Coach en Organizatech`
+
+```text
+Hola, {nombre}:
+
+Ya estabas registrado como Usuario y ahora también eres Coach en Organizatech.
+
+Muchas gracias por seguir confiando en nosotros. Esperamos acompañarte y ayudarte a seguir desarrollándote profesionalmente.
+
+Equipo Organizatech
+```
+
+### AC-038 — Persona nueva crea cuenta Coach
+
+Este correo se envía sólo después de la confirmación normal de Supabase Auth.
+
+Asunto: `Bienvenido a Organizatech Coaching`
+
+```text
+Hola, {nombre}:
+
+Tu cuenta Coach fue creada correctamente.
+
+Muchas gracias por confiar en nosotros. Esperamos acompañarte y ayudarte a seguir desarrollándote profesionalmente.
+
+Equipo Organizatech
+```
+
+## 11. Seguridad obligatoria
 
 ### AC-030 — Autoridad backend
 
@@ -271,33 +337,34 @@ peticiones concurrentes y clientes manipulados.
 Vinculaciones, solicitudes, desvinculaciones, bloqueos, cambios de ciclos y acciones
 administrativas futuras deben conservar actor, fecha y estado resultante.
 
-## 11. Decisiones pendientes
+## 12. Decisiones pendientes
 
 No se pueden completar mediante supuestos:
 
 - duración exacta de los códigos de vinculación;
-- contenido y diseño de los correos de invitación y notificaciones;
+- contenido y diseño de correos distintos de las dos plantillas Coach aprobadas;
 - ubicación y diseño de la casilla para ingresar el código;
 - significado de eliminar un chat: sólo para quien lo elimina o para ambos;
 - procedimiento excepcional para retirar un documento compartido por error,
   exigencia administrativa o eliminación de cuenta;
 - modelo operativo y permisos del soporte que intervenga en desvinculaciones;
-- detalle visual final de cada pantalla del portal Coach;
+- detalle visual de las funciones futuras del portal Coach;
 - URLs permanentes de los frames aprobados de Figma.
 
-## 12. Fuera del alcance de AUTH-COACH-01
+## 13. Fuera del alcance de AUTH-COACH-01
 
 - tabla de relaciones Coach-alumno;
 - códigos o correos de vinculación;
 - Supabase Cron;
-- portal o dashboard Coach;
+- panel, entrenamiento, comparación, ciclos, calendario, mensajes y demás funciones Coach;
+- envío de los correos Coach documentados para AUTH-COACH-02;
 - chat y mensajería;
 - documentos y Storage;
 - Google Login/Registro;
 - cambios en `training_sessions` o `exercise_entries`;
 - ejecución de SQL en QA o producción.
 
-## 13. Gobierno del contrato
+## 14. Gobierno del contrato
 
 - Sólo el dueño de producto puede aprobar o cambiar decisiones.
 - Cada tarea debe citar los IDs AC que implementa y los que mantiene fuera de alcance.

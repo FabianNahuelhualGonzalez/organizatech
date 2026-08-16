@@ -8,6 +8,7 @@ import {
   USER_REGISTRATION_REQUIRED_MESSAGE,
   createMultiportalAuthController,
   type AuthenticatedPortalIdentity,
+  type CoachRegistrationRecord,
   type MultiportalAuthGateway,
 } from "@/features/auth/model/multiportal-auth-controller";
 import {
@@ -57,6 +58,19 @@ const coachInput: CoachRegistrationPreparationPayload = {
   },
 };
 
+function createCoachRecord(userId = userA.userId): CoachRegistrationRecord {
+  return {
+    userId,
+    createdAt: "2026-08-16T12:00:00.000Z",
+    firstName: coachInput.registration.first_name,
+    lastName: coachInput.registration.last_name,
+    birthDate: coachInput.registration.birth_date,
+    gender: coachInput.registration.gender,
+    phoneNumber: coachInput.registration.phone_number,
+    professionalTitle: coachInput.registration.professional_title,
+  };
+}
+
 function createGateway(
   overrides: Partial<MultiportalAuthGateway<TestAuthState>> = {},
 ): MultiportalAuthGateway<TestAuthState> {
@@ -67,10 +81,11 @@ function createGateway(
     signInForUserRegistration: async () => assert.fail("signIn Usuario inesperado"),
     signUpForUserRegistration: async () => assert.fail("signUp Usuario inesperado"),
     hasUserRegistration: async () => true,
-    hasCoachRegistration: async () => false,
+    getCoachRegistration: async () => null,
     createUserRegistration: async (expectedUserId) => ({ userId: expectedUserId }),
     createCoachRegistration: async (payload, expectedUserId) => ({
       userId: expectedUserId,
+      createdAt: "2026-08-16T12:00:00.000Z",
       firstName: payload.first_name,
       lastName: payload.last_name,
       birthDate: payload.birth_date,
@@ -127,9 +142,9 @@ test("Usuario autenticado sólo resuelve user_authorized con membresía Usuario"
       userReads += 1;
       return true;
     },
-    hasCoachRegistration: async () => {
+    getCoachRegistration: async () => {
       coachReads += 1;
-      return true;
+      return createCoachRecord();
     },
   }));
 
@@ -155,9 +170,9 @@ test("Coach-only es rechazado del portal Usuario con el mensaje aprobado", async
       order.push("user_lookup");
       return false;
     },
-    hasCoachRegistration: async () => {
+    getCoachRegistration: async () => {
       order.push("coach_lookup");
-      return true;
+      return createCoachRecord();
     },
     signOut: async (reason) => {
       order.push(`sign_out:${reason}`);
@@ -226,12 +241,15 @@ test("misma identidad Usuario + Coach resuelve coach_authorized", async () => {
     requestedPortal: "coach",
     expectedUserId: "user-a",
     owner,
-  }, createGateway({ hasCoachRegistration: async (userId) => userId === "user-a" }));
+  }, createGateway({
+    getCoachRegistration: async (userId) => userId === "user-a" ? createCoachRecord(userId) : null,
+  }));
 
   assert.deepEqual(result, {
     state: "coach_authorized",
     requestedPortal: "coach",
     userId: "user-a",
+    coach: createCoachRecord(),
   });
 });
 
@@ -249,9 +267,9 @@ test("Usuario sin registro Coach se autentica, se consulta y luego se cierra la 
       order.push("authenticated");
       return userA;
     },
-    hasCoachRegistration: async () => {
+    getCoachRegistration: async () => {
       order.push("coach_lookup");
-      return false;
+      return null;
     },
     signOut: async (reason) => {
       order.push(`sign_out:${reason}`);
@@ -342,9 +360,9 @@ test("correo, metadata, accountType, query, roles y privilegios nunca reemplazan
     } as Parameters<typeof controller.resolvePortalAccess>[0];
     const result = await controller.resolvePortalAccess(request, createGateway({
       getCurrentIdentity: async () => manipulatedIdentity,
-      hasCoachRegistration: async () => {
+      getCoachRegistration: async () => {
         coachReads += 1;
-        return false;
+        return null;
       },
       signOut: async () => {
         signOuts += 1;
@@ -371,7 +389,7 @@ test("fallo autoritativo no filtra detalles y también falla cerrado", async () 
     expectedUserId: "user-a",
     owner,
   }, createGateway({
-    hasCoachRegistration: async () => {
+    getCoachRegistration: async () => {
       throw new Error("relation coach_registrations leaked-detail does not exist");
     },
     signOut: async () => {
@@ -397,7 +415,7 @@ test("no declara rechazo Coach seguro si signOut falla", async () => {
     expectedUserId: "user-a",
     owner,
   }, createGateway({
-    hasCoachRegistration: async () => false,
+    getCoachRegistration: async () => null,
     signOut: async () => { throw new Error("signout failed"); },
   }));
 
@@ -431,7 +449,7 @@ for (const variant of staleLookupVariants) {
     const ownerA = owners.begin(userA.userId);
     const lookupStarted = createDeferred<void>();
     const identityLookup = createDeferred<AuthenticatedPortalIdentity<TestAuthState> | null>();
-    const coachLookup = createDeferred<boolean>();
+    const coachLookup = createDeferred<CoachRegistrationRecord | null>();
     const signOutAttempts: string[] = [];
     const writes: string[] = [];
     const publications = {
@@ -451,17 +469,18 @@ for (const variant of staleLookupVariants) {
         if (expectedUserId !== activeUserId) return null;
         return expectedUserId === userA.userId ? userA : userB;
       },
-      async hasCoachRegistration(expectedUserId) {
+      async getCoachRegistration(expectedUserId) {
         if (expectedUserId === userA.userId) {
           lookupStarted.resolve();
           return coachLookup.promise;
         }
-        return expectedUserId === userB.userId;
+        return expectedUserId === userB.userId ? createCoachRecord(userB.userId) : null;
       },
       async createCoachRegistration(payload, expectedUserId) {
         writes.push(expectedUserId);
         return {
           userId: expectedUserId,
+          createdAt: "2026-08-16T12:00:00.000Z",
           firstName: payload.first_name,
           lastName: payload.last_name,
           birthDate: payload.birth_date,
@@ -493,7 +512,7 @@ for (const variant of staleLookupVariants) {
 
     switch (variant) {
       case "coach_inexistente":
-        coachLookup.resolve(false);
+        coachLookup.resolve(null);
         break;
       case "gateway_error":
         coachLookup.reject(new Error("lookup A tardío"));
@@ -502,7 +521,7 @@ for (const variant of staleLookupVariants) {
         identityLookup.resolve(userB);
         break;
       case "coach_exitoso_tardio":
-        coachLookup.resolve(true);
+        coachLookup.resolve(createCoachRecord());
         break;
     }
 
@@ -539,6 +558,7 @@ for (const variant of staleLookupVariants) {
       state: "coach_authorized",
       requestedPortal: "coach",
       userId: userB.userId,
+      coach: createCoachRecord(userB.userId),
     });
     assert.equal(ownerB.isCurrent(), true, "la invalidación de A no bloquea a B");
     assert.equal(activeUserId, userB.userId);
@@ -565,7 +585,7 @@ test("E7 · dominios generados no conceden Coach sin fila autoritativa", async (
         email,
         authState: { sessionId: `session-${index}` },
       }),
-      hasCoachRegistration: async () => false,
+      getCoachRegistration: async () => null,
       signOut: async () => {
         signOuts += 1;
         return "signed_out";
@@ -602,7 +622,7 @@ test("E8 · ID hardcodeado e IDs generados no conceden Coach mediante allowlist 
         email: `generated-${index}@example.net`,
         authState: { sessionId: `session-${index}` },
       }),
-      hasCoachRegistration: async () => false,
+      getCoachRegistration: async () => null,
       signOut: async () => "signed_out",
     }));
     assert.equal(
@@ -736,10 +756,10 @@ for (const awaitPoint of staleRegistrationAwaitPoints) {
         await pause("isolated_sign_up");
         return { kind: "authenticated", identity: userA };
       },
-      async hasCoachRegistration() {
+      async getCoachRegistration() {
         effects.lookups += 1;
         await pause("coach_lookup");
-        return awaitPoint === "session_activation";
+        return awaitPoint === "session_activation" ? createCoachRecord() : null;
       },
       async createCoachRegistration(payload, expectedUserId) {
         if (expectedUserId === userA.userId) effects.writesA += 1;
@@ -747,6 +767,7 @@ for (const awaitPoint of staleRegistrationAwaitPoints) {
         await pause("atomic_insert");
         return {
           userId: expectedUserId,
+          createdAt: "2026-08-16T12:00:00.000Z",
           firstName: payload.first_name,
           lastName: payload.last_name,
           birthDate: payload.birth_date,
@@ -1008,6 +1029,7 @@ test("Usuario existente agrega Coach sobre el mismo correo y auth.uid()", async 
       assert.deepEqual(payload, coachInput.registration);
       return {
         userId: expectedUserId,
+        createdAt: "2026-08-16T12:00:00.000Z",
         firstName: payload.first_name,
         lastName: payload.last_name,
         birthDate: payload.birth_date,
@@ -1030,6 +1052,7 @@ test("Usuario existente agrega Coach sobre el mismo correo y auth.uid()", async 
     state: "coach_authorized",
     requestedPortal: "coach",
     userId: "user-a",
+    coach: createCoachRecord(),
     authState: { sessionId: "session-a" },
   });
 });
@@ -1096,6 +1119,7 @@ test("cuenta Coach nueva con sesión crea la fila sólo después de Auth", async
       order.push(`coach_insert:${expectedUserId}`);
       return {
         userId: expectedUserId,
+        createdAt: "2026-08-16T12:00:00.000Z",
         firstName: payload.first_name,
         lastName: payload.last_name,
         birthDate: payload.birth_date,
@@ -1139,6 +1163,7 @@ test("ownership cruzado en la respuesta falla cerrado", async () => {
   const result = await controller.registerCoach(coachInput, owner, createGateway({
     createCoachRegistration: async (payload) => ({
       userId: "user-b",
+      createdAt: "2026-08-16T12:00:00.000Z",
       firstName: payload.first_name,
       lastName: payload.last_name,
       birthDate: payload.birth_date,

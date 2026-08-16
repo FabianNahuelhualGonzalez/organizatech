@@ -69,6 +69,11 @@ import {
   MULTIPORTAL_AUTH_ERROR_MESSAGE,
   type AuthorizedPortalAccess,
 } from "@/features/auth/model/multiportal-auth-controller";
+import { CoachPortalBoundary } from "@/features/coach-portal/components/coach-portal";
+import {
+  createCoachPortalSession,
+  type CoachPortalSession,
+} from "@/features/coach-portal/model/coach-portal";
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
@@ -427,6 +432,8 @@ export function OrganizatechApp({
   const [dataMode, setDataMode] = useState<DataMode>("demo");
   const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
+  const [coachPortalSession, setCoachPortalSession] = useState<CoachPortalSession | null>(null);
+  const coachPortalSessionRef = useRef<CoachPortalSession | null>(null);
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(initialAuthState.isAuthLoading);
   const [isBusy, setIsBusy] = useState(false);
@@ -1267,6 +1274,11 @@ export function OrganizatechApp({
     setStatusMessage("");
   }
 
+  function replaceCoachPortalSession(session: CoachPortalSession | null) {
+    coachPortalSessionRef.current = session;
+    setCoachPortalSession(session);
+  }
+
   function holdAuthenticatedPortalRegistrationSession(
     event: string,
     authState: SupabaseSessionState,
@@ -1325,10 +1337,28 @@ export function OrganizatechApp({
   ) {
     switch (access.state) {
       case "user_authorized":
-      case "coach_authorized":
-        // AUTH-COACH-01 seam: a future Coach destination branches here after
-        // the backend-authoritative result, without changing how access is resolved.
+        replaceCoachPortalSession(null);
         return continueAuthenticatedSession(authState, intent);
+      case "coach_authorized": {
+        const nextCoachPortalSession = createCoachPortalSession({
+          authorizedUserId: access.userId,
+          authenticatedUser: authState.user,
+          registration: access.coach,
+        });
+        if (!nextCoachPortalSession) {
+          replaceCoachPortalSession(null);
+          setIsAuthLoading(false);
+          setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+          return;
+        }
+
+        authenticatedSessionCoordinatorRef.current.reset();
+        replaceCoachPortalSession(nextCoachPortalSession);
+        setIsAuthLoading(false);
+        clearAuthForms();
+        setAuthStatus("", "info");
+        return;
+      }
     }
   }
 
@@ -1362,6 +1392,9 @@ export function OrganizatechApp({
 
   function applySessionState(authState: SupabaseSessionState) {
     const authenticatedUser = resolveEffectiveAuthenticatedUser(authState.session, authState.user);
+    if (coachPortalSessionRef.current?.userId !== authenticatedUser?.id) {
+      replaceCoachPortalSession(null);
+    }
     const effectiveSession = authenticatedUser ? authState.session : null;
     const effectiveDataMode: DataMode = effectiveSession ? authState.dataMode : "demo";
     const nextStorageScope = getBrowserStorageScope(effectiveDataMode, authenticatedUser?.id);
@@ -1420,6 +1453,7 @@ export function OrganizatechApp({
     storageScope = activeBrowserStorageScopeRef.current,
     options: { navigate?: boolean; statusTone?: AuthStatusTone } = {},
   ) {
+    replaceCoachPortalSession(null);
     if (
       activeBrowserStorageScopeRef.current === null &&
       sessionDataEpochRef.current.userId === null &&
@@ -1831,6 +1865,7 @@ export function OrganizatechApp({
           state: "coach_authorized",
           requestedPortal: "coach",
           userId: registration.userId,
+          coach: registration.coach,
         }, registration.authState, "dashboard");
         return;
       }
@@ -2630,13 +2665,14 @@ export function OrganizatechApp({
   }
 
   async function handleLogout() {
+    multiportalAuth.invalidatePortalOperations();
     setIsBusy(true);
     const requestToken = captureSessionDataRequestToken();
     const currentStorageScope = activeBrowserStorageScopeRef.current;
     try {
       const supabase = getSupabaseBrowserClient();
       if (supabase) {
-        const { error } = await supabase.auth.signOut();
+        const { error } = await supabase.auth.signOut({ scope: "local" });
         if (error) throw error;
       }
       if (isSessionDataRequestCurrent(requestToken)) {
@@ -3703,6 +3739,17 @@ export function OrganizatechApp({
       <main className="app-shell">
         <AuthLoadingScreen />
       </main>
+    );
+  }
+
+  if (coachPortalSession) {
+    return (
+      <CoachPortalBoundary
+        key={`${coachPortalSession.userId}:${coachPortalSession.registration.createdAt}`}
+        session={coachPortalSession}
+        isLoggingOut={isBusy}
+        onLogout={handleLogout}
+      />
     );
   }
 

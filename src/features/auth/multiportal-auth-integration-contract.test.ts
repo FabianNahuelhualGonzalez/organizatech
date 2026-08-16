@@ -15,6 +15,9 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
 
+import "@/features/coach-portal/coach-portal-integration-contract";
+import "@/features/coach-portal/model/coach-portal.contract";
+
 const ROOT_PATH = "src/components/organizatech-app.tsx";
 const CONTROLLER_PATH = "src/features/auth/model/multiportal-auth-controller.ts";
 const OWNER_PATH = "src/features/auth/model/portal-resolution-owner.ts";
@@ -454,7 +457,7 @@ function auditCoachAuthorizationSemantics(controller: string) {
       if (!bindingName) return false;
       const initializer = initializers.get(bindingName);
       if (!initializer) return false;
-      const call = awaitedMethodCall(initializer, "hasCoachRegistration");
+      const call = awaitedMethodCall(initializer, "getCoachRegistration");
       return Boolean(
         call
         && ts.isPropertyAccessExpression(call.expression)
@@ -656,7 +659,7 @@ function auditUserAuthorizationSemantics(controller: string) {
 
 function auditGatewayCoachLookupSemantics(gateway: string) {
   const sourceFile = parseTypeScript(gateway, GATEWAY_PATH);
-  const method = findNamedMethod(sourceFile, "hasCoachRegistration");
+  const method = findNamedMethod(sourceFile, "getCoachRegistration");
   const expectedUserIdParameter = method.parameters[0]?.name;
   const ownerParameter = method.parameters[1]?.name;
   const expectedUserIdName = expectedUserIdParameter && ts.isIdentifier(expectedUserIdParameter)
@@ -707,29 +710,15 @@ function auditGatewayCoachLookupSemantics(gateway: string) {
   const returnExpression = returns[0]?.expression
     ? unwrapExpression(returns[0].expression!)
     : null;
-  const returnsPositiveEvidence = Boolean(
+  const returnsAuthoritativeEvidence = Boolean(
     evidenceName
     && returnExpression
-    && ts.isBinaryExpression(returnExpression)
-    && (
-      returnExpression.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken
-      || returnExpression.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken
-    )
-    && (
-      (
-        isIdentifierNamed(returnExpression.left, evidenceName)
-        && unwrapExpression(returnExpression.right).kind === ts.SyntaxKind.NullKeyword
-      )
-      || (
-        isIdentifierNamed(returnExpression.right, evidenceName)
-        && unwrapExpression(returnExpression.left).kind === ts.SyntaxKind.NullKeyword
-      )
-    )
+    && isIdentifierNamed(returnExpression, evidenceName)
   );
   assert.equal(
-    returnsPositiveEvidence,
+    returnsAuthoritativeEvidence,
     true,
-    "[AUTH-COACH-01.E9.authoritative-select-required] true deriva exclusivamente de evidencia SELECT no nula",
+    "[AUTH-COACH-01.E9.authoritative-select-required] la fila tipada deriva exclusivamente del SELECT own-only",
   );
 }
 
@@ -1039,12 +1028,12 @@ function auditIntegration(sources: Sources) {
   );
   assert.match(
     controller,
-    /const hasCoachRegistration = await gateway\.hasCoachRegistration\(identity\.userId, input\.owner\);[\s\S]*if \(hasCoachRegistration\) \{[\s\S]*state: "coach_authorized"/,
+    /const coachRegistration = await gateway\.getCoachRegistration\(identity\.userId, input\.owner\);[\s\S]*if \(coachRegistration\) \{[\s\S]*state: "coach_authorized"[\s\S]*coach: coachRegistration/,
     "[AUTH-COACH-01.controller.authoritative-coach-row] sólo la fila backend concede Coach",
   );
   assert.match(
     controller,
-    /const hasCoachRegistration = await[\s\S]*if \(!ownsPortalResolution\(input\)\) return stalePortalResolution/,
+    /const coachRegistration = await gateway\.getCoachRegistration[\s\S]*if \(!ownsPortalResolution\(input\)\) return stalePortalResolution/,
     "[AUTH-COACH-01.controller.post-lookup-owner] valida owner después del lookup",
   );
   assert.match(
@@ -1060,7 +1049,7 @@ function auditIntegration(sources: Sources) {
   assert.match(controller, /identity\.userId !== input\.expectedUserId/);
   assert.match(
     controller,
-    /async function registerCoach<[\s\S]*?registration\.userId !== identity\.userId[\s\S]*?controlledCoachRegistrationError\(\)/,
+    /async function registerCoach<[\s\S]*?coachRegistration\.userId !== identity\.userId[\s\S]*?controlledCoachRegistrationError\(\)/,
     "[AUTH-COACH-01.controller.registration-owner] registro cruzado falla cerrado",
   );
   assert.match(
@@ -1099,7 +1088,7 @@ function auditIntegration(sources: Sources) {
   );
   assert.doesNotMatch(
     registerUserText,
-    /hasCoachRegistration|createCoachRegistration|activateCoachRegistrationIdentity/,
+    /getCoachRegistration|createCoachRegistration|activateCoachRegistrationIdentity/,
     "[AUTH-COACH-01.USER.registration.no-coach-write] Registro Usuario no crea Coach",
   );
   assert.doesNotMatch(
@@ -1171,7 +1160,7 @@ function auditIntegration(sources: Sources) {
   assert.match(hook, /portalResolutionOwnersRef\.current\.hasPending\(\)/);
   assert.match(
     hook,
-    /event === "SIGNED_OUT"[\s\S]*portalResolutionOwnersRef\.current\.invalidate\(\);[\s\S]*coachRegistrationOwnersRef\.current\.invalidate\(\)[\s\S]*userRegistrationOwnersRef\.current\.invalidate\(\)/,
+    /function invalidatePortalOperations\(\) \{[\s\S]*portalResolutionOwnersRef\.current\.invalidate\(\);[\s\S]*coachRegistrationOwnersRef\.current\.invalidate\(\);[\s\S]*userRegistrationOwnersRef\.current\.invalidate\(\);[\s\S]*event === "SIGNED_OUT"[\s\S]*invalidatePortalOperations\(\)/,
     "[AUTH-COACH-01.hook.signed-out-invalidation] SIGNED_OUT invalida antes de continuar",
   );
   assert.match(
@@ -1225,8 +1214,22 @@ function auditIntegration(sources: Sources) {
     "[AUTH-COACH-01.root.no-timeout-authorization] autorización Auth se difiere sin timeout",
   );
   assert.match(root, /event === "SIGNED_OUT"[\s\S]*interactiveAuthAttemptRef\.current = false/);
-  assert.match(root, /case "coach_authorized":[\s\S]*return continueAuthenticatedSession/);
-  assert.match(root, /case "user_authorized":[\s\S]*case "coach_authorized"/);
+  assert.match(
+    root,
+    /case "user_authorized":[\s\S]*replaceCoachPortalSession\(null\);[\s\S]*return continueAuthenticatedSession\(authState, intent\);/,
+    "[AUTH-COACH-01.USER.root.user-destination] Usuario conserva su continuación productiva",
+  );
+  assert.match(
+    root,
+    /case "coach_authorized": \{[\s\S]*createCoachPortalSession\([\s\S]*registration: access\.coach[\s\S]*replaceCoachPortalSession\(nextCoachPortalSession\)/,
+    "[AUTH-COACH-01.root.coach-destination] Coach publica sólo su portal tipado",
+  );
+  const coachContinuation = root.match(/case "coach_authorized": \{[\s\S]*?\n      \}/)?.[0] ?? "";
+  assert.doesNotMatch(
+    coachContinuation,
+    /continueAuthenticatedSession|refreshTrainingDataForSession|navigation\.transition/,
+    "[AUTH-COACH-01.root.destinations-separated] Coach no continúa hacia Usuario",
+  );
   assert.match(root, /consumePortalSignOutMessage\(\)/);
   assert.match(root, /settlePortalSignOutMessage\(access\.message\)/);
   assert.match(root, /invalidateCoachRegistrationSubmits\(\)[\s\S]*supabase\.auth\.signInWithPassword/);
@@ -1268,17 +1271,14 @@ const semanticPositiveControls = [
     name: "controller acepta un nombre local inocente para la evidencia backend",
     file: "controller" as const,
     apply(source: string) {
-      const renamedDeclaration = replaceExactlyOnce(
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const resolution = findNamedFunction(sourceFile, "resolvePortalAccess");
+      return renameIdentifiersWithin(
         source,
-        "    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, input.owner);",
-        "    const backendEvidence = await gateway.hasCoachRegistration(identity.userId, input.owner);",
-        "control positivo controller: declaración",
-      );
-      return replaceExactlyOnce(
-        renamedDeclaration,
-        "    if (hasCoachRegistration) {",
-        "    if (backendEvidence) {",
-        "control positivo controller: condición",
+        sourceFile,
+        resolution,
+        "coachRegistration",
+        "backendEvidence",
       );
     },
   },
@@ -1287,8 +1287,8 @@ const semanticPositiveControls = [
     file: "controller" as const,
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, input.owner);",
-      `    const hasCoachRegistration = await gateway.hasCoachRegistration(
+      "    const coachRegistration = await gateway.getCoachRegistration(identity.userId, input.owner);",
+      `    const coachRegistration = await gateway.getCoachRegistration(
       identity.userId,
       input.owner,
     );`,
@@ -1298,17 +1298,17 @@ const semanticPositiveControls = [
   {
     name: "gateway acepta nombre y formato inocentes para la evidencia SELECT",
     file: "gateway" as const,
-    apply: (source: string) => replaceExactlyOnce(
-      source,
-      "      const row = await readOwnCoachRegistration(dataClientFor(expectedUserId), expectedUserId, owner);\n      return row !== null;",
-      `      const registrationEvidence = await readOwnCoachRegistration(
-        dataClientFor(expectedUserId),
-        expectedUserId,
-        owner,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const method = findNamedMethod(sourceFile, "getCoachRegistration");
+      return renameIdentifiersWithin(
+        source,
+        sourceFile,
+        method,
+        "row",
+        "registrationEvidence",
       );
-      return registrationEvidence !== null;`,
-      "control positivo gateway: nombre y reformateo",
-    ),
+    },
   },
 ] as const;
 
@@ -1458,7 +1458,7 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.controller.authoritative-coach-row]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "if (hasCoachRegistration) {",
+      "if (coachRegistration) {",
       'if (input.requestedPortal === "coach") {',
       "accountType concede Coach sin fila",
     ),
@@ -1537,8 +1537,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.hook.signed-out-invalidation]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "      portalResolutionOwnersRef.current.invalidate();",
-      "      void portalResolutionOwnersRef.current;",
+      "    portalResolutionOwnersRef.current.invalidate();",
+      "    void portalResolutionOwnersRef.current;",
       "SIGNED_OUT conserva owner A",
     ),
   },
@@ -1609,8 +1609,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.controller.registration-owner]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "      if (registration.userId !== identity.userId) {\n        return controlledCoachRegistrationError();",
-      "      if (false) {\n        return controlledCoachRegistrationError();",
+      "    if (coachRegistration.userId !== identity.userId) {\n      return controlledCoachRegistrationError();",
+      "    if (false) {\n      return controlledCoachRegistrationError();",
       "ownership cruzado deja de fallar cerrado",
     ),
   },
@@ -1657,8 +1657,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.hook.signed-out-invalidation]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "      coachRegistrationOwnersRef.current.invalidate();",
-      "      void coachRegistrationOwnersRef.current;",
+      "    portalResolutionOwnersRef.current.invalidate();\n    coachRegistrationOwnersRef.current.invalidate();\n    userRegistrationOwnersRef.current.invalidate();",
+      "    portalResolutionOwnersRef.current.invalidate();\n    void coachRegistrationOwnersRef.current;\n    userRegistrationOwnersRef.current.invalidate();",
       "SIGNED_OUT conserva owner de registro A",
     ),
   },
@@ -1712,8 +1712,19 @@ const mutations = [
     runtimeSuite: true,
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "      const row = await readOwnCoachRegistration(dataClientFor(expectedUserId), expectedUserId, owner);\n      return row !== null;",
-      "      if (owner) return true;\n      const row = await readOwnCoachRegistration(dataClientFor(expectedUserId), expectedUserId, owner);\n      return row !== null;",
+      `      const row = await readOwnCoachRegistration(
+        dataClientFor(expectedUserId),
+        expectedUserId,
+        owner,
+      );
+      return row;`,
+      `      if (owner) return {} as never;
+      const row = await readOwnCoachRegistration(
+        dataClientFor(expectedUserId),
+        expectedUserId,
+        owner,
+      );
+      return row;`,
       "E9 · gateway retorna true sin SELECT",
     ),
   },
@@ -1798,11 +1809,11 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.USER.controller.unique-user-authorization-path]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, input.owner);",
+      "    const coachRegistration = await gateway.getCoachRegistration(identity.userId, input.owner);",
       `    if (input.requestedPortal === "usuario") {
       return { state: "user_authorized", requestedPortal: "usuario", userId: identity.userId };
     }
-    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, input.owner);`,
+    const coachRegistration = await gateway.getCoachRegistration(identity.userId, input.owner);`,
       "segunda ruta Usuario",
     ),
   },
@@ -1907,8 +1918,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.USER.registration.coach-does-not-create-user]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, owner);",
-      "    await gateway.createUserRegistration(identity.userId, owner as never);\n    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, owner);",
+      "    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
+      "    await gateway.createUserRegistration(identity.userId, owner as never);\n    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
       "Coach crea Usuario",
     ),
   },
@@ -1931,8 +1942,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.hook.signed-out-invalidation]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "      userRegistrationOwnersRef.current.invalidate();",
-      "      void userRegistrationOwnersRef.current;",
+      "    portalResolutionOwnersRef.current.invalidate();\n    coachRegistrationOwnersRef.current.invalidate();\n    userRegistrationOwnersRef.current.invalidate();",
+      "    portalResolutionOwnersRef.current.invalidate();\n    coachRegistrationOwnersRef.current.invalidate();\n    void userRegistrationOwnersRef.current;",
       "SIGNED_OUT conserva owner Usuario",
     ),
   },

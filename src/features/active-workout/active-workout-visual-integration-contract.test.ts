@@ -603,7 +603,7 @@ const protectedFileHashes = {
   "package.json": "2fba19ac1c3a2f5348261d917da6ac8d4d611cd1107131c3aded9ee8574bb515",
   "package-lock.json": "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5",
   "src/app/globals.css": "57a8d03c03fc729a72a06a7b846ae8a73a721b7d89551edf18b0003b26cfc5c9",
-  "src/components/organizatech-app.tsx": "250a9f10c1c43402c51a1588bef8415ef6f1232014787774fd1eb1e73954a2fd",
+  "src/components/organizatech-app.tsx": "4cb87fe54639f8ee35c9479fbbd5598e914eda57a5e483f285b28bca7fa3862e",
   "src/features/progress/components/comparison-screen-v2.tsx": "bff390e44cf5a04fe59b0f2a594fcb53fb2a50602c850362f1a88ca136765743",
   "src/features/progress/progress-visual-integration-contract.test.ts": "9c0f432417b1a98a0cd3b9542b2e6a4c3dd4a8126989c6f17bc3a65133a56821",
   "src/features/active-workout/model/active-workout-controller-state.ts": "37006210eabda3f99217bd98b6ebf876780ed5ecc33bb8fba936eda7fd085ea5",

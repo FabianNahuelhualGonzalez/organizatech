@@ -22,10 +22,11 @@ import type {
 
 const USER_REGISTRATION_COLUMNS = "user_id";
 const COACH_REGISTRATION_COLUMNS =
-  "user_id,first_name,last_name,birth_date,gender,phone_number,professional_title";
+  "user_id,created_at,first_name,last_name,birth_date,gender,phone_number,professional_title";
 
 interface CoachRegistrationRow {
   user_id: string;
+  created_at: string;
   first_name: string;
   last_name: string;
   birth_date: string;
@@ -167,9 +168,13 @@ export function createSupabaseMultiportalAuthGateway(
       return row !== null;
     },
 
-    async hasCoachRegistration(expectedUserId, owner) {
-      const row = await readOwnCoachRegistration(dataClientFor(expectedUserId), expectedUserId, owner);
-      return row !== null;
+    async getCoachRegistration(expectedUserId, owner) {
+      const row = await readOwnCoachRegistration(
+        dataClientFor(expectedUserId),
+        expectedUserId,
+        owner,
+      );
+      return row;
     },
 
     async createCoachRegistration(payload, expectedUserId, owner) {
@@ -448,6 +453,7 @@ function mapCoachRegistrationRow(value: unknown): CoachRegistrationRecord | null
   const row = value as CoachRegistrationRow;
   if (
     typeof row.user_id !== "string" ||
+    typeof row.created_at !== "string" ||
     typeof row.first_name !== "string" ||
     typeof row.last_name !== "string" ||
     typeof row.birth_date !== "string" ||
@@ -459,6 +465,7 @@ function mapCoachRegistrationRow(value: unknown): CoachRegistrationRecord | null
   }
   return {
     userId: row.user_id,
+    createdAt: row.created_at,
     firstName: row.first_name,
     lastName: row.last_name,
     birthDate: row.birth_date,

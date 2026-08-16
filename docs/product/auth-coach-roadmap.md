@@ -22,7 +22,7 @@ contrato de producto y no autoriza implementar una etapa futura.
 | Un Coach activo por alumno | Especificado; no implementado | Restricción concurrente en PostgreSQL y pruebas materiales |
 | Autosupervisión | Especificada; no implementada | Debe consumir el único cupo activo |
 | Desvinculación automática a 48 horas | Especificada; no implementada | Tabla de relaciones, transición atómica, Cron, notificaciones y QA |
-| Portal Coach | Diseño futuro | Implementar por pantallas y permisos aprobados |
+| Portal Coach | Shell provisional implementado localmente | Requiere auditoría read-only y QA visual manual; funciones futuras siguen bloqueadas |
 | Chat Coach-alumno | Especificado parcialmente | Falta diseño y semántica de eliminación |
 | Documentos compartidos | Especificado parcialmente | Falta política excepcional de retiro, Storage y QA de permisos |
 | Producción | Bloqueada | Requiere cierre técnico, auditoría, Preview, QA manual y autorización expresa |
@@ -32,8 +32,8 @@ contrato de producto y no autoriza implementar una etapa futura.
 ### Objetivo
 
 Crear y autorizar membresías Usuario y Coach independientes para la misma
-identidad Auth, sin crear un portal Coach ficticio ni implementar todavía la
-relación con alumnos.
+identidad Auth y separar sus destinos mediante un portal Coach provisional, sin
+implementar todavía la relación con alumnos ni funciones futuras.
 
 ### Incluye
 
@@ -43,6 +43,10 @@ relación con alumnos.
 - tabla y registro Usuario autoritativos, separados del perfil común;
 - backfill acotado para las cuentas Usuario legacy existentes;
 - acceso Usuario/Coach resuelto desde su membresía backend correspondiente;
+- destino Coach independiente con inicio, menú cerrado y perfil propio de solo lectura;
+- transporte tipado de la fila Coach autoritativa sin una segunda consulta;
+- logout local con invalidación de resoluciones y estado Coach;
+- plantillas y semántica futura de correo documentadas para `AUTH-COACH-02`, sin envío;
 - rechazo de Coach-only al portal Usuario con el mensaje aprobado;
 - rechazo de Usuario sin membresía Coach;
 - aislamiento ante cambios de sesión A → B;
@@ -55,7 +59,8 @@ relación con alumnos.
 - vínculo Coach-alumno;
 - códigos de invitación;
 - desvinculación o Cron;
-- portal Coach;
+- funciones Coach posteriores al shell provisional;
+- implementación o envío de correos Coach;
 - chat, PDF o documentos compartidos;
 - Google;
 - ejecución SQL remota.
@@ -87,6 +92,13 @@ relación con alumnos.
 Implementar creación e inicio de sesión mediante Google sin debilitar la separación
 de membresías ni conceder Coach desde metadata OAuth.
 
+### AUTH-COACH-02 — Correos de membresía Coach
+
+Implementar las dos plantillas aprobadas desde un evento backend idempotente,
+con entrega exactamente una vez, reintentos sin duplicación y sin revertir la
+membresía ante fallas de entrega. Debe conservarse la confirmación normal de
+Supabase Auth para identidades nuevas.
+
 ### COACH-LINK-01 — Vinculación Coach-alumno
 
 Implementar relaciones históricas, un solo Coach activo, autosupervisión, códigos
@@ -97,10 +109,10 @@ de un uso y activación atómica.
 Implementar desvinculación inmediata del Coach, solicitud del alumno, plazo de
 48 horas, cancelación, bloqueo, auditoría y automatización programada.
 
-### COACH-PORTAL-01 — Perfil y alumnos
+### COACH-PORTAL-01 — Alumnos y perfil editable
 
-Implementar el perfil Coach y la búsqueda restringida a alumnos autorizados,
-siguiendo los diseños permanentes de Figma aprobados por el dueño.
+Implementar edición autorizada del perfil Coach y búsqueda restringida a alumnos
+autorizados, siguiendo diseños permanentes aprobados por el dueño.
 
 ### COACH-TRAINING-01 — Supervisión del entrenamiento
 
