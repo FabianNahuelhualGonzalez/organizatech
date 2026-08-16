@@ -188,6 +188,18 @@
   max-inline-size: 100%;
 }
 
+@supports (-webkit-touch-callout: none) {
+  .field input[type="date"] {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .field input[type="date"]::-webkit-date-and-time-value {
+    height: 1.5em;
+    text-align: left;
+  }
+}
+
 .passwordWrap {
   position: relative;
   display: block;
