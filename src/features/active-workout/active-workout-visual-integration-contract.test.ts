@@ -1049,10 +1049,10 @@ function readCssRule(source: string, selector: string) {
   assert.fail(`regla CSS sin cierre para ${selector}`);
 }
 
-function readCssProperty(ruleBody: string, property: string) {
+function readCssProperty(ruleBody: string, property: string, missingMessage?: string) {
   const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = ruleBody.match(new RegExp(`(?:^|\\n)\\s*${escapedProperty}:\\s*([^;]+);`));
-  assert.ok(match, `falta ${property} en la regla CSS auditada`);
+  assert.ok(match, missingMessage ?? `falta ${property} en la regla CSS auditada`);
   return match[1].trim();
 }
 
@@ -1077,6 +1077,7 @@ interface CssAuditElement {
   attributes?: Readonly<Record<string, string>>;
   states?: readonly string[];
   pseudoElement?: string;
+  childIndex?: number;
 }
 
 interface CssAuditTarget extends CssAuditElement {
@@ -1262,12 +1263,41 @@ function parseExecutableCss(source: string) {
 }
 
 function normalizeCssModulesSelector(selector: string) {
-  let normalized = selector;
-  let previous = "";
-  while (normalized !== previous) {
-    previous = normalized;
-    normalized = normalized.replace(/:global\(([^()]*)\)/g, "$1");
+  let normalized = "";
+
+  for (let index = 0; index < selector.length; index += 1) {
+    if (!selector.startsWith(":global(", index)) {
+      normalized += selector[index];
+      continue;
+    }
+
+    const contentStart = index + ":global(".length;
+    let depth = 1;
+    let quote = "";
+    let closingIndex = -1;
+    for (let cursor = contentStart; cursor < selector.length; cursor += 1) {
+      const character = selector[cursor];
+      if (quote) {
+        if (character === "\\") cursor += 1;
+        else if (character === quote) quote = "";
+        continue;
+      }
+      if (character === '"' || character === "'") quote = character;
+      else if (character === "(") depth += 1;
+      else if (character === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          closingIndex = cursor;
+          break;
+        }
+      }
+    }
+
+    assert.ok(closingIndex >= 0, `selector CSS Modules inválido: :global sin cierre (${selector})`);
+    normalized += normalizeCssModulesSelector(selector.slice(contentStart, closingIndex));
+    index = closingIndex;
   }
+
   return normalized;
 }
 
@@ -1316,6 +1346,11 @@ function compoundMatchesElement(compoundInput: string, element: CssAuditElement)
   const pseudoElement = compound.match(/::([a-z-]+)/i)?.[1];
   if ((pseudoElement ?? "") !== (element.pseudoElement ?? "")) return false;
   compound = compound.replace(/::[a-z-]+/gi, "");
+
+  for (const match of [...compound.matchAll(/:nth-child\(\s*(\d+)\s*\)/gi)]) {
+    if (element.childIndex !== Number(match[1])) return false;
+  }
+  compound = compound.replace(/:nth-child\(\s*\d+\s*\)/gi, "");
 
   const states = new Set(element.states ?? []);
   const requiredStates = [...compound.matchAll(/:(hover|focus-visible|focus|active|disabled|checked|open|visited|target)\b/gi)]
@@ -1402,7 +1437,10 @@ function resolveDeclarationValue(declaration: CssDeclaration, property: string) 
   if (property === "background-image" && declaration.property === "background") {
     return /(?:gradient|url|image-set)\s*\(/i.test(declaration.value) ? declaration.value : "none";
   }
-  if (property === "overflow-x" && declaration.property === "overflow") return declaration.value;
+  if (
+    (property === "overflow-x" || property === "overflow-y") &&
+    declaration.property === "overflow"
+  ) return declaration.value;
   if (/^margin-(?:top|right|bottom|left)$/.test(property) && declaration.property === "margin") {
     const tokens = splitCssValueTokens(declaration.value);
     if (tokens.length === 1) return tokens[0];
@@ -1498,6 +1536,34 @@ function readEffectiveCssProperty(input: {
   return winner.value;
 }
 
+function readEffectiveInheritedCssProperty(input: {
+  rules: readonly CssExecutableRule[];
+  target: CssAuditTarget;
+  property: string;
+  viewportWidth: number;
+}) {
+  const direct = readEffectiveCssProperty({ ...input, required: false });
+  if (direct !== null) return direct;
+
+  const ancestors = input.target.ancestors ?? [];
+  for (let index = 0; index < ancestors.length; index += 1) {
+    const value = readEffectiveCssProperty({
+      rules: input.rules,
+      target: {
+        ...ancestors[index],
+        label: `${input.target.label} (ancestro ${index + 1})`,
+        ancestors: ancestors.slice(index + 1),
+      },
+      property: input.property,
+      viewportWidth: input.viewportWidth,
+      required: false,
+    });
+    if (value !== null) return value;
+  }
+
+  return null;
+}
+
 function readHexToken(styles: string, token: string) {
   const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = styles.match(new RegExp(`${escapedToken}:\\s*(#[0-9a-f]{6});`, "i"));
@@ -1549,7 +1615,7 @@ function assertMobileFontAtLeast16Px(ruleBody: string, label: string) {
   assert.ok(sizeInPixels >= 16, `${label}: ${sizeInPixels}px provoca autozoom en iOS`);
 }
 
-const mobileAuditWidths = [320, 360, 361, 375, 390, 393, 400, 401, 430] as const;
+const mobileAuditWidths = [320, 360, 361, 375, 390, 393, 400, 401, 420, 421, 430] as const;
 
 const cssAuditTargets = {
   body: { label: "viewport", tag: "body" },
@@ -1574,6 +1640,12 @@ const cssAuditTargets = {
     tag: "div",
     classes: ["referencePanel", "exercise-reference-card"],
     ancestors: [{ classes: ["workoutCard", "card"] }, { classes: ["screen"] }],
+  },
+  startIntro: {
+    label: "introducción de Entrenemos",
+    tag: "header",
+    classes: ["startIntro", "wide"],
+    ancestors: [{ classes: ["screen"] }],
   },
   startHeading: {
     label: "título inicial",
@@ -1604,6 +1676,78 @@ const cssAuditTargets = {
     label: "título de objetivos",
     tag: "h3",
     ancestors: [{ classes: ["objectives"] }, { classes: ["workoutCard", "card"] }],
+  },
+  metricGrid: {
+    label: "grilla de métricas",
+    tag: "div",
+    classes: ["metric-grid", "wide", "dashboard-metric-grid", "routine-metric-grid"],
+    ancestors: [{ classes: ["metricScope"] }, { classes: ["workoutCard", "card"] }],
+  },
+  firstMetricCard: {
+    label: "primera tarjeta métrica",
+    tag: "div",
+    classes: ["metric"],
+    childIndex: 1,
+    ancestors: [
+      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
+      { classes: ["metricScope"] },
+      { classes: ["workoutCard", "card"] },
+    ],
+  },
+  secondMetricCard: {
+    label: "segunda tarjeta métrica",
+    tag: "div",
+    classes: ["metric"],
+    childIndex: 2,
+    ancestors: [
+      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
+      { classes: ["metricScope"] },
+      { classes: ["workoutCard", "card"] },
+    ],
+  },
+  thirdMetricCard: {
+    label: "tercera tarjeta métrica",
+    tag: "div",
+    classes: ["metric"],
+    childIndex: 3,
+    ancestors: [
+      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
+      { classes: ["metricScope"] },
+      { classes: ["workoutCard", "card"] },
+    ],
+  },
+  firstMetricLabel: {
+    label: "primera etiqueta métrica",
+    tag: "span",
+    ancestors: [
+      { classes: ["metric-title-row"] },
+      { classes: ["metric"], childIndex: 1 },
+      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
+      { classes: ["metricScope"] },
+      { classes: ["workoutCard", "card"] },
+    ],
+  },
+  secondMetricLabel: {
+    label: "segunda etiqueta métrica",
+    tag: "span",
+    ancestors: [
+      { classes: ["metric-title-row"] },
+      { classes: ["metric"], childIndex: 2 },
+      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
+      { classes: ["metricScope"] },
+      { classes: ["workoutCard", "card"] },
+    ],
+  },
+  thirdMetricLabel: {
+    label: "tercera etiqueta métrica",
+    tag: "span",
+    ancestors: [
+      { classes: ["metric-title-row"] },
+      { classes: ["metric"], childIndex: 3 },
+      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
+      { classes: ["metricScope"] },
+      { classes: ["workoutCard", "card"] },
+    ],
   },
   routineHeader: {
     label: "cabecera de rutina",
@@ -1759,12 +1903,54 @@ const approvedRoutineHeaderDays = [
 ] as const;
 
 const approvedRoutineTextPixels = 15;
-const approvedDaySelectPixels = 92;
-const approvedDaySelectUsefulInlinePixels = 76;
+const approvedDaySelectPixels = 116;
+const approvedDaySelectUsefulInlinePixels = 82;
 // Roboto Mono avanza nominalmente ~0.60em. El contrato usa 0.64em y redondea hacia arriba para
 // absorber rasterización/subpíxeles sin fingir una medición de navegador.
 const conservativeMonospaceAdvanceEm = 0.64;
 const nominalMonospaceAdvanceEm = 0.6;
+
+function countWordWrappedLines(copy: string, maxCharacters: number, label = "etiqueta métrica") {
+  let lines = 1;
+  let currentCharacters = 0;
+  for (const word of copy.split(" ")) {
+    assert.ok(
+      word.length <= maxCharacters,
+      `${label}: “${word}” excede por sí sola el ancho efectivo de ${maxCharacters}ch`,
+    );
+    const nextCharacters = currentCharacters === 0
+      ? word.length
+      : currentCharacters + 1 + word.length;
+    if (nextCharacters <= maxCharacters) {
+      currentCharacters = nextCharacters;
+    } else {
+      lines += 1;
+      currentCharacters = word.length;
+    }
+  }
+  return lines;
+}
+
+const metricLabelProtectionPolicies = [
+  {
+    target: cssAuditTargets.firstMetricLabel,
+    copy: "Total de KG de la rutina",
+    expectedMaxWidth: "13ch",
+    expectedLines: 2,
+  },
+  {
+    target: cssAuditTargets.secondMetricLabel,
+    copy: "Total Reps",
+    expectedMaxWidth: "7ch",
+    expectedLines: 2,
+  },
+  {
+    target: cssAuditTargets.thirdMetricLabel,
+    copy: "Total ejercicios registrados",
+    expectedMaxWidth: "12ch",
+    expectedLines: 3,
+  },
+] as const;
 
 interface RoutineHeaderGeometryResult {
   viewportWidth: number;
@@ -2272,6 +2458,65 @@ function assertRoutineHeaderGeometry(
   return results;
 }
 
+function assertStartHeadingGeometry(rules: readonly CssExecutableRule[]) {
+  const copy = "Selecciona el día de entrenamiento para comenzar";
+  for (const viewportWidth of mobileAuditWidths) {
+    const shellOuterWidth = Math.min(viewportWidth, 560);
+    const shellPaddingLeft = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.shell,
+      property: "padding-left",
+      viewportWidth,
+      percentageBase: shellOuterWidth,
+    });
+    const shellPaddingRight = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.shell,
+      property: "padding-right",
+      viewportWidth,
+      percentageBase: shellOuterWidth,
+    });
+    const introOuterWidth = shellOuterWidth - shellPaddingLeft - shellPaddingRight;
+    const introPaddingLeft = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.startIntro,
+      property: "padding-left",
+      viewportWidth,
+      percentageBase: introOuterWidth,
+    });
+    const introPaddingRight = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.startIntro,
+      property: "padding-right",
+      viewportWidth,
+      percentageBase: introOuterWidth,
+    });
+    const availableWidth = introOuterWidth - introPaddingLeft - introPaddingRight;
+    const fontSize = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.startHeading,
+      property: "font-size",
+      viewportWidth,
+      percentageBase: availableWidth,
+    });
+    const letterSpacing = readEffectiveLetterSpacing({
+      rules,
+      target: cssAuditTargets.startHeading,
+      viewportWidth,
+      percentageBase: availableWidth,
+    });
+    const glyphCount = [...copy].length;
+    const textWidth = Math.ceil(
+      (glyphCount * fontSize * conservativeMonospaceAdvanceEm) +
+      (Math.max(0, glyphCount - 1) * letterSpacing),
+    );
+    assert.ok(
+      textWidth <= availableWidth,
+      `texto introductorio: debe permanecer en una línea a ${viewportWidth}px (${textWidth}px > ${availableWidth.toFixed(2)}px)`,
+    );
+  }
+}
+
 function assertDirectPerformanceHistoryFlow(component: ts.FunctionDeclaration) {
   assert.ok(component.body);
   const disclosureContents: ts.JsxElement[] = [];
@@ -2374,31 +2619,23 @@ function assertEffectiveCssValue(input: {
 
 function assertNoProtectedTextClipping(rules: readonly CssExecutableRule[]) {
   const protectedTargets = [
-    cssAuditTargets.startHeading,
-    cssAuditTargets.routineHeading,
-    cssAuditTargets.routineSubheading,
-    cssAuditTargets.sectionHeading,
-    cssAuditTargets.newRecordHeading,
-    cssAuditTargets.objectivesHeading,
+    ...[
+      cssAuditTargets.startHeading,
+      cssAuditTargets.routineHeading,
+      cssAuditTargets.routineSubheading,
+      cssAuditTargets.sectionHeading,
+      cssAuditTargets.newRecordHeading,
+      cssAuditTargets.objectivesHeading,
+    ].map((target) => ({ target, kind: "single-line" as const })),
+    ...metricLabelProtectionPolicies.map((policy) => ({
+      ...policy,
+      kind: "bounded-metric" as const,
+    })),
   ];
 
   for (const viewportWidth of mobileAuditWidths) {
-    for (const target of protectedTargets) {
-      assertEffectiveCssValue({
-        rules,
-        target,
-        property: "white-space",
-        expected: "nowrap",
-        viewportWidth,
-        message: `nowrap efectivo: ${target.label} debe permanecer en una línea a ${viewportWidth}px`,
-      });
-      const overflow = readEffectiveCssProperty({
-        rules,
-        target,
-        property: "overflow-x",
-        viewportWidth,
-        required: false,
-      });
+    for (const protectedTarget of protectedTargets) {
+      const { target } = protectedTarget;
       const textOverflow = readEffectiveCssProperty({
         rules,
         target,
@@ -2406,17 +2643,163 @@ function assertNoProtectedTextClipping(rules: readonly CssExecutableRule[]) {
         viewportWidth,
         required: false,
       });
-      assert.notEqual(
-        overflow,
-        "hidden",
-        `texto protegido con recorte efectivo: ${target.label} usa overflow hidden a ${viewportWidth}px`,
+      if (protectedTarget.kind === "bounded-metric") {
+        assert.ok(
+          textOverflow === null || !/\b(?:ellipsis|clip)\b/i.test(textOverflow),
+          `${target.label}: no puede usar text-overflow: ${textOverflow}`,
+        );
+      } else {
+        assert.notEqual(
+          textOverflow,
+          "ellipsis",
+          `texto protegido con ellipsis efectivo: ${target.label} a ${viewportWidth}px`,
+        );
+      }
+
+      for (const property of ["overflow-x", "overflow-y"] as const) {
+        const overflow = readEffectiveCssProperty({
+          rules,
+          target,
+          property,
+          viewportWidth,
+          required: false,
+        });
+        assert.ok(
+          overflow === null || !/\b(?:hidden|clip)\b/i.test(overflow),
+          protectedTarget.kind === "bounded-metric"
+            ? `${target.label}: no puede usar overflow: hidden ni clip`
+            : `texto protegido con recorte efectivo: ${target.label} usa ${property} ${overflow} a ${viewportWidth}px`,
+        );
+      }
+
+      for (const property of ["clip", "clip-path", "line-clamp", "-webkit-line-clamp"] as const) {
+        const clipping = readEffectiveCssProperty({
+          rules,
+          target,
+          property,
+          viewportWidth,
+          required: false,
+        });
+        assert.ok(
+          clipping === null || /^(?:auto|none|unset|initial)$/i.test(clipping),
+          protectedTarget.kind === "bounded-metric"
+            ? `${target.label}: no puede usar clipping ni line-clamp`
+            : `texto protegido con recorte efectivo: ${target.label} usa ${property} ${clipping} a ${viewportWidth}px`,
+        );
+      }
+
+      const whiteSpace = readEffectiveInheritedCssProperty({
+        rules,
+        target,
+        property: "white-space",
+        viewportWidth,
+      });
+      if (protectedTarget.kind === "single-line") {
+        assert.equal(
+          whiteSpace,
+          "nowrap",
+          `${target.label}: white-space debe permanecer nowrap`,
+        );
+        continue;
+      }
+
+      assert.ok(
+        whiteSpace === null || !/(?:\bnowrap\b|^pre$)/i.test(whiteSpace),
+        `${target.label}: white-space nowrap contradice el límite aprobado de ${protectedTarget.expectedLines} líneas`,
       );
-      assert.notEqual(
-        textOverflow,
-        "ellipsis",
-        `texto protegido con ellipsis efectivo: ${target.label} a ${viewportWidth}px`,
+      const maxWidth = readEffectiveCssProperty({
+        rules,
+        target,
+        property: "max-width",
+        viewportWidth,
+        required: false,
+      });
+      const maxWidthMatch = maxWidth?.match(/^(\d+)ch$/);
+      const maxWidthFailure = `${target.label}: max-width debe conservar ${protectedTarget.expectedMaxWidth} para el límite aprobado de ${protectedTarget.expectedLines} líneas`;
+      assert.ok(maxWidthMatch, maxWidthFailure);
+      const maxCharacters = Number(maxWidthMatch[1]);
+      const overflowWrap = readEffectiveInheritedCssProperty({
+        rules,
+        target,
+        property: "overflow-wrap",
+        viewportWidth,
+      });
+      const wordBreak = readEffectiveInheritedCssProperty({
+        rules,
+        target,
+        property: "word-break",
+        viewportWidth,
+      });
+      const breaksAnywhere = /^(?:anywhere|break-word)$/i.test(overflowWrap ?? "normal") ||
+        /^(?:break-all|break-word)$/i.test(wordBreak ?? "normal");
+      const calculatedLines = breaksAnywhere
+        ? Math.ceil([...protectedTarget.copy].length / maxCharacters)
+        : countWordWrappedLines(protectedTarget.copy, maxCharacters, target.label);
+      assert.ok(
+        calculatedLines <= protectedTarget.expectedLines,
+        `${target.label}: “${protectedTarget.copy}” excede el límite aprobado de ${protectedTarget.expectedLines} líneas (${calculatedLines} líneas calculadas)`,
+      );
+      assert.equal(
+        calculatedLines,
+        protectedTarget.expectedLines,
+        `${target.label}: “${protectedTarget.copy}” debe conservar exactamente ${protectedTarget.expectedLines} líneas`,
+      );
+      assert.equal(maxWidth, protectedTarget.expectedMaxWidth, maxWidthFailure);
+      assert.equal(
+        overflowWrap ?? "normal",
+        "normal",
+        `${target.label}: overflow-wrap efectivo debe permanecer normal`,
+      );
+      assert.equal(
+        wordBreak ?? "normal",
+        "normal",
+        `${target.label}: word-break efectivo debe permanecer normal`,
       );
     }
+  }
+}
+
+function assertMetricGridStructure(rules: readonly CssExecutableRule[]) {
+  const metricCards = [
+    cssAuditTargets.firstMetricCard,
+    cssAuditTargets.secondMetricCard,
+    cssAuditTargets.thirdMetricCard,
+  ];
+  const widthProperties = ["width", "min-width", "max-width", "grid-column", "justify-self"] as const;
+  const heightProperties = ["height", "min-height", "max-height", "grid-row", "align-self"] as const;
+
+  for (const viewportWidth of mobileAuditWidths) {
+    const columns = readEffectiveCssProperty({
+      rules,
+      target: cssAuditTargets.metricGrid,
+      property: "grid-template-columns",
+      viewportWidth,
+    });
+    assert.equal(
+      columns,
+      "repeat(3, minmax(0, 1fr))",
+      "grilla métrica: debe conservar tres columnas iguales",
+    );
+
+    const readSignatures = (properties: readonly string[]) => metricCards.map((target) => (
+      properties.map((property) => readEffectiveCssProperty({
+        rules,
+        target,
+        property,
+        viewportWidth,
+        required: false,
+      })).join("|")
+    ));
+    assert.equal(
+      new Set(readSignatures(widthProperties)).size,
+      1,
+      `tarjetas métricas: ancho uniforme de las tres tarjetas a ${viewportWidth}px`,
+    );
+    assert.equal(
+      new Set(readSignatures(heightProperties)).size,
+      1,
+      `tarjetas métricas: altura uniforme de las tres tarjetas a ${viewportWidth}px`,
+    );
   }
 }
 
@@ -2748,9 +3131,9 @@ function assertEffectiveVisualCascade(rules: readonly CssExecutableRule[]) {
       rules,
       target: cssAuditTargets.daySelect,
       property: "min-height",
-      expected: "36px",
+      expected: "44px",
       viewportWidth,
-      message: "tamaño compacto efectivo incorrecto en selector de día",
+      message: "altura visible efectiva incorrecta en selector de día",
     });
     assertEffectiveCssValue({
       rules,
@@ -2774,9 +3157,9 @@ function assertEffectiveVisualCascade(rules: readonly CssExecutableRule[]) {
       rules,
       target: cssAuditTargets.editButtonBefore,
       property: "inset",
-      expected: "5px",
+      expected: "0",
       viewportWidth,
-      message: "tamaño compacto efectivo incorrecto en caja visual Editar",
+      message: "altura visible efectiva incorrecta en caja visual Editar",
     });
   }
 
@@ -2828,7 +3211,7 @@ function assertEffectiveVisualCascade(rules: readonly CssExecutableRule[]) {
   });
 
   const compactFonts = [
-    [cssAuditTargets.startHeading, "clamp(0.58rem, 2.7vw, 1.1rem)"],
+    [cssAuditTargets.startHeading, "clamp(0.7rem, 3.2vw, 1.1rem)"],
     [cssAuditTargets.routineHeading, "15px"],
     [cssAuditTargets.routineSubheading, "15px"],
     [cssAuditTargets.sectionHeading, "clamp(0.72rem, 3.2vw, 1.1rem)"],
@@ -2847,6 +3230,8 @@ function assertEffectiveVisualCascade(rules: readonly CssExecutableRule[]) {
   }
 
   assertNoReservedComparisonSpace(rules);
+  assertStartHeadingGeometry(rules);
+  assertMetricGridStructure(rules);
   assertNoProtectedTextClipping(rules);
   assertNoTouchTargetReduction(rules);
   assertNoEffectiveHorizontalOverflow(rules);
@@ -2940,7 +3325,11 @@ function assertTrainUi01AuditContracts(
 
   // El h1 pertenece al topbar; estas pantallas comienzan en h2 y sus secciones usan h3.
   assert.doesNotMatch(sources.start, /<h1\b/);
-  assert.doesNotMatch(sources.guided, /<h1\b/);
+  assert.doesNotMatch(
+    sources.guided,
+    /<h1\b/,
+    "jerarquía de títulos: GuidedTrainingScreen no puede introducir un h1",
+  );
   assert.match(sources.start, /<h2 id="training-start-title">/);
   assert.match(sources.guided, /<h2 id="guided-routine-title">/);
   assert.match(sources.guided, /<h3 id="guided-plan-title">/);
@@ -2953,7 +3342,11 @@ function assertTrainUi01AuditContracts(
   assert.ok(firstSummaryStart >= 0 && firstSummaryEnd > firstSummaryStart);
   const firstSummary = sources.performancePanel.slice(firstSummaryStart, firstSummaryEnd);
   assert.match(firstSummary, /presentation\.status === "found"/);
-  assert.match(firstSummary, /presentation\.seriesDetailTitle/);
+  assert.match(
+    firstSummary,
+    /presentation\.seriesDetailTitle/,
+    "historial: el summary debe usar presentation.seriesDetailTitle cuando existe rendimiento",
+  );
   assert.match(firstSummary, /presentation\.lastSummaryText/);
   assert.doesNotMatch(firstSummary, /Rendimiento anterior/);
 
@@ -2970,7 +3363,11 @@ function assertTrainUi01AuditContracts(
   // Las tarjetas presentan el detalle/estado canónico y derivan icono/tono del mismo item.
   assert.match(sources.seriesResult, /import \{ Check, X \} from "lucide-react";/);
   assert.match(sources.seriesResult, /data-tone=\{item\.tone\}/);
-  assert.match(sources.seriesResult, /\{item\.detail\}/);
+  assert.match(
+    sources.seriesResult,
+    /\{item\.detail\}/,
+    "objetivos: cada tarjeta debe mostrar item.detail, no un label genérico",
+  );
   assert.match(sources.seriesResult, /item\.tone === "partial" \? <X size=\{20\} \/> : <Check size=\{20\} \/>/);
 
   // La API local de labels preserva los defaults del resto del producto y sólo la pantalla
@@ -2994,9 +3391,17 @@ function assertTrainUi01AuditContracts(
 
   // La selección conserva botones nativos: no hay grid/row ARIA simulado, y aria-pressed comunica
   // el estado manteniendo activación Tab/Enter/Space propia de button.
-  assert.match(sources.guided, /<button\s*className=\{styles\.selectableTableRow\}\s*type="button"\s*aria-pressed=\{isActive\}/);
+  assert.match(
+    sources.guided,
+    /<button\s*className=\{styles\.selectableTableRow\}\s*type="button"\s*aria-pressed=\{isActive\}/,
+    "selección de ejercicios: debe conservar button nativo con aria-pressed",
+  );
   assert.doesNotMatch(sources.guided, /role="grid"|role="row"|role="rowgroup"|role="gridcell"/);
-  assert.match(sources.guided, /data-complete=\{isDone \? "true" : undefined\}/);
+  assert.match(
+    sources.guided,
+    /data-complete=\{isDone \? "true" : undefined\}/,
+    "estado completado: data-complete debe derivarse de isDone",
+  );
 
   // El status vacío está fuera del rowgroup de la tabla estática.
   assert.match(
@@ -3016,6 +3421,7 @@ function assertTrainUi01AuditContracts(
   assert.match(
     sources.guided,
     /function isIntermediateDecimalWeightInput\(value: string\) \{[\s\S]*isDecimalWeightDraftInput\(value\)[\s\S]*normalized\.endsWith\(","\) \|\| normalized\.endsWith\("\."\)[\s\S]*const hasSubmittedInvalidWeight = draft\s*\? notice === incompleteCurrentExerciseMessage && \(\s*parseDecimalWeightInput\(draft\.weight\) === null &&\s*!isIntermediateDecimalWeightInput\(draft\.weight\)\s*\)\s*: false;/,
+    "peso decimal intermedio: 5, y 5. no pueden activar alert antes del intento de registro",
   );
   assert.match(sources.guided, /\{hasSubmittedInvalidWeight \? \(\s*<p className=\{styles\.fieldError\} id="exercise-weight-error" role="alert">/);
   assert.doesNotMatch(sources.guided, /\bhasInvalidWeight\b/);
@@ -3041,19 +3447,60 @@ function assertTrainUi01AuditContracts(
     sources.workoutStyles,
     ".metricScope.metricScope :global(.metric-title-row span)",
   );
+  const firstMetricTitleRule = readCssRule(
+    sources.workoutStyles,
+    ".metricScope.metricScope :global(.metric:nth-child(1) .metric-title-row span)",
+  );
+  const secondMetricTitleRule = readCssRule(
+    sources.workoutStyles,
+    ".metricScope.metricScope :global(.metric:nth-child(2) .metric-title-row span)",
+  );
+  const thirdMetricTitleRule = readCssRule(
+    sources.workoutStyles,
+    ".metricScope.metricScope :global(.metric:nth-child(3) .metric-title-row span)",
+  );
+  const disclosureSummaryRule = readCssRule(
+    sources.workoutStyles,
+    ".referencePanel [data-disclosure] > summary",
+  );
+  const selectedExerciseValueRule = readCssRule(
+    sources.workoutStyles,
+    ".selectedExerciseHeading.selectedExerciseHeading strong",
+  );
+  const startHeadingRule = readCssRule(sources.workoutStyles, ".startIntro h2");
   const globalBodyRule = readCssRule(sources.globalStyles, "body");
   const globalShellRule = readCssRule(sources.globalStyles, ".app-shell");
   const globalTopbarRule = readCssRule(sources.globalStyles, ".topbar");
   const globalBackRule = readCssRule(sources.globalStyles, ".section-back-row");
-  assert.equal(readCssProperty(selectedRule.body, "background"), "var(--primary-strong)");
-  assert.equal(readCssProperty(completedRule.body, "color"), "var(--workout-row-complete)");
+  assert.equal(
+    readCssProperty(selectedRule.body, "background"),
+    "var(--primary-strong)",
+    "fila seleccionada: el fondo debe permanecer var(--primary-strong)",
+  );
+  assert.equal(
+    readCssProperty(completedRule.body, "color"),
+    "var(--workout-row-complete)",
+    "estado completado: el color debe permanecer var(--workout-row-complete)",
+  );
   assert.equal(readCssProperty(screenRule.body, "--workout-row-complete"), "var(--green)");
   assert.equal(readCssProperty(globalBodyRule.body, "background-color"), "var(--background)");
   assert.equal(readCssProperty(globalShellRule.body, "background-color"), "var(--background)");
   assert.equal(readCssProperty(globalTopbarRule.body, "background"), "var(--background)");
-  assert.equal(readCssProperty(globalBackRule.body, "background"), "var(--background)");
+  assert.equal(
+    readCssProperty(globalBackRule.body, "background"),
+    "var(--background)",
+    "zona Back: el fondo debe permanecer var(--background)",
+  );
   assert.equal(readCssProperty(screenRule.body, "background"), "var(--background)");
-  assert.equal(readCssProperty(workoutCardRule.body, "background"), "var(--background)");
+  assert.equal(
+    readCssProperty(
+      workoutCardRule.body,
+      "background",
+      "tarjeta TRAIN-UI-01: el fondo debe conservar la especificidad local .workoutCard.workoutCard",
+    ),
+    "var(--background)",
+    "tarjeta TRAIN-UI-01: el fondo debe conservar la especificidad local .workoutCard.workoutCard",
+  );
   for (const [label, rule] of [
     ["viewport", globalBodyRule],
     ["app shell", globalShellRule],
@@ -3067,7 +3514,70 @@ function assertTrainUi01AuditContracts(
   assert.equal(readCssProperty(globalBackRule.body, "box-shadow"), "none");
   assert.equal(readCssProperty(referencePanelRule.body, "background"), "transparent");
   assert.equal(readCssProperty(referencePanelRule.body, "box-shadow"), "none");
-  assert.equal(readCssProperty(metricTitleRule.body, "font-size"), "clamp(0.5rem, 2vw, 0.7rem)");
+  assert.equal(
+    readCssProperty(metricTitleRule.body, "font-size"),
+    "clamp(0.625rem, 2.4vw, 0.75rem)",
+    "etiquetas métricas: font-size debe conservar clamp(0.625rem, 2.4vw, 0.75rem)",
+  );
+  assert.equal(
+    readCssProperty(metricTitleRule.body, "overflow-wrap"),
+    "normal",
+    "etiquetas métricas: overflow-wrap debe permanecer normal",
+  );
+  assert.equal(
+    readCssProperty(metricTitleRule.body, "word-break"),
+    "normal",
+    "etiquetas métricas: word-break debe permanecer normal",
+  );
+  assert.equal(
+    readCssProperty(firstMetricTitleRule.body, "max-width"),
+    "13ch",
+    "primera etiqueta métrica: max-width debe conservar 13ch para el límite aprobado de 2 líneas",
+  );
+  assert.equal(
+    readCssProperty(secondMetricTitleRule.body, "max-width"),
+    "7ch",
+    "segunda etiqueta métrica: max-width debe conservar 7ch para el límite aprobado de 2 líneas",
+  );
+  assert.equal(
+    readCssProperty(thirdMetricTitleRule.body, "max-width"),
+    "12ch",
+    "tercera etiqueta métrica: max-width debe conservar 12ch para el límite aprobado de 3 líneas",
+  );
+  for (const [copy, maxCharacters, expectedLines] of [
+    ["Total de KG de la rutina", 13, 2],
+    ["Total Reps", 7, 2],
+    ["Total ejercicios registrados", 12, 3],
+  ] as const) {
+    assert.equal(
+      countWordWrappedLines(copy, maxCharacters),
+      expectedLines,
+      `etiqueta métrica: “${copy}” debe conservar ${expectedLines} líneas`,
+    );
+  }
+  assert.equal(
+    readCssProperty(disclosureSummaryRule.body, "background"),
+    "var(--primary-strong)",
+    "historial y comentario: el fondo debe permanecer var(--primary-strong)",
+  );
+  assert.equal(readCssProperty(disclosureSummaryRule.body, "color"), "var(--text)");
+  assert.equal(readCssProperty(selectedExerciseValueRule.body, "min-width"), "max-content");
+  assert.equal(readCssProperty(selectedExerciseValueRule.body, "overflow-wrap"), "normal");
+  assert.equal(
+    readCssProperty(selectedExerciseValueRule.body, "white-space"),
+    "nowrap",
+    "peso del ejercicio seleccionado: la unidad kg debe permanecer en una línea",
+  );
+  assert.equal(
+    readCssProperty(startHeadingRule.body, "font-size"),
+    "clamp(0.7rem, 3.2vw, 1.1rem)",
+    "texto introductorio: la tipografía debe conservar clamp(0.7rem, 3.2vw, 1.1rem)",
+  );
+  assert.equal(
+    readCssProperty(startHeadingRule.body, "letter-spacing"),
+    "-1.2px",
+    "texto introductorio: letter-spacing debe conservar -1.2px",
+  );
   assertAccessibleSmallTextContrast({
     globalStyles: sources.globalStyles,
     ruleBody: selectedRule.body,
@@ -3077,6 +3587,11 @@ function assertTrainUi01AuditContracts(
     globalStyles: sources.globalStyles,
     ruleBody: primaryActionRule.body,
     label: "botón primario",
+  });
+  assertAccessibleSmallTextContrast({
+    globalStyles: sources.globalStyles,
+    ruleBody: disclosureSummaryRule.body,
+    label: "casillas de historial y comentario",
   });
 
   const mobileInputSelector = `.newRecord :global(.series-weight-field input),
@@ -3094,18 +3609,22 @@ function assertTrainUi01AuditContracts(
     "textarea de observación",
   );
 
-  // Las líneas que Figma presenta completas no vuelven a envolver. Selector y edición reducen su
-  // caja visible, preservando un target etiquetado de 44 px para touch/teclado.
-  for (const selector of [
-    ".startIntro h2",
-    `.routineTitle h2,
-.routineTitle h3`,
-    `.sectionHeading h3,
+  // Las líneas aprobadas permanecen completas. Selector y edición comparten una caja visible de
+  // 44 px, además de preservar el mismo target para touch/teclado.
+  for (const [selector, label] of [
+    [".startIntro h2", "título inicial"],
+    [`.routineTitle h2,
+.routineTitle h3`, "título de rutina"],
+    [`.sectionHeading h3,
 .newRecord h3,
-.objectives h3`,
-  ]) {
+.objectives h3`, "título de sección"],
+  ] as const) {
     const headingRule = readCssRule(sources.workoutStyles, selector);
-    assert.equal(readCssProperty(headingRule.body, "white-space"), "nowrap", `${selector}: debe permanecer en una línea`);
+    assert.equal(
+      readCssProperty(headingRule.body, "white-space"),
+      "nowrap",
+      `${label}: white-space debe permanecer nowrap`,
+    );
     assert.doesNotMatch(headingRule.body, /overflow-wrap:\s*anywhere/);
   }
   const daySelectorRule = readCssRule(sources.workoutStyles, ".daySelector");
@@ -3126,13 +3645,17 @@ function assertTrainUi01AuditContracts(
     "44px",
     "selector de día: el target táctil estructural debe medir al menos 44px",
   );
-  assert.equal(readCssProperty(daySelectRule.body, "min-height"), "36px");
+  assert.equal(
+    readCssProperty(daySelectRule.body, "min-height"),
+    "44px",
+    "selector de día: la altura visible estructural debe permanecer en 44px",
+  );
   assert.equal(
     readCssProperty(daySelectRule.body, "width"),
     `${approvedDaySelectPixels}px`,
     `selector de día: el ancho estructural debe medir exactamente ${approvedDaySelectPixels}px`,
   );
-  assert.equal(readCssProperty(daySelectRule.body, "padding"), "0 7px");
+  assert.equal(readCssProperty(daySelectRule.body, "padding"), "0 24px 0 8px");
   assert.equal(
     readCssProperty(routineHeadingRule.body, "font-size"),
     `${approvedRoutineTextPixels}px`,
@@ -3145,12 +3668,21 @@ function assertTrainUi01AuditContracts(
   );
   assert.equal(readCssProperty(editButtonRule.body, "width"), "44px");
   assert.equal(readCssProperty(editButtonRule.body, "height"), "44px");
-  assert.equal(readCssProperty(editButtonVisualRule.body, "inset"), "5px");
+  assert.equal(
+    readCssProperty(editButtonVisualRule.body, "inset"),
+    "0",
+    "botón Editar: la caja visual debe conservar inset 0",
+  );
+  assert.equal(readCssProperty(editButtonVisualRule.body, "border-radius"), "8px");
   assert.equal((sources.start.match(/<Pencil size=\{15\}/g) ?? []).length, 1);
   assert.equal((sources.guided.match(/<Pencil size=\{15\}/g) ?? []).length, 1);
 
   // Los colores con token global no pueden reaparecer hardcodeados en el CSS local.
-  assert.doesNotMatch(sources.workoutStyles, /#[0-9a-f]{3,8}\b|rgba?\(/i);
+  assert.doesNotMatch(
+    sources.workoutStyles,
+    /#[0-9a-f]{3,8}\b|rgba?\(/i,
+    "CSS TRAIN-UI-01: los colores locales deben usar tokens, no valores hardcodeados",
+  );
   assert.doesNotMatch(sources.workoutStyles, /(?:linear|radial|conic)-gradient\s*\(/i);
 
   // La cascada completa se evalúa en el orden real de compilación (globals antes del módulo),
@@ -3187,6 +3719,23 @@ const trainUi01AuditSources: TrainUi01AuditSources = {
   trainingDayOrder: files.trainingDayOrder,
   globalStyles,
 };
+const trainUi01AuditSourceFiles = {
+  start: { diskPath: "src/features/active-workout/components/TrainingStartScreen.tsx", syntax: "tsx" },
+  guided: { diskPath: "src/features/active-workout/components/GuidedTrainingScreen.tsx", syntax: "tsx" },
+  performancePanel: {
+    diskPath: "src/features/active-workout/components/ExerciseLastPerformancePanel.tsx",
+    syntax: "tsx",
+  },
+  seriesResult: { diskPath: "src/features/active-workout/components/SeriesResult.tsx", syntax: "tsx" },
+  workoutStyles: { diskPath: "src/features/active-workout/active-workout.module.css", syntax: "css" },
+  metricGrid: { diskPath: "src/ui/data-display/metric-grid.tsx", syntax: "tsx" },
+  workoutRegistration: { diskPath: "src/lib/training/workout-registration.ts", syntax: "ts" },
+  trainingDayOrder: { diskPath: "src/lib/training/training-day-order.ts", syntax: "ts" },
+  globalStyles: { diskPath: "src/app/globals.css", syntax: "css" },
+} as const satisfies Record<
+  keyof TrainUi01AuditSources,
+  { diskPath: string; syntax: "css" | "tsx" | "ts" }
+>;
 const trainUi01HeaderGeometryResults = assertTrainUi01AuditContracts(trainUi01AuditSources);
 
 console.log(
@@ -3195,13 +3744,17 @@ console.log(
   )).join(" | ")}`,
 );
 
-const trainUi01MutationProbes: Array<{
+type TrainUi01VisualMutationProbe = {
   name: string;
   target: keyof TrainUi01AuditSources;
+  expectedFailure: string;
   mutate(source: string): string;
-}> = [
+};
+
+const trainUi01MutationProbes: TrainUi01VisualMutationProbe[] = [
   {
     name: "eliminar título dinámico del historial",
+    expectedFailure: "historial: el summary debe usar presentation.seriesDetailTitle cuando existe rendimiento",
     target: "performancePanel",
     mutate: (source) => replaceAuditOnce(
       source,
@@ -3211,6 +3764,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "reconstruir comparación dinámica de peso y reps",
+    expectedFailure: "presentation no puede ocultarse mediante alias, destructuring ni acceso dinámico",
     target: "performancePanel",
     mutate: (source) => replaceAuditOnce(
       source,
@@ -3220,11 +3774,13 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "sustituir estado de objetivos por label genérico",
+    expectedFailure: "objetivos: cada tarjeta debe mostrar item.detail, no un label genérico",
     target: "seriesResult",
     mutate: (source) => replaceAuditOnce(source, "{item.detail}", "{item.label}"),
   },
   {
     name: "reintroducir segundo h1",
+    expectedFailure: "jerarquía de títulos: GuidedTrainingScreen no puede introducir un h1",
     target: "guided",
     mutate: (source) => replaceAuditOnce(
       replaceAuditOnce(source, '<h2 id="guided-routine-title">', '<h1 id="guided-routine-title">'),
@@ -3234,6 +3790,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "aplicar role row al botón seleccionable",
+    expectedFailure: "selección de ejercicios: debe conservar button nativo con aria-pressed",
     target: "guided",
     mutate: (source) => replaceAuditOnce(
       source,
@@ -3243,6 +3800,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "emitir alert durante el draft 5,",
+    expectedFailure: "peso decimal intermedio: 5, y 5. no pueden activar alert antes del intento de registro",
     target: "guided",
     mutate: (source) => replaceAuditOnce(
       source,
@@ -3252,6 +3810,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "reducir inputs móviles bajo 16px",
+    expectedFailure: "inputs de peso/repeticiones: 14px provoca autozoom en iOS",
     target: "workoutStyles",
     mutate: (source) => mutateCssRule(
       source,
@@ -3263,6 +3822,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "degradar contraste de fila seleccionada",
+    expectedFailure: "fila seleccionada: el fondo debe permanecer var(--primary-strong)",
     target: "workoutStyles",
     mutate: (source) => mutateCssRule(
       source,
@@ -3273,6 +3833,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "mover el estilo seleccionado a un bloque señuelo",
+    expectedFailure: "fila seleccionada: el fondo debe permanecer var(--primary-strong)",
     target: "workoutStyles",
     mutate: (source) => `${mutateCssRule(
       source,
@@ -3283,6 +3844,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "convertir data-complete en literal no ejecutable",
+    expectedFailure: "estado completado: data-complete debe derivarse de isDone",
     target: "guided",
     mutate: (source) => replaceAuditOnce(
       source,
@@ -3292,6 +3854,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "eliminar verde del estado completado",
+    expectedFailure: "estado completado: el color debe permanecer var(--workout-row-complete)",
     target: "workoutStyles",
     mutate: (source) => mutateCssRule(
       source,
@@ -3302,6 +3865,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "hardcodear fondo TRAIN-UI-01",
+    expectedFailure: "CSS TRAIN-UI-01: los colores locales deben usar tokens, no valores hardcodeados",
     target: "workoutStyles",
     mutate: (source) => mutateCssRule(
       source,
@@ -3312,6 +3876,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "reintroducir banda distinta en zona Back",
+    expectedFailure: "zona Back: el fondo debe permanecer var(--background)",
     target: "globalStyles",
     mutate: (source) => mutateCssRule(
       source,
@@ -3322,6 +3887,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "degradar especificidad de tarjeta frente al CSS global",
+    expectedFailure: "tarjeta TRAIN-UI-01: el fondo debe conservar la especificidad local .workoutCard.workoutCard",
     target: "workoutStyles",
     mutate: (source) => source.replace(
       ".workoutCard.workoutCard {",
@@ -3330,6 +3896,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "reintroducir gradiente en topbar",
+    expectedFailure: "topbar: sin banda ni gradiente",
     target: "globalStyles",
     mutate: (source) => mutateCssRule(
       source,
@@ -3340,6 +3907,7 @@ const trainUi01MutationProbes: Array<{
   },
   {
     name: "permitir wrap del título de rutina",
+    expectedFailure: "título de rutina: white-space debe permanecer nowrap",
     target: "workoutStyles",
     mutate: (source) => mutateCssRule(
       source,
@@ -3350,42 +3918,261 @@ const trainUi01MutationProbes: Array<{
     ),
   },
   {
-    name: "agrandar visualmente el selector de día",
+    name: "reducir visualmente el selector de día",
+    expectedFailure: "selector de día: la altura visible estructural debe permanecer en 44px",
     target: "workoutStyles",
     mutate: (source) => mutateCssRule(
       source,
       ".daySelector select",
-      "min-height: 36px;",
       "min-height: 44px;",
+      "min-height: 36px;",
     ),
   },
   {
-    name: "agrandar visualmente el botón Editar",
+    name: "reducir visualmente el botón Editar",
+    expectedFailure: "botón Editar: la caja visual debe conservar inset 0",
     target: "workoutStyles",
     mutate: (source) => mutateCssRule(
       source,
       ".editRoutineButton.editRoutineButton::before",
-      "inset: 5px;",
       "inset: 0;",
+      "inset: 5px;",
+    ),
+  },
+  {
+    name: "restaurar tipografía pequeña del texto introductorio",
+    expectedFailure: "texto introductorio: la tipografía debe conservar clamp(0.7rem, 3.2vw, 1.1rem)",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".startIntro h2",
+      "font-size: clamp(0.7rem, 3.2vw, 1.1rem);",
+      "font-size: clamp(0.58rem, 2.7vw, 1.1rem);",
+    ),
+  },
+  {
+    name: "eliminar compactación del texto introductorio",
+    expectedFailure: "texto introductorio: letter-spacing debe conservar -1.2px",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".startIntro h2",
+      "letter-spacing: -1.2px;",
+      "letter-spacing: normal;",
+    ),
+  },
+  {
+    name: "restaurar tipografía pequeña de métricas",
+    expectedFailure: "etiquetas métricas: font-size debe conservar clamp(0.625rem, 2.4vw, 0.75rem)",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".metricScope.metricScope :global(.metric-title-row span)",
+      "font-size: clamp(0.625rem, 2.4vw, 0.75rem);",
+      "font-size: clamp(0.5rem, 2vw, 0.7rem);",
+    ),
+  },
+  {
+    name: "permitir corte arbitrario en etiquetas métricas",
+    expectedFailure: "etiquetas métricas: overflow-wrap debe permanecer normal",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".metricScope.metricScope :global(.metric-title-row span)",
+      "overflow-wrap: normal;",
+      "overflow-wrap: anywhere;",
+    ),
+  },
+  {
+    name: "eliminar límite de dos líneas de la primera métrica",
+    expectedFailure: "primera etiqueta métrica: max-width debe conservar 13ch para el límite aprobado de 2 líneas",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".metricScope.metricScope :global(.metric:nth-child(1) .metric-title-row span)",
+      "max-width: 13ch;",
+      "max-width: none;",
+    ),
+  },
+  {
+    name: "eliminar límite de dos líneas de la segunda métrica",
+    expectedFailure: "segunda etiqueta métrica: max-width debe conservar 7ch para el límite aprobado de 2 líneas",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".metricScope.metricScope :global(.metric:nth-child(2) .metric-title-row span)",
+      "max-width: 7ch;",
+      "max-width: none;",
+    ),
+  },
+  {
+    name: "eliminar límite de tres líneas de la tercera métrica",
+    expectedFailure: "tercera etiqueta métrica: max-width debe conservar 12ch para el límite aprobado de 3 líneas",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".metricScope.metricScope :global(.metric:nth-child(3) .metric-title-row span)",
+      "max-width: 12ch;",
+      "max-width: none;",
+    ),
+  },
+  {
+    name: "volver transparentes las casillas de historial y comentario",
+    expectedFailure: "historial y comentario: el fondo debe permanecer var(--primary-strong)",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".referencePanel [data-disclosure] > summary",
+      "background: var(--primary-strong);",
+      "background: transparent;",
+    ),
+  },
+  {
+    name: "permitir que kg salte a otra línea",
+    expectedFailure: "peso del ejercicio seleccionado: la unidad kg debe permanecer en una línea",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".selectedExerciseHeading.selectedExerciseHeading strong",
+      "white-space: nowrap;",
+      "white-space: normal;",
     ),
   },
 ];
 
-for (const probe of trainUi01MutationProbes) {
+const trainUi01MetricProtectionMutationProbes: TrainUi01VisualMutationProbe[] = [
+  {
+    name: "M1 · degradar primera etiqueta a más de 2 líneas",
+    target: "workoutStyles",
+    expectedFailure: "primera etiqueta métrica: “Total de KG de la rutina” excede el límite aprobado de 2 líneas (3 líneas calculadas)",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(1) :global(.metric-title-row) span {\n  max-width: 10ch;\n}\n`,
+  },
+  {
+    name: "M2 · degradar segunda etiqueta a más de 2 líneas",
+    target: "workoutStyles",
+    expectedFailure: "segunda etiqueta métrica: “Total Reps” excede el límite aprobado de 2 líneas (3 líneas calculadas)",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(2) :global(.metric-title-row) span {\n  max-width: 4ch;\n  overflow-wrap: anywhere;\n}\n`,
+  },
+  {
+    name: "M3 · degradar tercera etiqueta a más de 3 líneas",
+    target: "workoutStyles",
+    expectedFailure: "tercera etiqueta métrica: “Total ejercicios registrados” excede el límite aprobado de 3 líneas (4 líneas calculadas)",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(3) :global(.metric-title-row) span {\n  max-width: 8ch;\n  overflow-wrap: anywhere;\n}\n`,
+  },
+  {
+    name: "M4 · aplicar ellipsis efectivo a la segunda etiqueta",
+    target: "workoutStyles",
+    expectedFailure: "segunda etiqueta métrica: no puede usar text-overflow: ellipsis",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(2) :global(.metric-title-row) span {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n`,
+  },
+  {
+    name: "M5 · ocultar overflow de la tercera etiqueta",
+    target: "workoutStyles",
+    expectedFailure: "tercera etiqueta métrica: no puede usar overflow: hidden ni clip",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(3) :global(.metric-title-row) span {\n  overflow: hidden;\n}\n`,
+  },
+  {
+    name: "M6 · convertir la grilla en columnas desiguales",
+    target: "workoutStyles",
+    expectedFailure: "grilla métrica: debe conservar tres columnas iguales",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.routine-metric-grid) {\n  grid-template-columns: 1fr 2fr 1fr;\n}\n`,
+  },
+  {
+    name: "M7 · dar altura diferente a la segunda tarjeta",
+    target: "workoutStyles",
+    expectedFailure: "tarjetas métricas: altura uniforme de las tres tarjetas a 320px",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(2) {\n  min-height: 160px;\n}\n`,
+  },
+  {
+    name: "M8 · añadir override tardío señuelo sólo a la primera tarjeta",
+    target: "workoutStyles",
+    expectedFailure: "tarjetas métricas: ancho uniforme de las tres tarjetas a 390px",
+    mutate: (source) => `${source}\n@media (min-width: 390px) and (max-width: 390px) {\n  .metricScope.metricScope :global(.metric):nth-child(1) {\n    width: calc(100% - 1px);\n  }\n}\n`,
+  },
+];
+
+const expectedTrainUi01FocalMutationProbeCount = 27;
+const expectedTrainUi01MetricProtectionProbeCount = 8;
+const expectedTrainUi01VisualMutationProbeCount = 35;
+assert.equal(
+  trainUi01MutationProbes.length,
+  expectedTrainUi01FocalMutationProbeCount,
+  "TRAIN-UI-01: deben existir exactamente 27 probes visuales focales",
+);
+assert.equal(
+  trainUi01MetricProtectionMutationProbes.length,
+  expectedTrainUi01MetricProtectionProbeCount,
+  "TRAIN-UI-01: deben existir exactamente 8 probes métricos estructurales",
+);
+assert.equal(
+  trainUi01MutationProbes.length + trainUi01MetricProtectionMutationProbes.length,
+  expectedTrainUi01VisualMutationProbeCount,
+  "TRAIN-UI-01: deben ejecutarse exactamente 35 probes visuales endurecidos",
+);
+
+function runTrainUi01VisualMutationProbe(probe: TrainUi01VisualMutationProbe) {
+  const metadata = trainUi01AuditSourceFiles[probe.target];
   const original = trainUi01AuditSources[probe.target];
-  const mutated = probe.mutate(original);
-  assert.notEqual(mutated, original, `probe sin mutación efectiva: ${probe.name}`);
-  assert.throws(
-    () => assertTrainUi01AuditContracts({
-      ...trainUi01AuditSources,
-      [probe.target]: mutated,
-    }),
-    `el contrato debe matar la mutación: ${probe.name}`,
+  const originalDiskHash = sha256(readSource(metadata.diskPath));
+  assert.equal(
+    originalDiskHash,
+    sha256(original),
+    `restauración byte a byte: el source base de ${probe.name} debe coincidir con disco`,
   );
+
+  try {
+    const mutated = probe.mutate(original);
+    assert.notEqual(mutated, original, `probe sin mutación efectiva: ${probe.name}`);
+    assert.notEqual(
+      sha256(mutated),
+      originalDiskHash,
+      `probe sin cambio byte a byte: ${probe.name}`,
+    );
+    if (metadata.syntax === "css") parseExecutableCss(mutated);
+    else assertValidTypeScriptMutation(
+      mutated,
+      metadata.diskPath,
+      metadata.syntax === "tsx" ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+
+    let semanticFailure: unknown;
+    try {
+      assertTrainUi01AuditContracts({
+        ...trainUi01AuditSources,
+        [probe.target]: mutated,
+      });
+    } catch (error) {
+      semanticFailure = error;
+    }
+    assert.ok(semanticFailure instanceof Error, `el contrato debe matar la mutación: ${probe.name}`);
+    assert.ok(
+      semanticFailure.message.includes(probe.expectedFailure),
+      `el mensaje debe contener exactamente el expectedFailure: ${probe.name}`,
+    );
+    assert.equal(
+      semanticFailure.message.split("\n", 1)[0],
+      probe.expectedFailure,
+      `el probe debe morir exclusivamente por su expectedFailure: ${probe.name}`,
+    );
+  } finally {
+    assert.equal(
+      sha256(readSource(metadata.diskPath)),
+      originalDiskHash,
+      `restauración byte a byte fallida después de ${probe.name}`,
+    );
+  }
+}
+
+for (const probe of trainUi01MutationProbes) runTrainUi01VisualMutationProbe(probe);
+for (const probe of trainUi01MetricProtectionMutationProbes) {
+  runTrainUi01VisualMutationProbe(probe);
 }
 
 console.log(
-  `TRAIN-UI-01 previous focal mutation probes passed (${trainUi01MutationProbes.length}): ${trainUi01MutationProbes.map((probe) => probe.name).join(" | ")}`,
+  `TRAIN-UI-01 focal mutation probes passed (${expectedTrainUi01FocalMutationProbeCount}): ${trainUi01MutationProbes.map((probe) => `${probe.name} => ${probe.expectedFailure}`).join(" | ")}`,
+);
+console.log(
+  `TRAIN-UI-01 metric protection mutation probes passed (${expectedTrainUi01MetricProtectionProbeCount}): ${trainUi01MetricProtectionMutationProbes.map((probe) => `${probe.name} => ${probe.expectedFailure}`).join(" | ")}`,
 );
 
 type TrainUi01ReauditProbe = {
@@ -3560,9 +4347,9 @@ const trainUi01HeaderGeometryProbes: TrainUi01ReauditProbe[] = [
     name: "G4 · aumentar selector hasta provocar colisión",
     diskPath: "src/features/active-workout/active-workout.module.css",
     syntax: "css",
-    expectedFailure: /geometría del selector: debe conservar 76px útiles a 401px/,
+    expectedFailure: /geometría del selector: debe conservar 82px útiles a 401px/,
     target: { kind: "audit", key: "workoutStyles" },
-    mutate: (source) => `${source}\n@media (min-width: 401px) and (max-width: 401px) {\n  .daySelector select {\n    width: 120px;\n  }\n}\n`,
+    mutate: (source) => `${source}\n@media (min-width: 401px) and (max-width: 401px) {\n  .daySelector select {\n    width: 140px;\n  }\n}\n`,
   },
   {
     name: "G5 · aumentar gap hasta provocar colisión",
@@ -3634,29 +4421,29 @@ const trainUi01HeaderGeometryProbes: TrainUi01ReauditProbe[] = [
     ),
   },
   {
-    name: "G13 · reducir selector bajo 92px",
+    name: "G13 · reducir selector bajo 116px",
     diskPath: "src/features/active-workout/active-workout.module.css",
     syntax: "css",
-    expectedFailure: /selector de día: el ancho estructural debe medir exactamente 92px/,
+    expectedFailure: /selector de día: el ancho estructural debe medir exactamente 116px/,
     target: { kind: "audit", key: "workoutStyles" },
     mutate: (source) => mutateCssRule(
       source,
       ".daySelector select",
-      "width: 92px;",
-      "width: 91px;",
+      "width: 116px;",
+      "width: 115px;",
     ),
   },
   {
-    name: "G14 · aumentar selector sobre 92px",
+    name: "G14 · aumentar selector sobre 116px",
     diskPath: "src/features/active-workout/active-workout.module.css",
     syntax: "css",
-    expectedFailure: /selector de día: el ancho estructural debe medir exactamente 92px/,
+    expectedFailure: /selector de día: el ancho estructural debe medir exactamente 116px/,
     target: { kind: "audit", key: "workoutStyles" },
     mutate: (source) => mutateCssRule(
       source,
       ".daySelector select",
-      "width: 92px;",
-      "width: 93px;",
+      "width: 116px;",
+      "width: 117px;",
     ),
   },
   {
