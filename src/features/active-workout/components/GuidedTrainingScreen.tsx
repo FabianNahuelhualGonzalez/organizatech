@@ -1,8 +1,9 @@
-import { Pencil, Save } from "lucide-react";
+import { Pencil } from "lucide-react";
 
+import styles from "@/features/active-workout/active-workout.module.css";
 import { calculateExerciseMetrics } from "@/lib/progress/calculations";
 import type { ExerciseTemplate } from "@/lib/progress/types";
-import { formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
+import { formatDecimalEs, formatKg, isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import {
   buildExerciseLastObservationPresentation,
   type ExerciseLastObservationPresentationInput,
@@ -12,20 +13,23 @@ import {
   type ExerciseLastPerformancePresentationInput,
 } from "@/lib/training/exercise-last-performance-presentation";
 import { normalizeExerciseDraft, type ExerciseDraft } from "@/lib/training/training-exercise-draft";
-import { isExerciseRegisteredInCurrentWorkout } from "@/lib/training/workout-registration";
+import {
+  incompleteCurrentExerciseMessage,
+  isExerciseRegisteredInCurrentWorkout,
+} from "@/lib/training/workout-registration";
+import { IconButton } from "@/ui/buttons/icon-button";
 import { RoutineMetricGrid } from "@/ui/data-display/metric-grid";
 import { ExerciseLastPerformancePanel } from "@/features/active-workout/components/ExerciseLastPerformancePanel";
 import { SeriesResult } from "@/features/active-workout/components/SeriesResult";
 
 /**
- * Pantalla de entrenamiento guiado (P3-30): extracción MECÁNICA de la función inline
- * `GuidedTrainingScreen` que vivía en `organizatech-app.tsx`. Sin rediseño, sin cambios
- * funcionales ni visuales: mismos textos, DOM, classNames, callbacks y estados disabled.
+ * Pantalla de entrenamiento guiado. TRAIN-UI-01 cambia únicamente su presentación visual y
+ * conserva el boundary extraído en P3-30: mismos callbacks, drafts y estados productivos.
  *
- * Componente puro de presentación, sin hooks, sin estado propio, sin efectos. No accede a
- * storage, Supabase, repositories, navegación ni sesión: todo llega por props desde el root.
- *
- * Reutiliza el normalizador canónico `normalizeExerciseDraft` (P3-29) — no lo duplica.
+ * Componente puro de presentación, sin hooks, estado propio ni efectos. No accede a storage,
+ * Supabase, repositories, navegación ni sesión: todo llega por props desde el composition root.
+ * Reutiliza el normalizador canónico `normalizeExerciseDraft` (P3-29) y las presentaciones de
+ * historial/objetivos; no crea fuentes de verdad alternativas.
  *
  * NOTA sobre los tipos de `latestExercisePerformance`/`latestExerciseObservation`: se declaran
  * mediante los tipos de entrada de las presentaciones (`...PresentationInput["latest"]` y
@@ -51,6 +55,13 @@ function readWeightInput(value: string, fallback: string) {
 
 function readPreviewWeight(value: string, fallback: number) {
   return parseDecimalWeightInput(value) ?? fallback;
+}
+
+function isIntermediateDecimalWeightInput(value: string) {
+  const normalized = value.trim();
+  return isDecimalWeightDraftInput(value) && (
+    normalized.endsWith(",") || normalized.endsWith(".")
+  );
 }
 
 function readOptionalNumber(value: string): number | "" {
@@ -150,11 +161,17 @@ export function GuidedTrainingScreen({
     error: latestExerciseObservationError,
     hasQueried: latestExerciseObservationDidQuery,
   });
+  const hasSubmittedInvalidWeight = draft
+    ? notice === incompleteCurrentExerciseMessage && (
+        parseDecimalWeightInput(draft.weight) === null &&
+        !isIntermediateDecimalWeightInput(draft.weight)
+      )
+    : false;
 
   if (!activeExercise || !draft || !preview || !performancePresentation) {
     return (
-      <section className="screen">
-        <div className="card wide">
+      <section className={`screen ${styles.screen}`}>
+        <div className={`card wide ${styles.workoutCard}`}>
           <h3>No hay ejercicios para {day}</h3>
         </div>
       </section>
@@ -162,78 +179,102 @@ export function GuidedTrainingScreen({
   }
 
   return (
-    <section className="screen">
-      <div className="card wide day-switcher-card">
-        <div className="section-heading">
-          <div>
-            <h3>Selecciona rutina o día</h3>
-            <p className="eyebrow">Cambia entre tus días registrados para seguir entrenando.</p>
+    <section className={`screen ${styles.screen}`} aria-labelledby="guided-routine-title">
+      <article className={`card wide routine-summary-card mobile-series-card ${styles.workoutCard}`}>
+        <header className={styles.routineHeader}>
+          <div className={styles.routineTitle}>
+            <h2 id="guided-routine-title">Rutina registrada {day}</h2>
+            <p>{routine}</p>
           </div>
-        </div>
-        <div className="routine-day-pills">
-          {routineDays.map((item) => (
-            <button
-              key={item}
-              className={`routine-day-pill configured ${item === day ? "active" : ""}`}
+
+          <div className={styles.routineControls}>
+            <label className={styles.daySelector}>
+              <span className={styles.srOnly}>Día de entrenamiento</span>
+              <select value={day} onChange={(event) => switchDay(event.target.value)}>
+                {routineDays.map((item) => (
+                  <option value={item} key={item}>{item}</option>
+                ))}
+              </select>
+            </label>
+            <IconButton
+              className={styles.editRoutineButton}
               type="button"
-              onClick={() => switchDay(item)}
+              aria-label="Editar rutina semanal"
+              onClick={editRoutine}
             >
-              {item}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="card wide routine-summary-card">
-        <h3>Entrenamiento día {day}</h3>
-        <p className="eyebrow">{routine}</p>
-        {notice ? <div className={`notice-banner ${notice.includes("Ya existe un entrenamiento") ? "warning" : ""}`}>{notice}</div> : null}
-        <p className="eyebrow">Ejercicio {activeIndex + 1} de {exercises.length} · {completedCount} registrados</p>
-        <RoutineMetricGrid targetSummary={targetSummary} />
-        <button className="button secondary" type="button" onClick={editRoutine}>
-          <Pencil size={16} />
-          Editar rutina semanal
-        </button>
-      </div>
-
-      <div className="card wide">
-        <div className="section-heading">
-          <div>
-            <h3>Ejercicios a realizar</h3>
-            <p className="eyebrow">Elige el ejercicio, revisa el objetivo y registra tus series.</p>
+              <Pencil size={15} aria-hidden="true" />
+            </IconButton>
           </div>
-        </div>
-        <div className="routine-list">
-          {exercises.map((exercise, index) => {
-            const isActive = index === activeIndex;
-            const isDone = isExerciseRegistered(exercise);
+        </header>
 
-            return (
-              <button
-                key={exercise.id}
-                className={`routine-item ${isActive ? "active" : ""} ${isDone ? "done" : ""}`}
-                onClick={() => setActiveIndex(index)}
-              >
-                <span className="routine-item-index">{index + 1}</span>
-                <span className="routine-item-main">
-                  <strong>{exercise.name}</strong>
-                  <small>{exercise.targetSets} series · {exercise.targetReps} reps · {formatKg(exercise.baseWeight)}</small>
-                </span>
-                <span className="routine-item-status">
-                  {isDone ? "Registrado" : isActive ? "Actual" : "Pendiente"}
-                </span>
-              </button>
-            );
-          })}
+        {notice ? (
+          <p
+            className={`${styles.notice} ${notice.includes("Ya existe un entrenamiento") ? styles.warningNotice : ""}`}
+            role="status"
+            aria-live="polite"
+          >
+            {notice}
+          </p>
+        ) : null}
+        <div className={styles.srOnly} aria-hidden="true">
+          <RoutineMetricGrid targetSummary={targetSummary} />
         </div>
-      </div>
+        <p className={styles.srOnly}>
+          Ejercicio {activeIndex + 1} de {exercises.length}; {completedCount} registrados.
+        </p>
 
-      <div className="card wide mobile-series-card">
-        <div className="series-card-heading">
-          <p className="eyebrow">Registro de series</p>
-          <h3>{activeExercise.name}</h3>
-        </div>
-        <div className="series-exercise-card">
+        <section className={styles.planSection} aria-labelledby="guided-plan-title">
+          <div className={styles.sectionHeading}>
+            <h3 id="guided-plan-title">Pauta de entrenamiento registrada</h3>
+            <p>Selecciona un ejercicio dentro de la tabla para obtener los detalles.</p>
+          </div>
+
+          <div
+            className={styles.exerciseTable}
+            role="group"
+            aria-label={`Ejercicios de ${routine} para ${day}`}
+          >
+            <div className={styles.tableHeader} aria-hidden="true">
+              <span>Ejercicios</span>
+              <span>Series</span>
+              <span>Reps</span>
+              <span>KG</span>
+            </div>
+            <div className={styles.exerciseRows}>
+              {exercises.map((exercise, index) => {
+                const isActive = index === activeIndex;
+                const isDone = isExerciseRegistered(exercise);
+
+                return (
+                  <button
+                    className={styles.selectableTableRow}
+                    type="button"
+                    aria-pressed={isActive}
+                    aria-label={`${exercise.name}: ${exercise.targetSets} series, ${exercise.targetReps} repeticiones, ${formatKg(exercise.baseWeight)}${isDone ? ", registrado" : ""}`}
+                    data-complete={isDone ? "true" : undefined}
+                    onClick={() => setActiveIndex(index)}
+                    key={exercise.id}
+                  >
+                    <span className={styles.exerciseNameCell}>
+                      {exercise.name}
+                      {isDone ? <span className={styles.rowStatus} aria-hidden="true">✓</span> : null}
+                    </span>
+                    <span>{exercise.targetSets}</span>
+                    <span>{exercise.targetReps}</span>
+                    <span>{formatDecimalEs(exercise.baseWeight)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.selectedExercise} aria-labelledby="selected-exercise-title">
+          <p className={styles.overline}>Ejercicio que seleccionaste</p>
+          <div className={styles.selectedExerciseHeading}>
+            <h3 id="selected-exercise-title">{activeExercise.name}</h3>
+            <strong>{performancePresentation.objectiveText}</strong>
+          </div>
           <ExerciseLastPerformancePanel
             presentation={performancePresentation}
             exerciseId={activeExercise.id}
@@ -241,52 +282,79 @@ export function GuidedTrainingScreen({
             observationValue={draft.observation}
             onObservationChange={(value) => updateDraft(activeExercise, { observation: value })}
           />
+        </section>
+
+        <section className={styles.newRecord} aria-labelledby="new-record-title">
+          <h3 id="new-record-title">Nuevo registro</h3>
           <label className="series-weight-field">
-            <span>Peso usado</span>
+            <span>KG utilizado</span>
             <input
               type="text"
               inputMode="decimal"
+              autoComplete="off"
               placeholder={formatKg(activeExercise.baseWeight)}
               value={draft.weight}
+              aria-invalid={hasSubmittedInvalidWeight || undefined}
+              aria-describedby={`exercise-weight-hint${hasSubmittedInvalidWeight ? " exercise-weight-error" : ""}`}
               onChange={(event) => updateDraft(activeExercise, { weight: readWeightInput(event.target.value, draft.weight) })}
             />
+            <small id="exercise-weight-hint">Puedes usar coma o punto para pesos decimales.</small>
           </label>
-          <div className="series-rep-grid">
-            {draft.reps.map((reps, index) => (
-              <label className="series-rep-box" key={index}>
-                <span>Serie {index + 1}</span>
-                <input
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  placeholder={`${activeExercise.targetReps}`}
-                  value={reps}
-                  onChange={(event) => {
-                    const next = [...draft.reps];
-                    next[index] = readOptionalNumber(event.target.value);
-                    updateDraft(activeExercise, { reps: next });
-                  }}
-                />
-              </label>
-            ))}
+          {hasSubmittedInvalidWeight ? (
+            <p className={styles.fieldError} id="exercise-weight-error" role="alert">
+              Ingresa un peso válido igual o mayor que cero.
+            </p>
+          ) : null}
+          <p className={styles.repGridLabel}>Repeticiones por series</p>
+          <div>
+            <div className="series-rep-grid">
+              {draft.reps.map((reps, index) => (
+                <label className="series-rep-box" key={index}>
+                  <span>Serie {index + 1}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    inputMode="numeric"
+                    placeholder={`${activeExercise.targetReps}`}
+                    value={reps}
+                    aria-label={`Repeticiones de la serie ${index + 1}`}
+                    onChange={(event) => {
+                      const next = [...draft.reps];
+                      next[index] = readOptionalNumber(event.target.value);
+                      updateDraft(activeExercise, { reps: next });
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
           </div>
-        </div>
+        </section>
+
         <SeriesResult entry={preview} />
-        {!allRegistered && !activeExerciseAlreadyRegistered ? (
-          <button className="button" type="button" onClick={registerExercise}>
-            <Save size={17} />
-            Registrar serie
-          </button>
-        ) : !allRegistered ? (
-          <button className="button secondary" type="button" disabled>
-            Ejercicio ya registrado
-          </button>
-        ) : (
-          <button className="start-button compact" type="button" onClick={saveCompletedTraining} disabled={isBusy}>
-            {isBusy ? "Guardando..." : "Guardar entrenamiento"}
-          </button>
-        )}
-      </div>
+
+        <div className={styles.actionRow}>
+          {!allRegistered && !activeExerciseAlreadyRegistered ? (
+            <button className={`button ${styles.primaryAction}`} type="button" onClick={registerExercise}>
+              Registrar serie
+            </button>
+          ) : !allRegistered ? (
+            <button className={`button secondary ${styles.primaryAction}`} type="button" disabled>
+              Ejercicio ya registrado
+            </button>
+          ) : (
+            <button
+              className={`start-button compact ${styles.primaryAction}`}
+              type="button"
+              onClick={saveCompletedTraining}
+              disabled={isBusy}
+              aria-busy={isBusy}
+            >
+              {isBusy ? "Guardando..." : "Guardar entrenamiento"}
+            </button>
+          )}
+        </div>
+      </article>
     </section>
   );
 }
