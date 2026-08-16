@@ -17,7 +17,8 @@
 .startIntro h2 {
   max-width: 36rem;
   margin: 0;
-  font-size: clamp(0.58rem, 2.7vw, 1.1rem);
+  font-size: clamp(0.7rem, 3.2vw, 1.1rem);
+  letter-spacing: -1.2px;
   line-height: 1.35;
   white-space: nowrap;
 }
@@ -80,15 +81,15 @@
 }
 
 .daySelector select {
-  width: 92px;
+  width: 116px;
   min-width: 0;
-  min-height: 36px;
+  min-height: 44px;
   border: 1px solid color-mix(in srgb, var(--text) 72%, transparent);
   border-radius: 8px;
   color: var(--text);
   color-scheme: dark;
   background: var(--background);
-  padding: 0 7px;
+  padding: 0 24px 0 8px;
   font-size: 1rem;
   letter-spacing: -1.4px;
 }
@@ -111,9 +112,9 @@
 
 .editRoutineButton.editRoutineButton::before {
   position: absolute;
-  inset: 5px;
+  inset: 0;
   border: 1px solid color-mix(in srgb, var(--text) 72%, transparent);
-  border-radius: 7px;
+  border-radius: 8px;
   content: "";
   pointer-events: none;
 }
@@ -305,10 +306,23 @@
 
 .metricScope.metricScope :global(.metric-title-row span) {
   color: var(--text);
-  font-size: clamp(0.5rem, 2vw, 0.7rem);
+  font-size: clamp(0.625rem, 2.4vw, 0.75rem);
   font-weight: 700;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.metricScope.metricScope :global(.metric:nth-child(1) .metric-title-row span) {
+  max-width: 13ch;
+}
+
+.metricScope.metricScope :global(.metric:nth-child(2) .metric-title-row span) {
+  max-width: 7ch;
+}
+
+.metricScope.metricScope :global(.metric:nth-child(3) .metric-title-row span) {
+  max-width: 12ch;
 }
 
 .metricScope.metricScope :global(.metric strong) {
@@ -390,8 +404,11 @@
   overflow-wrap: anywhere;
 }
 
-.selectedExerciseHeading strong {
+.selectedExerciseHeading.selectedExerciseHeading strong {
+  min-width: max-content;
   text-align: right;
+  overflow-wrap: normal;
+  white-space: nowrap;
 }
 
 .referencePanel.referencePanel {
@@ -427,8 +444,8 @@
   gap: 10px;
   border: 1px solid color-mix(in srgb, var(--text) 90%, transparent);
   border-radius: 8px;
-  color: var(--muted);
-  background: transparent;
+  color: var(--text);
+  background: var(--primary-strong);
   padding: 8px 12px;
   cursor: pointer;
   font-size: clamp(0.67rem, 3vw, 0.8rem);
@@ -776,7 +793,14 @@
 
   .routineTitle h2,
   .routineTitle h3 {
-    letter-spacing: -1.6px;
+    letter-spacing: -2.6px;
+  }
+}
+
+@media (min-width: 421px) and (max-width: 479px) {
+  .routineTitle h2,
+  .routineTitle h3 {
+    letter-spacing: -1.8px;
   }
 }
 
