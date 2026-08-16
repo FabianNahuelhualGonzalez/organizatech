@@ -6,7 +6,6 @@ import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import {
   AUTH_REGISTRATION_GENDER_VALUES,
-  COACH_REGISTRATION_SUBMIT_ENABLED,
   type AuthFieldErrors,
   type AuthFieldName,
 } from "@/features/auth/model/auth-form";
@@ -81,7 +80,7 @@ export function AuthScreen({
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [studyTitle, setStudyTitle] = useState("");
+  const [professionalTitle, setProfessionalTitle] = useState("");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] = useState(false);
@@ -139,9 +138,8 @@ export function AuthScreen({
         id="auth-panel"
         role="tabpanel"
         aria-labelledby={accountType === "usuario" ? "auth-tab-usuario" : "auth-tab-coach"}
-        action={isCoachRegistration ? undefined : onSubmit}
+        action={onSubmit}
         autoComplete={isRegister ? "off" : "on"}
-        onSubmit={isCoachRegistration ? (event) => event.preventDefault() : undefined}
       >
         {isRegister ? <h2>Crea tu cuenta</h2> : null}
 
@@ -153,8 +151,8 @@ export function AuthScreen({
               gender={gender}
               lastName={lastName}
               phoneNumber={phoneNumber}
-              studyTitle={studyTitle}
-              includeStudyTitle={isCoachRegistration}
+              professionalTitle={professionalTitle}
+              includeProfessionalTitle={isCoachRegistration}
               firstName={registerName}
               email={registerEmail}
               password={registerPassword}
@@ -166,7 +164,7 @@ export function AuthScreen({
               onGenderChange={setGender}
               onLastNameChange={setLastName}
               onPhoneNumberChange={setPhoneNumber}
-              onStudyTitleChange={setStudyTitle}
+              onProfessionalTitleChange={setProfessionalTitle}
               onFirstNameChange={onRegisterNameChange}
               onEmailChange={onRegisterEmailChange}
               onPasswordChange={onRegisterPasswordChange}
@@ -213,7 +211,7 @@ export function AuthScreen({
         <button
           className={styles.primaryButton}
           type="submit"
-          disabled={isBusy || (isCoachRegistration && !COACH_REGISTRATION_SUBMIT_ENABLED)}
+          disabled={isBusy}
         >
           {isRegister ? <UserPlus aria-hidden="true" size={21} /> : <LogIn aria-hidden="true" size={21} />}
           {isBusy ? (isRegister ? "Creando cuenta..." : "Iniciando sesión...") : isRegister ? "Crear cuenta" : "Iniciar sesión"}
@@ -454,8 +452,8 @@ interface RegistrationFieldsProps {
   gender: string;
   lastName: string;
   phoneNumber: string;
-  studyTitle: string;
-  includeStudyTitle: boolean;
+  professionalTitle: string;
+  includeProfessionalTitle: boolean;
   firstName: string;
   email: string;
   password: string;
@@ -467,7 +465,7 @@ interface RegistrationFieldsProps {
   onGenderChange: (value: string) => void;
   onLastNameChange: (value: string) => void;
   onPhoneNumberChange: (value: string) => void;
-  onStudyTitleChange: (value: string) => void;
+  onProfessionalTitleChange: (value: string) => void;
   onFirstNameChange: (value: string) => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
@@ -483,8 +481,8 @@ function RegistrationFields({
   gender,
   lastName,
   phoneNumber,
-  studyTitle,
-  includeStudyTitle,
+  professionalTitle,
+  includeProfessionalTitle,
   firstName,
   email,
   password,
@@ -496,7 +494,7 @@ function RegistrationFields({
   onGenderChange,
   onLastNameChange,
   onPhoneNumberChange,
-  onStudyTitleChange,
+  onProfessionalTitleChange,
   onFirstNameChange,
   onEmailChange,
   onPasswordChange,
@@ -526,8 +524,8 @@ function RegistrationFields({
       </label>
       <AuthTextField id="register-phone-number" name="register-phone-number" label="Celular" placeholder="+56912345678" type="tel" autoComplete="tel" inputMode="tel" value={phoneNumber} error={fieldErrors["register-phone-number"]} onChange={onPhoneNumberChange} onErrorClear={() => onFieldErrorClear("register-phone-number")} required />
       <AuthTextField id="register-email" name="register-email" label="Correo" placeholder="nombre@organizatech.cl" type="email" autoComplete="email" value={email} error={fieldErrors["register-email"]} onChange={onEmailChange} onErrorClear={() => onFieldErrorClear("register-email")} required />
-      {includeStudyTitle ? (
-        <AuthTextField id="register-study-title" name="register-study-title" label="Título de estudios" placeholder="Ej: Linc. en Ciencias del deporte" autoComplete="off" value={studyTitle} onChange={onStudyTitleChange} required />
+      {includeProfessionalTitle ? (
+        <AuthTextField id="register-professional-title" name="register-professional-title" label="Título de estudios" placeholder="Ej: Linc. en Ciencias del deporte" autoComplete="off" value={professionalTitle} error={fieldErrors["register-professional-title"]} onChange={onProfessionalTitleChange} onErrorClear={() => onFieldErrorClear("register-professional-title")} required />
       ) : null}
       <AuthPasswordField id="register-password" name="register-password" label="Contraseña" placeholder="Crea una contraseña" autoComplete="new-password" value={password} visible={showPassword} error={fieldErrors["register-password"]} onChange={onPasswordChange} onErrorClear={() => onFieldErrorClear("register-password")} onToggle={onPasswordVisibilityChange} required />
       <AuthPasswordField id="register-confirm-password" name="register-confirm-password" label="Confirmar contraseña" placeholder="Repite tu contraseña" autoComplete="new-password" value={confirmPassword} visible={showConfirmPassword} error={fieldErrors["register-confirm-password"]} onChange={onConfirmPasswordChange} onErrorClear={() => onFieldErrorClear("register-confirm-password")} onToggle={onConfirmPasswordVisibilityChange} required />

@@ -109,8 +109,8 @@ function assertLoginOwnerWiring(source: string) {
   const finallyText = authTry.finallyBlock.getText(sourceFile);
   assert.match(
     finallyText,
-    /const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController[\s\S]*loginSubmitOwnerController\.finalize\(loginSubmitOwner\)[\s\S]*if \(canFinalizeAuthAttempt\)/,
-    "finally sólo puede liberar UI y owner tras comprobar el owner vigente",
+    /const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController[\s\S]*loginSubmitOwnerController\.finalize\(loginSubmitOwner\)[\s\S]*const canFinalizePortalResolution[\s\S]*const canFinalizeCoachRegistration[\s\S]*if \(\s*canFinalizeAuthAttempt\s*&& canFinalizePortalResolution\s*&& canFinalizeCoachRegistration\s*\)/,
+    "finally sólo puede liberar UI y owners tras comprobar Login, portal y registro vigentes",
   );
 
   const signedOutBranches = collect(sourceFile, (node): node is ts.IfStatement => {

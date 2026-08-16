@@ -48,6 +48,12 @@ import {
 } from "@/features/auth/components/auth-screen";
 import { useAuthRouteController } from "@/features/auth/hooks/use-auth-route-controller";
 import {
+  useMultiportalAuthBoundary,
+  type CoachRegistrationOwner,
+  type PortalResolutionOwner,
+} from "@/features/auth/hooks/use-multiportal-auth-boundary";
+import {
+  buildCoachRegistrationPayload,
   buildLoginPayload,
   buildUserSignupPayload,
   type AuthFieldErrors,
@@ -58,6 +64,10 @@ import {
   type AuthAccountType,
   type AuthRouteState,
 } from "@/features/auth/model/auth-route";
+import {
+  MULTIPORTAL_AUTH_ERROR_MESSAGE,
+  type AuthorizedPortalAccess,
+} from "@/features/auth/model/multiportal-auth-controller";
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
@@ -396,6 +406,10 @@ export function OrganizatechApp({
   initialPasswordRecoveryRouteStateRef.current = initialPasswordRecoveryRouteState;
   const initialAuthState = resolveInitialAuthState(initialPasswordRecoveryRouteState, initialAuthRoute.mode);
   const authRouteController = useAuthRouteController(initialAuthRoute);
+  const multiportalAuth = useMultiportalAuthBoundary({
+    initialRoute: initialAuthRoute,
+    currentRoute: authRouteController.route,
+  });
   const [sessionName, setSessionName] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -803,6 +817,28 @@ export function OrganizatechApp({
           return;
         }
         if (authState.session) {
+          const portalDecision = multiportalAuth.resolveInitialSessionDecision(authState.session.user.id);
+          if (portalDecision === "hold_coach_registration") {
+            multiportalAuth.completeInitialResolution();
+            setIsAuthLoading(false);
+            setAuthStatus("", "info");
+            return;
+          }
+          if (portalDecision === "authorize_coach") {
+            const resolutionOwner = multiportalAuth.beginPortalResolution(authState.session.user.id);
+            try {
+              await authorizeAndContinuePortalSession(
+                authState,
+                "coach",
+                "restore-active-flow",
+                resolutionOwner,
+              );
+            } finally {
+              multiportalAuth.endPortalResolution(resolutionOwner);
+              multiportalAuth.completeInitialResolution();
+            }
+            return;
+          }
           await continueAuthenticatedSession(authState, "restore-active-flow");
         } else {
           setAuthStatus(authState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage(), "info");
@@ -830,6 +866,7 @@ export function OrganizatechApp({
           }
         }
       } finally {
+        multiportalAuth.completeInitialResolution();
         if (isMounted && isSessionDataRequestCurrent(requestToken)) {
           setIsAuthLoading(passwordRecoveryStateRef.current === "pending");
         }
@@ -848,9 +885,48 @@ export function OrganizatechApp({
         user: session?.user ?? null,
       };
 
+      const portalEventDecision = multiportalAuth.resolveSessionEventDecision(
+        event,
+        session?.user.id ?? null,
+        interactiveAuthAttemptRef.current,
+      );
+      if (portalEventDecision === "defer") return;
+      if (
+        portalEventDecision === "hold_coach_registration" ||
+        portalEventDecision === "authorize_coach"
+      ) {
+        setIsAuthLoading(false);
+        if (portalEventDecision === "hold_coach_registration") {
+          holdAuthenticatedPortalRegistrationSession(event, nextState);
+          setAuthStatus("", "info");
+          return;
+        }
+
+        const resolutionOwner = multiportalAuth.beginPortalResolution(session!.user.id);
+        queueMicrotask(() => {
+          void authorizeAndContinuePortalSession(nextState, "coach", "dashboard", resolutionOwner)
+            .finally(() => {
+              multiportalAuth.endPortalResolution(resolutionOwner);
+            });
+        });
+        return;
+      }
+
       const previousStorageScope = activeBrowserStorageScopeRef.current;
       if (event === "SIGNED_OUT") {
         loginSubmitOwnerRef.current?.invalidate();
+        interactiveAuthAttemptRef.current = false;
+        const portalSignOutMessage = multiportalAuth.consumePortalSignOutMessage();
+        if (portalSignOutMessage) {
+          clearUserSessionState(portalSignOutMessage, previousStorageScope, {
+            navigate: false,
+            statusTone: "error",
+          });
+          setIsBusy(false);
+          setIsAuthLoading(false);
+          setAuthStatus(portalSignOutMessage, "error");
+          return;
+        }
         if (passwordUpdateSuccessRef.current) {
           completePasswordRecoveryUpdate(previousStorageScope);
           return;
@@ -1178,6 +1254,67 @@ export function OrganizatechApp({
     progressController.resetSelection();
     clearAuthForms();
     setStatusMessage("");
+  }
+
+  function holdAuthenticatedPortalRegistrationSession(
+    event: string,
+    authState: SupabaseSessionState,
+  ) {
+    coordinateAuthenticatedSessionEvent({
+      event,
+      state: authState,
+      currentIdentity: sessionDataEpochRef.current,
+      nextIdentity: {
+        userId: authState.session?.user.id ?? null,
+        scope: getBrowserStorageScope(authState.dataMode, authState.session?.user.id),
+      },
+      intent: "restore-active-flow",
+      hasAuthenticatedSession: Boolean(authState.session),
+    }, {
+      applySameIdentitySession: applySessionState,
+      applyNewIdentitySession: (state) => {
+        loginSubmitOwnerRef.current?.invalidate();
+        interactiveAuthAttemptRef.current = false;
+        applySessionState(state);
+      },
+      canContinueAfterSessionApplied: () => false,
+      continueSession: continueAuthenticatedSession,
+    });
+  }
+
+  async function authorizeAndContinuePortalSession(
+    authState: SupabaseSessionState,
+    requestedPortal: AuthAccountType,
+    intent: AuthenticatedSessionIntent,
+    resolutionOwner: PortalResolutionOwner,
+  ): Promise<AuthorizedPortalAccess | null> {
+    const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);
+    if (access.state === "stale" || !multiportalAuth.isPortalResolutionCurrent(resolutionOwner)) {
+      return null;
+    }
+    if (access.state === "coach_registration_required" || access.state === "error") {
+      const rejectionMessage = multiportalAuth.settlePortalSignOutMessage(access.message);
+      setIsAuthLoading(false);
+      if (rejectionMessage) setAuthStatus(rejectionMessage, "error");
+      return null;
+    }
+    applySessionState(authState);
+    await continueAuthorizedPortalAccess(access, authState, intent);
+    return access;
+  }
+
+  function continueAuthorizedPortalAccess(
+    access: AuthorizedPortalAccess,
+    authState: SupabaseSessionState,
+    intent: AuthenticatedSessionIntent,
+  ) {
+    switch (access.state) {
+      case "user_authorized":
+      case "coach_authorized":
+        // AUTH-COACH-01 seam: a future Coach destination branches here after
+        // the backend-authoritative result, without changing how access is resolved.
+        return continueAuthenticatedSession(authState, intent);
+    }
   }
 
   function continueAuthenticatedSession(
@@ -1564,9 +1701,16 @@ export function OrganizatechApp({
   }
 
   async function handleAuth(mode: "login" | "registro", formData: FormData) {
-    const signupPreparation = mode === "registro" ? buildUserSignupPayload(formData) : null;
+    const requestedPortal = authRouteController.route.accountType;
+    const isCoachRegistration = mode === "registro" && requestedPortal === "coach";
+    const coachRegistrationPreparation = isCoachRegistration
+      ? buildCoachRegistrationPayload(formData)
+      : null;
+    const signupPreparation = mode === "registro" && !isCoachRegistration
+      ? buildUserSignupPayload(formData)
+      : null;
     const loginPreparation = mode === "login" ? buildLoginPayload(formData) : null;
-    const preparation = signupPreparation ?? loginPreparation;
+    const preparation = coachRegistrationPreparation ?? signupPreparation ?? loginPreparation;
     if (!preparation) return;
     if (!preparation.ok) {
       setAuthFieldError(preparation.field, preparation.message);
@@ -1576,14 +1720,28 @@ export function OrganizatechApp({
     setAuthFieldErrors({});
     setAuthStatus("", "info");
 
-    const { email, password } = preparation.payload;
+    const authPayload = "auth" in preparation.payload
+      ? preparation.payload.auth
+      : preparation.payload;
+    const { email, password } = authPayload;
+    const coachRegistrationPayload = coachRegistrationPreparation?.ok
+      ? coachRegistrationPreparation.payload
+      : null;
     const signupPayload = signupPreparation?.ok ? signupPreparation.payload : null;
-    const name = signupPayload?.options.data.display_name ?? "";
+    const name = coachRegistrationPayload?.auth.options.data.display_name
+      ?? signupPayload?.options.data.display_name
+      ?? "";
     const supabase = getSupabaseBrowserClient();
     let appliedIdentityToken: SessionDataRequestToken | null = null;
     let loginSubmitOwner: LoginSubmitOwner | null = null;
+    let coachRegistrationSubmitOwner: CoachRegistrationOwner | null = null;
+    let portalResolutionOwner: PortalResolutionOwner | null = null;
 
     if (!supabase) {
+      if (requestedPortal === "coach") {
+        setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+        return;
+      }
       setSessionName(name || email.split("@")[0] || "Usuario");
       applySessionState({
         isConfigured: false,
@@ -1602,6 +1760,12 @@ export function OrganizatechApp({
       return;
     }
 
+    if (coachRegistrationPayload) {
+      coachRegistrationSubmitOwner = multiportalAuth.beginCoachRegistrationSubmit();
+    } else {
+      multiportalAuth.invalidateCoachRegistrationSubmits();
+    }
+
     const loginSubmitOwnerController = mode === "login" ? loginSubmitOwnerRef.current : null;
     if (mode === "login") {
       if (!loginSubmitOwnerController) return;
@@ -1612,6 +1776,44 @@ export function OrganizatechApp({
     interactiveAuthAttemptRef.current = true;
     setIsBusy(true);
     try {
+      if (coachRegistrationPayload) {
+        const registration = await multiportalAuth.registerCoach(
+          coachRegistrationPayload,
+          coachRegistrationSubmitOwner!,
+        );
+        if (
+          !coachRegistrationSubmitOwner
+          || !multiportalAuth.isCoachRegistrationSubmitCurrent(coachRegistrationSubmitOwner)
+        ) return;
+        if (registration.state === "busy" || registration.state === "stale") return;
+        if (registration.state === "coach_confirmation_required") {
+          clearAuthForms();
+          setAuthStatus(registration.message, "success");
+          authRouteController.replace({ mode: "login", accountType: "coach" });
+          navigation.transition(createAuthNavigationReset("login", "signup-confirmation-pending"));
+          return;
+        }
+        if (registration.state === "error") {
+          if (registration.field) {
+            setAuthFieldError(registration.field, registration.message);
+          } else {
+            setAuthStatus(registration.message, "error");
+          }
+          return;
+        }
+
+        portalResolutionOwner = multiportalAuth.beginPortalResolution(registration.userId);
+        if (!multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner)) return;
+        applySessionState(registration.authState);
+        appliedIdentityToken = captureSessionDataRequestToken();
+        await continueAuthorizedPortalAccess({
+          state: "coach_authorized",
+          requestedPortal: "coach",
+          userId: registration.userId,
+        }, registration.authState, "dashboard");
+        return;
+      }
+
       let result:
         | Awaited<ReturnType<typeof supabase.auth.signUp>>
         | Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
@@ -1647,26 +1849,59 @@ export function OrganizatechApp({
         session,
         user: session?.user ?? null,
       };
-      applySessionState(authenticatedState);
-      appliedIdentityToken = captureSessionDataRequestToken();
 
       if (!session && mode === "registro") {
         setAuthStatus("Cuenta creada. Revisa tu correo para confirmar el registro.", "success");
         clearAuthForms();
-        authRouteController.replace({ mode: "login", accountType: "usuario" });
+        authRouteController.replace({ mode: "login", accountType: requestedPortal });
         navigation.transition(createAuthNavigationReset("login", "signup-confirmation-pending"));
         return;
       }
+      if (!session) {
+        setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+        return;
+      }
 
-      await continueAuthenticatedSession(authenticatedState, "dashboard");
+      portalResolutionOwner = multiportalAuth.beginPortalResolution(session.user.id);
+      if (!multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner)) return;
+
+      const access = await authorizeAndContinuePortalSession(
+        authenticatedState,
+        requestedPortal,
+        "dashboard",
+        portalResolutionOwner,
+      );
+      if (access) appliedIdentityToken = captureSessionDataRequestToken();
     } catch (error) {
+      if (
+        portalResolutionOwner
+        && !multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner)
+      ) return;
+      if (
+        coachRegistrationSubmitOwner
+        && !multiportalAuth.isCoachRegistrationSubmitCurrent(coachRegistrationSubmitOwner)
+      ) return;
       if (appliedIdentityToken && !isSessionDataRequestCurrent(appliedIdentityToken)) return;
       setAuthStatus(translateAuthError(error), "error");
     } finally {
       const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController
         ? loginSubmitOwnerController.finalize(loginSubmitOwner)
         : true;
-      if (canFinalizeAuthAttempt) {
+      const canFinalizePortalResolution = portalResolutionOwner
+        ? multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner)
+        : true;
+      const canFinalizeCoachRegistration = coachRegistrationSubmitOwner
+        ? multiportalAuth.isCoachRegistrationSubmitCurrent(coachRegistrationSubmitOwner)
+        : true;
+      if (portalResolutionOwner) multiportalAuth.endPortalResolution(portalResolutionOwner);
+      if (coachRegistrationSubmitOwner) {
+        multiportalAuth.endCoachRegistrationSubmit(coachRegistrationSubmitOwner);
+      }
+      if (
+        canFinalizeAuthAttempt
+        && canFinalizePortalResolution
+        && canFinalizeCoachRegistration
+      ) {
         interactiveAuthAttemptRef.current = false;
         if (!appliedIdentityToken || isSessionDataRequestCurrent(appliedIdentityToken)) {
           setIsBusy(false);
