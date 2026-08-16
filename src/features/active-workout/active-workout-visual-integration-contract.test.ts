@@ -3131,9 +3131,17 @@ function assertEffectiveVisualCascade(rules: readonly CssExecutableRule[]) {
       rules,
       target: cssAuditTargets.daySelect,
       property: "min-height",
-      expected: "44px",
+      expected: "36px",
       viewportWidth,
       message: "altura visible efectiva incorrecta en selector de día",
+    });
+    assertEffectiveCssValue({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "height",
+      expected: "36px",
+      viewportWidth,
+      message: "altura explícita efectiva incorrecta en selector de día",
     });
     assertEffectiveCssValue({
       rules,
@@ -3157,9 +3165,9 @@ function assertEffectiveVisualCascade(rules: readonly CssExecutableRule[]) {
       rules,
       target: cssAuditTargets.editButtonBefore,
       property: "inset",
-      expected: "0",
+      expected: "4px 0",
       viewportWidth,
-      message: "altura visible efectiva incorrecta en caja visual Editar",
+      message: "la caja visual Editar debe medir los mismos 36px de alto que el selector",
     });
   }
 
@@ -3647,8 +3655,13 @@ function assertTrainUi01AuditContracts(
   );
   assert.equal(
     readCssProperty(daySelectRule.body, "min-height"),
-    "44px",
-    "selector de día: la altura visible estructural debe permanecer en 44px",
+    "36px",
+    "selector de día: la altura visual estructural debe permanecer en 36px",
+  );
+  assert.equal(
+    readCssProperty(daySelectRule.body, "height"),
+    "36px",
+    "selector de día: la altura explícita debe permanecer en 36px para Safari",
   );
   assert.equal(
     readCssProperty(daySelectRule.body, "width"),
@@ -3670,8 +3683,8 @@ function assertTrainUi01AuditContracts(
   assert.equal(readCssProperty(editButtonRule.body, "height"), "44px");
   assert.equal(
     readCssProperty(editButtonVisualRule.body, "inset"),
-    "0",
-    "botón Editar: la caja visual debe conservar inset 0",
+    "4px 0",
+    "botón Editar: la caja visual debe medir los mismos 36px de alto que el selector",
   );
   assert.equal(readCssProperty(editButtonVisualRule.body, "border-radius"), "8px");
   assert.equal((sources.start.match(/<Pencil size=\{15\}/g) ?? []).length, 1);
@@ -3918,25 +3931,36 @@ const trainUi01MutationProbes: TrainUi01VisualMutationProbe[] = [
     ),
   },
   {
-    name: "reducir visualmente el selector de día",
-    expectedFailure: "selector de día: la altura visible estructural debe permanecer en 44px",
+    name: "agrandar visualmente el selector de día",
+    expectedFailure: "selector de día: la altura visual estructural debe permanecer en 36px",
     target: "workoutStyles",
     mutate: (source) => mutateCssRule(
       source,
       ".daySelector select",
-      "min-height: 44px;",
       "min-height: 36px;",
+      "min-height: 44px;",
     ),
   },
   {
-    name: "reducir visualmente el botón Editar",
-    expectedFailure: "botón Editar: la caja visual debe conservar inset 0",
+    name: "agrandar visualmente el botón Editar",
+    expectedFailure: "botón Editar: la caja visual debe medir los mismos 36px de alto que el selector",
     target: "workoutStyles",
     mutate: (source) => mutateCssRule(
       source,
       ".editRoutineButton.editRoutineButton::before",
+      "inset: 4px 0;",
       "inset: 0;",
-      "inset: 5px;",
+    ),
+  },
+  {
+    name: "eliminar altura explícita del selector en Safari",
+    expectedFailure: "selector de día: la altura explícita debe permanecer en 36px para Safari",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "\n  height: 36px;",
+      "\n  height: auto;",
     ),
   },
   {
@@ -4091,13 +4115,13 @@ const trainUi01MetricProtectionMutationProbes: TrainUi01VisualMutationProbe[] = 
   },
 ];
 
-const expectedTrainUi01FocalMutationProbeCount = 27;
+const expectedTrainUi01FocalMutationProbeCount = 28;
 const expectedTrainUi01MetricProtectionProbeCount = 8;
-const expectedTrainUi01VisualMutationProbeCount = 35;
+const expectedTrainUi01VisualMutationProbeCount = 36;
 assert.equal(
   trainUi01MutationProbes.length,
   expectedTrainUi01FocalMutationProbeCount,
-  "TRAIN-UI-01: deben existir exactamente 27 probes visuales focales",
+  "TRAIN-UI-01: deben existir exactamente 28 probes visuales focales",
 );
 assert.equal(
   trainUi01MetricProtectionMutationProbes.length,
@@ -4107,7 +4131,7 @@ assert.equal(
 assert.equal(
   trainUi01MutationProbes.length + trainUi01MetricProtectionMutationProbes.length,
   expectedTrainUi01VisualMutationProbeCount,
-  "TRAIN-UI-01: deben ejecutarse exactamente 35 probes visuales endurecidos",
+  "TRAIN-UI-01: deben ejecutarse exactamente 36 probes visuales endurecidos",
 );
 
 function runTrainUi01VisualMutationProbe(probe: TrainUi01VisualMutationProbe) {

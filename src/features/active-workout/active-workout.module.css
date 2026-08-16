@@ -82,8 +82,9 @@
 
 .daySelector select {
   width: 116px;
+  height: 36px;
   min-width: 0;
-  min-height: 44px;
+  min-height: 36px;
   border: 1px solid color-mix(in srgb, var(--text) 72%, transparent);
   border-radius: 8px;
   color: var(--text);
@@ -112,7 +113,7 @@
 
 .editRoutineButton.editRoutineButton::before {
   position: absolute;
-  inset: 0;
+  inset: 4px 0;
   border: 1px solid color-mix(in srgb, var(--text) 72%, transparent);
   border-radius: 8px;
   content: "";
