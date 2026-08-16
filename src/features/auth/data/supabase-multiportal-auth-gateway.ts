@@ -10,14 +10,17 @@ import type {
   CoachRegistrationRecord,
   MultiportalAuthGateway,
   PortalSignOutReason,
+  UserRegistrationRecord,
 } from "@/features/auth/model/multiportal-auth-controller";
 import { translateAuthError } from "@/lib/supabase/auth-errors";
 import type { SupabaseSessionState } from "@/lib/supabase/session";
 import type {
   CoachRegistrationOwner,
   PortalResolutionOwner,
+  UserRegistrationOwner,
 } from "@/features/auth/model/portal-resolution-owner";
 
+const USER_REGISTRATION_COLUMNS = "user_id";
 const COACH_REGISTRATION_COLUMNS =
   "user_id,first_name,last_name,birth_date,gender,phone_number,professional_title";
 
@@ -29,6 +32,10 @@ interface CoachRegistrationRow {
   gender: string;
   phone_number: string;
   professional_title: string;
+}
+
+interface UserRegistrationRow {
+  user_id: string;
 }
 
 export interface SupabaseMultiportalAuthGatewayOptions {
@@ -111,6 +118,55 @@ export function createSupabaseMultiportalAuthGateway(
         : { kind: "error", message: translateAuthError(new Error("auth session missing")) };
     },
 
+    async signInForUserRegistration(credentials: LoginPayload, owner) {
+      if (!owner.isCurrent()) return { kind: "stale" };
+      const isolatedClient = getRegistrationClient();
+      const { data, error } = await isolatedClient.auth.signInWithPassword({
+        email: credentials.email,
+        password: credentials.password,
+      });
+      if (!owner.isCurrent()) return { kind: "stale" };
+      if (error) {
+        if (isInvalidCredentialsError(error)) return { kind: "invalid_credentials" };
+        return { kind: "error", message: translateAuthError(error) };
+      }
+
+      const identity = data.user
+        ? await getAuthoritativeIdentity(isolatedClient, data.user.id, owner)
+        : null;
+      if (!owner.isCurrent()) return { kind: "stale" };
+      if (identity) registrationIdentityUserId = identity.userId;
+      return identity
+        ? { kind: "authenticated", identity }
+        : { kind: "error", message: translateAuthError(new Error("auth session missing")) };
+    },
+
+    async signUpForUserRegistration(payload: UserSignupPayload, owner) {
+      if (!owner.isCurrent()) return { kind: "stale" };
+      const isolatedClient = getRegistrationClient();
+      const { data, error } = await isolatedClient.auth.signUp(payload);
+      if (!owner.isCurrent()) return { kind: "stale" };
+      if (error) return { kind: "error", message: translateAuthError(error) };
+      if (Array.isArray(data.user?.identities) && data.user.identities.length === 0) {
+        return { kind: "existing_identity" };
+      }
+      if (!data.session) return { kind: "confirmation_required" };
+
+      const identity = data.user
+        ? await getAuthoritativeIdentity(isolatedClient, data.user.id, owner)
+        : null;
+      if (!owner.isCurrent()) return { kind: "stale" };
+      if (identity) registrationIdentityUserId = identity.userId;
+      return identity
+        ? { kind: "authenticated", identity }
+        : { kind: "error", message: translateAuthError(new Error("auth session missing")) };
+    },
+
+    async hasUserRegistration(expectedUserId, owner) {
+      const row = await readOwnUserRegistration(dataClientFor(expectedUserId), expectedUserId, owner);
+      return row !== null;
+    },
+
     async hasCoachRegistration(expectedUserId, owner) {
       const row = await readOwnCoachRegistration(dataClientFor(expectedUserId), expectedUserId, owner);
       return row !== null;
@@ -132,6 +188,27 @@ export function createSupabaseMultiportalAuthGateway(
       await requireAuthoritativeIdentity(client, expectedUserId, owner);
       if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
       return row;
+    },
+
+    async createUserRegistration(expectedUserId, owner) {
+      if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
+      const client = dataClientFor(expectedUserId);
+      const { data, error } = await client.rpc("register_own_user");
+      if (error) {
+        throw new MultiportalAuthRepositoryError("No pudimos registrar el acceso Usuario.", error);
+      }
+      if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
+      const row = mapUserRegistrationRow(data);
+      if (!row || row.userId !== expectedUserId) {
+        throw new MultiportalAuthRepositoryError("No pudimos confirmar el registro Usuario.");
+      }
+      await requireAuthoritativeIdentity(client, expectedUserId, owner);
+      if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
+      return row;
+    },
+
+    async activateUserRegistrationIdentity(identity, owner) {
+      return activateRegistrationIdentity(supabase, identity, owner);
     },
 
     async activateCoachRegistrationIdentity(identity, owner) {
@@ -251,6 +328,55 @@ async function requireAuthoritativeIdentity(
   return identity;
 }
 
+async function activateRegistrationIdentity(
+  supabase: SupabaseClient,
+  identity: AuthenticatedPortalIdentity<SupabaseSessionState>,
+  owner: UserRegistrationOwner,
+): Promise<AuthenticatedPortalIdentity<SupabaseSessionState> | null> {
+  if (!ownsRegistration(owner, identity.userId)) return null;
+  const currentIdentity = await getAuthoritativeIdentity(supabase, undefined, owner);
+  if (!owner.isCurrent()) return null;
+  if (currentIdentity) {
+    return currentIdentity.userId === identity.userId ? currentIdentity : null;
+  }
+
+  const session = identity.authState.session;
+  if (!session?.access_token || !session.refresh_token) return null;
+  if (!ownsRegistration(owner, identity.userId)) return null;
+  const { data, error } = await supabase.auth.setSession({
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+  });
+  if (error) throw new MultiportalAuthRepositoryError("No pudimos activar la sesión Usuario.", error);
+  if (!ownsRegistration(owner, identity.userId)) return null;
+  const activatedIdentity = mapAuthenticatedIdentity(data.session, data.user);
+  if (!activatedIdentity || activatedIdentity.userId !== identity.userId) return null;
+  return getAuthoritativeIdentity(supabase, identity.userId, owner);
+}
+
+async function readOwnUserRegistration(
+  supabase: SupabaseClient,
+  expectedUserId: string,
+  owner?: { isCurrent(): boolean },
+): Promise<UserRegistrationRecord | null> {
+  await requireAuthoritativeIdentity(supabase, expectedUserId, owner);
+  if (owner && !owner.isCurrent()) throw staleRegistrationError();
+  const { data, error } = await supabase
+    .from("user_registrations")
+    .select(USER_REGISTRATION_COLUMNS)
+    .maybeSingle();
+  if (error) {
+    throw new MultiportalAuthRepositoryError("No pudimos validar el acceso Usuario.", error);
+  }
+
+  const row = mapUserRegistrationRow(data);
+  if (row && row.userId !== expectedUserId) {
+    throw new MultiportalAuthRepositoryError("La autorización Usuario no pertenece a la sesión.");
+  }
+  await requireAuthoritativeIdentity(supabase, expectedUserId, owner);
+  return row;
+}
+
 async function readOwnCoachRegistration(
   supabase: SupabaseClient,
   expectedUserId: string,
@@ -274,7 +400,10 @@ async function readOwnCoachRegistration(
   return row;
 }
 
-function ownsRegistration(owner: CoachRegistrationOwner, expectedUserId: string) {
+function ownsRegistration(
+  owner: CoachRegistrationOwner | UserRegistrationOwner,
+  expectedUserId: string,
+) {
   return owner.isCurrent() && owner.expectedUserId === expectedUserId;
 }
 
@@ -337,6 +466,15 @@ function mapCoachRegistrationRow(value: unknown): CoachRegistrationRecord | null
     phoneNumber: row.phone_number,
     professionalTitle: row.professional_title,
   };
+}
+
+function mapUserRegistrationRow(value: unknown): UserRegistrationRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as UserRegistrationRow;
+  if (typeof row.user_id !== "string") {
+    throw new MultiportalAuthRepositoryError("La respuesta de autorización Usuario no es válida.");
+  }
+  return { userId: row.user_id };
 }
 
 function readErrorCode(error: unknown): string {

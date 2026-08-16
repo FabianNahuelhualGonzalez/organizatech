@@ -22,6 +22,23 @@ export interface CoachRegistrationOwnerController {
   hasPending(): boolean;
 }
 
+export interface UserRegistrationOwner {
+  readonly id: symbol;
+  readonly revision: number;
+  readonly expectedUserId: string | null;
+  bindExpectedUserId(userId: string): boolean;
+  isCurrent(): boolean;
+}
+
+export interface UserRegistrationOwnerController {
+  acceptIdentity(userId: string): boolean;
+  begin(): UserRegistrationOwner;
+  end(owner: UserRegistrationOwner): void;
+  invalidate(): void;
+  isCurrent(owner: UserRegistrationOwner): boolean;
+  hasPending(): boolean;
+}
+
 export interface SinglePublicationNoticeController<TReason> {
   begin(reason: TReason): void;
   fail(): void;
@@ -129,6 +146,78 @@ export function createCoachRegistrationOwnerController(): CoachRegistrationOwner
       const ownerRevision = revision;
       const owner: CoachRegistrationOwner = Object.freeze({
         id: Symbol("coach-registration"),
+        revision: ownerRevision,
+        get expectedUserId() {
+          return expectedUserIds.get(owner) ?? null;
+        },
+        bindExpectedUserId(userId: string) {
+          if (!isCurrent(owner)) return false;
+          const expectedUserId = expectedUserIds.get(owner) ?? null;
+          if (expectedUserId !== null && expectedUserId !== userId) return false;
+          if (currentUserId !== null && currentUserId !== userId) return false;
+          expectedUserIds.set(owner, userId);
+          return true;
+        },
+        isCurrent: () => isCurrent(owner),
+      });
+      expectedUserIds.set(owner, currentUserId);
+      activeOwner = owner;
+      return owner;
+    },
+
+    end(owner) {
+      if (activeOwner === owner) activeOwner = null;
+    },
+
+    invalidate() {
+      invalidateForIdentity(null);
+    },
+
+    isCurrent,
+
+    hasPending() {
+      return activeOwner !== null;
+    },
+  };
+}
+
+export function createUserRegistrationOwnerController(): UserRegistrationOwnerController {
+  let revision = 0;
+  let currentUserId: string | null = null;
+  let activeOwner: UserRegistrationOwner | null = null;
+  const expectedUserIds = new WeakMap<UserRegistrationOwner, string | null>();
+
+  function isCurrent(owner: UserRegistrationOwner) {
+    const expectedUserId = expectedUserIds.get(owner) ?? null;
+    return owner.revision === revision
+      && activeOwner === owner
+      && (currentUserId === null || expectedUserId === null || expectedUserId === currentUserId);
+  }
+
+  function invalidateForIdentity(userId: string | null) {
+    revision += 1;
+    currentUserId = userId;
+    activeOwner = null;
+  }
+
+  return {
+    acceptIdentity(userId) {
+      if (userId === currentUserId) return false;
+      const replacedIdentity = currentUserId !== null;
+      const expectedUserId = activeOwner ? expectedUserIds.get(activeOwner) ?? null : null;
+      if (activeOwner && expectedUserId === userId) {
+        currentUserId = userId;
+        return replacedIdentity;
+      }
+      invalidateForIdentity(userId);
+      return replacedIdentity;
+    },
+
+    begin() {
+      revision += 1;
+      const ownerRevision = revision;
+      const owner: UserRegistrationOwner = Object.freeze({
+        id: Symbol("user-registration"),
         revision: ownerRevision,
         get expectedUserId() {
           return expectedUserIds.get(owner) ?? null;

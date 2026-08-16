@@ -15,9 +15,9 @@ contrato de producto y no autoriza implementar una etapa futura.
 | Accesos desde la página web | Flujo incluido en el alcance aprobado | Verificación final antes de producción |
 | Nuevo diseño Entrenemos TRAIN-UI-01 | QA del dueño aprobada; no producción | Mantener integración sin promoción productiva |
 | Login y registro con Google | Pendiente | Tarea independiente con OAuth, seguridad y QA propios |
-| Registro de membresía Coach | En desarrollo | Normalizar `professional_title`, reauditoría Claude y PostgreSQL QA |
-| Autorización multipportal | En desarrollo | Reauditoría independiente y pruebas materiales con dos identidades |
-| PostgreSQL/RLS AUTH-COACH-01 | Pendiente de QA autorizada | Aplicar migración en entorno descartable/QA y verificar catálogo, ACL y anti-BOLA |
+| Registro de membresía Coach | Implementado; migración Coach verificada en QA | Reauditoría Claude y cierre coordinado pendientes |
+| Autorización multipportal | Corrección Usuario implementada localmente | Reauditoría independiente, segunda migración en QA y pruebas materiales con dos identidades |
+| PostgreSQL/RLS AUTH-COACH-01 | Coach QA PASS; Usuario pendiente de QA | Aplicar manualmente la migración `user_registrations` en QA y verificar catálogo, ACL y anti-BOLA |
 | Código de vinculación Coach-alumno | Especificado; no implementado | Diseños del dueño y tarea/backend propios |
 | Un Coach activo por alumno | Especificado; no implementado | Restricción concurrente en PostgreSQL y pruebas materiales |
 | Autosupervisión | Especificada; no implementada | Debe consumir el único cupo activo |
@@ -31,18 +31,23 @@ contrato de producto y no autoriza implementar una etapa futura.
 
 ### Objetivo
 
-Crear y autorizar una membresía Coach para la misma identidad Auth, sin crear un
-portal Coach ficticio ni implementar todavía la relación con alumnos.
+Crear y autorizar membresías Usuario y Coach independientes para la misma
+identidad Auth, sin crear un portal Coach ficticio ni implementar todavía la
+relación con alumnos.
 
 ### Incluye
 
 - formulario de registro Coach con `professional_title`;
 - payload cerrado y ownership derivado por backend;
 - registro Coach autoritativo;
-- acceso Usuario/Coach resuelto desde backend;
+- tabla y registro Usuario autoritativos, separados del perfil común;
+- backfill acotado para las cuentas Usuario legacy existentes;
+- acceso Usuario/Coach resuelto desde su membresía backend correspondiente;
+- rechazo de Coach-only al portal Usuario con el mensaje aprobado;
 - rechazo de Usuario sin membresía Coach;
 - aislamiento ante cambios de sesión A → B;
-- migración y contratos de RLS/ACL para `coach_registrations`;
+- migraciones y contratos de RLS/ACL separados para `coach_registrations` y
+  `user_registrations`;
 - contrato de producto y roadmap versionados.
 
 ### No incluye
@@ -69,8 +74,9 @@ portal Coach ficticio ni implementar todavía la relación con alumnos.
 
 1. Commit y push ejecutados por el dueño
 2. Draft PR y Preview
-3. Migración aplicada exclusivamente en PostgreSQL/Supabase QA autorizado
-4. Verificación material de catálogo, RLS, ACL, RPC, dos identidades y anti-BOLA
+3. Segunda migración aplicada exclusivamente en PostgreSQL/Supabase QA autorizado
+4. Verificación material de catálogo, RLS, ACL, RPC, tres estados de membresía,
+   dos identidades y anti-BOLA
 5. QA manual del dueño
 6. Sin promoción a producción hasta autorización expresa
 

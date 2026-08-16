@@ -109,8 +109,8 @@ function assertLoginOwnerWiring(source: string) {
   const finallyText = authTry.finallyBlock.getText(sourceFile);
   assert.match(
     finallyText,
-    /const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController[\s\S]*loginSubmitOwnerController\.finalize\(loginSubmitOwner\)[\s\S]*const canFinalizePortalResolution[\s\S]*const canFinalizeCoachRegistration[\s\S]*if \(\s*canFinalizeAuthAttempt\s*&& canFinalizePortalResolution\s*&& canFinalizeCoachRegistration\s*\)/,
-    "finally sólo puede liberar UI y owners tras comprobar Login, portal y registro vigentes",
+    /const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController[\s\S]*loginSubmitOwnerController\.finalize\(loginSubmitOwner\)[\s\S]*const canFinalizePortalResolution[\s\S]*const canFinalizeCoachRegistration[\s\S]*const canFinalizeUserRegistration[\s\S]*if \(\s*canFinalizeAuthAttempt\s*&& canFinalizePortalResolution\s*&& canFinalizeCoachRegistration\s*&& canFinalizeUserRegistration\s*\)/,
+    "finally sólo puede liberar UI y owners tras comprobar Login, portal y ambos registros vigentes",
   );
 
   const signedOutBranches = collect(sourceFile, (node): node is ts.IfStatement => {
@@ -198,8 +198,8 @@ for (const mutation of [
         "      loginSubmitOwner = loginSubmitOwnerController.acquire();\n      if (!loginSubmitOwner) return;",
         "      loginSubmitOwner = null;",
       ),
-      "        const settlement = await loginSubmitOwnerController!.settle(\n          loginSubmitOwner!,\n          supabase.auth.signInWithPassword({ email, password }),\n        );",
-      "        const lateRequest = supabase.auth.signInWithPassword({ email, password });\n        loginSubmitOwner = loginSubmitOwnerController.acquire();\n        if (!loginSubmitOwner) return;\n        const settlement = await loginSubmitOwnerController.settle(loginSubmitOwner, lateRequest);",
+      "      const settlement = await loginSubmitOwnerController!.settle(\n        loginSubmitOwner!,\n        supabase.auth.signInWithPassword({ email, password }),\n      );",
+      "      const lateRequest = supabase.auth.signInWithPassword({ email, password });\n      loginSubmitOwner = loginSubmitOwnerController.acquire();\n      if (!loginSubmitOwner) return;\n      const settlement = await loginSubmitOwnerController.settle(loginSubmitOwner, lateRequest);",
     ),
   },
   {

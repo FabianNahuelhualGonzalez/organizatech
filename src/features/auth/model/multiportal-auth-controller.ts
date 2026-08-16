@@ -8,18 +8,26 @@ import type { AuthAccountType } from "@/features/auth/model/auth-route";
 import type {
   CoachRegistrationOwner,
   PortalResolutionOwner,
+  UserRegistrationOwner,
 } from "@/features/auth/model/portal-resolution-owner";
 
+export const USER_REGISTRATION_REQUIRED_MESSAGE =
+  "Cuenta Usuario no registrada. Crea una cuenta Usuario para iniciar sesión.";
 export const COACH_REGISTRATION_REQUIRED_MESSAGE =
   "Cuenta Coach no registrada. Crea una cuenta Coach para iniciar sesión.";
+export const USER_REGISTRATION_CONFIRMATION_MESSAGE =
+  "Cuenta creada. Revisa tu correo para confirmar el registro.";
 export const COACH_REGISTRATION_CONFIRMATION_MESSAGE =
   "Cuenta creada. Revisa tu correo para confirmar el registro.";
 export const MULTIPORTAL_AUTH_ERROR_MESSAGE =
   "No pudimos completar la acción. Intenta nuevamente.";
 export const COACH_REGISTRATION_IDENTITY_MISMATCH_MESSAGE =
   "El correo debe coincidir con la sesión activa.";
+export const USER_REGISTRATION_IDENTITY_MISMATCH_MESSAGE =
+  "El correo debe coincidir con la sesión activa.";
 
 export type PortalSignOutReason =
+  | "user_registration_required"
   | "coach_registration_required"
   | "authorization_error";
 
@@ -41,6 +49,10 @@ export interface CoachRegistrationRecord {
   professionalTitle: string;
 }
 
+export interface UserRegistrationRecord {
+  userId: string;
+}
+
 export type RegistrationPasswordSignInResult<TAuthState> =
   | { kind: "authenticated"; identity: AuthenticatedPortalIdentity<TAuthState> }
   | { kind: "invalid_credentials" }
@@ -57,7 +69,7 @@ export type RegistrationSignupResult<TAuthState> =
 export interface MultiportalAuthGateway<TAuthState> {
   getCurrentIdentity(
     expectedUserId?: string,
-    owner?: CoachRegistrationOwner,
+    owner?: CoachRegistrationOwner | UserRegistrationOwner,
   ): Promise<AuthenticatedPortalIdentity<TAuthState> | null>;
   signInForCoachRegistration(
     credentials: LoginPayload,
@@ -67,6 +79,18 @@ export interface MultiportalAuthGateway<TAuthState> {
     payload: UserSignupPayload,
     owner: CoachRegistrationOwner,
   ): Promise<RegistrationSignupResult<TAuthState>>;
+  signInForUserRegistration(
+    credentials: LoginPayload,
+    owner: UserRegistrationOwner,
+  ): Promise<RegistrationPasswordSignInResult<TAuthState>>;
+  signUpForUserRegistration(
+    payload: UserSignupPayload,
+    owner: UserRegistrationOwner,
+  ): Promise<RegistrationSignupResult<TAuthState>>;
+  hasUserRegistration(
+    expectedUserId: string,
+    owner?: PortalResolutionOwner | UserRegistrationOwner,
+  ): Promise<boolean>;
   hasCoachRegistration(
     expectedUserId: string,
     owner?: PortalResolutionOwner | CoachRegistrationOwner,
@@ -76,6 +100,14 @@ export interface MultiportalAuthGateway<TAuthState> {
     expectedUserId: string,
     owner: CoachRegistrationOwner,
   ): Promise<CoachRegistrationRecord>;
+  createUserRegistration(
+    expectedUserId: string,
+    owner: UserRegistrationOwner,
+  ): Promise<UserRegistrationRecord>;
+  activateUserRegistrationIdentity(
+    identity: AuthenticatedPortalIdentity<TAuthState>,
+    owner: UserRegistrationOwner,
+  ): Promise<AuthenticatedPortalIdentity<TAuthState> | null>;
   activateCoachRegistrationIdentity(
     identity: AuthenticatedPortalIdentity<TAuthState>,
     owner: CoachRegistrationOwner,
@@ -101,6 +133,11 @@ export type PortalAccessResult =
     state: "coach_registration_required";
     requestedPortal: "coach";
     message: typeof COACH_REGISTRATION_REQUIRED_MESSAGE;
+  }
+  | {
+    state: "user_registration_required";
+    requestedPortal: "usuario";
+    message: typeof USER_REGISTRATION_REQUIRED_MESSAGE;
   }
   | {
     state: "error";
@@ -144,6 +181,33 @@ export type CoachRegistrationResult<TAuthState> =
     requestedPortal: "coach";
   };
 
+export type UserRegistrationResult<TAuthState> =
+  | {
+    state: "user_authorized";
+    requestedPortal: "usuario";
+    userId: string;
+    authState: TAuthState;
+  }
+  | {
+    state: "user_confirmation_required";
+    requestedPortal: "usuario";
+    message: typeof USER_REGISTRATION_CONFIRMATION_MESSAGE;
+  }
+  | {
+    state: "error";
+    requestedPortal: "usuario";
+    message: string;
+    field?: "register-email";
+  }
+  | {
+    state: "busy";
+    requestedPortal: "usuario";
+  }
+  | {
+    state: "stale";
+    requestedPortal: "usuario";
+  };
+
 export interface MultiportalAuthController<TAuthState> {
   resolvePortalAccess(
     input: {
@@ -158,11 +222,17 @@ export interface MultiportalAuthController<TAuthState> {
     owner: CoachRegistrationOwner,
     gateway: MultiportalAuthGateway<TAuthState>,
   ): Promise<CoachRegistrationResult<TAuthState>>;
+  registerUser(
+    input: UserSignupPayload,
+    owner: UserRegistrationOwner,
+    gateway: MultiportalAuthGateway<TAuthState>,
+  ): Promise<UserRegistrationResult<TAuthState>>;
   dispose(): void;
 }
 
 export function createMultiportalAuthController<TAuthState>(): MultiportalAuthController<TAuthState> {
   const registrationOwners = new Set<symbol>();
+  const userRegistrationOwners = new Set<symbol>();
   let disposed = false;
 
   return {
@@ -184,9 +254,24 @@ export function createMultiportalAuthController<TAuthState>(): MultiportalAuthCo
       });
     },
 
+    registerUser(input, owner, gateway) {
+      if (disposed || !owner.isCurrent()) {
+        return Promise.resolve(staleUserRegistration());
+      }
+      if (userRegistrationOwners.has(owner.id)) {
+        return Promise.resolve({ state: "busy", requestedPortal: "usuario" });
+      }
+
+      userRegistrationOwners.add(owner.id);
+      return registerUser(input, owner, gateway).finally(() => {
+        userRegistrationOwners.delete(owner.id);
+      });
+    },
+
     dispose() {
       disposed = true;
       registrationOwners.clear();
+      userRegistrationOwners.clear();
     },
   };
 }
@@ -209,11 +294,17 @@ async function resolvePortalAccess<TAuthState>(
     }
 
     if (input.requestedPortal === "usuario") {
-      return {
-        state: "user_authorized",
-        requestedPortal: "usuario",
-        userId: identity.userId,
-      };
+      const hasUserRegistration = await gateway.hasUserRegistration(identity.userId, input.owner);
+      if (!ownsPortalResolution(input)) return stalePortalResolution(input.requestedPortal);
+      if (hasUserRegistration) {
+        return {
+          state: "user_authorized",
+          requestedPortal: "usuario",
+          userId: identity.userId,
+        };
+      }
+
+      return rejectPortalSession(input, gateway, "user_registration_required");
     }
 
     const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, input.owner);
@@ -252,6 +343,13 @@ async function rejectPortalSession<TAuthState>(
     return controlledPortalError(input.requestedPortal);
   }
 
+  if (reason === "user_registration_required") {
+    return {
+      state: "user_registration_required",
+      requestedPortal: "usuario",
+      message: USER_REGISTRATION_REQUIRED_MESSAGE,
+    };
+  }
   if (reason === "coach_registration_required") {
     return {
       state: "coach_registration_required",
@@ -370,8 +468,105 @@ async function registerCoach<TAuthState>(
   }
 }
 
+async function registerUser<TAuthState>(
+  input: UserSignupPayload,
+  owner: UserRegistrationOwner,
+  gateway: MultiportalAuthGateway<TAuthState>,
+): Promise<UserRegistrationResult<TAuthState>> {
+  if (!owner.isCurrent()) return staleUserRegistration();
+  try {
+    let identity = await gateway.getCurrentIdentity(owner.expectedUserId ?? undefined, owner);
+    if (!owner.isCurrent()) return staleUserRegistration();
+    if (identity && !owner.bindExpectedUserId(identity.userId)) return staleUserRegistration();
+    if (identity && !sameEmail(identity.email, input.email)) {
+      return {
+        state: "error",
+        requestedPortal: "usuario",
+        field: "register-email",
+        message: USER_REGISTRATION_IDENTITY_MISMATCH_MESSAGE,
+      };
+    }
+
+    if (!identity) {
+      const signIn = await gateway.signInForUserRegistration({
+        email: input.email,
+        password: input.password,
+      }, owner);
+      if (!owner.isCurrent() || signIn.kind === "stale") return staleUserRegistration();
+      if (signIn.kind === "authenticated") {
+        identity = signIn.identity;
+      } else if (signIn.kind === "invalid_credentials") {
+        if (!owner.isCurrent()) return staleUserRegistration();
+        const signup = await gateway.signUpForUserRegistration(input, owner);
+        if (!owner.isCurrent() || signup.kind === "stale") return staleUserRegistration();
+        if (signup.kind === "authenticated") {
+          identity = signup.identity;
+        } else if (signup.kind === "confirmation_required") {
+          return {
+            state: "user_confirmation_required",
+            requestedPortal: "usuario",
+            message: USER_REGISTRATION_CONFIRMATION_MESSAGE,
+          };
+        } else if (signup.kind === "existing_identity") {
+          return {
+            state: "error",
+            requestedPortal: "usuario",
+            field: "register-email",
+            message: "Este correo ya está registrado. Inicia sesión con esa cuenta para agregar el acceso Usuario.",
+          };
+        } else {
+          return controlledUserRegistrationError(signup.message);
+        }
+      } else {
+        return controlledUserRegistrationError(signIn.message);
+      }
+    }
+
+    if (!owner.isCurrent() || !owner.bindExpectedUserId(identity.userId)) {
+      return staleUserRegistration();
+    }
+    if (!sameEmail(identity.email, input.email)) {
+      return {
+        state: "error",
+        requestedPortal: "usuario",
+        field: "register-email",
+        message: USER_REGISTRATION_IDENTITY_MISMATCH_MESSAGE,
+      };
+    }
+
+    const hasUserRegistration = await gateway.hasUserRegistration(identity.userId, owner);
+    if (!owner.isCurrent()) return staleUserRegistration();
+    if (!hasUserRegistration) {
+      const registration = await gateway.createUserRegistration(identity.userId, owner);
+      if (!owner.isCurrent()) return staleUserRegistration();
+      if (registration.userId !== identity.userId) {
+        return controlledUserRegistrationError();
+      }
+    }
+
+    const activatedIdentity = await gateway.activateUserRegistrationIdentity(identity, owner);
+    if (!owner.isCurrent()) return staleUserRegistration();
+    if (!activatedIdentity || activatedIdentity.userId !== identity.userId) {
+      return controlledUserRegistrationError();
+    }
+    return {
+      state: "user_authorized",
+      requestedPortal: "usuario",
+      userId: activatedIdentity.userId,
+      authState: activatedIdentity.authState,
+    };
+  } catch {
+    if (!owner.isCurrent()) return staleUserRegistration();
+    return controlledUserRegistrationError();
+  }
+}
+
 function staleCoachRegistration(): CoachRegistrationResult<never> {
   return { state: "stale", requestedPortal: "coach" };
+}
+
+function staleUserRegistration(): UserRegistrationResult<never> {
+  return { state: "stale", requestedPortal: "usuario" };
 }
 
 function controlledPortalError(requestedPortal: AuthAccountType): PortalAccessResult {
@@ -386,6 +581,14 @@ function controlledCoachRegistrationError(message = MULTIPORTAL_AUTH_ERROR_MESSA
   return {
     state: "error",
     requestedPortal: "coach",
+    message,
+  };
+}
+
+function controlledUserRegistrationError(message = MULTIPORTAL_AUTH_ERROR_MESSAGE): UserRegistrationResult<never> {
+  return {
+    state: "error",
+    requestedPortal: "usuario",
     message,
   };
 }

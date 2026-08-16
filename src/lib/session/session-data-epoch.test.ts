@@ -485,7 +485,9 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   assertMarkersInOrder(portalAuthorizationContinuation, [
     "multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner)",
     'access.state === "stale" || !multiportalAuth.isPortalResolutionCurrent(resolutionOwner)',
-    'access.state === "coach_registration_required" || access.state === "error"',
+    'access.state === "user_registration_required"',
+    'access.state === "coach_registration_required"',
+    'access.state === "error"',
     "multiportalAuth.settlePortalSignOutMessage(access.message)",
     'if (rejectionMessage) setAuthStatus(rejectionMessage, "error")',
     "applySessionState(authState)",
@@ -2549,11 +2551,11 @@ async function run() {
   );
   assert.match(
     handleAuthSource,
-    /catch \(error\) \{\s*if \(\s*portalResolutionOwner\s*&& !multiportalAuth\.isPortalResolutionCurrent\(portalResolutionOwner\)\s*\) return;\s*if \(\s*coachRegistrationSubmitOwner\s*&& !multiportalAuth\.isCoachRegistrationSubmitCurrent\(coachRegistrationSubmitOwner\)\s*\) return;\s*if \(appliedIdentityToken && !isSessionDataRequestCurrent\(appliedIdentityToken\)\) return;\s*setAuthStatus/,
+    /catch \(error\) \{\s*if \(\s*portalResolutionOwner\s*&& !multiportalAuth\.isPortalResolutionCurrent\(portalResolutionOwner\)\s*\) return;\s*if \(\s*coachRegistrationSubmitOwner\s*&& !multiportalAuth\.isCoachRegistrationSubmitCurrent\(coachRegistrationSubmitOwner\)\s*\) return;\s*if \(\s*userRegistrationSubmitOwner\s*&& !multiportalAuth\.isUserRegistrationSubmitCurrent\(userRegistrationSubmitOwner\)\s*\) return;\s*if \(appliedIdentityToken && !isSessionDataRequestCurrent\(appliedIdentityToken\)\) return;\s*setAuthStatus/,
   );
   assert.match(
     handleAuthSource,
-    /finally \{\s*const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController[\s\S]*?loginSubmitOwnerController\.finalize\(loginSubmitOwner\)[\s\S]*?const canFinalizePortalResolution[\s\S]*?const canFinalizeCoachRegistration[\s\S]*?if \(\s*canFinalizeAuthAttempt\s*&& canFinalizePortalResolution\s*&& canFinalizeCoachRegistration\s*\) \{\s*interactiveAuthAttemptRef\.current = false;\s*if \(!appliedIdentityToken \|\| isSessionDataRequestCurrent\(appliedIdentityToken\)\) \{\s*setIsBusy\(false\);/,
+    /finally \{\s*const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController[\s\S]*?loginSubmitOwnerController\.finalize\(loginSubmitOwner\)[\s\S]*?const canFinalizePortalResolution[\s\S]*?const canFinalizeCoachRegistration[\s\S]*?const canFinalizeUserRegistration[\s\S]*?if \(\s*canFinalizeAuthAttempt\s*&& canFinalizePortalResolution\s*&& canFinalizeCoachRegistration\s*&& canFinalizeUserRegistration\s*\) \{\s*interactiveAuthAttemptRef\.current = false;\s*if \(!appliedIdentityToken \|\| isSessionDataRequestCurrent\(appliedIdentityToken\)\) \{\s*setIsBusy\(false\);/,
   );
 
   // ---------------------------------------------------------------------------------------------

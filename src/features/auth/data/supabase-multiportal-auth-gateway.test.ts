@@ -10,9 +10,15 @@ import {
   toCoachRegistrationRpcPayload,
 } from "@/features/auth/data/supabase-multiportal-auth-gateway";
 import {
+  createMultiportalAuthController,
+  MULTIPORTAL_AUTH_ERROR_MESSAGE,
+} from "@/features/auth/model/multiportal-auth-controller";
+import {
   createCoachRegistrationOwnerController,
   createPortalResolutionOwnerController,
+  createUserRegistrationOwnerController,
 } from "@/features/auth/model/portal-resolution-owner";
+import type { SupabaseSessionState } from "@/lib/supabase/session";
 
 const users = {
   "user-a": { id: "user-a", email: "coach-a@example.com" } as User,
@@ -55,6 +61,7 @@ function createDeferred<T>() {
 interface StatefulFakeInput {
   activeUserId?: TestUserId | null;
   rows?: ReadonlyArray<ReturnType<typeof registrationRow>>;
+  userRows?: ReadonlyArray<{ user_id: TestUserId }>;
   beforeGetUser?(): void | Promise<void>;
   beforeRpc?(): void | Promise<void>;
   onFilterAttempt?(): void;
@@ -67,7 +74,11 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
   const rows = new Map<TestUserId, ReturnType<typeof registrationRow>>(
     (input.rows ?? []).map((row) => [row.user_id, row]),
   );
+  const userRows = new Map<TestUserId, { user_id: TestUserId }>(
+    (input.userRows ?? []).map((row) => [row.user_id, row]),
+  );
   const insertedPayloads: unknown[] = [];
+  const insertedUserIds: TestUserId[] = [];
   const readOwners: Array<TestUserId | null> = [];
   const signOutOptions: unknown[] = [];
   const rpcPayloads: unknown[] = [];
@@ -75,6 +86,8 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
   let identityReads = 0;
   let sessionReads = 0;
   let rpcAttempts = 0;
+  let setSessionAttempts = 0;
+  const setSessionUserIds: TestUserId[] = [];
 
   function currentUser() {
     return activeUserId ? users[activeUserId] : null;
@@ -97,7 +110,9 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
     signInWithPassword: async () => assert.fail("signIn inesperado"),
     signUp: async () => assert.fail("signUp inesperado"),
     setSession: async ({ access_token }: { access_token: string }) => {
+      setSessionAttempts += 1;
       const nextUserId: TestUserId = access_token.endsWith("user-a") ? "user-a" : "user-b";
+      setSessionUserIds.push(nextUserId);
       activeUserId = nextUserId;
       const user = users[nextUserId];
       return {
@@ -120,15 +135,19 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
   };
 
   const from = (relation: string) => {
-    assert.equal(relation, "coach_registrations");
+    assert.ok(
+      relation === "coach_registrations" || relation === "user_registrations",
+      `relación Auth inesperada: ${relation}`,
+    );
     relationReads += 1;
+    const selectedRows = relation === "coach_registrations" ? rows : userRows;
     return {
       select: () => ({
         eq: () => {
           input.onFilterAttempt?.();
           return {
             maybeSingle: async () => ({
-              data: activeUserId ? rows.get(activeUserId) ?? null : null,
+              data: activeUserId ? selectedRows.get(activeUserId) ?? null : null,
               error: null,
             }),
           };
@@ -138,7 +157,7 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
           return {
             data: input.selectedRowOverride !== undefined
               ? input.selectedRowOverride
-              : activeUserId ? rows.get(activeUserId) ?? null : null,
+              : activeUserId ? selectedRows.get(activeUserId) ?? null : null,
             error: input.selectError ?? null,
           };
         },
@@ -146,12 +165,26 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
     };
   };
 
-  const rpc = async (functionName: string, payload: Record<string, unknown>) => {
-    assert.equal(functionName, "register_own_coach");
+  const rpc = async (functionName: string, payload: Record<string, unknown> = {}) => {
+    assert.ok(
+      functionName === "register_own_coach" || functionName === "register_own_user",
+      `RPC Auth inesperada: ${functionName}`,
+    );
     rpcAttempts += 1;
     rpcPayloads.push(payload);
     const jwtUserId = activeUserId;
     await input.beforeRpc?.();
+    if (functionName === "register_own_user") {
+      if (!jwtUserId || Object.keys(payload).length > 0) {
+        return { data: null, error: { code: "42501", message: "RLS/ACL" } };
+      }
+      const existingUserRegistration = userRows.get(jwtUserId);
+      if (existingUserRegistration) return { data: existingUserRegistration, error: null };
+      const row = { user_id: jwtUserId };
+      insertedUserIds.push(jwtUserId);
+      userRows.set(jwtUserId, row);
+      return { data: row, error: null };
+    }
     const expectedKeys = [
       "p_expected_user_id",
       "p_first_name",
@@ -192,7 +225,9 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
       activeUserId = userId;
     },
     rows,
+    userRows,
     insertedPayloads,
+    insertedUserIds,
     readOwners,
     signOutOptions,
     rpcPayloads,
@@ -208,11 +243,21 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
     get rpcAttempts() {
       return rpcAttempts;
     },
+    get setSessionAttempts() {
+      return setSessionAttempts;
+    },
+    setSessionUserIds,
   };
 }
 
 function beginRegistrationOwner(userId: TestUserId | null) {
   const owners = createCoachRegistrationOwnerController();
+  if (userId) owners.acceptIdentity(userId);
+  return { owners, owner: owners.begin() };
+}
+
+function beginUserRegistrationOwner(userId: TestUserId | null) {
+  const owners = createUserRegistrationOwnerController();
   if (userId) owners.acceptIdentity(userId);
   return { owners, owner: owners.begin() };
 }
@@ -280,6 +325,340 @@ test("fake stateful A/B materializa lectura own-only y bloquea selección cruzad
   );
   assert.equal(fake.relationReads, readsBeforeCrossAttempt, "B no alcanza SELECT al declarar expectedUserId A");
   assert.equal(filterAttempts, 0, "el cliente no controla user_id mediante filtros");
+});
+
+test("membresía Usuario se lee own-only y profiles no participa de la autorización", async () => {
+  let filterAttempts = 0;
+  const fake = createStatefulFakeClient({
+    activeUserId: "user-a",
+    userRows: [{ user_id: "user-a" }],
+    onFilterAttempt: () => { filterAttempts += 1; },
+  });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+
+  assert.equal(await gateway.hasUserRegistration("user-a"), true);
+  assert.deepEqual(fake.readOwners, ["user-a"]);
+  assert.equal(fake.relationReads, 1);
+
+  fake.setActiveUserId("user-b");
+  assert.equal(await gateway.hasUserRegistration("user-b"), false);
+  assert.deepEqual(fake.readOwners, ["user-a", "user-b"]);
+  await assert.rejects(
+    gateway.hasUserRegistration("user-a"),
+    /identidad autenticada cambió/,
+  );
+  assert.equal(filterAttempts, 0, "el cliente no puede elegir user_id mediante filtros");
+});
+
+test("RPC Usuario deriva ownership del JWT, no recibe payload y es idempotente", async () => {
+  const fake = createStatefulFakeClient({ activeUserId: "user-b" });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const { owner } = beginUserRegistrationOwner("user-b");
+
+  const first = await gateway.createUserRegistration("user-b", owner);
+  const second = await gateway.createUserRegistration("user-b", owner);
+
+  assert.deepEqual(first, { userId: "user-b" });
+  assert.deepEqual(second, first);
+  assert.deepEqual(fake.insertedUserIds, ["user-b"]);
+  assert.deepEqual(fake.rpcPayloads, [{}, {}], "el cliente no envía user_id ni otro ownership");
+  assert.equal(fake.userRows.size, 1);
+  assert.equal(fake.rows.size, 0, "Registro Usuario no crea membresía Coach");
+
+  await assert.rejects(
+    gateway.createUserRegistration("user-a", owner),
+    /operación de registro ya no está vigente/,
+  );
+  assert.equal(fake.userRows.has("user-a"), false, "B nunca puede crear la fila Usuario de A");
+});
+
+test("signIn Usuario aislado tardío no reemplaza la sesión global B", async () => {
+  const main = createStatefulFakeClient({ activeUserId: "user-b" });
+  const isolated = createStatefulFakeClient({ activeUserId: null });
+  const signInStarted = createDeferred<void>();
+  const signInResult = createDeferred<{
+    data: { user: User; session: Session };
+    error: null;
+  }>();
+  (isolated.client.auth as unknown as {
+    signInWithPassword: () => Promise<{
+      data: { user: User; session: Session };
+      error: null;
+    }>;
+  }).signInWithPassword = async () => {
+    signInStarted.resolve();
+    return signInResult.promise;
+  };
+  const owners = createUserRegistrationOwnerController();
+  const ownerA = owners.begin();
+  const gateway = createSupabaseMultiportalAuthGateway(main.client, {
+    createRegistrationClient: () => isolated.client,
+  });
+
+  const pending = gateway.signInForUserRegistration({
+    email: users["user-a"].email!,
+    password: "segura123",
+  }, ownerA);
+  await signInStarted.promise;
+  owners.acceptIdentity("user-b");
+  isolated.setActiveUserId("user-a");
+  signInResult.resolve({
+    data: {
+      user: users["user-a"],
+      session: {
+        user: users["user-a"],
+        access_token: "test-user-a",
+        refresh_token: "test-user-a",
+      } as Session,
+    },
+    error: null,
+  });
+
+  assert.deepEqual(await pending, { kind: "stale" });
+  assert.equal(main.activeUserId, "user-b");
+  assert.equal(main.rpcAttempts, 0);
+});
+
+test("H1 · identidad Usuario aislada A no reemplaza una sesión global B vigente", async () => {
+  const main = createStatefulFakeClient({ activeUserId: "user-b" });
+  const gateway = createSupabaseMultiportalAuthGateway(main.client);
+  const owners = createUserRegistrationOwnerController();
+  const ownerA = owners.begin();
+  assert.equal(ownerA.bindExpectedUserId("user-a"), true);
+
+  const isolatedSessionA = {
+    user: users["user-a"],
+    access_token: "test-user-a",
+    refresh_token: "test-user-a",
+  } as Session;
+  const isolatedIdentityA = {
+    userId: "user-a",
+    email: users["user-a"].email ?? null,
+    authState: {
+      isConfigured: true,
+      dataMode: "supabase" as const,
+      session: isolatedSessionA,
+      user: users["user-a"],
+    },
+  };
+  const globalIdentityBefore = await gateway.getCurrentIdentity("user-b");
+  const activatedIdentity = await gateway.activateUserRegistrationIdentity(
+    isolatedIdentityA,
+    ownerA,
+  );
+  const consumerEffects = {
+    navigation: 0,
+    messages: 0,
+    authorizations: 0,
+    publications: 0,
+  };
+  if (activatedIdentity) {
+    consumerEffects.navigation += 1;
+    consumerEffects.authorizations += 1;
+    consumerEffects.publications += 1;
+  }
+  const globalIdentityAfter = await gateway.getCurrentIdentity("user-b");
+
+  assert.deepEqual(
+    {
+      globalUserBefore: globalIdentityBefore?.userId ?? null,
+      isolatedUser: isolatedIdentityA.userId,
+      activation: activatedIdentity,
+      setSessionAttempts: main.setSessionAttempts,
+      setSessionUserIds: main.setSessionUserIds,
+      activeGlobalUserAfter: main.activeUserId,
+      globalUserAfter: globalIdentityAfter?.userId ?? null,
+      consumerEffects,
+      userMembershipAppliedByA: main.userRows.has("user-a"),
+      coachMembershipAppliedByA: main.rows.has("user-a"),
+    },
+    {
+      globalUserBefore: "user-b",
+      isolatedUser: "user-a",
+      activation: null,
+      setSessionAttempts: 0,
+      setSessionUserIds: [],
+      activeGlobalUserAfter: "user-b",
+      globalUserAfter: "user-b",
+      consumerEffects: {
+        navigation: 0,
+        messages: 0,
+        authorizations: 0,
+        publications: 0,
+      },
+      userMembershipAppliedByA: false,
+      coachMembershipAppliedByA: false,
+    },
+    "[AUTH-COACH-01.USER.H1.global-session-preserved]",
+  );
+});
+
+test("H2 · owner Usuario stale no inicia write y B completa después su propio flujo", async () => {
+  const main = createStatefulFakeClient({ activeUserId: "user-b" });
+  const gateway = createSupabaseMultiportalAuthGateway(main.client);
+  const controller = createMultiportalAuthController<SupabaseSessionState>();
+  const owners = createUserRegistrationOwnerController();
+  owners.acceptIdentity("user-a");
+  const ownerA = owners.begin();
+  owners.acceptIdentity("user-b");
+  const ownerWasStaleBeforeWrite = !ownerA.isCurrent();
+
+  let staleWriteError: unknown = null;
+  try {
+    await gateway.createUserRegistration("user-a", ownerA);
+  } catch (error) {
+    staleWriteError = error;
+  }
+  const rpcAttemptsAfterA = main.rpcAttempts;
+  const userRowsAfterA = [...main.userRows.keys()];
+
+  const ownerB = owners.begin();
+  const resultB = await controller.registerUser({
+    email: users["user-b"].email!,
+    password: "segura123",
+    options: {
+      data: {
+        display_name: "Usuario B",
+        first_name: "Usuario",
+        last_name: "B",
+        birth_date: "1990-01-01",
+        gender: "prefer_not_to_say",
+        phone_number: "+56900000002",
+      },
+    },
+  }, ownerB, gateway);
+
+  assert.deepEqual(
+    {
+      ownerWasStaleBeforeWrite,
+      staleWriteError: staleWriteError instanceof Error
+        ? { name: staleWriteError.name, message: staleWriteError.message }
+        : null,
+      rpcAttemptsAfterA,
+      userRowsAfterA,
+      aEffects: {
+        writes: rpcAttemptsAfterA,
+        navigation: 0,
+        messages: 0,
+        publications: 0,
+        authorizations: 0,
+      },
+      resultB: resultB.state === "user_authorized"
+        ? { state: resultB.state, userId: resultB.userId }
+        : { state: resultB.state, userId: null },
+      finalActiveUser: main.activeUserId,
+      finalUserRows: [...main.userRows.keys()],
+      totalRpcAttempts: main.rpcAttempts,
+      setSessionAttempts: main.setSessionAttempts,
+    },
+    {
+      ownerWasStaleBeforeWrite: true,
+      staleWriteError: {
+        name: "MultiportalAuthRepositoryError",
+        message: "La operación de registro ya no está vigente.",
+      },
+      rpcAttemptsAfterA: 0,
+      userRowsAfterA: [],
+      aEffects: {
+        writes: 0,
+        navigation: 0,
+        messages: 0,
+        publications: 0,
+        authorizations: 0,
+      },
+      resultB: { state: "user_authorized", userId: "user-b" },
+      finalActiveUser: "user-b",
+      finalUserRows: ["user-b"],
+      totalRpcAttempts: 1,
+      setSessionAttempts: 0,
+    },
+    "[AUTH-COACH-01.USER.H2.stale-owner-prewrite]",
+  );
+});
+
+test("H3 · fila Usuario cruzada B al solicitar A falla cerrada y sanitizada", async () => {
+  const direct = createStatefulFakeClient({
+    activeUserId: "user-a",
+    selectedRowOverride: { user_id: "user-b" },
+  });
+  const directGateway = createSupabaseMultiportalAuthGateway(direct.client);
+  const directOwner = beginPortalOwner("user-a").owner;
+  let directValue: boolean | null = null;
+  let directError: unknown = null;
+  try {
+    directValue = await directGateway.hasUserRegistration("user-a", directOwner);
+  } catch (error) {
+    directError = error;
+  }
+
+  const flow = createStatefulFakeClient({
+    activeUserId: "user-a",
+    selectedRowOverride: { user_id: "user-b" },
+  });
+  const flowGateway = createSupabaseMultiportalAuthGateway(flow.client);
+  const flowOwner = beginPortalOwner("user-a").owner;
+  const result = await createMultiportalAuthController<SupabaseSessionState>().resolvePortalAccess({
+    requestedPortal: "usuario",
+    expectedUserId: "user-a",
+    owner: flowOwner,
+  }, flowGateway);
+  const accessEffects = {
+    authorizations: 0,
+    publications: 0,
+    navigation: 0,
+    stateA: 0,
+    stateB: 0,
+  };
+  if (result.state === "user_authorized") {
+    accessEffects.authorizations += 1;
+    accessEffects.publications += 1;
+    accessEffects.navigation += 1;
+    if (result.userId === "user-a") accessEffects.stateA += 1;
+    if (result.userId === "user-b") accessEffects.stateB += 1;
+  }
+  const directErrorMessage = directError instanceof Error ? directError.message : null;
+
+  assert.deepEqual(
+    {
+      requestedUser: "user-a",
+      backendRowUser: "user-b",
+      directValue,
+      directError: directError instanceof Error
+        ? { name: directError.name, message: directError.message }
+        : null,
+      leakedInternalDetail: directErrorMessage === null
+        || /user-[ab]|user_registrations|pgrst|postgres|select\s|rpc/i.test(directErrorMessage),
+      result: result.state === "error"
+        ? { state: result.state, message: result.message }
+        : { state: result.state, message: null },
+      accessEffects,
+      signOuts: flow.signOutOptions,
+      activeUserAfterRejection: flow.activeUserId,
+      writes: flow.rpcAttempts,
+    },
+    {
+      requestedUser: "user-a",
+      backendRowUser: "user-b",
+      directValue: null,
+      directError: {
+        name: "MultiportalAuthRepositoryError",
+        message: "La autorización Usuario no pertenece a la sesión.",
+      },
+      leakedInternalDetail: false,
+      result: { state: "error", message: MULTIPORTAL_AUTH_ERROR_MESSAGE },
+      accessEffects: {
+        authorizations: 0,
+        publications: 0,
+        navigation: 0,
+        stateA: 0,
+        stateB: 0,
+      },
+      signOuts: [{ scope: "local" }],
+      activeUserAfterRejection: null,
+      writes: 0,
+    },
+    "[AUTH-COACH-01.USER.H3.crossed-row-rejected]",
+  );
 });
 
 test("E9 · forma productiva con owner vigente retorna true sólo después del SELECT propio", async () => {

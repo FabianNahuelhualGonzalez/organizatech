@@ -192,6 +192,13 @@ function isCoachAuthorizedReturn(statement: ts.ReturnStatement) {
   );
 }
 
+function isUserAuthorizedReturn(statement: ts.ReturnStatement) {
+  return Boolean(
+    statement.expression
+    && objectLiteralStringProperty(statement.expression, "state") === "user_authorized",
+  );
+}
+
 function ancestorIfStatements(node: ts.Node, body: ts.Block) {
   const ancestors: ts.IfStatement[] = [];
   let current: ts.Node | undefined = node;
@@ -273,6 +280,108 @@ function isPropertyPath(expression: ts.Expression | undefined, root: string, pro
   return current.name.text === property
     && ts.isIdentifier(base)
     && base.text === root;
+}
+
+function awaitedNamedCall(expression: ts.Expression, functionName: string) {
+  let current = unwrapExpression(expression);
+  if (ts.isAwaitExpression(current)) current = unwrapExpression(current.expression);
+  if (
+    !ts.isCallExpression(current)
+    || !ts.isIdentifier(current.expression)
+    || current.expression.text !== functionName
+  ) {
+    return null;
+  }
+  return current;
+}
+
+function isNullExpression(expression: ts.Expression | undefined) {
+  return Boolean(expression && unwrapExpression(expression).kind === ts.SyntaxKind.NullKeyword);
+}
+
+function statementContainsThrowCall(statement: ts.Statement, functionName: string) {
+  let match = false;
+  const visit = (node: ts.Node) => {
+    if (match || (node !== statement && isNestedFunctionBoundary(node))) return;
+    if (ts.isThrowStatement(node) && node.expression) {
+      const expression = unwrapExpression(node.expression);
+      if (
+        ts.isCallExpression(expression)
+        && ts.isIdentifier(expression.expression)
+        && expression.expression.text === functionName
+      ) {
+        match = true;
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(statement);
+  return match;
+}
+
+function statementContainsThrow(statement: ts.Statement) {
+  let match = false;
+  const visit = (node: ts.Node) => {
+    if (match || (node !== statement && isNestedFunctionBoundary(node))) return;
+    if (ts.isThrowStatement(node)) {
+      match = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(statement);
+  return match;
+}
+
+function statementContainsReturn(
+  statement: ts.Statement,
+  predicate: (expression: ts.Expression) => boolean,
+) {
+  let match = false;
+  const visit = (node: ts.Node) => {
+    if (match || (node !== statement && isNestedFunctionBoundary(node))) return;
+    if (ts.isReturnStatement(node) && node.expression && predicate(node.expression)) {
+      match = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(statement);
+  return match;
+}
+
+function replaceNodeText(
+  source: string,
+  sourceFile: ts.SourceFile,
+  node: ts.Node,
+  replacement: string,
+) {
+  return `${source.slice(0, node.getStart(sourceFile))}${replacement}${source.slice(node.end)}`;
+}
+
+function renameIdentifiersWithin(
+  source: string,
+  sourceFile: ts.SourceFile,
+  container: ts.Node,
+  currentName: string,
+  nextName: string,
+) {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const visit = (node: ts.Node) => {
+    if (node !== container && isNestedFunctionBoundary(node)) return;
+    if (ts.isIdentifier(node) && node.text === currentName) {
+      ranges.push({ start: node.getStart(sourceFile), end: node.end });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(container);
+  assert.ok(ranges.length > 0, `renombre semántico encuentra ${currentName}`);
+  let transformed = source;
+  for (const range of ranges.sort((left, right) => right.start - left.start)) {
+    transformed = `${transformed.slice(0, range.start)}${nextName}${transformed.slice(range.end)}`;
+  }
+  return transformed;
 }
 
 function positiveBindingName(expression: ts.Expression): string | null {
@@ -421,6 +530,130 @@ function auditCoachAuthorizationSemantics(controller: string) {
   );
 }
 
+function auditUserAuthorizationSemantics(controller: string) {
+  const sourceFile = parseTypeScript(controller, CONTROLLER_PATH);
+  const resolution = findNamedFunction(sourceFile, "resolvePortalAccess");
+  const inputParameter = resolution.parameters[0]?.name;
+  const gatewayParameter = resolution.parameters[1]?.name;
+  const inputName = inputParameter && ts.isIdentifier(inputParameter) ? inputParameter.text : null;
+  const gatewayName = gatewayParameter && ts.isIdentifier(gatewayParameter) ? gatewayParameter.text : null;
+  assert.ok(inputName && gatewayName, "resolvePortalAccess conserva parámetros Usuario identificables");
+
+  const initializers = collectVariableInitializers(resolution.body);
+  const identityEntry = [...initializers.entries()].find(([, initializer]) => {
+    const call = awaitedMethodCall(initializer, "getCurrentIdentity");
+    return Boolean(
+      call
+      && ts.isPropertyAccessExpression(call.expression)
+      && ts.isIdentifier(call.expression.expression)
+      && call.expression.expression.text === gatewayName
+      && isPropertyPath(call.arguments[0], inputName!, "expectedUserId"),
+    );
+  });
+  const identityName = identityEntry?.[0] ?? null;
+  assert.ok(
+    identityName,
+    "[AUTH-COACH-01.USER.controller.authoritative-user-row] identidad fresca deriva de expectedUserId",
+  );
+
+  const userReturns = collectReturns(resolution.body).filter(isUserAuthorizedReturn);
+  const authoritativeReturns = userReturns.filter((userReturn) => (
+    ancestorIfStatements(userReturn, resolution.body).some((ifStatement) => {
+      if (!isWithin(userReturn, ifStatement.thenStatement)) return false;
+      const bindingName = positiveBindingName(ifStatement.expression);
+      if (!bindingName) return false;
+      const initializer = initializers.get(bindingName);
+      if (!initializer) return false;
+      const call = awaitedMethodCall(initializer, "hasUserRegistration");
+      return Boolean(
+        call
+        && ts.isPropertyAccessExpression(call.expression)
+        && ts.isIdentifier(call.expression.expression)
+        && call.expression.expression.text === gatewayName
+        && call.arguments.length === 2
+        && isPropertyPath(call.arguments[0], identityName!, "userId")
+        && isPropertyPath(call.arguments[1], inputName!, "owner"),
+      );
+    })
+  ));
+  const alternativeReturns = userReturns.filter((userReturn) => !authoritativeReturns.includes(userReturn));
+
+  const emailAuthorized = alternativeReturns.filter((userReturn) => (
+    ancestorIfStatements(userReturn, resolution.body).some((ifStatement) => (
+      expressionContainsSemanticNode(
+        ifStatement.expression,
+        initializers,
+        (node) => isPropertyRead(node, new Set(["email"])),
+      )
+    ))
+  ));
+  assert.equal(
+    emailAuthorized.length,
+    0,
+    "[AUTH-COACH-01.USER.controller.no-email-authority] email o dominio no conceden Usuario",
+  );
+
+  const untrustedProperties = new Set([
+    "user_metadata",
+    "app_metadata",
+    "claims",
+    "accountType",
+    "query",
+    "searchParams",
+    "role",
+    "roles",
+    "privileges",
+    "profileExists",
+  ]);
+  const untrustedAuthorized = alternativeReturns.filter((userReturn) => (
+    ancestorIfStatements(userReturn, resolution.body).some((ifStatement) => (
+      expressionContainsSemanticNode(
+        ifStatement.expression,
+        initializers,
+        (node) => isPropertyRead(node, untrustedProperties),
+      )
+    ))
+  ));
+  assert.equal(
+    untrustedAuthorized.length,
+    0,
+    "[AUTH-COACH-01.USER.controller.no-client-signal-authority] metadata, parámetros y roles no conceden Usuario",
+  );
+
+  const localRegistryAuthorized = alternativeReturns.filter((userReturn) => (
+    ancestorIfStatements(userReturn, resolution.body).some((ifStatement) => (
+      expressionContainsSemanticNode(
+        ifStatement.expression,
+        initializers,
+        (node) => (
+          ts.isArrayLiteralExpression(node)
+          || (
+            ts.isNewExpression(node)
+            && ts.isIdentifier(node.expression)
+            && ["Set", "Map", "WeakSet", "WeakMap"].includes(node.expression.text)
+          )
+        ),
+      )
+    ))
+  ));
+  assert.equal(
+    localRegistryAuthorized.length,
+    0,
+    "[AUTH-COACH-01.USER.controller.no-local-id-authority] IDs locales no conceden Usuario",
+  );
+
+  assert.equal(
+    userReturns.length,
+    1,
+    "[AUTH-COACH-01.USER.controller.unique-user-authorization-path] existe una única salida Usuario",
+  );
+  assert.equal(
+    authoritativeReturns.length,
+    1,
+    "[AUTH-COACH-01.USER.controller.authoritative-user-row] la salida Usuario depende del lookup own-only",
+  );
+}
+
 function auditGatewayCoachLookupSemantics(gateway: string) {
   const sourceFile = parseTypeScript(gateway, GATEWAY_PATH);
   const method = findNamedMethod(sourceFile, "hasCoachRegistration");
@@ -500,9 +733,305 @@ function auditGatewayCoachLookupSemantics(gateway: string) {
   );
 }
 
+function locateUserActivationGlobalSessionGuard(sourceFile: ts.SourceFile) {
+  const activation = findNamedFunction(sourceFile, "activateRegistrationIdentity");
+  const supabaseParameter = activation.parameters[0]?.name;
+  const identityParameter = activation.parameters[1]?.name;
+  const ownerParameter = activation.parameters[2]?.name;
+  const supabaseName = supabaseParameter && ts.isIdentifier(supabaseParameter)
+    ? supabaseParameter.text
+    : null;
+  const identityName = identityParameter && ts.isIdentifier(identityParameter)
+    ? identityParameter.text
+    : null;
+  const ownerName = ownerParameter && ts.isIdentifier(ownerParameter) ? ownerParameter.text : null;
+  const evidenceEntry = [...collectVariableInitializers(activation.body).entries()].find(
+    ([, initializer]) => {
+      const call = awaitedNamedCall(initializer, "getAuthoritativeIdentity");
+      return Boolean(
+        call
+        && supabaseName
+        && ownerName
+        && isIdentifierNamed(call.arguments[0], supabaseName)
+        && isIdentifierNamed(call.arguments[1], "undefined")
+        && isIdentifierNamed(call.arguments[2], ownerName),
+      );
+    },
+  );
+  const evidenceName = evidenceEntry?.[0] ?? null;
+  const guard = evidenceName
+    ? activation.body.statements.find((statement): statement is ts.IfStatement => (
+      ts.isIfStatement(statement) && isIdentifierNamed(statement.expression, evidenceName)
+    )) ?? null
+    : null;
+  return {
+    activation,
+    supabaseName,
+    identityName,
+    ownerName,
+    evidenceName,
+    guard,
+  };
+}
+
+function isSafeGlobalIdentityReturn(
+  expression: ts.Expression,
+  evidenceName: string,
+  identityName: string,
+) {
+  const current = unwrapExpression(expression);
+  if (!ts.isConditionalExpression(current)) return false;
+  const condition = unwrapExpression(current.condition);
+  if (!ts.isBinaryExpression(condition)) return false;
+  const equality = condition.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken
+    || condition.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken;
+  const comparesIdentities = (
+    isPropertyPath(condition.left, evidenceName, "userId")
+    && isPropertyPath(condition.right, identityName, "userId")
+  ) || (
+    isPropertyPath(condition.right, evidenceName, "userId")
+    && isPropertyPath(condition.left, identityName, "userId")
+  );
+  return equality
+    && comparesIdentities
+    && isIdentifierNamed(current.whenTrue, evidenceName)
+    && isNullExpression(current.whenFalse);
+}
+
+function auditUserActivationGlobalSessionGuard(sourceFile: ts.SourceFile) {
+  const located = locateUserActivationGlobalSessionGuard(sourceFile);
+  let setSessionCall: ts.CallExpression | null = null;
+  visitFunctionBody(located.activation.body, (node) => {
+    if (
+      !setSessionCall
+      && ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === "setSession"
+    ) {
+      setSessionCall = node;
+    }
+  });
+  const resolvedSetSessionCall = setSessionCall as ts.CallExpression | null;
+  const safeReturn = Boolean(
+    located.guard
+    && located.evidenceName
+    && located.identityName
+    && statementContainsReturn(
+      located.guard.thenStatement,
+      (expression) => isSafeGlobalIdentityReturn(
+        expression,
+        located.evidenceName!,
+        located.identityName!,
+      ),
+    ),
+  );
+  assert.equal(
+    Boolean(
+      located.supabaseName
+      && located.ownerName
+      && safeReturn
+      && resolvedSetSessionCall
+      && located.guard!.end < resolvedSetSessionCall.getStart(sourceFile)
+    ),
+    true,
+    "[AUTH-COACH-01.USER.H1.global-session-preserved]",
+  );
+}
+
+function locateInitialUserWriteOwnershipGuard(sourceFile: ts.SourceFile) {
+  const method = findNamedMethod(sourceFile, "createUserRegistration");
+  const expectedUserIdParameter = method.parameters[0]?.name;
+  const ownerParameter = method.parameters[1]?.name;
+  const expectedUserIdName = expectedUserIdParameter && ts.isIdentifier(expectedUserIdParameter)
+    ? expectedUserIdParameter.text
+    : null;
+  const ownerName = ownerParameter && ts.isIdentifier(ownerParameter) ? ownerParameter.text : null;
+  const firstStatement = method.body.statements[0] ?? null;
+  let guard: ts.IfStatement | null = null;
+  if (firstStatement && ts.isIfStatement(firstStatement)) {
+    const condition = unwrapExpression(firstStatement.expression);
+    if (ts.isPrefixUnaryExpression(condition) && condition.operator === ts.SyntaxKind.ExclamationToken) {
+      const ownershipCall = unwrapExpression(condition.operand);
+      if (
+        ts.isCallExpression(ownershipCall)
+        && ts.isIdentifier(ownershipCall.expression)
+        && ownershipCall.expression.text === "ownsRegistration"
+        && ownerName
+        && expectedUserIdName
+        && isIdentifierNamed(ownershipCall.arguments[0], ownerName)
+        && isIdentifierNamed(ownershipCall.arguments[1], expectedUserIdName)
+        && statementContainsThrowCall(firstStatement.thenStatement, "staleRegistrationError")
+      ) {
+        guard = firstStatement;
+      }
+    }
+  }
+  return { method, expectedUserIdName, ownerName, guard };
+}
+
+function auditInitialUserWriteOwnershipGuard(sourceFile: ts.SourceFile) {
+  const located = locateInitialUserWriteOwnershipGuard(sourceFile);
+  assert.equal(
+    Boolean(located.expectedUserIdName && located.ownerName && located.guard),
+    true,
+    "[AUTH-COACH-01.USER.H2.stale-owner-prewrite]",
+  );
+}
+
+function locateCrossedUserRowGuard(sourceFile: ts.SourceFile) {
+  const readFunction = findNamedFunction(sourceFile, "readOwnUserRegistration");
+  const expectedUserIdParameter = readFunction.parameters[1]?.name;
+  const expectedUserIdName = expectedUserIdParameter && ts.isIdentifier(expectedUserIdParameter)
+    ? expectedUserIdParameter.text
+    : null;
+  const rowEntry = [...collectVariableInitializers(readFunction.body).entries()].find(
+    ([, initializer]) => Boolean(awaitedNamedCall(initializer, "mapUserRegistrationRow")),
+  );
+  const rowName = rowEntry?.[0] ?? null;
+  const guard = rowName && expectedUserIdName
+    ? readFunction.body.statements.find((statement): statement is ts.IfStatement => {
+      if (!ts.isIfStatement(statement)) return false;
+      const condition = unwrapExpression(statement.expression);
+      if (
+        !ts.isBinaryExpression(condition)
+        || condition.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken
+      ) {
+        return false;
+      }
+      const left = unwrapExpression(condition.left);
+      const right = unwrapExpression(condition.right);
+      const truthyEvidence = isIdentifierNamed(left, rowName) || isIdentifierNamed(right, rowName);
+      const mismatch = [left, right].some((candidate) => {
+        if (!ts.isBinaryExpression(candidate)) return false;
+        const inequality = candidate.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken
+          || candidate.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+        return inequality && (
+          (
+            isPropertyPath(candidate.left, rowName, "userId")
+            && isIdentifierNamed(candidate.right, expectedUserIdName)
+          )
+          || (
+            isPropertyPath(candidate.right, rowName, "userId")
+            && isIdentifierNamed(candidate.left, expectedUserIdName)
+          )
+        );
+      });
+      return truthyEvidence && mismatch && statementContainsThrow(statement.thenStatement);
+    }) ?? null
+    : null;
+  return { readFunction, expectedUserIdName, rowName, guard };
+}
+
+function auditCrossedUserRowGuard(sourceFile: ts.SourceFile) {
+  const located = locateCrossedUserRowGuard(sourceFile);
+  assert.equal(
+    Boolean(located.expectedUserIdName && located.rowName && located.guard),
+    true,
+    "[AUTH-COACH-01.USER.H3.crossed-row-rejected]",
+  );
+}
+
+function auditGatewayUserLookupSemantics(gateway: string) {
+  const sourceFile = parseTypeScript(gateway, GATEWAY_PATH);
+  const method = findNamedMethod(sourceFile, "hasUserRegistration");
+  const expectedUserIdParameter = method.parameters[0]?.name;
+  const ownerParameter = method.parameters[1]?.name;
+  const expectedUserIdName = expectedUserIdParameter && ts.isIdentifier(expectedUserIdParameter)
+    ? expectedUserIdParameter.text
+    : null;
+  const ownerName = ownerParameter && ts.isIdentifier(ownerParameter) ? ownerParameter.text : null;
+  assert.ok(
+    expectedUserIdName && ownerName,
+    "[AUTH-COACH-01.USER.gateway.authoritative-select] lookup conserva expectedUserId y owner",
+  );
+
+  const initializers = collectVariableInitializers(method.body);
+  const authoritativeReads = [...initializers.entries()].filter(([, initializer]) => {
+    let current = unwrapExpression(initializer);
+    if (ts.isAwaitExpression(current)) current = unwrapExpression(current.expression);
+    if (!ts.isCallExpression(current) || !ts.isIdentifier(current.expression)) return false;
+    if (current.expression.text !== "readOwnUserRegistration") return false;
+    const dataClient = current.arguments[0] ? unwrapExpression(current.arguments[0]) : null;
+    return Boolean(
+      dataClient
+      && ts.isCallExpression(dataClient)
+      && ts.isIdentifier(dataClient.expression)
+      && dataClient.expression.text === "dataClientFor"
+      && isIdentifierNamed(dataClient.arguments[0], expectedUserIdName!)
+      && isIdentifierNamed(current.arguments[1], expectedUserIdName!)
+      && isIdentifierNamed(current.arguments[2], ownerName!),
+    );
+  });
+  const returns = collectReturns(method.body);
+  assert.equal(
+    authoritativeReads.length,
+    1,
+    "[AUTH-COACH-01.USER.gateway.authoritative-select] existe una lectura own-only exacta",
+  );
+  assert.equal(
+    returns.length,
+    1,
+    "[AUTH-COACH-01.USER.gateway.authoritative-select] no existe retorno anticipado",
+  );
+  const [evidenceName] = authoritativeReads[0] ?? [];
+  const returnExpression = returns[0]?.expression ? unwrapExpression(returns[0].expression) : null;
+  assert.equal(
+    Boolean(
+      evidenceName
+      && returnExpression
+      && ts.isBinaryExpression(returnExpression)
+      && (
+        returnExpression.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken
+        || returnExpression.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken
+      )
+      && isIdentifierNamed(returnExpression.left, evidenceName)
+      && unwrapExpression(returnExpression.right).kind === ts.SyntaxKind.NullKeyword
+    ),
+    true,
+    "[AUTH-COACH-01.USER.gateway.authoritative-select] true deriva sólo de la fila SELECT",
+  );
+
+  const readFunction = findNamedFunction(sourceFile, "readOwnUserRegistration");
+  const readText = readFunction.getText(sourceFile);
+  assert.match(
+    readText,
+    /\.from\("user_registrations"\)[\s\S]*\.select\(USER_REGISTRATION_COLUMNS\)[\s\S]*\.maybeSingle\(\)/,
+    "[AUTH-COACH-01.USER.gateway.user-table-only] autorización consulta user_registrations",
+  );
+  assert.doesNotMatch(
+    readText,
+    /\.from\("profiles"\)|\.eq\(|\.filter\(/,
+    "[AUTH-COACH-01.USER.gateway.user-table-only] profiles y filtros cliente no son autoridad",
+  );
+
+  const createMethod = findNamedMethod(sourceFile, "createUserRegistration");
+  const createText = createMethod.getText(sourceFile);
+  assert.match(
+    createText,
+    /client\.rpc\("register_own_user"\)/,
+    "[AUTH-COACH-01.USER.gateway.no-client-ownership] RPC no recibe payload de ownership",
+  );
+  assert.doesNotMatch(
+    createText,
+    /client\.rpc\("register_own_user",|\.insert\(|\.upsert\(/,
+    "[AUTH-COACH-01.USER.gateway.no-client-ownership] frontend no envía user_id ni inserta directo",
+  );
+  auditUserActivationGlobalSessionGuard(sourceFile);
+  auditInitialUserWriteOwnershipGuard(sourceFile);
+  auditCrossedUserRowGuard(sourceFile);
+}
+
 function auditIntegration(sources: Sources) {
   const { root, controller, owner, gateway, hook, form, screen } = sources;
+  const controllerSourceFile = parseTypeScript(controller, CONTROLLER_PATH);
+  const registerCoachFunction = findNamedFunction(controllerSourceFile, "registerCoach");
+  const registerUserFunction = findNamedFunction(controllerSourceFile, "registerUser");
 
+  assert.match(
+    controller,
+    /"Cuenta Usuario no registrada\. Crea una cuenta Usuario para iniciar sesión\."/,
+    "[AUTH-COACH-01.USER.controller.exact-message] conserva el mensaje aprobado",
+  );
   assert.match(
     controller,
     /"Cuenta Coach no registrada\. Crea una cuenta Coach para iniciar sesión\."/,
@@ -531,7 +1060,7 @@ function auditIntegration(sources: Sources) {
   assert.match(controller, /identity\.userId !== input\.expectedUserId/);
   assert.match(
     controller,
-    /registration\.userId !== identity\.userId/,
+    /async function registerCoach<[\s\S]*?registration\.userId !== identity\.userId[\s\S]*?controlledCoachRegistrationError\(\)/,
     "[AUTH-COACH-01.controller.registration-owner] registro cruzado falla cerrado",
   );
   assert.match(
@@ -541,7 +1070,7 @@ function auditIntegration(sources: Sources) {
   );
   assert.match(controller, /owner\.bindExpectedUserId\(identity\.userId\)/);
   assert.match(
-    controller,
+    registerCoachFunction.getText(controllerSourceFile),
     /gateway\.signInForCoachRegistration\([\s\S]*?\}, owner\);\n      if \(!owner\.isCurrent\(\) \|\| signIn\.kind === "stale"\)/,
     "[AUTH-COACH-01.registration.post-sign-in-owner] signIn tardío se descarta",
   );
@@ -561,6 +1090,28 @@ function auditIntegration(sources: Sources) {
     "[AUTH-COACH-01.controller.no-metadata-authority] metadata cliente/JWT no concede Coach",
   );
   auditCoachAuthorizationSemantics(controller);
+  auditUserAuthorizationSemantics(controller);
+  const registerUserText = registerUserFunction.getText(controllerSourceFile);
+  assert.match(
+    registerUserText,
+    /gateway\.signInForUserRegistration[\s\S]*gateway\.hasUserRegistration[\s\S]*gateway\.createUserRegistration[\s\S]*gateway\.activateUserRegistrationIdentity/,
+    "[AUTH-COACH-01.USER.registration.closed-path] Registro Usuario usa sólo sus puertos autoritativos",
+  );
+  assert.doesNotMatch(
+    registerUserText,
+    /hasCoachRegistration|createCoachRegistration|activateCoachRegistrationIdentity/,
+    "[AUTH-COACH-01.USER.registration.no-coach-write] Registro Usuario no crea Coach",
+  );
+  assert.doesNotMatch(
+    registerCoachFunction.getText(controllerSourceFile),
+    /hasUserRegistration|createUserRegistration|activateUserRegistrationIdentity/,
+    "[AUTH-COACH-01.USER.registration.coach-does-not-create-user] Registro Coach no crea Usuario",
+  );
+  assert.match(
+    registerUserText,
+    /if \(!owner\.isCurrent\(\) \|\| signIn\.kind === "stale"\) return staleUserRegistration\(\)/,
+    "[AUTH-COACH-01.USER.registration.post-sign-in-owner] respuesta tardía se descarta",
+  );
 
   assert.match(owner, /readonly expectedUserId: string;/);
   assert.match(
@@ -584,10 +1135,13 @@ function auditIntegration(sources: Sources) {
     "[AUTH-COACH-01.gateway.atomic-rpc] write usa la RPC atómica invoker",
   );
   auditGatewayCoachLookupSemantics(gateway);
+  auditGatewayUserLookupSemantics(gateway);
   assert.match(gateway, /p_expected_user_id: expectedUserId[\s\S]*p_first_name:[\s\S]*p_professional_title:/);
   assert.match(gateway, /persistSession: false,[\s\S]*autoRefreshToken: false,[\s\S]*detectSessionInUrl: false/);
+  const gatewaySourceFile = parseTypeScript(gateway, GATEWAY_PATH);
+  const coachSignInMethod = findNamedMethod(gatewaySourceFile, "signInForCoachRegistration");
   assert.match(
-    gateway,
+    coachSignInMethod.getText(gatewaySourceFile),
     /const isolatedClient = getRegistrationClient\(\);[\s\S]*isolatedClient\.auth\.signInWithPassword/,
     "[AUTH-COACH-01.registration.isolated-sign-in] credenciales A no mutan la sesión global",
   );
@@ -617,7 +1171,7 @@ function auditIntegration(sources: Sources) {
   assert.match(hook, /portalResolutionOwnersRef\.current\.hasPending\(\)/);
   assert.match(
     hook,
-    /event === "SIGNED_OUT"[\s\S]*portalResolutionOwnersRef\.current\.invalidate\(\);[\s\S]*coachRegistrationOwnersRef\.current\.invalidate\(\)/,
+    /event === "SIGNED_OUT"[\s\S]*portalResolutionOwnersRef\.current\.invalidate\(\);[\s\S]*coachRegistrationOwnersRef\.current\.invalidate\(\)[\s\S]*userRegistrationOwnersRef\.current\.invalidate\(\)/,
     "[AUTH-COACH-01.hook.signed-out-invalidation] SIGNED_OUT invalida antes de continuar",
   );
   assert.match(
@@ -628,7 +1182,23 @@ function auditIntegration(sources: Sources) {
   assert.match(hook, /beginPortalResolution\(expectedUserId: string\)/);
   assert.match(hook, /\{ requestedPortal, expectedUserId, owner \}/);
   assert.match(hook, /beginCoachRegistrationSubmit\(\)[\s\S]*coachRegistrationOwnersRef\.current\.begin\(\)/);
+  assert.match(
+    hook,
+    /beginUserRegistrationSubmit\(\)[\s\S]*userRegistrationOwnersRef\.current\.begin\(\)/,
+    "[AUTH-COACH-01.USER.hook.registration-owner] Usuario conserva owner feature-local",
+  );
+  assert.match(
+    hook,
+    /return input\.initialRoute\.accountType === "coach" \? "authorize_coach" : "authorize_user"/,
+    "[AUTH-COACH-01.USER.hook.initial-authorization] sesión inicial Usuario exige resolución backend",
+  );
+  assert.match(
+    hook,
+    /return route\.accountType === "coach" \? "authorize_coach" : "authorize_user"/,
+    "[AUTH-COACH-01.USER.hook.event-authorization] evento Auth Usuario exige resolución backend",
+  );
   assert.match(hook, /registerCoach\(payload, owner, createGateway\(supabase\)\)/);
+  assert.match(hook, /registerUser\(payload, owner, createGateway\(supabase\)\)/);
   assert.match(hook, /onBeforeSignOut\(reason\)[\s\S]*signOutNoticeRef\.current\.begin\(reason\)/);
   assert.match(hook, /consumePortalSignOutMessage[\s\S]*consumeEvent\(\)/);
   assert.match(hook, /settlePortalSignOutMessage[\s\S]*settle\(\)/);
@@ -642,7 +1212,7 @@ function auditIntegration(sources: Sources) {
   assert.match(root, /multiportalAuth\.resolvePortalAccess\(authState, requestedPortal, resolutionOwner\)/);
   assert.match(
     root,
-    /const access = await multiportalAuth\.resolvePortalAccess[\s\S]*if \(access\.state === "stale" \|\| !multiportalAuth\.isPortalResolutionCurrent\(resolutionOwner\)\) \{[\s\S]*return null;[\s\S]*if \(access\.state === "coach_registration_required"/,
+    /const access = await multiportalAuth\.resolvePortalAccess[\s\S]*if \(access\.state === "stale" \|\| !multiportalAuth\.isPortalResolutionCurrent\(resolutionOwner\)\) \{[\s\S]*return null;[\s\S]*access\.state === "coach_registration_required"/,
     "[AUTH-COACH-01.root.stale-before-publication] descarta stale antes de mensajes o estado",
   );
   assert.match(
@@ -651,15 +1221,36 @@ function auditIntegration(sources: Sources) {
   );
   assert.match(
     root,
-    /const resolutionOwner = multiportalAuth\.beginPortalResolution\(session!\.user\.id\);\n        queueMicrotask\(/,
+    /const requestedPortal = portalEventDecision === "authorize_coach" \? "coach" : "usuario";[\s\S]{0,180}const resolutionOwner = multiportalAuth\.beginPortalResolution\(session!\.user\.id\);\n        queueMicrotask\(/,
     "[AUTH-COACH-01.root.no-timeout-authorization] autorización Auth se difiere sin timeout",
   );
   assert.match(root, /event === "SIGNED_OUT"[\s\S]*interactiveAuthAttemptRef\.current = false/);
   assert.match(root, /case "coach_authorized":[\s\S]*return continueAuthenticatedSession/);
+  assert.match(root, /case "user_authorized":[\s\S]*case "coach_authorized"/);
   assert.match(root, /consumePortalSignOutMessage\(\)/);
   assert.match(root, /settlePortalSignOutMessage\(access\.message\)/);
   assert.match(root, /invalidateCoachRegistrationSubmits\(\)[\s\S]*supabase\.auth\.signInWithPassword/);
   assert.match(root, /registration\.state === "busy" \|\| registration\.state === "stale"/);
+  assert.match(
+    root,
+    /multiportalAuth\.registerUser\(\s*signupPayload,[\s\S]*state: "user_authorized"/,
+    "[AUTH-COACH-01.USER.root.registration-controller] root sólo conecta el controller Usuario",
+  );
+  assert.doesNotMatch(
+    root,
+    /supabase\.auth\.signUp\(signupPayload\)/,
+    "[AUTH-COACH-01.USER.root.no-raw-signup] Registro Usuario no evade el boundary",
+  );
+  assert.match(
+    root,
+    /portalDecision === "authorize_user" \|\| portalDecision === "authorize_coach"/,
+    "[AUTH-COACH-01.USER.root.initial-session-authorization] bootstrap autoriza ambos portales",
+  );
+  assert.match(
+    root,
+    /portalEventDecision === "authorize_user" \|\|[\s\S]*portalEventDecision === "authorize_coach"/,
+    "[AUTH-COACH-01.USER.root.session-event-authorization] eventos Auth autorizan ambos portales",
+  );
   assert.doesNotMatch(root, /\.from\("coach_registrations"\)/);
 
   assert.match(screen, /action=\{onSubmit\}/);
@@ -743,6 +1334,105 @@ test("controles positivos semánticos toleran nombres y reformateos inocentes", 
     } else {
       auditGatewayCoachLookupSemantics(transformed);
     }
+  }
+});
+
+const userSemanticPositiveControls = [
+  {
+    name: "H1 acepta renombre inocente de la evidencia de sesión global",
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const located = locateUserActivationGlobalSessionGuard(sourceFile);
+      assert.ok(located.evidenceName, "control H1 localiza evidencia global");
+      return renameIdentifiersWithin(
+        source,
+        sourceFile,
+        located.activation,
+        located.evidenceName,
+        "authenticatedGlobalSession",
+      );
+    },
+  },
+  {
+    name: "H2 acepta renombre inocente del parámetro esperado",
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const located = locateInitialUserWriteOwnershipGuard(sourceFile);
+      assert.ok(located.expectedUserIdName, "control H2 localiza expectedUserId");
+      return renameIdentifiersWithin(
+        source,
+        sourceFile,
+        located.method,
+        located.expectedUserIdName,
+        "requestedIdentityId",
+      );
+    },
+  },
+  {
+    name: "H2 acepta reformateo multilinea del guard pre-write",
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const located = locateInitialUserWriteOwnershipGuard(sourceFile);
+      assert.ok(
+        located.guard && located.ownerName && located.expectedUserIdName,
+        "control H2 localiza guard pre-write",
+      );
+      return replaceNodeText(
+        source,
+        sourceFile,
+        located.guard,
+        `if (
+        !ownsRegistration(
+          ${located.ownerName},
+          ${located.expectedUserIdName},
+        )
+      ) {
+        throw staleRegistrationError();
+      }`,
+      );
+    },
+  },
+  {
+    name: "H3 ignora comentarios junto al guard de ownership cruzado",
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const located = locateCrossedUserRowGuard(sourceFile);
+      assert.ok(located.guard, "control H3 localiza guard cruzado");
+      const start = located.guard.getStart(sourceFile);
+      return `${source.slice(0, start)}/* evidencia backend own-only */\n  ${source.slice(start)}`;
+    },
+  },
+  {
+    name: "H3 acepta renombre inocente de la variable de evidencia",
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const located = locateCrossedUserRowGuard(sourceFile);
+      assert.ok(located.rowName, "control H3 localiza variable de evidencia");
+      return renameIdentifiersWithin(
+        source,
+        sourceFile,
+        located.readFunction,
+        located.rowName,
+        "userRegistrationEvidence",
+      );
+    },
+  },
+] as const;
+
+const EXPECTED_USER_SEMANTIC_POSITIVE_CONTROL_COUNT = 5;
+assert.equal(
+  userSemanticPositiveControls.length,
+  EXPECTED_USER_SEMANTIC_POSITIVE_CONTROL_COUNT,
+  "AUTH-COACH-01 Usuario fija cinco controles positivos semánticos H1-H3",
+);
+
+test("controles positivos Usuario H1-H3 toleran renombres, formato y comentarios", () => {
+  const gateway = readSources().gateway;
+  for (const control of userSemanticPositiveControls) {
+    const transformed = control.apply(gateway);
+    assert.notEqual(sha256(transformed), sha256(gateway), `${control.name}: transformación efectiva`);
+    assertValidTypeScript(transformed, GATEWAY_PATH);
+    auditGatewayUserLookupSemantics(transformed);
   }
 });
 
@@ -919,8 +1609,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.controller.registration-owner]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "if (registration.userId !== identity.userId) {",
-      "if (false) {",
+      "      if (registration.userId !== identity.userId) {\n        return controlledCoachRegistrationError();",
+      "      if (false) {\n        return controlledCoachRegistrationError();",
       "ownership cruzado deja de fallar cerrado",
     ),
   },
@@ -955,8 +1645,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.registration.isolated-sign-in]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "      const isolatedClient = getRegistrationClient();\n      const { data, error } = await isolatedClient.auth.signInWithPassword({",
-      "      const isolatedClient = getRegistrationClient();\n      const { data, error } = await supabase.auth.signInWithPassword({",
+      "    async signInForCoachRegistration(credentials: LoginPayload, owner) {\n      if (!owner.isCurrent()) return { kind: \"stale\" };\n      const isolatedClient = getRegistrationClient();\n      const { data, error } = await isolatedClient.auth.signInWithPassword({",
+      "    async signInForCoachRegistration(credentials: LoginPayload, owner) {\n      if (!owner.isCurrent()) return { kind: \"stale\" };\n      const isolatedClient = getRegistrationClient();\n      const { data, error } = await supabase.auth.signInWithPassword({",
       "signIn Coach usa cliente global",
     ),
   },
@@ -1027,12 +1717,271 @@ const mutations = [
       "E9 · gateway retorna true sin SELECT",
     ),
   },
+  {
+    name: "H1 · activación Usuario reemplaza sesión global B con la aislada A",
+    userSecurityEvidence: "H1" as const,
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.H1.global-session-preserved]",
+    runtimeFailure: "[AUTH-COACH-01.USER.H1.global-session-preserved]",
+    runtimeSuite: true,
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const located = locateUserActivationGlobalSessionGuard(sourceFile);
+      assert.ok(located.guard, "mutante H1 localiza el guard de sesión global");
+      return replaceNodeText(source, sourceFile, located.guard, "");
+    },
+  },
+  {
+    name: "H2 · createUserRegistration despacha RPC con owner stale",
+    userSecurityEvidence: "H2" as const,
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.H2.stale-owner-prewrite]",
+    runtimeFailure: "[AUTH-COACH-01.USER.H2.stale-owner-prewrite]",
+    runtimeSuite: true,
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const located = locateInitialUserWriteOwnershipGuard(sourceFile);
+      assert.ok(located.guard, "mutante H2 localiza el guard inicial de ownership");
+      return replaceNodeText(source, sourceFile, located.guard, "");
+    },
+  },
+  {
+    name: "H3 · readOwnUserRegistration acepta una fila cruzada",
+    userSecurityEvidence: "H3" as const,
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.H3.crossed-row-rejected]",
+    runtimeFailure: "[AUTH-COACH-01.USER.H3.crossed-row-rejected]",
+    runtimeSuite: true,
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const located = locateCrossedUserRowGuard(sourceFile);
+      assert.ok(located.guard, "mutante H3 localiza validación de fila cruzada");
+      return replaceNodeText(source, sourceFile, located.guard, "");
+    },
+  },
+  {
+    name: "Usuario se autoriza inmediatamente sólo por sesión",
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.controller.authoritative-user-row]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      `    if (input.requestedPortal === "usuario") {
+      const hasUserRegistration = await gateway.hasUserRegistration(identity.userId, input.owner);
+      if (!ownsPortalResolution(input)) return stalePortalResolution(input.requestedPortal);
+      if (hasUserRegistration) {
+        return {
+          state: "user_authorized",
+          requestedPortal: "usuario",
+          userId: identity.userId,
+        };
+      }
+
+      return rejectPortalSession(input, gateway, "user_registration_required");
+    }`,
+      `    if (input.requestedPortal === "usuario") {
+      return { state: "user_authorized", requestedPortal: "usuario", userId: identity.userId };
+    }`,
+      "Usuario inmediato por sesión",
+    ),
+  },
+  {
+    name: "lookup Usuario existe pero una segunda ruta lo evade",
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.controller.unique-user-authorization-path]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, input.owner);",
+      `    if (input.requestedPortal === "usuario") {
+      return { state: "user_authorized", requestedPortal: "usuario", userId: identity.userId };
+    }
+    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, input.owner);`,
+      "segunda ruta Usuario",
+    ),
+  },
+  {
+    name: "dominio de email concede Usuario",
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.controller.no-email-authority]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '    if (input.requestedPortal === "usuario") {',
+      `    if (input.requestedPortal === "usuario" && identity.email?.endsWith("@organizatech.cl")) {
+      return { state: "user_authorized", requestedPortal: "usuario", userId: identity.userId };
+    }
+    if (input.requestedPortal === "usuario") {`,
+      "email concede Usuario",
+    ),
+  },
+  {
+    name: "metadata concede Usuario",
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.controller.no-metadata-authority]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '    if (input.requestedPortal === "usuario") {',
+      `    if (input.requestedPortal === "usuario" && (identity as never as { user_metadata?: { role?: string } }).user_metadata?.role === "usuario") {
+      return { state: "user_authorized", requestedPortal: "usuario", userId: identity.userId };
+    }
+    if (input.requestedPortal === "usuario") {`,
+      "metadata concede Usuario",
+    ),
+  },
+  {
+    name: "allowlist local de ID concede Usuario",
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.controller.no-local-id-authority]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '    if (input.requestedPortal === "usuario") {',
+      `    const userRegistry = new Set(["usuario-autorizado"]);
+    if (input.requestedPortal === "usuario" && userRegistry.has(identity.userId)) {
+      return { state: "user_authorized", requestedPortal: "usuario", userId: identity.userId };
+    }
+    if (input.requestedPortal === "usuario") {`,
+      "ID concede Usuario",
+    ),
+  },
+  {
+    name: "gateway Usuario retorna true antes del SELECT",
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.gateway.authoritative-select]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "      const row = await readOwnUserRegistration(dataClientFor(expectedUserId), expectedUserId, owner);\n      return row !== null;",
+      "      if (owner) return true;\n      const row = await readOwnUserRegistration(dataClientFor(expectedUserId), expectedUserId, owner);\n      return row !== null;",
+      "Usuario true sin SELECT",
+    ),
+  },
+  {
+    name: "profiles reemplaza user_registrations como autoridad",
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.gateway.user-table-only]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '.from("user_registrations")',
+      '.from("profiles")',
+      "profiles como autoridad",
+    ),
+  },
+  {
+    name: "cliente envía user_id a RPC Usuario",
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.gateway.no-client-ownership]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      'client.rpc("register_own_user")',
+      'client.rpc("register_own_user", { user_id: expectedUserId })',
+      "ownership Usuario desde cliente",
+    ),
+  },
+  {
+    name: "Registro Usuario crea accidentalmente Coach",
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.registration.no-coach-write]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    const hasUserRegistration = await gateway.hasUserRegistration(identity.userId, owner);",
+      "    await gateway.createCoachRegistration(input as never, identity.userId, owner as never);\n    const hasUserRegistration = await gateway.hasUserRegistration(identity.userId, owner);",
+      "Usuario crea Coach",
+    ),
+  },
+  {
+    name: "Registro Coach crea accidentalmente Usuario",
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.registration.coach-does-not-create-user]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, owner);",
+      "    await gateway.createUserRegistration(identity.userId, owner as never);\n    const hasCoachRegistration = await gateway.hasCoachRegistration(identity.userId, owner);",
+      "Coach crea Usuario",
+    ),
+  },
+  {
+    name: "Registro Usuario omite guard después de signIn",
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.registration.post-sign-in-owner]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      'if (!owner.isCurrent() || signIn.kind === "stale") return staleUserRegistration();',
+      'if (signIn.kind === "stale") return staleUserRegistration();',
+      "guard Usuario post-signIn",
+    ),
+  },
+  {
+    name: "SIGNED_OUT conserva owner de Registro Usuario A",
+    file: "hook" as const,
+    path: HOOK_PATH,
+    expectedFailure: "[AUTH-COACH-01.hook.signed-out-invalidation]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "      userRegistrationOwnersRef.current.invalidate();",
+      "      void userRegistrationOwnersRef.current;",
+      "SIGNED_OUT conserva owner Usuario",
+    ),
+  },
+  {
+    name: "root evade controller con signUp Usuario crudo",
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.root.registration-controller]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      `        const registration = await multiportalAuth.registerUser(
+          signupPayload,
+          userRegistrationSubmitOwner!,
+        );`,
+      "        const registration = await supabase.auth.signUp(signupPayload);",
+      "signUp Usuario crudo",
+    ),
+  },
+  {
+    name: "bootstrap Usuario evita autorización backend",
+    file: "hook" as const,
+    path: HOOK_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.hook.initial-authorization]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '    return input.initialRoute.accountType === "coach" ? "authorize_coach" : "authorize_user";',
+      '    return input.initialRoute.accountType === "coach" ? "authorize_coach" : "continue";',
+      "bootstrap Usuario sin autorización",
+    ),
+  },
+  {
+    name: "mensaje aprobado Usuario cambia",
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.USER.controller.exact-message]",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "Cuenta Usuario no registrada. Crea una cuenta Usuario para iniciar sesión.",
+      "Cuenta Usuario inválida.",
+      "mensaje Usuario",
+    ),
+  },
 ] as const;
 
-const EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT = 19;
-const EXPECTED_RUNTIME_MUTATION_PROBE_COUNT = 4;
-const EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT = 3;
+const EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT = 37;
+const EXPECTED_RUNTIME_MUTATION_PROBE_COUNT = 7;
+const EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT = 6;
 const EXPECTED_E7_E9_SEMANTIC_MUTATION_PROBE_COUNT = 3;
+const EXPECTED_USER_H1_H3_SEMANTIC_MUTATION_PROBE_COUNT = 3;
 
 assert.equal(mutations.length, EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT);
 assert.equal(
@@ -1049,6 +1998,13 @@ assert.deepEqual(
     .map((mutation) => mutation.securityEvidence),
   ["E7", "E8", "E9"],
   `AUTH-COACH-01 fija ${EXPECTED_E7_E9_SEMANTIC_MUTATION_PROBE_COUNT} probes semánticos E7-E9`,
+);
+assert.deepEqual(
+  mutations
+    .filter((mutation) => "userSecurityEvidence" in mutation)
+    .map((mutation) => mutation.userSecurityEvidence),
+  ["H1", "H2", "H3"],
+  `AUTH-COACH-01 Usuario fija ${EXPECTED_USER_H1_H3_SEMANTIC_MUTATION_PROBE_COUNT} probes semánticos H1-H3`,
 );
 
 function assertMetadataRuntimeMutation(mutatedController: string, expectedFailure: string) {
@@ -1170,7 +2126,7 @@ const EXPECTED_AUTH_RUNTIME_SUITE_FILE_COUNT = 6;
 assert.equal(
   AUTH_RUNTIME_SUITE.length,
   EXPECTED_AUTH_RUNTIME_SUITE_FILE_COUNT,
-  "la barrera runtime E7-E9 ejecuta toda la suite Auth no recursiva",
+  "la barrera runtime E7-E9/H1-H3 ejecuta toda la suite Auth no recursiva",
 );
 
 function assertAuthSuiteRuntimeMutation(
@@ -1211,7 +2167,9 @@ function assertAuthSuiteRuntimeMutation(
     );
     const output = `${mutation.stdout ?? ""}\n${mutation.stderr ?? ""}`;
     assert.notEqual(mutation.status, 0, `la suite Auth debe matar ${expectedFailure}\n${output}`);
-    const firstSecurityFailure = output.match(/\[AUTH-COACH-01\.E[789][^\]]*\]/)?.[0] ?? null;
+    const firstSecurityFailure = output.match(
+      /\[AUTH-COACH-01\.(?:E[789]|USER\.H[123])[^\]]*\]/,
+    )?.[0] ?? null;
     assert.equal(
       firstSecurityFailure,
       expectedFailure,
@@ -1307,10 +2265,13 @@ for (const mutation of mutations) {
         assertValidTypeScript(materializedMutation, mutation.path);
         assert.throws(
           () => auditIntegration({ ...sources, [mutation.file]: materializedMutation }),
-          (error: unknown) => (
-            error instanceof assert.AssertionError
-            && error.message.includes(mutation.expectedFailure)
-          ),
+          (error: unknown) => {
+            if (!(error instanceof assert.AssertionError)) return false;
+            if ("exactFailureLine" in mutation) {
+              return error.message.split(/\r?\n/, 1)[0] === mutation.expectedFailure;
+            }
+            return error.message.includes(mutation.expectedFailure);
+          },
           `el contrato debe fallar sólo por la aserción esperada: ${mutation.name}`,
         );
       },
@@ -1326,5 +2287,5 @@ for (const mutation of mutations) {
 }
 
 console.log(
-  `AUTH-COACH-01 integration mutation probes: ${mutations.length}/${EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT}; runtime: ${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}/${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}; Auth suite E7-E9: ${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}/${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}`,
+  `AUTH-COACH-01 integration mutation probes: ${mutations.length}/${EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT}; runtime: ${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}/${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}; Auth suite E7-E9/H1-H3: ${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}/${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}`,
 );
