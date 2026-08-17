@@ -28,6 +28,7 @@ interface AuthScreenProps {
   statusTone: AuthStatusTone;
   fieldErrors: AuthFieldErrors;
   isBusy: boolean;
+  coachIdentitySwitchRequired: boolean;
   loginEmail: string;
   loginPassword: string;
   registerName: string;
@@ -41,6 +42,7 @@ interface AuthScreenProps {
   onRegisterPasswordChange: (value: string) => void;
   onRegisterConfirmPasswordChange: (value: string) => void;
   onSubmit: (data: FormData) => void | Promise<void>;
+  onCoachIdentitySwitch: () => void | Promise<void>;
   onForgotPassword: () => void;
   onModeChange: (mode: AuthMode) => void;
   onAccountTypeChange: (accountType: AuthAccountType) => void;
@@ -56,6 +58,7 @@ export function AuthScreen({
   statusTone,
   fieldErrors,
   isBusy,
+  coachIdentitySwitchRequired,
   loginEmail,
   loginPassword,
   registerName,
@@ -69,6 +72,7 @@ export function AuthScreen({
   onRegisterPasswordChange,
   onRegisterConfirmPasswordChange,
   onSubmit,
+  onCoachIdentitySwitch,
   onForgotPassword,
   onModeChange,
   onAccountTypeChange,
@@ -208,13 +212,27 @@ export function AuthScreen({
 
         <AuthStatus message={message} tone={statusTone} />
 
+        {isCoachRegistration && coachIdentitySwitchRequired ? (
+          <button
+            className={styles.primaryButton}
+            type="button"
+            aria-describedby="auth-form-status"
+            disabled={isBusy}
+            onClick={onCoachIdentitySwitch}
+          >
+            Cerrar sesión y continuar
+          </button>
+        ) : null}
+
         <button
           className={styles.primaryButton}
           type="submit"
-          disabled={isBusy}
+          disabled={isBusy || (isCoachRegistration && coachIdentitySwitchRequired)}
         >
           {isRegister ? <UserPlus aria-hidden="true" size={21} /> : <LogIn aria-hidden="true" size={21} />}
-          {isBusy ? (isRegister ? "Creando cuenta..." : "Iniciando sesión...") : isRegister ? "Crear cuenta" : "Iniciar sesión"}
+          {isBusy && !coachIdentitySwitchRequired
+            ? (isRegister ? "Creando cuenta..." : "Iniciando sesión...")
+            : isRegister ? "Crear cuenta" : "Iniciar sesión"}
         </button>
 
         {!isRegister ? (

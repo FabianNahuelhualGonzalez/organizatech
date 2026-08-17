@@ -1010,3 +1010,48 @@ test("signOut stale de A no toca la sesión vigente de B ni publica motivo", asy
   assert.deepEqual(reasons, []);
   assert.equal(fake.activeUserId, "user-b");
 });
+
+test("cambio Coach A→B revalida A y cierra exclusivamente la sesión local", async () => {
+  const fake = createStatefulFakeClient({ activeUserId: "user-a" });
+  const { owner } = beginPortalOwner("user-a");
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+
+  assert.equal(
+    await gateway.signOutForCoachIdentitySwitch(users["user-b"].email!, owner),
+    "signed_out",
+  );
+  assert.deepEqual(fake.signOutOptions, [{ scope: "local" }]);
+  assert.equal(fake.activeUserId, null);
+  assert.equal(fake.relationReads, 0);
+  assert.equal(fake.rpcAttempts, 0);
+});
+
+test("cambio Coach no cierra la identidad si el formulario ya coincide con la sesión", async () => {
+  const fake = createStatefulFakeClient({ activeUserId: "user-a" });
+  const { owner } = beginPortalOwner("user-a");
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+
+  assert.equal(
+    await gateway.signOutForCoachIdentitySwitch(" COACH-A@example.com ", owner),
+    "stale",
+  );
+  assert.deepEqual(fake.signOutOptions, []);
+  assert.equal(fake.activeUserId, "user-a");
+});
+
+test("cambio Coach stale de A nunca cierra una sesión B posterior", async () => {
+  const fake = createStatefulFakeClient({ activeUserId: "user-a" });
+  const { owners, owner } = beginPortalOwner("user-a");
+  owners.invalidate();
+  fake.setActiveUserId("user-b");
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+
+  assert.equal(
+    await gateway.signOutForCoachIdentitySwitch(users["user-b"].email!, owner),
+    "stale",
+  );
+  assert.deepEqual(fake.signOutOptions, []);
+  assert.equal(fake.activeUserId, "user-b");
+  assert.equal(fake.relationReads, 0);
+  assert.equal(fake.rpcAttempts, 0);
+});

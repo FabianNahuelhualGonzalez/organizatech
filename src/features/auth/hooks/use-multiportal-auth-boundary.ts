@@ -17,6 +17,7 @@ import {
   type MultiportalAuthController,
   type PortalAccessResult,
   type PortalSignOutReason,
+  type PortalSignOutResult,
   type UserRegistrationResult,
 } from "@/features/auth/model/multiportal-auth-controller";
 import {
@@ -34,6 +35,7 @@ import type { SupabaseSessionState } from "@/lib/supabase/session";
 export type PortalSessionEventDecision =
   | "continue"
   | "defer"
+  | "complete_coach_identity_switch"
   | "hold_user_registration"
   | "hold_coach_registration"
   | "authorize_user"
@@ -54,6 +56,9 @@ export function useMultiportalAuthBoundary(input: {
   const portalResolutionOwnersRef = useRef(createPortalResolutionOwnerController());
   const coachRegistrationOwnersRef = useRef(createCoachRegistrationOwnerController());
   const userRegistrationOwnersRef = useRef(createUserRegistrationOwnerController());
+  const currentUserIdRef = useRef<string | null>(null);
+  const blockedCoachIdentityUserIdRef = useRef<string | null>(null);
+  const coachIdentitySwitchRef = useRef<CoachIdentitySwitchPending | null>(null);
   const initialResolutionPendingRef = useRef(true);
   const signOutNoticeRef = useRef(createSinglePublicationNoticeController<PortalSignOutReason>());
 
@@ -67,10 +72,14 @@ export function useMultiportalAuthBoundary(input: {
       portalResolutionOwners.invalidate();
       coachRegistrationOwners.invalidate();
       userRegistrationOwners.invalidate();
+      settleCoachIdentitySwitch("stale");
     };
   }, []);
 
   function beginPortalResolution(expectedUserId: string): PortalResolutionOwner {
+    blockedCoachIdentityUserIdRef.current = null;
+    currentUserIdRef.current = expectedUserId;
+    portalResolutionOwnersRef.current.acceptIdentity(expectedUserId);
     return portalResolutionOwnersRef.current.begin(expectedUserId);
   }
 
@@ -121,14 +130,33 @@ export function useMultiportalAuthBoundary(input: {
     initialResolutionPendingRef.current = false;
   }
 
+  function settleCoachIdentitySwitch(result: PortalSignOutResult): boolean {
+    const pending = coachIdentitySwitchRef.current;
+    if (!pending || pending.settled) return false;
+    pending.settled = true;
+    pending.resolveEvent(result);
+    return true;
+  }
+
   function resolveSessionEventDecision(
     event: string,
     currentUserId: string | null,
     deferForInteractiveAttempt = false,
   ): PortalSessionEventDecision {
     if (event === "SIGNED_OUT") {
+      const pendingIdentitySwitch = coachIdentitySwitchRef.current;
       invalidatePortalOperations();
+      currentUserIdRef.current = null;
+      if (pendingIdentitySwitch && settleCoachIdentitySwitch("signed_out")) {
+        blockedCoachIdentityUserIdRef.current = pendingIdentitySwitch.expectedUserId;
+        return "complete_coach_identity_switch";
+      }
     } else if (currentUserId) {
+      if (blockedCoachIdentityUserIdRef.current === currentUserId) {
+        return "defer";
+      }
+      blockedCoachIdentityUserIdRef.current = null;
+      currentUserIdRef.current = currentUserId;
       const replacedIdentity = portalResolutionOwnersRef.current.acceptIdentity(currentUserId);
       coachRegistrationOwnersRef.current.acceptIdentity(currentUserId);
       userRegistrationOwnersRef.current.acceptIdentity(currentUserId);
@@ -157,6 +185,7 @@ export function useMultiportalAuthBoundary(input: {
 
   function resolveInitialSessionDecision(currentUserId: string | null): PortalSessionEventDecision {
     if (!currentUserId) return "continue";
+    currentUserIdRef.current = currentUserId;
     portalResolutionOwnersRef.current.acceptIdentity(currentUserId);
     coachRegistrationOwnersRef.current.acceptIdentity(currentUserId);
     userRegistrationOwnersRef.current.acceptIdentity(currentUserId);
@@ -225,6 +254,45 @@ export function useMultiportalAuthBoundary(input: {
     return controllerRef.current!.registerUser(payload, owner, createGateway(supabase));
   }
 
+  function signOutForCoachIdentitySwitch(requestedEmail: string): Promise<PortalSignOutResult> {
+    const existingSwitch = coachIdentitySwitchRef.current;
+    if (existingSwitch?.operation) return existingSwitch.operation;
+
+    const expectedUserId = currentUserIdRef.current;
+    if (!expectedUserId) return Promise.resolve("stale");
+
+    invalidatePortalOperations();
+    portalResolutionOwnersRef.current.acceptIdentity(expectedUserId);
+    const owner = portalResolutionOwnersRef.current.begin(expectedUserId);
+    if (!owner.isCurrent()) return Promise.resolve("stale");
+
+    const pending = createCoachIdentitySwitchPending(expectedUserId);
+    coachIdentitySwitchRef.current = pending;
+    const operation = (async () => {
+      try {
+        const supabase = getSupabaseBrowserClient();
+        if (!supabase) {
+          settleCoachIdentitySwitch("stale");
+          return await pending.event;
+        }
+        const signOutResult = await createGateway(supabase)
+          .signOutForCoachIdentitySwitch(requestedEmail, owner);
+        if (signOutResult === "stale") settleCoachIdentitySwitch("stale");
+        return await pending.event;
+      } catch (error) {
+        settleCoachIdentitySwitch("stale");
+        throw error;
+      } finally {
+        portalResolutionOwnersRef.current.end(owner);
+        if (coachIdentitySwitchRef.current === pending) {
+          coachIdentitySwitchRef.current = null;
+        }
+      }
+    })();
+    pending.operation = operation;
+    return operation;
+  }
+
   function createGateway(
     supabase: NonNullable<ReturnType<typeof getSupabaseBrowserClient>>,
   ) {
@@ -271,6 +339,7 @@ export function useMultiportalAuthBoundary(input: {
     resolvePortalAccess,
     registerCoach,
     registerUser,
+    signOutForCoachIdentitySwitch,
     consumePortalSignOutMessage,
     settlePortalSignOutMessage,
     clearPortalSignOutReason,
@@ -293,3 +362,25 @@ function controlledPortalError(requestedPortal: AuthAccountType): PortalAccessRe
 }
 
 export type MultiportalAuthBoundary = ReturnType<typeof useMultiportalAuthBoundary>;
+
+interface CoachIdentitySwitchPending {
+  expectedUserId: string;
+  event: Promise<PortalSignOutResult>;
+  resolveEvent(result: PortalSignOutResult): void;
+  operation: Promise<PortalSignOutResult> | null;
+  settled: boolean;
+}
+
+function createCoachIdentitySwitchPending(expectedUserId: string): CoachIdentitySwitchPending {
+  let resolveEvent!: (result: PortalSignOutResult) => void;
+  const event = new Promise<PortalSignOutResult>((resolve) => {
+    resolveEvent = resolve;
+  });
+  return {
+    expectedUserId,
+    event,
+    resolveEvent,
+    operation: null,
+    settled: false,
+  };
+}

@@ -23,6 +23,8 @@ export const MULTIPORTAL_AUTH_ERROR_MESSAGE =
   "No pudimos completar la acción. Intenta nuevamente.";
 export const COACH_REGISTRATION_IDENTITY_MISMATCH_MESSAGE =
   "El correo debe coincidir con la sesión activa.";
+export const COACH_REGISTRATION_IDENTITY_SWITCH_MESSAGE =
+  "Hay una sesión activa con otro correo. Cierra sesión para registrar esta cuenta Coach.";
 export const USER_REGISTRATION_IDENTITY_MISMATCH_MESSAGE =
   "El correo debe coincidir con la sesión activa.";
 
@@ -117,6 +119,10 @@ export interface MultiportalAuthGateway<TAuthState> {
     reason: PortalSignOutReason,
     owner: PortalResolutionOwner,
   ): Promise<PortalSignOutResult>;
+  signOutForCoachIdentitySwitch(
+    requestedEmail: string,
+    owner: PortalResolutionOwner,
+  ): Promise<PortalSignOutResult>;
 }
 
 export type PortalAccessResult =
@@ -168,6 +174,11 @@ export type CoachRegistrationResult<TAuthState> =
     state: "coach_confirmation_required";
     requestedPortal: "coach";
     message: typeof COACH_REGISTRATION_CONFIRMATION_MESSAGE;
+  }
+  | {
+    state: "identity_switch_required";
+    requestedPortal: "coach";
+    message: typeof COACH_REGISTRATION_IDENTITY_SWITCH_MESSAGE;
   }
   | {
     state: "error";
@@ -390,10 +401,9 @@ async function registerCoach<TAuthState>(
     if (identity && !owner.bindExpectedUserId(identity.userId)) return staleCoachRegistration();
     if (identity && !sameEmail(identity.email, input.auth.email)) {
       return {
-        state: "error",
+        state: "identity_switch_required",
         requestedPortal: "coach",
-        field: "register-email",
-        message: COACH_REGISTRATION_IDENTITY_MISMATCH_MESSAGE,
+        message: COACH_REGISTRATION_IDENTITY_SWITCH_MESSAGE,
       };
     }
 

@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -25,8 +26,11 @@ const GATEWAY_PATH = "src/features/auth/data/supabase-multiportal-auth-gateway.t
 const HOOK_PATH = "src/features/auth/hooks/use-multiportal-auth-boundary.ts";
 const FORM_PATH = "src/features/auth/model/auth-form.ts";
 const SCREEN_PATH = "src/features/auth/components/auth-screen.tsx";
+const AUTH_SOURCE_DIRECTORY = "src/features/auth";
 const METADATA_RUNTIME_PROBE_PATH =
   "src/features/auth/model/multiportal-auth-metadata-mutation-runtime.test.ts";
+const NO_SENSITIVE_BROWSER_STORAGE_FAILURE =
+  "[AUTH-COACH-01.SWITCH.no-sensitive-browser-storage]";
 
 interface Sources {
   root: string;
@@ -38,6 +42,26 @@ interface Sources {
   screen: string;
 }
 
+function collectProductTypeScriptPaths(directory: string): string[] {
+  const paths: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      paths.push(...collectProductTypeScriptPaths(path));
+      continue;
+    }
+    if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+      paths.push(path);
+    }
+  }
+  return paths.sort();
+}
+
+const BROWSER_STORAGE_AUDIT_PATHS = [
+  ROOT_PATH,
+  ...collectProductTypeScriptPaths(AUTH_SOURCE_DIRECTORY),
+] as const;
+
 function readSources(): Sources {
   return {
     root: readFileSync(ROOT_PATH, "utf8"),
@@ -48,6 +72,22 @@ function readSources(): Sources {
     form: readFileSync(FORM_PATH, "utf8"),
     screen: readFileSync(SCREEN_PATH, "utf8"),
   };
+}
+
+function readBrowserStorageAuditSources(sources: Sources) {
+  const sourceOverrides = new Map<string, string>([
+    [ROOT_PATH, sources.root],
+    [CONTROLLER_PATH, sources.controller],
+    [OWNER_PATH, sources.owner],
+    [GATEWAY_PATH, sources.gateway],
+    [HOOK_PATH, sources.hook],
+    [FORM_PATH, sources.form],
+    [SCREEN_PATH, sources.screen],
+  ]);
+  return BROWSER_STORAGE_AUDIT_PATHS.map((path) => ({
+    path,
+    source: sourceOverrides.get(path) ?? readFileSync(path, "utf8"),
+  }));
 }
 
 function sha256(source: string) {
@@ -96,6 +136,158 @@ function unwrapExpression(expression: ts.Expression): ts.Expression {
     current = current.expression;
   }
   return current;
+}
+
+const BROWSER_STORAGE_NAMES = new Set(["localStorage", "sessionStorage"]);
+const BROWSER_GLOBAL_NAMES = new Set(["window", "globalThis"]);
+
+function memberAccessName(expression: ts.Expression): string | null {
+  const current = unwrapExpression(expression);
+  if (ts.isPropertyAccessExpression(current)) return current.name.text;
+  if (ts.isElementAccessExpression(current) && current.argumentExpression) {
+    const argument = unwrapExpression(current.argumentExpression);
+    return ts.isStringLiteralLike(argument) ? argument.text : null;
+  }
+  return null;
+}
+
+function memberAccessReceiver(expression: ts.Expression): ts.Expression | null {
+  const current = unwrapExpression(expression);
+  if (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+    return current.expression;
+  }
+  return null;
+}
+
+function isBrowserStorageReference(
+  expression: ts.Expression,
+  storageAliases: ReadonlySet<string>,
+  globalAliases: ReadonlySet<string>,
+): boolean {
+  const current = unwrapExpression(expression);
+  if (ts.isIdentifier(current)) {
+    return BROWSER_STORAGE_NAMES.has(current.text) || storageAliases.has(current.text);
+  }
+
+  const storageName = memberAccessName(current);
+  const receiver = memberAccessReceiver(current);
+  if (!storageName || !BROWSER_STORAGE_NAMES.has(storageName) || !receiver) return false;
+  return isBrowserGlobalReference(receiver, globalAliases);
+}
+
+function isBrowserGlobalReference(
+  expression: ts.Expression,
+  aliases: ReadonlySet<string>,
+): boolean {
+  const current = unwrapExpression(expression);
+  return ts.isIdentifier(current)
+    && (BROWSER_GLOBAL_NAMES.has(current.text) || aliases.has(current.text));
+}
+
+function bindingElementSourceProperty(element: ts.BindingElement): string | null {
+  if (!element.propertyName) {
+    return ts.isIdentifier(element.name) ? element.name.text : null;
+  }
+  if (ts.isComputedPropertyName(element.propertyName)) {
+    const expression = unwrapExpression(element.propertyName.expression);
+    return ts.isStringLiteralLike(expression) ? expression.text : null;
+  }
+  return propertyNameText(element.propertyName);
+}
+
+function collectBrowserStorageAliases(sourceFile: ts.SourceFile) {
+  const referenceCandidates: Array<{ name: string; initializer: ts.Expression }> = [];
+  const destructuringCandidates: Array<{
+    initializer: ts.Expression;
+    pattern: ts.ObjectBindingPattern;
+  }> = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      if (ts.isIdentifier(node.name)) {
+        referenceCandidates.push({ name: node.name.text, initializer: node.initializer });
+      } else if (ts.isObjectBindingPattern(node.name)) {
+        destructuringCandidates.push({ initializer: node.initializer, pattern: node.name });
+      }
+    }
+    if (
+      ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && ts.isIdentifier(node.left)
+    ) {
+      referenceCandidates.push({ name: node.left.text, initializer: node.right });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+
+  const globalAliases = new Set<string>();
+  const storageAliases = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const candidate of referenceCandidates) {
+      if (
+        !globalAliases.has(candidate.name)
+        && isBrowserGlobalReference(candidate.initializer, globalAliases)
+      ) {
+        globalAliases.add(candidate.name);
+        changed = true;
+      }
+      if (
+        !storageAliases.has(candidate.name)
+        && isBrowserStorageReference(candidate.initializer, storageAliases, globalAliases)
+      ) {
+        storageAliases.add(candidate.name);
+        changed = true;
+      }
+    }
+    for (const candidate of destructuringCandidates) {
+      if (!isBrowserGlobalReference(candidate.initializer, globalAliases)) continue;
+      for (const element of candidate.pattern.elements) {
+        if (element.dotDotDotToken || !ts.isIdentifier(element.name)) continue;
+        const sourceProperty = bindingElementSourceProperty(element);
+        if (
+          sourceProperty
+          && BROWSER_STORAGE_NAMES.has(sourceProperty)
+          && !storageAliases.has(element.name.text)
+        ) {
+          storageAliases.add(element.name.text);
+          changed = true;
+        }
+      }
+    }
+  }
+  return { globalAliases, storageAliases };
+}
+
+function containsBrowserStorageSetItem(source: string, path: string): boolean {
+  const sourceFile = parseTypeScript(source, path);
+  const { globalAliases, storageAliases } = collectBrowserStorageAliases(sourceFile);
+  let violation = false;
+  const visit = (node: ts.Node) => {
+    if (violation) return;
+    if (ts.isCallExpression(node)) {
+      const methodName = memberAccessName(node.expression);
+      const receiver = memberAccessReceiver(node.expression);
+      if (
+        methodName === "setItem"
+        && receiver
+        && isBrowserStorageReference(receiver, storageAliases, globalAliases)
+      ) {
+        violation = true;
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violation;
+}
+
+function auditNoSensitiveBrowserStorage(sources: Sources) {
+  const violations = readBrowserStorageAuditSources(sources)
+    .filter(({ path, source }) => containsBrowserStorageSetItem(source, path));
+  assert.equal(violations.length, 0, NO_SENSITIVE_BROWSER_STORAGE_FAILURE);
 }
 
 function propertyNameText(name: ts.PropertyName | undefined): string | null {
@@ -1010,7 +1202,147 @@ function auditGatewayUserLookupSemantics(gateway: string) {
   auditCrossedUserRowGuard(sourceFile);
 }
 
+function auditCoachIdentitySwitchSemantics(sources: Sources) {
+  const { controller, gateway, hook, root, screen } = sources;
+  const controllerSourceFile = parseTypeScript(controller, CONTROLLER_PATH);
+  const registerCoachText = findNamedFunction(
+    controllerSourceFile,
+    "registerCoach",
+  ).getText(controllerSourceFile);
+  const identitySwitchBranch = registerCoachText.match(
+    /if \(identity && !sameEmail\(identity\.email, input\.auth\.email\)\) \{[\s\S]*?state: "identity_switch_required"[\s\S]*?message: COACH_REGISTRATION_IDENTITY_SWITCH_MESSAGE[\s\S]*?\n    \}/,
+  )?.[0] ?? "";
+  assert.equal(
+    Boolean(identitySwitchBranch),
+    true,
+    "[AUTH-COACH-01.SWITCH.email-comparison] A/B distinto retorna el estado tipado antes de continuar",
+  );
+  assert.match(
+    controller,
+    /"Hay una sesión activa con otro correo\. Cierra sesión para registrar esta cuenta Coach\."/,
+    "[AUTH-COACH-01.SWITCH.exact-message] conserva el aviso aprobado",
+  );
+  const typedIdentitySwitchResult = controller.match(
+    /\| \{\n    state: "identity_switch_required";[\s\S]*?\n  \}/,
+  )?.[0] ?? "";
+  assert.equal(
+    Boolean(typedIdentitySwitchResult)
+      && !/password|authState|userId|email:/.test(typedIdentitySwitchResult),
+    true,
+    "[AUTH-COACH-01.SWITCH.minimal-result] el resultado UI no transporta identidad ni secretos",
+  );
+  assert.equal(
+    /const existingCoachRegistration = await gateway\.getCoachRegistration\(identity\.userId, owner\);/.test(registerCoachText)
+      && /gateway\.activateCoachRegistrationIdentity\(identity, owner\)/.test(registerCoachText),
+    true,
+    "[AUTH-COACH-01.SWITCH.session-a-cannot-authorize-b] lookup y activación permanecen ligados a la identidad autenticada",
+  );
+
+  const warningBranch = root.match(
+    /if \(registration\.state === "identity_switch_required"\) \{[\s\S]*?\n        \}/,
+  )?.[0] ?? "";
+  assert.equal(
+    /replaceCoachPortalSession\(null\)/.test(warningBranch)
+      && /setCoachIdentitySwitchRequired\(true\)/.test(warningBranch)
+      && /setAuthStatus\(registration\.message, "error"\)/.test(warningBranch),
+    true,
+    "[AUTH-COACH-01.SWITCH.portal-a-cleared-on-warning] el aviso desmonta A antes de exponer la acción",
+  );
+  assert.equal(
+    !/createCoachRegistration|activateCoachRegistrationIdentity|signInForCoachRegistration|signUpForCoachRegistration/.test(identitySwitchBranch),
+    true,
+    "[AUTH-COACH-01.SWITCH.no-write-before-switch] el mismatch no alcanza autenticación, lookup ni write Coach",
+  );
+
+  const gatewaySourceFile = parseTypeScript(gateway, GATEWAY_PATH);
+  const switchSignOutText = findNamedMethod(
+    gatewaySourceFile,
+    "signOutForCoachIdentitySwitch",
+  ).getText(gatewaySourceFile);
+  assert.equal(
+    /getAuthoritativeIdentity\(supabase, owner\.expectedUserId, owner\)/.test(switchSignOutText)
+      && /sameEmail\(identity\.email, requestedEmail\)/.test(switchSignOutText)
+      && /supabase\.auth\.signOut\(\{ scope: "local" \}\)/.test(switchSignOutText)
+      && !/scope: "global"|supabase\.auth\.signOut\(\)/.test(switchSignOutText),
+    true,
+    "[AUTH-COACH-01.SWITCH.local-signout-only] el cambio revalida A y usa sólo signout local",
+  );
+
+  const switchFunctionStart = hook.indexOf("  function signOutForCoachIdentitySwitch(");
+  const switchFunctionEnd = hook.indexOf("\n  function createGateway(", switchFunctionStart);
+  const switchFunctionText = switchFunctionStart >= 0 && switchFunctionEnd > switchFunctionStart
+    ? hook.slice(switchFunctionStart, switchFunctionEnd)
+    : "";
+  assert.equal(
+    /existingSwitch\?\.operation/.test(switchFunctionText)
+      && switchFunctionText.indexOf("invalidatePortalOperations();")
+        < switchFunctionText.indexOf(".signOutForCoachIdentitySwitch(requestedEmail, owner)")
+      && switchFunctionText.split(".signOutForCoachIdentitySwitch(requestedEmail, owner)").length - 1 === 1
+      && /return await pending\.event;/.test(switchFunctionText)
+      && /settleCoachIdentitySwitch\("signed_out"\)/.test(hook),
+    true,
+    "[AUTH-COACH-01.SWITCH.coordination] invalida owners, deduplica y espera SIGNED_OUT",
+  );
+
+  const signedOutBranch = root.match(
+    /if \(portalEventDecision === "complete_coach_identity_switch"\) \{[\s\S]*?\n          return;\n        \}/,
+  )?.[0] ?? "";
+  assert.equal(
+    /navigate: false/.test(signedOutBranch)
+      && !/authRouteController|navigation\.|history\./.test(signedOutBranch),
+    true,
+    "[AUTH-COACH-01.SWITCH.coach-route-preserved] SIGNED_OUT no abandona registro/coach",
+  );
+  assert.equal(
+    /preserveAuthForms: true/.test(signedOutBranch)
+      && /if \(options\.preserveAuthForms\) resetUserScopedTransientStatePreservingAuthForms\(\);\s*else resetUserScopedTransientState\(\);/.test(root)
+      && /<AuthScreen[\s\S]*?key=\{screen\}/.test(root),
+    true,
+    "[AUTH-COACH-01.SWITCH.form-b-preserved] el cierre conserva los campos controlados y locales de B",
+  );
+  assert.equal(
+    !/handleAuth\(|requestSubmit\(|\.submit\(|onSubmit/.test(signedOutBranch),
+    true,
+    "[AUTH-COACH-01.SWITCH.manual-resubmit-required] SIGNED_OUT no reenvía el formulario",
+  );
+  assert.equal(
+    /if \(blockedCoachIdentityUserIdRef\.current === currentUserId\) \{\s*return "defer";/.test(hook)
+      && /function beginPortalResolution\(expectedUserId: string\)[\s\S]*portalResolutionOwnersRef\.current\.acceptIdentity\(expectedUserId\);[\s\S]*\.begin\(expectedUserId\)/.test(hook),
+    true,
+    "[AUTH-COACH-01.SWITCH.stale-a-blocked] un callback tardío de A no vuelve a aplicarse",
+  );
+
+  const readOwnCoachText = findNamedFunction(
+    gatewaySourceFile,
+    "readOwnCoachRegistration",
+  ).getText(gatewaySourceFile);
+  assert.equal(
+    /if \(row && row\.userId !== expectedUserId\) \{[\s\S]*?throw new MultiportalAuthRepositoryError/.test(readOwnCoachText),
+    true,
+    "[AUTH-COACH-01.SWITCH.crossed-coach-row-rejected] una fila Coach de otro user_id falla cerrada",
+  );
+  assert.equal(
+    /createCoachPortalSession\(\{[\s\S]*?authorizedUserId: access\.userId,[\s\S]*?registration: access\.coach/.test(root),
+    true,
+    "[AUTH-COACH-01.SWITCH.own-professional-title] el portal deriva professional_title sólo de la fila Coach autorizada",
+  );
+  assert.equal(
+    /const coachRegistration = existingCoachRegistration \?\? await gateway\.createCoachRegistration\([\s\S]*?input\.registration,[\s\S]*?identity\.userId,[\s\S]*?owner,[\s\S]*?\);/.test(registerCoachText),
+    true,
+    "[AUTH-COACH-01.SWITCH.membership-required-for-success] no existe éxito Coach sin fila leída o creada",
+  );
+
+  assert.equal(
+    /isCoachRegistration && coachIdentitySwitchRequired \? \([\s\S]*?type="button"[\s\S]*?onClick=\{onCoachIdentitySwitch\}[\s\S]*?Cerrar sesión y continuar/.test(screen)
+      && /disabled=\{isBusy \|\| \(isCoachRegistration && coachIdentitySwitchRequired\)\}/.test(screen),
+    true,
+    "[AUTH-COACH-01.SWITCH.exact-ui] pantalla Auth muestra el botón exacto y bloquea el submit previo",
+  );
+}
+
 function auditIntegration(sources: Sources) {
+  auditNoSensitiveBrowserStorage(sources);
+  auditCoachIdentitySwitchSemantics(sources);
   const { root, controller, owner, gateway, hook, form, screen } = sources;
   const controllerSourceFile = parseTypeScript(controller, CONTROLLER_PATH);
   const registerCoachFunction = findNamedFunction(controllerSourceFile, "registerCoach");
@@ -1129,6 +1461,7 @@ function auditIntegration(sources: Sources) {
   assert.match(gateway, /persistSession: false,[\s\S]*autoRefreshToken: false,[\s\S]*detectSessionInUrl: false/);
   const gatewaySourceFile = parseTypeScript(gateway, GATEWAY_PATH);
   const coachSignInMethod = findNamedMethod(gatewaySourceFile, "signInForCoachRegistration");
+  const signOutMethod = findNamedMethod(gatewaySourceFile, "signOut");
   assert.match(
     coachSignInMethod.getText(gatewaySourceFile),
     /const isolatedClient = getRegistrationClient\(\);[\s\S]*isolatedClient\.auth\.signInWithPassword/,
@@ -1140,7 +1473,7 @@ function auditIntegration(sources: Sources) {
     "[AUTH-COACH-01.gateway.signout-owner-guard] gateway rechaza owner stale antes de efectos",
   );
   assert.match(
-    gateway,
+    signOutMethod.getText(gatewaySourceFile),
     /const identity = await getAuthoritativeIdentity\(supabase, owner\.expectedUserId, owner\);/,
     "[AUTH-COACH-01.gateway.signout-fresh-identity] signOut revalida expectedUserId",
   );
@@ -1264,6 +1597,16 @@ function auditIntegration(sources: Sources) {
 function replaceExactlyOnce(source: string, target: string, replacement: string, name: string) {
   assert.equal(source.split(target).length - 1, 1, `${name}: target único`);
   return source.replace(target, replacement);
+}
+
+function injectAfterAuthCredentials(source: string, injectedSource: string, name: string) {
+  const credentialsDeclaration = "    const { email, password } = authPayload;";
+  return replaceExactlyOnce(
+    source,
+    credentialsDeclaration,
+    `${credentialsDeclaration}\n${injectedSource}`,
+    name,
+  );
 }
 
 const semanticPositiveControls = [
@@ -1436,6 +1779,82 @@ test("controles positivos Usuario H1-H3 toleran renombres, formato y comentarios
   }
 });
 
+const browserStoragePositiveControls = [
+  {
+    name: "comentario que menciona destructuring de localStorage",
+    apply: (source: string) => (
+      `${source}\n// const { localStorage: storage } = window; storage.setItem(\"key\", payload);\n`
+    ),
+  },
+  {
+    name: "string de documentación que menciona sessionStorage",
+    apply: (source: string) => (
+      `${source}\nconst authSessionStorageDocumentation = \"sessionStorage no conserva formularios Coach\";\n`
+    ),
+  },
+  {
+    name: "identificador localStorageWarning inocente",
+    apply: (source: string) => (
+      `${source}\nconst localStorageWarning = \"Persistencia Auth deshabilitada\";\n`
+    ),
+  },
+  {
+    name: "fixture textual con destructuring no ejecutable",
+    apply: (source: string) => (
+      `${source}\nconst browserStorageFixture = 'const { sessionStorage: storage } = window; storage.setItem("key", payload);';\n`
+    ),
+  },
+  {
+    name: "destructuring de location desde window",
+    apply: (source: string) => (
+      `${source}\nconst { location: currentBrowserLocation } = window; void currentBrowserLocation;\n`
+    ),
+  },
+  {
+    name: "objeto de dominio con propiedad localStorage",
+    apply: (source: string) => (
+      `${source}\nconst customRepository = { setItem(_key: string, _value: string) {} };\nconst domainSource = { localStorage: customRepository };\nconst { localStorage: repository } = domainSource;\nrepository.setItem("key", "value");\n`
+    ),
+  },
+  {
+    name: "getItem sobre Browser Storage reconocido",
+    apply: (source: string) => (
+      `${source}\nwindow.localStorage.getItem("coach-switch-form");\n`
+    ),
+  },
+  {
+    name: "alias global y destructuring inocentes reformateados",
+    apply: (source: string) => (
+      `${source}\nconst browserWindowAlias = window;\nconst {\n  location: renamedBrowserLocation,\n} = browserWindowAlias;\nvoid renamedBrowserLocation;\n`
+    ),
+  },
+] as const;
+
+const EXPECTED_BROWSER_STORAGE_POSITIVE_CONTROL_COUNT = 8;
+assert.equal(
+  browserStoragePositiveControls.length,
+  EXPECTED_BROWSER_STORAGE_POSITIVE_CONTROL_COUNT,
+  "AUTH-COACH-01 M11 fija ocho controles inocentes AST",
+);
+
+test("M11 ignora destructuring, comentarios, strings, dominios y lecturas inocentes", () => {
+  const sources = readSources();
+  for (const control of browserStoragePositiveControls) {
+    const transformed = control.apply(sources.root);
+    assert.notEqual(transformed, sources.root, `${control.name}: transformación efectiva`);
+    assert.notEqual(
+      sha256(transformed),
+      sha256(sources.root),
+      `${control.name}: cambia realmente el SHA`,
+    );
+    assertValidTypeScript(transformed, ROOT_PATH);
+    assert.doesNotThrow(
+      () => auditIntegration({ ...sources, root: transformed }),
+      `${control.name}: no representa persistencia ejecutable`,
+    );
+  }
+});
+
 test("wiring multiportal bloquea bypass cliente y deja seam Coach tipado", () => {
   const sources = readSources();
   for (const [path, source] of [
@@ -1451,6 +1870,419 @@ test("wiring multiportal bloquea bypass cliente y deja seam Coach tipado", () =>
 });
 
 const mutations = [
+  {
+    name: "SWITCH · omite comparación de correo A/B",
+    identitySwitchEvidence: "omit_email_comparison" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.email-comparison] A/B distinto retorna el estado tipado antes de continuar",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    if (identity && !sameEmail(identity.email, input.auth.email)) {",
+      "    if (false) {",
+      "SWITCH omite comparación de correo",
+    ),
+  },
+  {
+    name: "SWITCH · autoriza B usando el lookup de formulario bajo sesión A",
+    identitySwitchEvidence: "authorize_b_with_session_a" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.session-a-cannot-authorize-b] lookup y activación permanecen ligados a la identidad autenticada",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
+      "    const existingCoachRegistration = await gateway.getCoachRegistration(input.auth.email, owner);",
+      "SWITCH autoriza B con sesión A",
+    ),
+  },
+  {
+    name: "SWITCH · conserva coachPortalSession A al mostrar el aviso",
+    identitySwitchEvidence: "keep_portal_a" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.portal-a-cleared-on-warning] el aviso desmonta A antes de exponer la acción",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '        if (registration.state === "identity_switch_required") {\n          replaceCoachPortalSession(null);',
+      '        if (registration.state === "identity_switch_required") {\n          void coachPortalSessionRef.current;',
+      "SWITCH conserva portal A",
+    ),
+  },
+  {
+    name: "SWITCH · ejecuta write Coach antes del cambio de identidad",
+    identitySwitchEvidence: "write_before_switch" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.no-write-before-switch] el mismatch no alcanza autenticación, lookup ni write Coach",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    if (identity && !sameEmail(identity.email, input.auth.email)) {\n      return {",
+      "    if (identity && !sameEmail(identity.email, input.auth.email)) {\n      await gateway.createCoachRegistration(input.registration, identity.userId, owner);\n      return {",
+      "SWITCH write antes del cambio",
+    ),
+  },
+  {
+    name: "SWITCH · usa signout global",
+    identitySwitchEvidence: "global_signout" as const,
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.local-signout-only] el cambio revalida A y usa sólo signout local",
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const method = findNamedMethod(sourceFile, "signOutForCoachIdentitySwitch");
+      const mutatedMethod = replaceExactlyOnce(
+        method.getText(sourceFile),
+        'supabase.auth.signOut({ scope: "local" })',
+        "supabase.auth.signOut()",
+        "SWITCH signout global",
+      );
+      return replaceNodeText(source, sourceFile, method, mutatedMethod);
+    },
+  },
+  {
+    name: "SWITCH · navega fuera de registro/coach tras SIGNED_OUT",
+    identitySwitchEvidence: "navigate_after_signed_out" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.coach-route-preserved] SIGNED_OUT no abandona registro/coach",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '          clearUserSessionState("", previousStorageScope, {\n            navigate: false,',
+      '          clearUserSessionState("", previousStorageScope, {\n            navigate: true,',
+      "SWITCH navega tras SIGNED_OUT",
+    ),
+  },
+  {
+    name: "SWITCH · limpia los valores Coach B",
+    identitySwitchEvidence: "clear_form_b" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.form-b-preserved] el cierre conserva los campos controlados y locales de B",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "            preserveAuthForms: true,",
+      "            preserveAuthForms: false,",
+      "SWITCH limpia formulario B",
+    ),
+  },
+  {
+    name: "SWITCH · autoenvía el formulario después del cierre",
+    identitySwitchEvidence: "auto_submit_after_close" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.manual-resubmit-required] SIGNED_OUT no reenvía el formulario",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '          setIsAuthLoading(false);\n          setAuthStatus("", "info");\n          return;',
+      '          setIsAuthLoading(false);\n          setAuthStatus("", "info");\n          void handleAuth("registro", new FormData());\n          return;',
+      "SWITCH autoenvía formulario",
+    ),
+  },
+  {
+    name: "SWITCH · callback stale remonta A",
+    identitySwitchEvidence: "stale_callback_remounts_a" as const,
+    file: "hook" as const,
+    path: HOOK_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.stale-a-blocked] un callback tardío de A no vuelve a aplicarse",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "      if (blockedCoachIdentityUserIdRef.current === currentUserId) {",
+      "      if (false) {",
+      "SWITCH callback stale remonta A",
+    ),
+  },
+  {
+    name: "SWITCH · acepta fila Coach con otro user_id",
+    identitySwitchEvidence: "accept_crossed_coach_row" as const,
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.crossed-coach-row-rejected] una fila Coach de otro user_id falla cerrada",
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const readFunction = findNamedFunction(sourceFile, "readOwnCoachRegistration");
+      const mutatedFunction = replaceExactlyOnce(
+        readFunction.getText(sourceFile),
+        "  if (row && row.userId !== expectedUserId) {",
+        "  if (false) {",
+        "SWITCH acepta fila Coach cruzada",
+      );
+      return replaceNodeText(source, sourceFile, readFunction, mutatedFunction);
+    },
+  },
+  {
+    name: "SWITCH · muestra professional_title de la sesión anterior",
+    identitySwitchEvidence: "show_previous_professional_title" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.own-professional-title] el portal deriva professional_title sólo de la fila Coach autorizada",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "          registration: access.coach,",
+      "          registration: coachPortalSessionRef.current?.registration ?? access.coach,",
+      "SWITCH usa professional_title anterior",
+    ),
+  },
+  {
+    name: "SWITCH · declara éxito sin membresía Coach",
+    identitySwitchEvidence: "success_without_coach_membership" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.SWITCH.membership-required-for-success] no existe éxito Coach sin fila leída o creada",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      `    const coachRegistration = existingCoachRegistration ?? await gateway.createCoachRegistration(
+      input.registration,
+      identity.userId,
+      owner,
+    );`,
+      `    const coachRegistration = existingCoachRegistration ?? {
+      userId: identity.userId,
+      createdAt: "not-persisted",
+      firstName: input.registration.first_name,
+      lastName: input.registration.last_name,
+      birthDate: input.registration.birth_date,
+      gender: input.registration.gender,
+      phoneNumber: input.registration.phone_number,
+      professionalTitle: input.registration.professional_title,
+    };`,
+      "SWITCH éxito sin membresía",
+    ),
+  },
+  {
+    name: "SWITCH M11 · persiste password y email en window.localStorage",
+    identitySwitchEvidence: "sensitive_window_local_storage" as const,
+    browserStorageEvidence: "window_local_storage" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    window.localStorage.setItem(
+      "coach-switch-form",
+      JSON.stringify({ email, password }),
+    );`,
+      "M11 window.localStorage",
+    ),
+  },
+  {
+    name: "SWITCH M11 · persiste password en localStorage global",
+    identitySwitchEvidence: "sensitive_bare_local_storage" as const,
+    browserStorageEvidence: "bare_local_storage" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      '    localStorage.setItem("coach-switch-password", password);',
+      "M11 localStorage global",
+    ),
+  },
+  {
+    name: "SWITCH M11 · persiste formulario completo en window.sessionStorage",
+    identitySwitchEvidence: "sensitive_window_session_storage" as const,
+    browserStorageEvidence: "window_session_storage" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    window.sessionStorage.setItem(
+      "coach-switch-form",
+      JSON.stringify(formData),
+    );`,
+      "M11 window.sessionStorage",
+    ),
+  },
+  {
+    name: "SWITCH M11 · persiste email en sessionStorage global",
+    identitySwitchEvidence: "sensitive_bare_session_storage" as const,
+    browserStorageEvidence: "bare_session_storage" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      '    sessionStorage.setItem("coach-switch-email", email);',
+      "M11 sessionStorage global",
+    ),
+  },
+  {
+    name: "SWITCH M11 · usa acceso computado window localStorage",
+    identitySwitchEvidence: "sensitive_computed_local_storage" as const,
+    browserStorageEvidence: "computed_local_storage" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    window["localStorage"].setItem(
+      "coach-switch-form",
+      JSON.stringify({ email, password }),
+    );`,
+      "M11 acceso computado localStorage",
+    ),
+  },
+  {
+    name: "SWITCH M11 · persiste mediante alias directo de localStorage",
+    identitySwitchEvidence: "sensitive_storage_alias" as const,
+    browserStorageEvidence: "direct_storage_alias" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    const coachSwitchStorage = window.localStorage;
+    coachSwitchStorage.setItem(
+      "coach-switch-form",
+      JSON.stringify({ email, password }),
+    );`,
+      "M11 alias directo localStorage",
+    ),
+  },
+  {
+    name: "SWITCH M11 · persiste mediante globalThis.sessionStorage",
+    identitySwitchEvidence: "sensitive_global_session_storage" as const,
+    browserStorageEvidence: "global_session_storage" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    globalThis.sessionStorage.setItem(
+      "coach-switch-form",
+      JSON.stringify({ email, password }),
+    );`,
+      "M11 globalThis.sessionStorage",
+    ),
+  },
+  {
+    name: "SWITCH M11 · destructuring explícito de localStorage",
+    identitySwitchEvidence: "sensitive_destructured_local_storage_alias" as const,
+    browserStorageEvidence: "destructured_local_storage_alias" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    const form = formData;
+    const { localStorage: storage } = window;
+    storage.setItem("key", JSON.stringify(form));`,
+      "M11 destructuring explícito localStorage",
+    ),
+  },
+  {
+    name: "SWITCH M11 · destructuring shorthand de localStorage",
+    identitySwitchEvidence: "sensitive_destructured_local_storage_shorthand" as const,
+    browserStorageEvidence: "destructured_local_storage_shorthand" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    const { localStorage } = window;
+    localStorage.setItem("key", JSON.stringify(formData));`,
+      "M11 destructuring shorthand localStorage",
+    ),
+  },
+  {
+    name: "SWITCH M11 · destructuring explícito de sessionStorage",
+    identitySwitchEvidence: "sensitive_destructured_session_storage_alias" as const,
+    browserStorageEvidence: "destructured_session_storage_alias" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    const { sessionStorage: storage } = window;
+    storage.setItem("key", JSON.stringify(formData));`,
+      "M11 destructuring explícito sessionStorage",
+    ),
+  },
+  {
+    name: "SWITCH M11 · destructuring desde globalThis",
+    identitySwitchEvidence: "sensitive_destructured_global_this_storage" as const,
+    browserStorageEvidence: "destructured_global_this_storage" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    const { localStorage: storage } = globalThis;
+    storage.setItem("key", JSON.stringify(formData));`,
+      "M11 destructuring globalThis",
+    ),
+  },
+  {
+    name: "SWITCH M11 · destructuring con propiedad computada",
+    identitySwitchEvidence: "sensitive_destructured_computed_storage" as const,
+    browserStorageEvidence: "destructured_computed_storage" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    const { ["sessionStorage"]: storage } = window;
+    storage.setItem("key", JSON.stringify(formData));`,
+      "M11 destructuring computado",
+    ),
+  },
+  {
+    name: "SWITCH M11 · destructuring desde alias de window",
+    identitySwitchEvidence: "sensitive_destructured_global_alias" as const,
+    browserStorageEvidence: "destructured_global_alias" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    const browser = window;
+    const { localStorage: storage } = browser;
+    storage.setItem("key", JSON.stringify(formData));`,
+      "M11 destructuring desde alias global",
+    ),
+  },
+  {
+    name: "SWITCH M11 · cadena posterior a destructuring",
+    identitySwitchEvidence: "sensitive_destructured_storage_alias_chain" as const,
+    browserStorageEvidence: "destructured_storage_alias_chain" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      `    const { localStorage: first } = window;
+    const second = first;
+    second.setItem("key", JSON.stringify(formData));`,
+      "M11 cadena posterior a destructuring",
+    ),
+  },
   {
     name: "accountType concede Coach sin fila",
     file: "controller" as const,
@@ -1513,8 +2345,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.gateway.signout-owner-guard]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      '      if (!owner.isCurrent()) return "stale";',
-      '      if (false) return "stale";',
+      '    async signOut(reason, owner) {\n      if (!owner.isCurrent()) return "stale";',
+      '    async signOut(reason, owner) {\n      if (false) return "stale";',
       "gateway omite guard de owner antes de signOut",
     ),
   },
@@ -1525,8 +2357,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.gateway.signout-fresh-identity]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "      const identity = await getAuthoritativeIdentity(supabase, owner.expectedUserId, owner);",
-      "      const identity = { userId: owner.expectedUserId };",
+      '    async signOut(reason, owner) {\n      if (!owner.isCurrent()) return "stale";\n      const identity = await getAuthoritativeIdentity(supabase, owner.expectedUserId, owner);',
+      '    async signOut(reason, owner) {\n      if (!owner.isCurrent()) return "stale";\n      const identity = { userId: owner.expectedUserId };',
       "gateway omite identidad fresca antes de signOut",
     ),
   },
@@ -1988,13 +2820,71 @@ const mutations = [
   },
 ] as const;
 
-const EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT = 37;
+const EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT = 63;
+const EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT = 26;
+const EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT = 14;
 const EXPECTED_RUNTIME_MUTATION_PROBE_COUNT = 7;
 const EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT = 6;
 const EXPECTED_E7_E9_SEMANTIC_MUTATION_PROBE_COUNT = 3;
 const EXPECTED_USER_H1_H3_SEMANTIC_MUTATION_PROBE_COUNT = 3;
 
 assert.equal(mutations.length, EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT);
+assert.deepEqual(
+  mutations
+    .filter((mutation) => "identitySwitchEvidence" in mutation)
+    .map((mutation) => mutation.identitySwitchEvidence),
+  [
+    "omit_email_comparison",
+    "authorize_b_with_session_a",
+    "keep_portal_a",
+    "write_before_switch",
+    "global_signout",
+    "navigate_after_signed_out",
+    "clear_form_b",
+    "auto_submit_after_close",
+    "stale_callback_remounts_a",
+    "accept_crossed_coach_row",
+    "show_previous_professional_title",
+    "success_without_coach_membership",
+    "sensitive_window_local_storage",
+    "sensitive_bare_local_storage",
+    "sensitive_window_session_storage",
+    "sensitive_bare_session_storage",
+    "sensitive_computed_local_storage",
+    "sensitive_storage_alias",
+    "sensitive_global_session_storage",
+    "sensitive_destructured_local_storage_alias",
+    "sensitive_destructured_local_storage_shorthand",
+    "sensitive_destructured_session_storage_alias",
+    "sensitive_destructured_global_this_storage",
+    "sensitive_destructured_computed_storage",
+    "sensitive_destructured_global_alias",
+    "sensitive_destructured_storage_alias_chain",
+  ],
+  `AUTH-COACH-01 fija ${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT} probes A/B de cambio de identidad`,
+);
+assert.deepEqual(
+  mutations
+    .filter((mutation) => "browserStorageEvidence" in mutation)
+    .map((mutation) => mutation.browserStorageEvidence),
+  [
+    "window_local_storage",
+    "bare_local_storage",
+    "window_session_storage",
+    "bare_session_storage",
+    "computed_local_storage",
+    "direct_storage_alias",
+    "global_session_storage",
+    "destructured_local_storage_alias",
+    "destructured_local_storage_shorthand",
+    "destructured_session_storage_alias",
+    "destructured_global_this_storage",
+    "destructured_computed_storage",
+    "destructured_global_alias",
+    "destructured_storage_alias_chain",
+  ],
+  `AUTH-COACH-01 M11 fija ${EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT} probes de Browser Storage`,
+);
 assert.equal(
   mutations.filter((mutation) => "runtimeFailure" in mutation).length,
   EXPECTED_RUNTIME_MUTATION_PROBE_COUNT,
@@ -2298,5 +3188,5 @@ for (const mutation of mutations) {
 }
 
 console.log(
-  `AUTH-COACH-01 integration mutation probes: ${mutations.length}/${EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT}; runtime: ${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}/${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}; Auth suite E7-E9/H1-H3: ${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}/${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}`,
+  `AUTH-COACH-01 integration mutation probes: ${mutations.length}/${EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT}; cambio A/B: ${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT}/${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT}; M11 Browser Storage: ${EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT}/${EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT}; controles M11: ${EXPECTED_BROWSER_STORAGE_POSITIVE_CONTROL_COUNT}/${EXPECTED_BROWSER_STORAGE_POSITIVE_CONTROL_COUNT}; runtime: ${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}/${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}; Auth suite E7-E9/H1-H3: ${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}/${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}`,
 );

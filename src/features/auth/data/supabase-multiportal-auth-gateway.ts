@@ -257,6 +257,25 @@ export function createSupabaseMultiportalAuthGateway(
       }
       return "signed_out";
     },
+
+    async signOutForCoachIdentitySwitch(requestedEmail, owner) {
+      if (!owner.isCurrent()) return "stale";
+      const identity = await getAuthoritativeIdentity(supabase, owner.expectedUserId, owner);
+      if (
+        !identity
+        || identity.userId !== owner.expectedUserId
+        || sameEmail(identity.email, requestedEmail)
+        || !owner.isCurrent()
+      ) {
+        return "stale";
+      }
+
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      if (error) {
+        throw new MultiportalAuthRepositoryError("No pudimos cerrar la sesión.", error);
+      }
+      return "signed_out";
+    },
   };
 }
 
@@ -410,6 +429,10 @@ function ownsRegistration(
   expectedUserId: string,
 ) {
   return owner.isCurrent() && owner.expectedUserId === expectedUserId;
+}
+
+function sameEmail(left: string | null, right: string): boolean {
+  return typeof left === "string" && left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 function staleRegistrationError() {

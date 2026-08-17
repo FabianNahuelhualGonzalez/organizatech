@@ -434,6 +434,7 @@ export function OrganizatechApp({
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
   const [coachPortalSession, setCoachPortalSession] = useState<CoachPortalSession | null>(null);
   const coachPortalSessionRef = useRef<CoachPortalSession | null>(null);
+  const [coachIdentitySwitchRequired, setCoachIdentitySwitchRequired] = useState(false);
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(initialAuthState.isAuthLoading);
   const [isBusy, setIsBusy] = useState(false);
@@ -934,6 +935,17 @@ export function OrganizatechApp({
       if (event === "SIGNED_OUT") {
         loginSubmitOwnerRef.current?.invalidate();
         interactiveAuthAttemptRef.current = false;
+        if (portalEventDecision === "complete_coach_identity_switch") {
+          clearUserSessionState("", previousStorageScope, {
+            navigate: false,
+            preserveAuthForms: true,
+          });
+          setCoachIdentitySwitchRequired(false);
+          setIsBusy(false);
+          setIsAuthLoading(false);
+          setAuthStatus("", "info");
+          return;
+        }
         const portalSignOutMessage = multiportalAuth.consumePortalSignOutMessage();
         if (portalSignOutMessage) {
           clearUserSessionState(portalSignOutMessage, previousStorageScope, {
@@ -1266,11 +1278,19 @@ export function OrganizatechApp({
   }, [activeWorkoutBoundary, resetExerciseHistory]);
 
   function resetUserScopedTransientState() {
+    resetUserScopedTransientStateWithoutAuthForms();
+    clearAuthForms();
+  }
+
+  function resetUserScopedTransientStatePreservingAuthForms() {
+    resetUserScopedTransientStateWithoutAuthForms();
+  }
+
+  function resetUserScopedTransientStateWithoutAuthForms() {
     appShell.closeAll();
     routineBuilder.resetTransient();
     setDashboardDayOverride("");
     progressController.resetSelection();
-    clearAuthForms();
     setStatusMessage("");
   }
 
@@ -1451,7 +1471,11 @@ export function OrganizatechApp({
   function clearUserSessionState(
     message: string,
     storageScope = activeBrowserStorageScopeRef.current,
-    options: { navigate?: boolean; statusTone?: AuthStatusTone } = {},
+    options: {
+      navigate?: boolean;
+      preserveAuthForms?: boolean;
+      statusTone?: AuthStatusTone;
+    } = {},
   ) {
     replaceCoachPortalSession(null);
     if (
@@ -1478,7 +1502,8 @@ export function OrganizatechApp({
     if (sessionBoundary.resetActiveWorkoutMemory) {
       resetActiveWorkoutSessionState(null);
     }
-    resetUserScopedTransientState();
+    if (options.preserveAuthForms) resetUserScopedTransientStatePreservingAuthForms();
+    else resetUserScopedTransientState();
     if (sessionBoundary.clearClosingStorageScope) {
       clearBrowserStorageScope(storageScope);
     }
@@ -1489,6 +1514,7 @@ export function OrganizatechApp({
     activeBrowserStorageScopeRef.current = null;
     setSupabaseSession(null);
     setSupabaseUser(null);
+    setSessionName("");
     setDataMode("demo");
     setIsBusy(false);
     routineBuilder.replaceIdentityScope(null);
@@ -1749,6 +1775,22 @@ export function OrganizatechApp({
     return message;
   }
 
+  async function handleCoachIdentitySwitch() {
+    if (!coachIdentitySwitchRequired) return;
+    interactiveAuthAttemptRef.current = false;
+    setIsBusy(true);
+    try {
+      const result = await multiportalAuth.signOutForCoachIdentitySwitch(registerEmail);
+      if (result === "stale") {
+        setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+      }
+    } catch (error) {
+      setAuthStatus(translateAuthError(error), "error");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function handleAuth(mode: "login" | "registro", formData: FormData) {
     const requestedPortal = authRouteController.route.accountType;
     const isCoachRegistration = mode === "registro" && requestedPortal === "coach";
@@ -1841,6 +1883,12 @@ export function OrganizatechApp({
           || !multiportalAuth.isCoachRegistrationSubmitCurrent(coachRegistrationSubmitOwner)
         ) return;
         if (registration.state === "busy" || registration.state === "stale") return;
+        if (registration.state === "identity_switch_required") {
+          replaceCoachPortalSession(null);
+          setCoachIdentitySwitchRequired(true);
+          setAuthStatus(registration.message, "error");
+          return;
+        }
         if (registration.state === "coach_confirmation_required") {
           clearAuthForms();
           setAuthStatus(registration.message, "success");
@@ -3677,6 +3725,14 @@ export function OrganizatechApp({
     setNewPassword("");
     setNewPasswordConfirm("");
     setAuthFieldErrors({});
+    setCoachIdentitySwitchRequired(false);
+  }
+
+  function handleRegisterEmailChange(value: string) {
+    setRegisterEmail(value);
+    if (!coachIdentitySwitchRequired) return;
+    setCoachIdentitySwitchRequired(false);
+    setAuthStatus("", "info");
   }
 
   function switchAuthScreen(nextScreen: "login" | "registro" | "recuperar-password") {
@@ -3700,6 +3756,7 @@ export function OrganizatechApp({
   function switchAuthAccountType(accountType: AuthAccountType) {
     if (screen !== "login" && screen !== "registro") return;
     setAuthFieldErrors({});
+    setCoachIdentitySwitchRequired(false);
     setAuthStatus("", "info");
     authRouteController.replace({ mode: screen, accountType });
   }
@@ -3764,6 +3821,7 @@ export function OrganizatechApp({
           statusTone={authStatusTone}
           fieldErrors={authFieldErrors}
           isBusy={isBusy}
+          coachIdentitySwitchRequired={coachIdentitySwitchRequired}
           loginEmail={loginEmail}
           loginPassword={loginPassword}
           registerName={registerName}
@@ -3773,10 +3831,11 @@ export function OrganizatechApp({
           onLoginEmailChange={setLoginEmail}
           onLoginPasswordChange={setLoginPassword}
           onRegisterNameChange={setRegisterName}
-          onRegisterEmailChange={setRegisterEmail}
+          onRegisterEmailChange={handleRegisterEmailChange}
           onRegisterPasswordChange={setRegisterPassword}
           onRegisterConfirmPasswordChange={setRegisterConfirmPassword}
           onSubmit={(data) => handleAuth(screen, data)}
+          onCoachIdentitySwitch={handleCoachIdentitySwitch}
           onForgotPassword={() => switchAuthScreen("recuperar-password")}
           onModeChange={switchAuthScreen}
           onAccountTypeChange={switchAuthAccountType}
