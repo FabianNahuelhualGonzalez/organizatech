@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 
 import {
   AUTH_REGISTRATION_GENDER_VALUES,
+  buildCoachRegistrationPayload,
   buildLoginPayload,
   buildUserSignupPayload,
-  COACH_REGISTRATION_SUBMIT_ENABLED,
 } from "@/features/auth/model/auth-form";
 
 function createUserRegistrationForm(overrides: Record<string, string> = {}) {
@@ -122,6 +122,34 @@ assert.deepEqual(AUTH_REGISTRATION_GENDER_VALUES, [
   "prefer_not_to_say",
 ]);
 
-assert.equal(COACH_REGISTRATION_SUBMIT_ENABLED, false);
+{
+  const result = buildCoachRegistrationPayload(createUserRegistrationForm({
+    "register-professional-title": "  Lic.   en Ciencias del Deporte  ",
+  }), new Date(2026, 7, 14));
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.deepEqual(result.payload.registration, {
+      first_name: "Fabian",
+      last_name: "Nahuelhual",
+      birth_date: "1990-08-14",
+      gender: "male",
+      phone_number: "+56 9 1234 5678",
+      professional_title: "Lic. en Ciencias del Deporte",
+    });
+    const serialized = JSON.stringify(result.payload.registration);
+    for (const forbidden of ["age", "email", "password", "user_id", "owner_id", "profile_id", "role"] as const) {
+      assert.equal(serialized.includes(forbidden), false, `${forbidden} no debe entrar al write Coach`);
+    }
+  }
+}
+
+assert.deepEqual(
+  buildCoachRegistrationPayload(createUserRegistrationForm(), new Date(2026, 7, 14)),
+  {
+    ok: false,
+    field: "register-professional-title",
+    message: "Ingresa tu título de estudios.",
+  },
+);
 
 console.log("auth-form tests passed");

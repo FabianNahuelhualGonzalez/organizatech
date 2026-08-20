@@ -1,10 +1,30 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import ts from "typescript";
 
 function readSource(path: string) {
   return readFileSync(path, "utf8");
 }
+
+const COACH_CONTRACT_RUNNER_PATH =
+  "src/features/auth/multiportal-auth-integration-contract.test.ts";
+const COACH_INTEGRATION_CONTRACT_SPECIFIER =
+  "@/features/coach-portal/coach-portal-integration-contract";
+const COACH_MODEL_CONTRACT_SPECIFIER =
+  "@/features/coach-portal/model/coach-portal.contract";
+const COACH_INTEGRATION_IMPORT_FAILURE =
+  "[AUTH-COACH-01.runner-import.integration-contract]";
+const COACH_MODEL_IMPORT_FAILURE = "[AUTH-COACH-01.runner-import.model-contract]";
+
+// Deuda contractual LOW no bloqueante: este guard focal no amplía la auditoría a los
+// anclajes literales históricos de Auth; su eventual endurecimiento queda fuera de alcance.
+const coachContractRunner = readSource(COACH_CONTRACT_RUNNER_PATH);
+assertCoachContractRunnerImports(coachContractRunner);
+runCoachContractRunnerPositiveControls(coachContractRunner);
+runCoachContractRunnerMutationProbes(coachContractRunner);
 
 const landing = readSource("src/app/page.tsx");
 const loginPage = readSource("src/app/login/page.tsx");
@@ -39,8 +59,12 @@ assert.match(root, /import \{[\s\S]*?AuthScreen,[\s\S]*?\} from "@\/features\/au
 assert.doesNotMatch(root, /function AuthScreen\(/);
 assert.match(root, /buildLoginPayload\(formData\)/);
 assert.match(root, /buildUserSignupPayload\(formData\)/);
+assert.match(root, /buildCoachRegistrationPayload\(formData\)/);
 assert.match(root, /supabase\.auth\.signInWithPassword\(\{ email, password \}\)/);
-assert.match(root, /supabase\.auth\.signUp\(signupPayload\)/);
+assert.match(root, /multiportalAuth\.registerUser\(\s*signupPayload,/);
+assert.doesNotMatch(root, /supabase\.auth\.signUp\(signupPayload\)/);
+assert.match(root, /authorizeAndContinuePortalSession\(/);
+assert.match(root, /continueAuthorizedPortalAccess\(/);
 assert.match(root, /loginSubmitOwnerController\.acquire\(\)/);
 assert.match(root, /resetPasswordForEmail\(email, \{ redirectTo \}\)/);
 assert.doesNotMatch(root, /className="login-shell"|Validando sesión<\/h2>/);
@@ -78,8 +102,10 @@ assert.match(authScreen, /<Image[^>]+src="\/icon\.svg"/);
 assertAuthRegistrationInputContract(authScreen);
 runAuthRegistrationInputOrderControls(authScreen);
 runAuthRegistrationInputMutationProbes(authScreen);
-assert.match(authScreen, /COACH_REGISTRATION_SUBMIT_ENABLED/);
-assert.match(authScreen, /disabled=\{isBusy \|\| \(isCoachRegistration && !COACH_REGISTRATION_SUBMIT_ENABLED\)\}/);
+assert.doesNotMatch(authScreen, /COACH_REGISTRATION_SUBMIT_ENABLED/);
+assert.match(authScreen, /action=\{onSubmit\}/);
+assert.match(authScreen, /disabled=\{isBusy\}/);
+assert.match(authScreen, /fieldErrors\["register-professional-title"\]/);
 assert.doesNotMatch(authScreen, /auth-tab-coach[\s\S]{0,300}disabled/);
 assert.match(authScreen, /aria-label="Continuar con Google \(no disponible\)"[\s\S]*?disabled/);
 assert.doesNotMatch(authScreen, /Apple|aria-label="Correo"/);
@@ -1128,4 +1154,449 @@ function normalizeCssText(value: string) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+interface CoachContractImportExpectation {
+  moduleSpecifier: string;
+  failureMarker: string;
+}
+
+interface CoachContractRunnerMutationProbe {
+  name: string;
+  expectedFailure: string;
+  mutate: (source: string) => string;
+}
+
+interface CoachContractRunnerPositiveControl {
+  name: string;
+  mutate: (source: string) => string;
+}
+
+function coachContractImportExpectations(): readonly CoachContractImportExpectation[] {
+  return [
+    {
+      moduleSpecifier: COACH_INTEGRATION_CONTRACT_SPECIFIER,
+      failureMarker: COACH_INTEGRATION_IMPORT_FAILURE,
+    },
+    {
+      moduleSpecifier: COACH_MODEL_CONTRACT_SPECIFIER,
+      failureMarker: COACH_MODEL_IMPORT_FAILURE,
+    },
+  ];
+}
+
+function parseCoachContractRunner(source: string, path = COACH_CONTRACT_RUNNER_PATH) {
+  const sourceFile = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const parseDiagnostics = (sourceFile as ts.SourceFile & {
+    parseDiagnostics?: readonly ts.Diagnostic[];
+  }).parseDiagnostics ?? [];
+  assert.equal(
+    parseDiagnostics.length,
+    0,
+    `[AUTH-COACH-01.runner-import.syntax] ${path} debe conservar sintaxis TypeScript válida: ${parseDiagnostics
+      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, " "))
+      .join(" | ")}`,
+  );
+  return sourceFile;
+}
+
+function coachContractRunnerImports(sourceFile: ts.SourceFile) {
+  return sourceFile.statements.filter((statement): statement is ts.ImportDeclaration => (
+    ts.isImportDeclaration(statement)
+    && ts.isStringLiteral(statement.moduleSpecifier)
+    && statement.importClause === undefined
+  ));
+}
+
+function assertCoachContractRunnerImports(
+  source: string,
+  path = COACH_CONTRACT_RUNNER_PATH,
+) {
+  const sourceFile = parseCoachContractRunner(source, path);
+  const imports = coachContractRunnerImports(sourceFile);
+
+  for (const expectation of coachContractImportExpectations()) {
+    const count = imports.filter((declaration) => (
+      (declaration.moduleSpecifier as ts.StringLiteral).text === expectation.moduleSpecifier
+    )).length;
+    if (count !== 1) {
+      throw new Error(
+        `${expectation.failureMarker}\n`+
+        "El runner autoritativo debe contener exactamente una vez el import ejecutable de efecto lateral "+
+        `${expectation.moduleSpecifier}; `+
+        `encontrado: ${count}.`,
+      );
+    }
+  }
+}
+
+function findUniqueCoachContractImport(
+  source: string,
+  moduleSpecifier: string,
+  path = COACH_CONTRACT_RUNNER_PATH,
+) {
+  const sourceFile = parseCoachContractRunner(source, path);
+  const matches = coachContractRunnerImports(sourceFile).filter((declaration) => (
+    (declaration.moduleSpecifier as ts.StringLiteral).text === moduleSpecifier
+  ));
+  assert.equal(
+    matches.length,
+    1,
+    `[AUTH-COACH-01.runner-import.fixture] El fixture base debe contener una vez ${moduleSpecifier}.`,
+  );
+  return { sourceFile, declaration: matches[0] };
+}
+
+function replaceCoachContractImport(
+  source: string,
+  moduleSpecifier: string,
+  replacement: (declarationSource: string) => string,
+) {
+  const { sourceFile, declaration } = findUniqueCoachContractImport(source, moduleSpecifier);
+  const start = declaration.getStart(sourceFile);
+  const declarationSource = source.slice(start, declaration.end);
+  return `${source.slice(0, start)}${replacement(declarationSource)}${source.slice(declaration.end)}`;
+}
+
+function reorderCoachContractImports(source: string) {
+  const integration = findUniqueCoachContractImport(
+    source,
+    COACH_INTEGRATION_CONTRACT_SPECIFIER,
+  );
+  const model = findUniqueCoachContractImport(source, COACH_MODEL_CONTRACT_SPECIFIER);
+  const targets = [integration, model].sort((left, right) => (
+    left.declaration.getStart(left.sourceFile) - right.declaration.getStart(right.sourceFile)
+  ));
+  const [first, second] = targets;
+  const firstStart = first.declaration.getStart(first.sourceFile);
+  const secondStart = second.declaration.getStart(second.sourceFile);
+  const firstSource = source.slice(firstStart, first.declaration.end);
+  const secondSource = source.slice(secondStart, second.declaration.end);
+  const between = source.slice(first.declaration.end, secondStart);
+  return `${source.slice(0, firstStart)}${secondSource}${between}${firstSource}${source.slice(second.declaration.end)}`;
+}
+
+function hashCoachContractRunner(source: string) {
+  return createHash("sha256").update(source).digest("hex");
+}
+
+function exerciseCoachContractRunnerFixture(
+  original: string,
+  name: string,
+  mutate: (source: string) => string,
+  verify: (effectiveSource: string, fixturePath: string) => void,
+) {
+  const originalSha = hashCoachContractRunner(original);
+  const fixtureDirectory = mkdtempSync(join(tmpdir(), "organizatech-coach-runner-contract-"));
+  const fixturePath = join(fixtureDirectory, "multiportal-auth-integration-contract.test.ts");
+
+  try {
+    writeFileSync(fixturePath, original, "utf8");
+    const mutated = mutate(original);
+    assert.notEqual(
+      mutated,
+      original,
+      `[AUTH-COACH-01.runner-import.fixture-effective] El caso debe mutar la fuente: ${name}.`,
+    );
+    writeFileSync(fixturePath, mutated, "utf8");
+    const effectiveSource = readFileSync(fixturePath, "utf8");
+    const effectiveSha = hashCoachContractRunner(effectiveSource);
+    assert.equal(
+      effectiveSource,
+      mutated,
+      `[AUTH-COACH-01.runner-import.fixture-effective] La fuente materializada debe ser efectiva: ${name}.`,
+    );
+    assert.notEqual(
+      effectiveSha,
+      originalSha,
+      `[AUTH-COACH-01.runner-import.fixture-sha] El SHA efectivo debe cambiar: ${name}.`,
+    );
+    parseCoachContractRunner(effectiveSource, fixturePath);
+    verify(effectiveSource, fixturePath);
+  } finally {
+    try {
+      writeFileSync(fixturePath, original, "utf8");
+      const restoredSource = readFileSync(fixturePath, "utf8");
+      assert.equal(
+        restoredSource,
+        original,
+        `[AUTH-COACH-01.runner-import.fixture-restore] Debe restaurar bytes originales: ${name}.`,
+      );
+      assert.equal(
+        hashCoachContractRunner(restoredSource),
+        originalSha,
+        `[AUTH-COACH-01.runner-import.fixture-restore] Debe restaurar el SHA original: ${name}.`,
+      );
+      const productiveSource = readSource(COACH_CONTRACT_RUNNER_PATH);
+      assert.equal(
+        productiveSource,
+        original,
+        `[AUTH-COACH-01.runner-import.productive-bytes] El probe no puede alterar el runner: ${name}.`,
+      );
+      assert.equal(
+        hashCoachContractRunner(productiveSource),
+        originalSha,
+        `[AUTH-COACH-01.runner-import.productive-sha] El probe no puede alterar su SHA: ${name}.`,
+      );
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  }
+}
+
+function assertCoachContractRunnerExpectedFailure(
+  source: string,
+  path: string,
+  expectedFailure: string,
+  probeName: string,
+) {
+  let failure: unknown;
+  try {
+    assertCoachContractRunnerImports(source, path);
+  } catch (error) {
+    failure = error;
+  }
+  assert.ok(
+    failure instanceof Error,
+    `[AUTH-COACH-01.runner-import.probe] El contrato debía lanzar una excepción: ${probeName}.`,
+  );
+  assert.equal(
+    failure.message.split(/\r?\n/, 1)[0],
+    expectedFailure,
+    `[AUTH-COACH-01.runner-import.expected-failure] Primera causa inesperada: ${probeName}.`,
+  );
+}
+
+function runCoachContractRunnerMutationProbes(source: string) {
+  const probes: CoachContractRunnerMutationProbe[] = [
+    {
+      name: "eliminar import del contrato de integración Coach",
+      expectedFailure: COACH_INTEGRATION_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_INTEGRATION_CONTRACT_SPECIFIER,
+        () => "",
+      ),
+    },
+    {
+      name: "eliminar import del contrato de modelo Coach",
+      expectedFailure: COACH_MODEL_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_MODEL_CONTRACT_SPECIFIER,
+        () => "",
+      ),
+    },
+    {
+      name: "reemplazar integración por comentario señuelo",
+      expectedFailure: COACH_INTEGRATION_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_INTEGRATION_CONTRACT_SPECIFIER,
+        (declaration) => `// ${declaration}`,
+      ),
+    },
+    {
+      name: "reemplazar modelo por string señuelo",
+      expectedFailure: COACH_MODEL_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_MODEL_CONTRACT_SPECIFIER,
+        () => `const coachModelContractImportDecoy = "${COACH_MODEL_CONTRACT_SPECIFIER}";`,
+      ),
+    },
+    {
+      name: "duplicar import del contrato de integración Coach",
+      expectedFailure: COACH_INTEGRATION_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_INTEGRATION_CONTRACT_SPECIFIER,
+        (declaration) => `${declaration}\n${declaration}`,
+      ),
+    },
+    {
+      name: "duplicar import del contrato de modelo Coach",
+      expectedFailure: COACH_MODEL_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_MODEL_CONTRACT_SPECIFIER,
+        (declaration) => `${declaration}\n${declaration}`,
+      ),
+    },
+    {
+      name: "sustituir integración por módulo de nombre parecido",
+      expectedFailure: COACH_INTEGRATION_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_INTEGRATION_CONTRACT_SPECIFIER,
+        () => `import "${COACH_INTEGRATION_CONTRACT_SPECIFIER}-decoy";`,
+      ),
+    },
+    {
+      name: "sustituir modelo por módulo de nombre parecido",
+      expectedFailure: COACH_MODEL_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_MODEL_CONTRACT_SPECIFIER,
+        () => `import "${COACH_MODEL_CONTRACT_SPECIFIER}-decoy";`,
+      ),
+    },
+    {
+      name: "convertir integración en import type vacío",
+      expectedFailure: COACH_INTEGRATION_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_INTEGRATION_CONTRACT_SPECIFIER,
+        () => `import type {} from "${COACH_INTEGRATION_CONTRACT_SPECIFIER}";`,
+      ),
+    },
+    {
+      name: "convertir modelo en import type vacío",
+      expectedFailure: COACH_MODEL_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_MODEL_CONTRACT_SPECIFIER,
+        () => `import type {} from "${COACH_MODEL_CONTRACT_SPECIFIER}";`,
+      ),
+    },
+    {
+      name: "convertir ambos contratos en imports type vacíos",
+      expectedFailure: COACH_INTEGRATION_IMPORT_FAILURE,
+      mutate: (current) => {
+        const typeOnlyIntegration = replaceCoachContractImport(
+          current,
+          COACH_INTEGRATION_CONTRACT_SPECIFIER,
+          () => `import type {} from "${COACH_INTEGRATION_CONTRACT_SPECIFIER}";`,
+        );
+        return replaceCoachContractImport(
+          typeOnlyIntegration,
+          COACH_MODEL_CONTRACT_SPECIFIER,
+          () => `import type {} from "${COACH_MODEL_CONTRACT_SPECIFIER}";`,
+        );
+      },
+    },
+    {
+      name: "convertir integración en import vacío con cláusula",
+      expectedFailure: COACH_INTEGRATION_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_INTEGRATION_CONTRACT_SPECIFIER,
+        () => `import {} from "${COACH_INTEGRATION_CONTRACT_SPECIFIER}";`,
+      ),
+    },
+    {
+      name: "convertir modelo en import con namespace",
+      expectedFailure: COACH_MODEL_IMPORT_FAILURE,
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_MODEL_CONTRACT_SPECIFIER,
+        () => `import * as CoachModelContract from "${COACH_MODEL_CONTRACT_SPECIFIER}";`,
+      ),
+    },
+  ];
+  const expectedProbeCount = 13;
+  assert.equal(
+    probes.length,
+    expectedProbeCount,
+    "[AUTH-COACH-01.runner-import.probe-count] Debe conservarse el conteo fijo de mutaciones.",
+  );
+
+  for (const probe of probes) {
+    exerciseCoachContractRunnerFixture(
+      source,
+      probe.name,
+      probe.mutate,
+      (effectiveSource, fixturePath) => assertCoachContractRunnerExpectedFailure(
+        effectiveSource,
+        fixturePath,
+        probe.expectedFailure,
+        probe.name,
+      ),
+    );
+  }
+
+  console.log(
+    `AUTH-COACH-01 runner import AST mutation probes passed (${probes.length}/${expectedProbeCount})`,
+  );
+}
+
+function runCoachContractRunnerPositiveControls(source: string) {
+  const controls: CoachContractRunnerPositiveControl[] = [
+    {
+      name: "reformatear imports protegidos",
+      mutate: (current) => {
+        const reformattedIntegration = replaceCoachContractImport(
+          current,
+          COACH_INTEGRATION_CONTRACT_SPECIFIER,
+          () => `import\n  "${COACH_INTEGRATION_CONTRACT_SPECIFIER}"\n;`,
+        );
+        return replaceCoachContractImport(
+          reformattedIntegration,
+          COACH_MODEL_CONTRACT_SPECIFIER,
+          () => `import\n  "${COACH_MODEL_CONTRACT_SPECIFIER}"\n;`,
+        );
+      },
+    },
+    {
+      name: "cambiar comillas de imports protegidos",
+      mutate: (current) => {
+        const singleQuotedIntegration = replaceCoachContractImport(
+          current,
+          COACH_INTEGRATION_CONTRACT_SPECIFIER,
+          () => `import '${COACH_INTEGRATION_CONTRACT_SPECIFIER}';`,
+        );
+        return replaceCoachContractImport(
+          singleQuotedIntegration,
+          COACH_MODEL_CONTRACT_SPECIFIER,
+          () => `import '${COACH_MODEL_CONTRACT_SPECIFIER}';`,
+        );
+      },
+    },
+    {
+      name: "agregar comentarios cercanos",
+      mutate: (current) => replaceCoachContractImport(
+        current,
+        COACH_INTEGRATION_CONTRACT_SPECIFIER,
+        (declaration) => `// Comentario inocente previo.\n${declaration}\n/* Comentario inocente posterior. */`,
+      ),
+    },
+    {
+      name: "reordenar imports protegidos",
+      mutate: reorderCoachContractImports,
+    },
+    {
+      name: "agregar nombre local inocente",
+      mutate: (current) => (
+        `import { basename as coachRunnerFixtureBasename } from "node:path";\n${current}`
+      ),
+    },
+  ];
+  const expectedControlCount = 5;
+  assert.equal(
+    controls.length,
+    expectedControlCount,
+    "[AUTH-COACH-01.runner-import.control-count] Debe conservarse el conteo fijo de controles.",
+  );
+
+  for (const control of controls) {
+    exerciseCoachContractRunnerFixture(
+      source,
+      control.name,
+      control.mutate,
+      (effectiveSource, fixturePath) => assertCoachContractRunnerImports(
+        effectiveSource,
+        fixturePath,
+      ),
+    );
+  }
+
+  console.log(
+    `AUTH-COACH-01 runner import AST positive controls passed (${controls.length}/${expectedControlCount})`,
+  );
 }

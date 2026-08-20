@@ -268,18 +268,20 @@ const overlayEngineConsumers: string[] = [];
     }
   }
 })("src");
-// P3-50B1 conecto Drawer y NotificationPanel; P3-50B2 conecta ProfileAvatarEditor. La garantia
-// sigue siendo una lista EXACTA (no un "al menos"): un quinto consumidor inesperado debe hacer
-// fallar este contrato. Se ordena para que el resultado no dependa del recorrido del directorio.
+// P3-50B1 conecto Drawer y NotificationPanel; P3-50B2 conecta ProfileAvatarEditor; AUTH-COACH-01
+// conecta el drawer Coach. La garantia sigue siendo una lista EXACTA (no un "al menos"): un sexto
+// consumidor inesperado debe hacer fallar este contrato. Se ordena para que el resultado no dependa
+// del recorrido del directorio.
 assert.deepEqual(
   overlayEngineConsumers.sort(),
   [
     "src/components/profile/ProfileAvatarEditor.tsx",
     "src/features/app-shell/components/app-navigation-drawer.tsx",
+    "src/features/coach-portal/components/coach-portal.tsx",
     "src/features/notifications/components/NotificationPanel.tsx",
     "src/ui/modals/modal-shell.tsx",
   ],
-  "los consumidores son exactamente ProfileAvatarEditor, ModalShell, Drawer y NotificationPanel",
+  "los consumidores son exactamente ProfileAvatarEditor, ModalShell, ambos Drawer y NotificationPanel",
 );
 
 // ConfirmDialog bloquea Escape durante busy y enfoca la accion segura.

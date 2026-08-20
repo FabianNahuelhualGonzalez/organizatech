@@ -3,7 +3,7 @@ import {
   buildProfilePersonalDataPayload,
 } from "@/lib/profile/profile-form";
 
-export const COACH_REGISTRATION_SUBMIT_ENABLED = false;
+export const COACH_PROFESSIONAL_TITLE_MAX_LENGTH = 160;
 export const AUTH_REGISTRATION_GENDER_VALUES = [
   "male",
   "female",
@@ -21,6 +21,7 @@ export type AuthFieldName =
   | "register-birth-date"
   | "register-gender"
   | "register-phone-number"
+  | "register-professional-title"
   | "register-email"
   | "register-password"
   | "register-confirm-password"
@@ -50,6 +51,20 @@ export interface UserSignupPayload {
   options: {
     data: UserSignupMetadata;
   };
+}
+
+export interface CoachRegistrationWritePayload {
+  first_name: string;
+  last_name: string;
+  birth_date: string;
+  gender: AuthRegistrationGender;
+  phone_number: string;
+  professional_title: string;
+}
+
+export interface CoachRegistrationPreparationPayload {
+  auth: UserSignupPayload;
+  registration: CoachRegistrationWritePayload;
 }
 
 export type AuthFormPreparation<T> =
@@ -149,6 +164,60 @@ export function buildUserSignupPayload(
   };
 }
 
+export function buildCoachRegistrationPayload(
+  formData: FormData,
+  referenceDate = new Date(),
+): AuthFormPreparation<CoachRegistrationPreparationPayload> {
+  const auth = buildUserSignupPayload(formData, referenceDate);
+  if (!auth.ok) return auth;
+
+  const professionalTitle = normalizeSpaces(readText(formData, "register-professional-title"));
+  if (!professionalTitle) {
+    return {
+      ok: false,
+      field: "register-professional-title",
+      message: "Ingresa tu título de estudios.",
+    };
+  }
+  if (professionalTitle.length > COACH_PROFESSIONAL_TITLE_MAX_LENGTH) {
+    return {
+      ok: false,
+      field: "register-professional-title",
+      message: `El título de estudios no puede superar ${COACH_PROFESSIONAL_TITLE_MAX_LENGTH} caracteres.`,
+    };
+  }
+
+  const {
+    first_name,
+    last_name,
+    birth_date,
+    gender,
+    phone_number,
+  } = auth.payload.options.data;
+  if (!last_name || !birth_date || !phone_number) {
+    return {
+      ok: false,
+      field: "register-first-name",
+      message: "Completa tus datos personales.",
+    };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      auth: auth.payload,
+      registration: {
+        first_name,
+        last_name,
+        birth_date,
+        gender,
+        phone_number,
+        professional_title: professionalTitle,
+      },
+    },
+  };
+}
+
 function isAuthRegistrationGender(value: string): value is AuthRegistrationGender {
   return AUTH_REGISTRATION_GENDER_VALUES.includes(value as AuthRegistrationGender);
 }
@@ -178,4 +247,8 @@ function readText(formData: FormData, key: string): string {
 function readRawText(formData: FormData, key: string): string {
   const value = formData.get(key);
   return typeof value === "string" ? value : "";
+}
+
+function normalizeSpaces(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }

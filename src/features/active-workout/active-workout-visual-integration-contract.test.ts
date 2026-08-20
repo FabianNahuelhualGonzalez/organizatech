@@ -600,10 +600,10 @@ const globalStyles = readSource("src/app/globals.css");
 
 const protectedFileHashes = {
   "AGENTS.md": "f0c3ef88979a0ab085551a656ebb1843bfa56138d948ca4236bce6fcd1fa9dd0",
-  "package.json": "912d03a06a3bbe4bd45490e5cfc1f4b71ee8090d5a1196e5645880850e2de762",
+  "package.json": "2fba19ac1c3a2f5348261d917da6ac8d4d611cd1107131c3aded9ee8574bb515",
   "package-lock.json": "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5",
   "src/app/globals.css": "57a8d03c03fc729a72a06a7b846ae8a73a721b7d89551edf18b0003b26cfc5c9",
-  "src/components/organizatech-app.tsx": "2ddbbdd604953fdbb6aaab4b9e9ee110b1d3f30ae449349ee2dd3efec6e15266",
+  "src/components/organizatech-app.tsx": "f097b47b617e95fb5338260f8a1469173b6da2a9d765deffa92110d0a10e5156",
   "src/features/progress/components/comparison-screen-v2.tsx": "bff390e44cf5a04fe59b0f2a594fcb53fb2a50602c850362f1a88ca136765743",
   "src/features/progress/progress-visual-integration-contract.test.ts": "9c0f432417b1a98a0cd3b9542b2e6a4c3dd4a8126989c6f17bc3a65133a56821",
   "src/features/active-workout/model/active-workout-controller-state.ts": "37006210eabda3f99217bd98b6ebf876780ed5ecc33bb8fba936eda7fd085ea5",

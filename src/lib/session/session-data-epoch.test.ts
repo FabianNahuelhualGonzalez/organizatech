@@ -380,7 +380,7 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   const logout = extractBetween(sources.app, "async function handleLogout", "function openRoutineDay");
   assert.doesNotMatch(logout, /clearBrowserStorageScope|clearPasswordRecoveryFlow/);
   assertMarkersInOrder(logout, [
-    "await supabase.auth.signOut()",
+    'await supabase.auth.signOut({ scope: "local" })',
     "if (error) throw error;",
     "clearUserSessionState",
   ], "signOut antes de cleanup");
@@ -468,13 +468,31 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   );
   assert.match(
     authenticatedHandler,
-    /await continueAuthenticatedSession\(authenticatedState, "dashboard"\)/,
+    /const access = await authorizeAndContinuePortalSession\([\s\S]*?authenticatedState,[\s\S]*?requestedPortal,[\s\S]*?"dashboard"/,
   );
   assert.doesNotMatch(
-    authenticatedHandler.slice(authenticatedHandler.indexOf("applySessionState(authenticatedState);")),
+    authenticatedHandler,
     /refreshTrainingDataForSession|createAuthNavigationReset\("dashboard", "session-established"\)/,
     "el handler autenticado delega refresh y completion al coordinador",
   );
+  assert.doesNotMatch(authenticatedHandler, /applySessionState\(authenticatedState\)/);
+
+  const portalAuthorizationContinuation = extractBetween(
+    sources.app,
+    "async function authorizeAndContinuePortalSession",
+    "function continueAuthorizedPortalAccess",
+  );
+  assertMarkersInOrder(portalAuthorizationContinuation, [
+    "multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner)",
+    'access.state === "stale" || !multiportalAuth.isPortalResolutionCurrent(resolutionOwner)',
+    'access.state === "user_registration_required"',
+    'access.state === "coach_registration_required"',
+    'access.state === "error"',
+    "multiportalAuth.settlePortalSignOutMessage(access.message)",
+    'if (rejectionMessage) setAuthStatus(rejectionMessage, "error")',
+    "applySessionState(authState)",
+    "continueAuthorizedPortalAccess(access, authState, intent)",
+  ], "autorización multiportal antes de aplicar y continuar la sesión");
 
   assert.match(
     sources.authenticatedSessionCoordinator,
@@ -2096,16 +2114,16 @@ async function run() {
       name: "limpiar storage antes de signOut",
       target: "app",
       mutate: (source) => source.replace(
-        "      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut();",
-        "      clearBrowserStorageScope(currentStorageScope);\n      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut();",
+        "      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut({ scope: \"local\" });",
+        "      clearBrowserStorageScope(currentStorageScope);\n      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut({ scope: \"local\" });",
       ),
     },
     {
       name: "ignorar error de signOut",
       target: "app",
       mutate: (source) => source.replace(
-        "        const { error } = await supabase.auth.signOut();\n        if (error) throw error;",
-        "        await supabase.auth.signOut();",
+        "        const { error } = await supabase.auth.signOut({ scope: \"local\" });\n        if (error) throw error;",
+        "        await supabase.auth.signOut({ scope: \"local\" });",
       ),
     },
     {
@@ -2506,43 +2524,38 @@ async function run() {
     "const authenticatedState: SupabaseSessionState",
     sessionResultIndex,
   );
-  const applyIdentityIndex = handleAuthSource.indexOf(
-    "applySessionState(authenticatedState);",
+  const authorizationIndex = handleAuthSource.indexOf(
+    "const access = await authorizeAndContinuePortalSession(",
     authenticatedStateIndex,
   );
   const captureIdentityIndex = handleAuthSource.indexOf(
     "appliedIdentityToken = captureSessionDataRequestToken();",
-    applyIdentityIndex,
-  );
-  const continuationIndex = handleAuthSource.indexOf(
-    'await continueAuthenticatedSession(authenticatedState, "dashboard");',
-    captureIdentityIndex,
+    authorizationIndex,
   );
   const orderedLoginSteps = [
     sessionResultIndex,
     authenticatedStateIndex,
-    applyIdentityIndex,
+    authorizationIndex,
     captureIdentityIndex,
-    continuationIndex,
   ];
   assert.equal(
     orderedLoginSteps.every((index, position) => index >= 0 && (position === 0 || index > orderedLoginSteps[position - 1])),
     true,
-    "El login debe aplicar identidad y delegar una sola continuacion autenticada",
+    "El login debe autorizar el portal y delegar una sola continuación autenticada",
   );
-  const authenticatedHandlerTail = handleAuthSource.slice(applyIdentityIndex, continuationIndex);
+  const authenticatedHandlerTail = handleAuthSource.slice(authorizationIndex, captureIdentityIndex);
   assert.doesNotMatch(
     authenticatedHandlerTail,
-    /refreshTrainingDataForSession|createAuthNavigationReset\("dashboard", "session-established"\)/,
+    /applySessionState\(authenticatedState\)|refreshTrainingDataForSession|createAuthNavigationReset\("dashboard", "session-established"\)/,
     "el handler no puede competir con el coordinador por refresh o completion",
   );
   assert.match(
     handleAuthSource,
-    /catch \(error\) \{\s*if \(appliedIdentityToken && !isSessionDataRequestCurrent\(appliedIdentityToken\)\) return;\s*setAuthStatus/,
+    /catch \(error\) \{\s*if \(\s*portalResolutionOwner\s*&& !multiportalAuth\.isPortalResolutionCurrent\(portalResolutionOwner\)\s*\) return;\s*if \(\s*coachRegistrationSubmitOwner\s*&& !multiportalAuth\.isCoachRegistrationSubmitCurrent\(coachRegistrationSubmitOwner\)\s*\) return;\s*if \(\s*userRegistrationSubmitOwner\s*&& !multiportalAuth\.isUserRegistrationSubmitCurrent\(userRegistrationSubmitOwner\)\s*\) return;\s*if \(appliedIdentityToken && !isSessionDataRequestCurrent\(appliedIdentityToken\)\) return;\s*setAuthStatus/,
   );
   assert.match(
     handleAuthSource,
-    /finally \{\s*const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController[\s\S]*?loginSubmitOwnerController\.finalize\(loginSubmitOwner\)[\s\S]*?if \(canFinalizeAuthAttempt\) \{\s*interactiveAuthAttemptRef\.current = false;\s*if \(!appliedIdentityToken \|\| isSessionDataRequestCurrent\(appliedIdentityToken\)\) \{\s*setIsBusy\(false\);/,
+    /finally \{\s*const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController[\s\S]*?loginSubmitOwnerController\.finalize\(loginSubmitOwner\)[\s\S]*?const canFinalizePortalResolution[\s\S]*?const canFinalizeCoachRegistration[\s\S]*?const canFinalizeUserRegistration[\s\S]*?if \(\s*canFinalizeAuthAttempt\s*&& canFinalizePortalResolution\s*&& canFinalizeCoachRegistration\s*&& canFinalizeUserRegistration\s*\) \{\s*interactiveAuthAttemptRef\.current = false;\s*if \(!appliedIdentityToken \|\| isSessionDataRequestCurrent\(appliedIdentityToken\)\) \{\s*setIsBusy\(false\);/,
   );
 
   // ---------------------------------------------------------------------------------------------
