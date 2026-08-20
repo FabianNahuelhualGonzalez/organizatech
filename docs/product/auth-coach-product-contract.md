@@ -312,6 +312,28 @@ Muchas gracias por confiar en nosotros. Esperamos acompañarte y ayudarte a segu
 Equipo Organizatech
 ```
 
+### AC-039 — Crear cuenta Coach rechaza una membresía Coach existente
+
+`Crear cuenta Coach` autentica primero de forma autoritativa el correo solicitado y
+consulta después la membresía Coach own-only ligada exclusivamente al `user_id` de
+esa identidad. Si la fila ya existe, el flujo termina sobre `register-email` con el
+mensaje exacto: `Este correo ya se encuentra registrado como Coach. Intente con otro correo.`
+
+La regla se limita al registro: `Iniciar sesión Coach` continúa autorizando una fila
+Coach propia y una identidad Usuario-only autenticada puede agregar su primera
+membresía Coach. Una contraseña incorrecta no permite consultar ni revelar la
+membresía y conserva el mensaje genérico aprobado para una identidad ya registrada.
+
+El rechazo no crea ni actualiza filas, no activa ni aplica sesiones, no navega ni
+monta el portal, no envía correos y no ejecuta `signOut` local o global. Los campos
+del nuevo intento, incluido `professional_title`, se descartan y la fila anterior
+permanece lógica y materialmente intacta.
+
+En el incidente observado no se creó una segunda cuenta Coach y la fila existente
+no fue sobrescrita. La idempotencia de `register_own_coach` permanece como defensa
+backend ante concurrencia, pero la UI de registro no puede convertir esa defensa en
+autorización, activación o navegación.
+
 ## 11. Seguridad obligatoria
 
 ### AC-030 — Autoridad backend

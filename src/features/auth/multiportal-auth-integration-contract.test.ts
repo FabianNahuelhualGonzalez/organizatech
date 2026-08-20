@@ -31,6 +31,24 @@ const METADATA_RUNTIME_PROBE_PATH =
   "src/features/auth/model/multiportal-auth-metadata-mutation-runtime.test.ts";
 const NO_SENSITIVE_BROWSER_STORAGE_FAILURE =
   "[AUTH-COACH-01.SWITCH.no-sensitive-browser-storage]";
+const AC039_FAILURES = {
+  exactMessage: "[AUTH-COACH-01.AC039.exact-message] conserva el mensaje de duplicado aprobado",
+  authenticatedLookup: "[AUTH-COACH-01.AC039.authenticated-own-lookup] el duplicado deriva sólo de identity.userId autenticado",
+  switchPrecedence: "[AUTH-COACH-01.AC039.switch-precedence] A→B se resuelve antes de consultar membresía Coach",
+  existingBranch: "[AUTH-COACH-01.AC039.existing-branch] una fila Coach existente tiene una rama terminal propia",
+  crossedRow: "[AUTH-COACH-01.AC039.crossed-row] una fila cruzada falla cerrada antes del mensaje de duplicado",
+  controlledError: "[AUTH-COACH-01.AC039.controlled-error] el duplicado retorna error register-email y nunca coach_authorized",
+  noCreate: "[AUTH-COACH-01.AC039.no-create] el duplicado no ejecuta createCoachRegistration",
+  noActivation: "[AUTH-COACH-01.AC039.no-activation] el duplicado no activa ni aplica sesión Coach",
+  immutableRow: "[AUTH-COACH-01.AC039.immutable-row] el duplicado no aplica campos nuevos sobre la fila existente",
+  noSignOut: "[AUTH-COACH-01.AC039.no-signout] el duplicado no ejecuta signOut local ni global",
+  noEmail: "[AUTH-COACH-01.AC039.no-email] el duplicado autenticado no ejecuta signup ni emisión de correo",
+  minimalResult: "[AUTH-COACH-01.AC039.minimal-result] el error no transporta coach, authState, userId ni professional_title",
+  userOnlyAllowed: "[AUTH-COACH-01.AC039.user-only-allowed] una identidad Usuario-only alcanza exactamente un create Coach",
+  noClientInference: "[AUTH-COACH-01.AC039.no-client-inference] metadata, email, roles y estado cliente no revelan duplicado",
+  invalidPasswordPrivacy: "[AUTH-COACH-01.AC039.invalid-password-privacy] contraseña incorrecta conserva el mensaje genérico",
+  rootNoContinuation: "[AUTH-COACH-01.AC039.root-no-continuation] el error corta sesión, portal y navegación antes de publicar éxito",
+} as const;
 
 interface Sources {
   root: string;
@@ -380,6 +398,70 @@ function objectLiteralStringProperty(expression: ts.Expression, propertyName: st
   return null;
 }
 
+function objectLiteralPropertyExpression(
+  expression: ts.Expression,
+  propertyName: string,
+): ts.Expression | null {
+  const unwrapped = unwrapExpression(expression);
+  if (!ts.isObjectLiteralExpression(unwrapped)) return null;
+  for (const property of unwrapped.properties) {
+    if (
+      ts.isPropertyAssignment(property)
+      && propertyNameText(property.name) === propertyName
+    ) {
+      return unwrapExpression(property.initializer);
+    }
+  }
+  return null;
+}
+
+function objectLiteralPropertyNames(expression: ts.Expression): string[] {
+  const unwrapped = unwrapExpression(expression);
+  if (!ts.isObjectLiteralExpression(unwrapped)) return [];
+  return unwrapped.properties.flatMap((property) => {
+    if (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) {
+      const name = propertyNameText(property.name);
+      return name ? [name] : [];
+    }
+    return [];
+  });
+}
+
+function collectIfStatements(container: ts.Node): ts.IfStatement[] {
+  const statements: ts.IfStatement[] = [];
+  const visit = (node: ts.Node) => {
+    if (node !== container && isNestedFunctionBoundary(node)) return;
+    if (ts.isIfStatement(node)) statements.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(container);
+  return statements;
+}
+
+function collectCallExpressions(container: ts.Node): ts.CallExpression[] {
+  const calls: ts.CallExpression[] = [];
+  const visit = (node: ts.Node) => {
+    if (node !== container && isNestedFunctionBoundary(node)) return;
+    if (ts.isCallExpression(node)) calls.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(container);
+  return calls;
+}
+
+function findNamedFunctionDeep(sourceFile: ts.SourceFile, name: string) {
+  const declarations: Array<ts.FunctionDeclaration & { body: ts.Block }> = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name && node.body) {
+      declarations.push(node as ts.FunctionDeclaration & { body: ts.Block });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  assert.equal(declarations.length, 1, `función ${name} debe tener una implementación única`);
+  return declarations[0]!;
+}
+
 function isCoachAuthorizedReturn(statement: ts.ReturnStatement) {
   return Boolean(
     statement.expression
@@ -609,6 +691,320 @@ function positiveBindingName(expression: ts.Expression): string | null {
     if (rightIdentifier && leftBoolean === false) return rightIdentifier;
   }
   return null;
+}
+
+function negativeBindingName(expression: ts.Expression): string | null {
+  const current = unwrapExpression(expression);
+  if (ts.isPrefixUnaryExpression(current) && current.operator === ts.SyntaxKind.ExclamationToken) {
+    const operand = unwrapExpression(current.operand);
+    return ts.isIdentifier(operand) ? operand.text : null;
+  }
+  if (!ts.isBinaryExpression(current)) return null;
+  const operator = current.operatorToken.kind;
+  if (
+    operator !== ts.SyntaxKind.EqualsEqualsToken
+    && operator !== ts.SyntaxKind.EqualsEqualsEqualsToken
+  ) return null;
+  const left = unwrapExpression(current.left);
+  const right = unwrapExpression(current.right);
+  if (ts.isIdentifier(left) && isNullExpression(right)) return left.text;
+  if (ts.isIdentifier(right) && isNullExpression(left)) return right.text;
+  return null;
+}
+
+function gatewayMethodName(call: ts.CallExpression, gatewayName: string): string | null {
+  const expression = unwrapExpression(call.expression);
+  if (!ts.isPropertyAccessExpression(expression)) return null;
+  const receiver = unwrapExpression(expression.expression);
+  return ts.isIdentifier(receiver) && receiver.text === gatewayName
+    ? expression.name.text
+    : null;
+}
+
+function locateCoachRegistrationErrorGuard(root: string) {
+  const sourceFile = parseTypeScript(root, ROOT_PATH);
+  const handleAuth = findNamedFunctionDeep(sourceFile, "handleAuth");
+  const guard = collectIfStatements(handleAuth.body).find((ifStatement) => {
+    if (!/\.state\s*===\s*"error"/.test(ifStatement.expression.getText(sourceFile))) return false;
+    return ancestorIfStatements(ifStatement, handleAuth.body).some((ancestor) => (
+      isIdentifierNamed(ancestor.expression, "coachRegistrationPayload")
+      && isWithin(ifStatement, ancestor.thenStatement)
+    ));
+  });
+  assert.ok(guard, "handleAuth conserva la rama error de registro Coach");
+  return { sourceFile, handleAuth, guard: guard! };
+}
+
+function auditDuplicateCoachRegistrationSemantics(sources: Sources) {
+  const sourceFile = parseTypeScript(sources.controller, CONTROLLER_PATH);
+  const registerCoach = findNamedFunction(sourceFile, "registerCoach");
+  const inputParameter = registerCoach.parameters[0]?.name;
+  const ownerParameter = registerCoach.parameters[1]?.name;
+  const gatewayParameter = registerCoach.parameters[2]?.name;
+  const inputName = inputParameter && ts.isIdentifier(inputParameter) ? inputParameter.text : null;
+  const ownerName = ownerParameter && ts.isIdentifier(ownerParameter) ? ownerParameter.text : null;
+  const gatewayName = gatewayParameter && ts.isIdentifier(gatewayParameter)
+    ? gatewayParameter.text
+    : null;
+  assert.ok(inputName && ownerName && gatewayName, "registerCoach conserva parámetros identificables");
+
+  const approvedMessage =
+    "Este correo ya se encuentra registrado como Coach. Intente con otro correo.";
+  const approvedMessageNames: string[] = [];
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        ts.isIdentifier(declaration.name)
+        && declaration.initializer
+        && ts.isStringLiteralLike(unwrapExpression(declaration.initializer))
+        && (unwrapExpression(declaration.initializer) as ts.StringLiteralLike).text === approvedMessage
+      ) approvedMessageNames.push(declaration.name.text);
+    }
+  }
+  assert.equal(approvedMessageNames.length, 1, AC039_FAILURES.exactMessage);
+  const approvedMessageName = approvedMessageNames[0]!;
+
+  const initializers = collectVariableInitializers(registerCoach.body);
+  const identityEntry = [...initializers.entries()].find(([, initializer]) => {
+    const call = awaitedMethodCall(initializer, "getCurrentIdentity");
+    return Boolean(call && gatewayMethodName(call, gatewayName!) === "getCurrentIdentity");
+  });
+  const identityName = identityEntry?.[0] ?? null;
+  assert.ok(identityName, AC039_FAILURES.authenticatedLookup);
+
+  const calls = collectCallExpressions(registerCoach.body);
+  const coachLookupCalls = calls.filter(
+    (call) => gatewayMethodName(call, gatewayName!) === "getCoachRegistration",
+  );
+  assert.equal(
+    coachLookupCalls.length > 0
+      && coachLookupCalls.every((call) => (
+        call.arguments.length === 2
+        && isPropertyPath(call.arguments[0], identityName!, "userId")
+        && isIdentifierNamed(call.arguments[1], ownerName!)
+      )),
+    true,
+    AC039_FAILURES.authenticatedLookup,
+  );
+
+  const ifStatements = collectIfStatements(registerCoach.body);
+  const identitySwitchGuard = ifStatements.find((ifStatement) => (
+    statementContainsReturn(
+      ifStatement.thenStatement,
+      (expression) => objectLiteralStringProperty(expression, "state") === "identity_switch_required",
+    )
+  ));
+  assert.ok(identitySwitchGuard, AC039_FAILURES.switchPrecedence);
+  assert.equal(
+    coachLookupCalls.every((call) => call.getStart(sourceFile) > identitySwitchGuard!.end),
+    true,
+    AC039_FAILURES.switchPrecedence,
+  );
+
+  const lookupEntry = [...initializers.entries()].find(([, initializer]) => {
+    const call = awaitedMethodCall(initializer, "getCoachRegistration");
+    return Boolean(call && gatewayMethodName(call, gatewayName!) === "getCoachRegistration");
+  });
+  const lookupName = lookupEntry?.[0] ?? null;
+  assert.ok(lookupName, AC039_FAILURES.existingBranch);
+  const existingGuard = ifStatements.find(
+    (ifStatement) => positiveBindingName(ifStatement.expression) === lookupName,
+  );
+  assert.ok(existingGuard, AC039_FAILURES.existingBranch);
+
+  const duplicateReturns = collectReturns(registerCoach.body).filter((returnStatement) => {
+    if (!returnStatement.expression) return false;
+    const message = objectLiteralPropertyExpression(returnStatement.expression, "message");
+    return Boolean(message && isIdentifierNamed(message, approvedMessageName));
+  });
+  const guardedDuplicateReturns = duplicateReturns.filter((returnStatement) => (
+    isWithin(returnStatement, existingGuard!.thenStatement)
+  ));
+
+  const crossedRowGuard = collectIfStatements(existingGuard!.thenStatement).find((ifStatement) => {
+    const expression = unwrapExpression(ifStatement.expression);
+    if (!ts.isBinaryExpression(expression)) return false;
+    if (
+      expression.operatorToken.kind !== ts.SyntaxKind.ExclamationEqualsEqualsToken
+      && expression.operatorToken.kind !== ts.SyntaxKind.ExclamationEqualsToken
+    ) return false;
+    const leftMatches = isPropertyPath(expression.left, lookupName!, "userId")
+      && isPropertyPath(expression.right, identityName!, "userId");
+    const rightMatches = isPropertyPath(expression.right, lookupName!, "userId")
+      && isPropertyPath(expression.left, identityName!, "userId");
+    return (leftMatches || rightMatches) && statementContainsReturn(
+      ifStatement.thenStatement,
+      (returnExpression) => Boolean(awaitedNamedCall(
+        returnExpression,
+        "controlledCoachRegistrationError",
+      )),
+    );
+  });
+  assert.equal(guardedDuplicateReturns.length, 1, AC039_FAILURES.controlledError);
+  const duplicateReturn = guardedDuplicateReturns[0]!;
+  assert.equal(
+    Boolean(
+      duplicateReturn.expression
+      && objectLiteralStringProperty(duplicateReturn.expression, "state") === "error"
+      && objectLiteralStringProperty(duplicateReturn.expression, "requestedPortal") === "coach"
+      && objectLiteralStringProperty(duplicateReturn.expression, "field") === "register-email"
+    ),
+    true,
+    AC039_FAILURES.controlledError,
+  );
+  assert.equal(
+    Boolean(
+      crossedRowGuard
+      && crossedRowGuard.getStart(sourceFile) < duplicateReturn.getStart(sourceFile)
+    ),
+    true,
+    AC039_FAILURES.crossedRow,
+  );
+
+  const duplicateBranchCalls = collectCallExpressions(existingGuard!.thenStatement);
+  assert.equal(
+    duplicateBranchCalls.some(
+      (call) => gatewayMethodName(call, gatewayName!) === "createCoachRegistration",
+    ),
+    false,
+    AC039_FAILURES.noCreate,
+  );
+  assert.equal(
+    duplicateBranchCalls.some(
+      (call) => gatewayMethodName(call, gatewayName!) === "activateCoachRegistrationIdentity",
+    ),
+    false,
+    AC039_FAILURES.noActivation,
+  );
+
+  let mutatesExistingRow = false;
+  const visitDuplicateBranch = (node: ts.Node) => {
+    if (mutatesExistingRow || (node !== existingGuard!.thenStatement && isNestedFunctionBoundary(node))) {
+      return;
+    }
+    if (ts.isBinaryExpression(node)) {
+      const operator = node.operatorToken.kind;
+      if (
+        operator >= ts.SyntaxKind.FirstAssignment
+        && operator <= ts.SyntaxKind.LastAssignment
+        && expressionContainsSemanticNode(
+          node.left,
+          new Map(),
+          (candidate) => ts.isIdentifier(candidate) && candidate.text === lookupName,
+        )
+      ) mutatesExistingRow = true;
+    }
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression)
+      && node.expression.expression.text === "Object"
+      && node.expression.name.text === "assign"
+      && isIdentifierNamed(node.arguments[0], lookupName!)
+    ) mutatesExistingRow = true;
+    ts.forEachChild(node, visitDuplicateBranch);
+  };
+  visitDuplicateBranch(existingGuard!.thenStatement);
+  assert.equal(mutatesExistingRow, false, AC039_FAILURES.immutableRow);
+  assert.equal(
+    duplicateBranchCalls.some((call) => {
+      const method = gatewayMethodName(call, gatewayName!);
+      return method === "signOut" || method === "signOutForCoachIdentitySwitch";
+    }),
+    false,
+    AC039_FAILURES.noSignOut,
+  );
+  assert.equal(
+    duplicateBranchCalls.some(
+      (call) => gatewayMethodName(call, gatewayName!) === "signUpForCoachRegistration",
+    ),
+    false,
+    AC039_FAILURES.noEmail,
+  );
+  assert.deepEqual(
+    objectLiteralPropertyNames(duplicateReturn.expression!).sort(),
+    ["field", "message", "requestedPortal", "state"],
+    AC039_FAILURES.minimalResult,
+  );
+
+  const createCalls = calls.filter(
+    (call) => gatewayMethodName(call, gatewayName!) === "createCoachRegistration",
+  );
+  assert.equal(
+    createCalls.length === 1
+      && createCalls[0]!.getStart(sourceFile) > existingGuard!.end
+      && isPropertyPath(createCalls[0]!.arguments[0], inputName!, "registration")
+      && isPropertyPath(createCalls[0]!.arguments[1], identityName!, "userId")
+      && isIdentifierNamed(createCalls[0]!.arguments[2], ownerName!),
+    true,
+    AC039_FAILURES.userOnlyAllowed,
+  );
+
+  const duplicateReturnsOutsideExistingGuard = duplicateReturns.filter(
+    (returnStatement) => !isWithin(returnStatement, existingGuard!.thenStatement),
+  );
+  const userOnlyDuplicateReturns = duplicateReturnsOutsideExistingGuard.filter((returnStatement) => (
+    ancestorIfStatements(returnStatement, registerCoach.body).some((ifStatement) => (
+      negativeBindingName(ifStatement.expression) === lookupName
+      && isWithin(returnStatement, ifStatement.thenStatement)
+    ))
+  ));
+  assert.equal(userOnlyDuplicateReturns.length, 0, AC039_FAILURES.userOnlyAllowed);
+  const invalidPasswordDuplicateReturns = duplicateReturnsOutsideExistingGuard.filter(
+    (returnStatement) => ancestorIfStatements(returnStatement, registerCoach.body).some(
+      (ifStatement) => /\.kind\s*===\s*"existing_identity"/.test(
+        ifStatement.expression.getText(sourceFile),
+      ),
+    ),
+  );
+  assert.equal(
+    duplicateReturnsOutsideExistingGuard.length
+      - userOnlyDuplicateReturns.length
+      - invalidPasswordDuplicateReturns.length,
+    0,
+    AC039_FAILURES.noClientInference,
+  );
+
+  const existingIdentityGuard = ifStatements.find(
+    (ifStatement) => /\.kind\s*===\s*"existing_identity"/.test(
+      ifStatement.expression.getText(sourceFile),
+    ),
+  );
+  const invalidPasswordMessage =
+    "Este correo ya está registrado. Inicia sesión con esa cuenta para agregar el acceso Coach.";
+  assert.equal(
+    Boolean(existingIdentityGuard && statementContainsReturn(
+      existingIdentityGuard.thenStatement,
+      (expression) => objectLiteralStringProperty(expression, "message") === invalidPasswordMessage,
+    )),
+    true,
+    AC039_FAILURES.invalidPasswordPrivacy,
+  );
+
+  const { guard: rootErrorGuard } = locateCoachRegistrationErrorGuard(sources.root);
+  const rootErrorCalls = collectCallExpressions(rootErrorGuard.thenStatement);
+  const forbiddenRootCalls = new Set([
+    "applySessionState",
+    "beginPortalResolution",
+    "continueAuthorizedPortalAccess",
+    "replaceCoachPortalSession",
+    "signOut",
+    "transition",
+  ]);
+  const hasTerminalReturn = ts.isBlock(rootErrorGuard.thenStatement)
+    && rootErrorGuard.thenStatement.statements.some(ts.isReturnStatement);
+  assert.equal(
+    hasTerminalReturn
+      && !rootErrorCalls.some((call) => {
+        const expression = unwrapExpression(call.expression);
+        if (ts.isIdentifier(expression)) return forbiddenRootCalls.has(expression.text);
+        return ts.isPropertyAccessExpression(expression)
+          && forbiddenRootCalls.has(expression.name.text);
+      }),
+    true,
+    AC039_FAILURES.rootNoContinuation,
+  );
 }
 
 function auditCoachAuthorizationSemantics(controller: string) {
@@ -1327,7 +1723,8 @@ function auditCoachIdentitySwitchSemantics(sources: Sources) {
     "[AUTH-COACH-01.SWITCH.own-professional-title] el portal deriva professional_title sólo de la fila Coach autorizada",
   );
   assert.equal(
-    /const coachRegistration = existingCoachRegistration \?\? await gateway\.createCoachRegistration\([\s\S]*?input\.registration,[\s\S]*?identity\.userId,[\s\S]*?owner,[\s\S]*?\);/.test(registerCoachText),
+    /const coachRegistration =[\s\S]{0,100}await gateway\.createCoachRegistration\([\s\S]*?input\.registration,[\s\S]*?identity\.userId,[\s\S]*?owner,[\s\S]*?\);/.test(registerCoachText)
+      && /coach: coachRegistration/.test(registerCoachText),
     true,
     "[AUTH-COACH-01.SWITCH.membership-required-for-success] no existe éxito Coach sin fila leída o creada",
   );
@@ -1343,6 +1740,7 @@ function auditCoachIdentitySwitchSemantics(sources: Sources) {
 function auditIntegration(sources: Sources) {
   auditNoSensitiveBrowserStorage(sources);
   auditCoachIdentitySwitchSemantics(sources);
+  auditDuplicateCoachRegistrationSemantics(sources);
   const { root, controller, owner, gateway, hook, form, screen } = sources;
   const controllerSourceFile = parseTypeScript(controller, CONTROLLER_PATH);
   const registerCoachFunction = findNamedFunction(controllerSourceFile, "registerCoach");
@@ -1680,6 +2078,72 @@ test("controles positivos semánticos toleran nombres y reformateos inocentes", 
   }
 });
 
+const duplicateCoachPositiveControls = [
+  {
+    name: "AC-039 acepta renombre inocente de la fila Coach existente",
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const registerCoach = findNamedFunction(sourceFile, "registerCoach");
+      return renameIdentifiersWithin(
+        source,
+        sourceFile,
+        registerCoach,
+        "existingCoachRegistration",
+        "authenticatedOwnCoachMembership",
+      );
+    },
+  },
+  {
+    name: "AC-039 acepta reformateo multilinea del lookup own-only",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
+      `    const existingCoachRegistration = await gateway.getCoachRegistration(
+      identity.userId,
+      owner,
+    );`,
+      "control positivo AC-039: reformateo",
+    ),
+  },
+  {
+    name: "AC-039 ignora comentarios sobre fallback, metadata y títulos",
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    if (existingCoachRegistration) {",
+      `    // No usar metadata ni el professional_title del intento como fallback.
+    if (existingCoachRegistration) {`,
+      "control positivo AC-039: comentario",
+    ),
+  },
+] as const;
+
+const EXPECTED_DUPLICATE_COACH_POSITIVE_CONTROL_COUNT = 3;
+assert.equal(
+  duplicateCoachPositiveControls.length,
+  EXPECTED_DUPLICATE_COACH_POSITIVE_CONTROL_COUNT,
+  "AUTH-COACH-01 AC-039 fija tres controles inocentes de nombre, formato y comentarios",
+);
+
+test("controles positivos AC-039 toleran renombres, formato y comentarios", () => {
+  const sources = readSources();
+  for (const control of duplicateCoachPositiveControls) {
+    const transformed = control.apply(sources.controller);
+    assert.notEqual(
+      sha256(transformed),
+      sha256(sources.controller),
+      `${control.name}: transformación efectiva`,
+    );
+    assertValidTypeScript(transformed, CONTROLLER_PATH);
+    assert.doesNotThrow(
+      () => auditDuplicateCoachRegistrationSemantics({
+        ...sources,
+        controller: transformed,
+      }),
+      `${control.name}: no cambia la semántica AC-039`,
+    );
+  }
+});
+
 const userSemanticPositiveControls = [
   {
     name: "H1 acepta renombre inocente de la evidencia de sesión global",
@@ -1871,6 +2335,321 @@ test("wiring multiportal bloquea bypass cliente y deja seam Coach tipado", () =>
 
 const mutations = [
   {
+    name: "AC-039 · restaura fallback existing ?? create",
+    ac039Evidence: "restore_existing_fallback" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.existingBranch,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      `    if (existingCoachRegistration) {
+      if (existingCoachRegistration.userId !== identity.userId) {
+        return controlledCoachRegistrationError();
+      }
+      return {
+        state: "error",
+        requestedPortal: "coach",
+        field: "register-email",
+        message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,
+      };
+    }
+
+    const coachRegistration = existingCoachRegistration ?? await gateway.createCoachRegistration(
+      input.registration,
+      identity.userId,
+      owner,
+    );`,
+      `    const coachRegistration = existingCoachRegistration ?? await gateway.createCoachRegistration(
+      input.registration,
+      identity.userId,
+      owner,
+    );`,
+      "AC-039 restaura fallback existing ?? create",
+    ),
+  },
+  {
+    name: "AC-039 · fila existente retorna coach_authorized",
+    ac039Evidence: "authorize_existing_registration" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.controlledError,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      `      return {
+        state: "error",
+        requestedPortal: "coach",
+        field: "register-email",
+        message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,
+      };`,
+      `      return {
+        state: "coach_authorized",
+        requestedPortal: "coach",
+        userId: identity.userId,
+        coach: existingCoachRegistration,
+        authState: identity.authState,
+      };`,
+      "AC-039 autoriza fila existente",
+    ),
+  },
+  {
+    name: "AC-039 · crea antes de rechazar duplicado",
+    ac039Evidence: "create_before_duplicate_rejection" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.noCreate,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    if (existingCoachRegistration) {",
+      `    if (existingCoachRegistration) {
+      await gateway.createCoachRegistration(input.registration, identity.userId, owner);`,
+      "AC-039 crea antes de rechazar",
+    ),
+  },
+  {
+    name: "AC-039 · activa identidad antes de rechazar duplicado",
+    ac039Evidence: "activate_before_duplicate_rejection" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.noActivation,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    if (existingCoachRegistration) {",
+      `    if (existingCoachRegistration) {
+      await gateway.activateCoachRegistrationIdentity(identity, owner);`,
+      "AC-039 activa antes de rechazar",
+    ),
+  },
+  {
+    name: "AC-039 · aplica professional_title nuevo sobre la fila existente",
+    ac039Evidence: "overwrite_existing_title" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.immutableRow,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    if (existingCoachRegistration) {",
+      `    if (existingCoachRegistration) {
+      Object.assign(existingCoachRegistration, {
+        professionalTitle: input.registration.professional_title,
+      });`,
+      "AC-039 sobrescribe título existente",
+    ),
+  },
+  {
+    name: "AC-039 · navega después de publicar el error duplicado",
+    ac039Evidence: "navigate_after_duplicate" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: AC039_FAILURES.rootNoContinuation,
+    exactFailureLine: true,
+    apply(source: string) {
+      const { sourceFile, guard } = locateCoachRegistrationErrorGuard(source);
+      assert.ok(ts.isBlock(guard.thenStatement), "AC-039 localiza bloque error Coach");
+      const block = guard.thenStatement;
+      const mutatedBlock = replaceExactlyOnce(
+        block.getText(sourceFile),
+        "          return;",
+        `          navigation.transition(
+            createAuthNavigationReset("dashboard", "session-established"),
+          );
+          return;`,
+        "AC-039 navega tras duplicado",
+      );
+      return replaceNodeText(source, sourceFile, block, mutatedBlock);
+    },
+  },
+  {
+    name: "AC-039 · ejecuta signOut durante el rechazo duplicado",
+    ac039Evidence: "signout_on_duplicate" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.noSignOut,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    if (existingCoachRegistration) {",
+      `    if (existingCoachRegistration) {
+      await gateway.signOut(
+        "authorization_error",
+        owner as unknown as PortalResolutionOwner,
+      );`,
+      "AC-039 signOut en duplicado",
+    ),
+  },
+  {
+    name: "AC-039 · infiere duplicado desde el correo controlado por cliente",
+    ac039Evidence: "infer_duplicate_from_client_email" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.noClientInference,
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const registerCoach = findNamedFunction(sourceFile, "registerCoach");
+      const identitySwitchGuard = collectIfStatements(registerCoach.body).find((ifStatement) => (
+        statementContainsReturn(
+          ifStatement.thenStatement,
+          (expression) => objectLiteralStringProperty(
+            expression,
+            "state",
+          ) === "identity_switch_required",
+        )
+      ));
+      assert.ok(identitySwitchGuard, "AC-039 localiza mismatch A→B");
+      const injected = `
+    if (input.auth.email.endsWith("@coach.example")) {
+      return {
+        state: "error",
+        requestedPortal: "coach",
+        field: "register-email",
+        message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,
+      };
+    }`;
+      return `${source.slice(0, identitySwitchGuard.end)}${injected}${source.slice(identitySwitchGuard.end)}`;
+    },
+  },
+  {
+    name: "AC-039 · revela duplicado con contraseña incorrecta",
+    ac039Evidence: "reveal_duplicate_with_invalid_password" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.invalidPasswordPrivacy,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      'message: "Este correo ya está registrado. Inicia sesión con esa cuenta para agregar el acceso Coach.",',
+      "message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,",
+      "AC-039 revela duplicado con password inválida",
+    ),
+  },
+  {
+    name: "AC-039 · rechaza incorrectamente a Usuario-only",
+    ac039Evidence: "reject_user_only" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.userOnlyAllowed,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      `    }
+
+    const coachRegistration = existingCoachRegistration ?? await gateway.createCoachRegistration(`,
+      `    }
+    if (!existingCoachRegistration) {
+      return {
+        state: "error",
+        requestedPortal: "coach",
+        field: "register-email",
+        message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,
+      };
+    }
+
+    const coachRegistration = existingCoachRegistration ?? await gateway.createCoachRegistration(`,
+      "AC-039 rechaza Usuario-only",
+    ),
+  },
+  {
+    name: "AC-039 · rompe Login Coach con fila propia",
+    ac039Evidence: "break_coach_login" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-COACH-01.controller.unique-coach-authorization-path] resolvePortalAccess tiene un único retorno Coach",
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const resolution = findNamedFunction(sourceFile, "resolvePortalAccess");
+      const coachReturn = collectReturns(resolution.body).find(isCoachAuthorizedReturn);
+      assert.ok(coachReturn, "AC-039 localiza éxito de Login Coach");
+      const mutatedReturn = replaceExactlyOnce(
+        coachReturn.getText(sourceFile),
+        'state: "coach_authorized"',
+        'state: "error"',
+        "AC-039 rompe Login Coach",
+      );
+      return replaceNodeText(source, sourceFile, coachReturn, mutatedReturn);
+    },
+  },
+  {
+    name: "AC-039 · consulta duplicado antes del mismatch A→B",
+    ac039Evidence: "lookup_before_identity_switch" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.switchPrecedence,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    if (identity && !sameEmail(identity.email, input.auth.email)) {\n      return {",
+      `    if (identity && !sameEmail(identity.email, input.auth.email)) {
+      await gateway.getCoachRegistration(identity.userId, owner);
+      return {`,
+      "AC-039 lookup antes de mismatch",
+    ),
+  },
+  {
+    name: "AC-039 · acepta fila cruzada como duplicado",
+    ac039Evidence: "accept_crossed_row_as_duplicate" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.crossedRow,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "      if (existingCoachRegistration.userId !== identity.userId) {",
+      "      if (false) {",
+      "AC-039 acepta fila cruzada",
+    ),
+  },
+  {
+    name: "AC-039 · cambia el mensaje exacto aprobado",
+    ac039Evidence: "change_exact_message" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.exactMessage,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '"Este correo ya se encuentra registrado como Coach. Intente con otro correo."',
+      '"Este Coach ya existe."',
+      "AC-039 cambia mensaje exacto",
+    ),
+  },
+  {
+    name: "AC-039 · transporta professional_title nuevo en el error",
+    ac039Evidence: "transport_new_title" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.minimalResult,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "        message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,\n      };",
+      `        message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,
+        professionalTitle: input.registration.professional_title,
+      };`,
+      "AC-039 transporta título nuevo",
+    ),
+  },
+  {
+    name: "AC-039 · ejecuta signup antes de rechazar y puede emitir correo",
+    ac039Evidence: "signup_before_duplicate_rejection" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AC039_FAILURES.noEmail,
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    if (existingCoachRegistration) {",
+      `    if (existingCoachRegistration) {
+      await gateway.signUpForCoachRegistration(input.auth, owner);`,
+      "AC-039 signup antes de rechazo",
+    ),
+  },
+  {
     name: "SWITCH · omite comparación de correo A/B",
     identitySwitchEvidence: "omit_email_comparison" as const,
     file: "controller" as const,
@@ -2048,7 +2827,7 @@ const mutations = [
       identity.userId,
       owner,
     );`,
-      `    const coachRegistration = existingCoachRegistration ?? {
+      `    const coachRegistration = {
       userId: identity.userId,
       createdAt: "not-persisted",
       firstName: input.registration.first_name,
@@ -2820,7 +3599,8 @@ const mutations = [
   },
 ] as const;
 
-const EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT = 63;
+const EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT = 79;
+const EXPECTED_AC039_MUTATION_PROBE_COUNT = 16;
 const EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT = 26;
 const EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT = 14;
 const EXPECTED_RUNTIME_MUTATION_PROBE_COUNT = 7;
@@ -2829,6 +3609,30 @@ const EXPECTED_E7_E9_SEMANTIC_MUTATION_PROBE_COUNT = 3;
 const EXPECTED_USER_H1_H3_SEMANTIC_MUTATION_PROBE_COUNT = 3;
 
 assert.equal(mutations.length, EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT);
+assert.deepEqual(
+  mutations
+    .filter((mutation) => "ac039Evidence" in mutation)
+    .map((mutation) => mutation.ac039Evidence),
+  [
+    "restore_existing_fallback",
+    "authorize_existing_registration",
+    "create_before_duplicate_rejection",
+    "activate_before_duplicate_rejection",
+    "overwrite_existing_title",
+    "navigate_after_duplicate",
+    "signout_on_duplicate",
+    "infer_duplicate_from_client_email",
+    "reveal_duplicate_with_invalid_password",
+    "reject_user_only",
+    "break_coach_login",
+    "lookup_before_identity_switch",
+    "accept_crossed_row_as_duplicate",
+    "change_exact_message",
+    "transport_new_title",
+    "signup_before_duplicate_rejection",
+  ],
+  `AUTH-COACH-01 AC-039 fija ${EXPECTED_AC039_MUTATION_PROBE_COUNT} probes focales`,
+);
 assert.deepEqual(
   mutations
     .filter((mutation) => "identitySwitchEvidence" in mutation)
@@ -3188,5 +3992,5 @@ for (const mutation of mutations) {
 }
 
 console.log(
-  `AUTH-COACH-01 integration mutation probes: ${mutations.length}/${EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT}; cambio A/B: ${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT}/${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT}; M11 Browser Storage: ${EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT}/${EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT}; controles M11: ${EXPECTED_BROWSER_STORAGE_POSITIVE_CONTROL_COUNT}/${EXPECTED_BROWSER_STORAGE_POSITIVE_CONTROL_COUNT}; runtime: ${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}/${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}; Auth suite E7-E9/H1-H3: ${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}/${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}`,
+  `AUTH-COACH-01 integration mutation probes: ${mutations.length}/${EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT}; AC-039: ${EXPECTED_AC039_MUTATION_PROBE_COUNT}/${EXPECTED_AC039_MUTATION_PROBE_COUNT}; cambio A/B: ${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT}/${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT}; M11 Browser Storage: ${EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT}/${EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT}; controles AC-039: ${EXPECTED_DUPLICATE_COACH_POSITIVE_CONTROL_COUNT}/${EXPECTED_DUPLICATE_COACH_POSITIVE_CONTROL_COUNT}; controles M11: ${EXPECTED_BROWSER_STORAGE_POSITIVE_CONTROL_COUNT}/${EXPECTED_BROWSER_STORAGE_POSITIVE_CONTROL_COUNT}; runtime: ${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}/${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}; Auth suite E7-E9/H1-H3: ${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}/${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}`,
 );

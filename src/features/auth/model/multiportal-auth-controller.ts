@@ -19,6 +19,8 @@ export const USER_REGISTRATION_CONFIRMATION_MESSAGE =
   "Cuenta creada. Revisa tu correo para confirmar el registro.";
 export const COACH_REGISTRATION_CONFIRMATION_MESSAGE =
   "Cuenta creada. Revisa tu correo para confirmar el registro.";
+export const COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE =
+  "Este correo ya se encuentra registrado como Coach. Intente con otro correo.";
 export const MULTIPORTAL_AUTH_ERROR_MESSAGE =
   "No pudimos completar la acción. Intenta nuevamente.";
 export const COACH_REGISTRATION_IDENTITY_MISMATCH_MESSAGE =
@@ -456,6 +458,18 @@ async function registerCoach<TAuthState>(
 
     const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);
     if (!owner.isCurrent()) return staleCoachRegistration();
+    if (existingCoachRegistration) {
+      if (existingCoachRegistration.userId !== identity.userId) {
+        return controlledCoachRegistrationError();
+      }
+      return {
+        state: "error",
+        requestedPortal: "coach",
+        field: "register-email",
+        message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,
+      };
+    }
+
     const coachRegistration = existingCoachRegistration ?? await gateway.createCoachRegistration(
       input.registration,
       identity.userId,
