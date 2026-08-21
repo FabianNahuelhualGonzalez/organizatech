@@ -3,7 +3,13 @@ import test from "node:test";
 
 import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 
-import type { CoachRegistrationWritePayload } from "@/features/auth/model/auth-form";
+import {
+  AUTH_REGISTRATION_PORTAL_METADATA_KEY,
+  type CoachRegistrationPreparationPayload,
+  type CoachRegistrationWritePayload,
+  type ConfirmationRegistrationSignupPayload,
+  type UserSignupPayload,
+} from "@/features/auth/model/auth-form";
 import {
   createSupabaseMultiportalAuthGateway,
   toCoachRegistrationInsertPayload,
@@ -34,6 +40,26 @@ const registration: CoachRegistrationWritePayload = {
   gender: "male",
   phone_number: "+56912345678",
   professional_title: "Preparador físico",
+};
+
+const signupPayload: UserSignupPayload = {
+  email: "coach-a@example.com",
+  password: "segura123",
+  options: {
+    data: {
+      display_name: "Coach Uno",
+      first_name: registration.first_name,
+      last_name: registration.last_name,
+      birth_date: registration.birth_date,
+      gender: registration.gender,
+      phone_number: registration.phone_number,
+    },
+  },
+};
+
+const coachSignupPayload: CoachRegistrationPreparationPayload = {
+  auth: signupPayload,
+  registration,
 };
 
 function registrationRow(userId: TestUserId, suffix: string) {
@@ -1054,4 +1080,206 @@ test("cambio Coach stale de A nunca cierra una sesión B posterior", async () =>
   assert.equal(fake.activeUserId, "user-b");
   assert.equal(fake.relationReads, 0);
   assert.equal(fake.rpcAttempts, 0);
+});
+
+test("signup Coach usa sólo Auth signUp con metadata allowlisted y redirect cerrado", async () => {
+  let rpcCalls = 0;
+  const signupCalls: unknown[] = [];
+  const isolatedClient = {
+    rpc: async () => {
+      rpcCalls += 1;
+      assert.fail("signup no debe preparar PII mediante RPC");
+    },
+    auth: {
+      signUp: async (payload: unknown) => {
+        signupCalls.push(payload);
+        return {
+          data: { user: { identities: [{ id: "identity-a" }] }, session: null },
+          error: null,
+        };
+      },
+    },
+  } as unknown as SupabaseClient;
+  const gateway = createSupabaseMultiportalAuthGateway({} as SupabaseClient, {
+    createRegistrationClient: () => isolatedClient,
+  });
+  const { owner } = beginRegistrationOwner(null);
+
+  assert.deepEqual(await gateway.signUpForCoachRegistration(coachSignupPayload, owner), {
+    kind: "confirmation_required",
+  });
+  assert.equal(rpcCalls, 0);
+  assert.equal(signupCalls.length, 1);
+  const signup = signupCalls[0] as ConfirmationRegistrationSignupPayload;
+  assert.equal(signup.email, signupPayload.email);
+  assert.equal(signup.password, signupPayload.password);
+  assert.equal(signup.options.data[AUTH_REGISTRATION_PORTAL_METADATA_KEY], "coach");
+  assert.equal(
+    "professional_title" in signup.options.data
+      ? signup.options.data.professional_title
+      : null,
+    registration.professional_title,
+  );
+  assert.equal(
+    signup.options.emailRedirectTo,
+    "https://organizatech.cl/login?flow=signup-confirmation",
+  );
+  for (const forbidden of [
+    "organizatech_registration_intent_id",
+    "user_id",
+    "owner_id",
+    "profile_id",
+    "role",
+  ] as const) {
+    assert.equal(JSON.stringify(signup).includes(forbidden), false);
+  }
+});
+
+test("signup Usuario omite professional_title y también usa una sola llamada Auth", async () => {
+  const signupCalls: unknown[] = [];
+  const isolatedClient = {
+    auth: {
+      signUp: async (payload: unknown) => {
+        signupCalls.push(payload);
+        return { data: { user: { identities: [{ id: "identity-a" }] }, session: null }, error: null };
+      },
+    },
+  } as unknown as SupabaseClient;
+  const gateway = createSupabaseMultiportalAuthGateway({} as SupabaseClient, {
+    createRegistrationClient: () => isolatedClient,
+  });
+  const { owner } = beginUserRegistrationOwner(null);
+
+  const result = await gateway.signUpForUserRegistration(signupPayload, owner);
+  assert.deepEqual(result, { kind: "confirmation_required" });
+  assert.equal(signupCalls.length, 1);
+  const signup = signupCalls[0] as ConfirmationRegistrationSignupPayload;
+  assert.equal(signup.options.data[AUTH_REGISTRATION_PORTAL_METADATA_KEY], "usuario");
+  assert.equal("professional_title" in signup.options.data, false);
+});
+
+test("respuesta ofuscada de un segundo signUp se clasifica sin escribir PII fuera de Auth", async () => {
+  let signupAttempts = 0;
+  const isolatedClient = {
+    auth: {
+      signUp: async () => {
+        signupAttempts += 1;
+        return {
+          data: { user: { identities: [] }, session: null },
+          error: null,
+        };
+      },
+    },
+  } as unknown as SupabaseClient;
+  const gateway = createSupabaseMultiportalAuthGateway({} as SupabaseClient, {
+    createRegistrationClient: () => isolatedClient,
+  });
+
+  const first = await gateway.signUpForCoachRegistration(
+    coachSignupPayload,
+    beginRegistrationOwner(null).owner,
+  );
+  const second = await gateway.signUpForUserRegistration(
+    signupPayload,
+    beginUserRegistrationOwner(null).owner,
+  );
+
+  assert.deepEqual(first, { kind: "existing_identity" });
+  assert.deepEqual(second, { kind: "existing_identity" });
+  assert.equal(signupAttempts, 2);
+});
+
+test("confirmación propia usa RPC sin argumentos y revalida identidad antes y después", async () => {
+  let identityReads = 0;
+  let sessionReads = 0;
+  const rpcCalls: unknown[][] = [];
+  const user = users["user-a"];
+  const session = {
+    user,
+    access_token: "callback-token-a",
+    refresh_token: "refresh-a",
+  } as Session;
+  const client = {
+    auth: {
+      getUser: async () => {
+        identityReads += 1;
+        return { data: { user }, error: null };
+      },
+      getSession: async () => {
+        sessionReads += 1;
+        return { data: { session }, error: null };
+      },
+    },
+    rpc: async (...args: unknown[]) => {
+      rpcCalls.push(args);
+      return {
+        data: [{ status: "confirmed", portal: "coach" }],
+        error: null,
+      };
+    },
+  } as unknown as SupabaseClient;
+  const gateway = createSupabaseMultiportalAuthGateway(client);
+  const { owner } = beginPortalOwner("user-a");
+
+  assert.deepEqual(await gateway.getOwnSignupConfirmation("user-a", owner), {
+    status: "confirmed",
+    portal: "coach",
+  });
+  assert.deepEqual(rpcCalls, [["get_own_auth_registration_confirmation"]]);
+  assert.equal(identityReads, 2);
+  assert.equal(sessionReads, 2);
+});
+
+test("respuesta tardía A no se acepta si la identidad global cambió a B", async () => {
+  let activeUserId: TestUserId = "user-a";
+  const rpcStarted = createDeferred<void>();
+  const releaseRpc = createDeferred<void>();
+  const client = {
+    auth: {
+      getUser: async () => ({ data: { user: users[activeUserId] }, error: null }),
+      getSession: async () => ({
+        data: {
+          session: {
+            user: users[activeUserId],
+            access_token: `token-${activeUserId}`,
+            refresh_token: `refresh-${activeUserId}`,
+          } as Session,
+        },
+        error: null,
+      }),
+    },
+    rpc: async () => {
+      rpcStarted.resolve();
+      await releaseRpc.promise;
+      return { data: [{ status: "confirmed", portal: "coach" }], error: null };
+    },
+  } as unknown as SupabaseClient;
+  const gateway = createSupabaseMultiportalAuthGateway(client);
+  const { owner } = beginPortalOwner("user-a");
+  const pending = gateway.getOwnSignupConfirmation("user-a", owner);
+  await rpcStarted.promise;
+  activeUserId = "user-b";
+  releaseRpc.resolve();
+
+  await assert.rejects(pending, /identidad autenticada cambió/i);
+});
+
+test("signOut de confirmación revalida owner y cierra sólo la sesión local", async () => {
+  const fake = createStatefulFakeClient({ activeUserId: "user-a" });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const { owner } = beginPortalOwner("user-a");
+
+  assert.equal(await gateway.signOutAfterSignupConfirmation("user-a", owner), "signed_out");
+  assert.deepEqual(fake.signOutOptions, [{ scope: "local" }]);
+  assert.equal(fake.activeUserId, null);
+});
+
+test("signOut tardío de confirmación A nunca cierra una sesión B", async () => {
+  const fake = createStatefulFakeClient({ activeUserId: "user-b" });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const { owner } = beginPortalOwner("user-a");
+
+  assert.equal(await gateway.signOutAfterSignupConfirmation("user-a", owner), "stale");
+  assert.deepEqual(fake.signOutOptions, []);
+  assert.equal(fake.activeUserId, "user-b");
 });

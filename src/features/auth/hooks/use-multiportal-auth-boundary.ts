@@ -11,6 +11,7 @@ import type { AuthAccountType, AuthRouteState } from "@/features/auth/model/auth
 import {
   COACH_REGISTRATION_REQUIRED_MESSAGE,
   MULTIPORTAL_AUTH_ERROR_MESSAGE,
+  SIGNUP_CONFIRMATION_INVALID_MESSAGE,
   USER_REGISTRATION_REQUIRED_MESSAGE,
   createMultiportalAuthController,
   type CoachRegistrationResult,
@@ -18,6 +19,7 @@ import {
   type PortalAccessResult,
   type PortalSignOutReason,
   type PortalSignOutResult,
+  type SignupConfirmationResult,
   type UserRegistrationResult,
 } from "@/features/auth/model/multiportal-auth-controller";
 import {
@@ -36,6 +38,7 @@ export type PortalSessionEventDecision =
   | "continue"
   | "defer"
   | "complete_coach_identity_switch"
+  | "complete_signup_confirmation"
   | "hold_user_registration"
   | "hold_coach_registration"
   | "authorize_user"
@@ -56,23 +59,31 @@ export function useMultiportalAuthBoundary(input: {
   const portalResolutionOwnersRef = useRef(createPortalResolutionOwnerController());
   const coachRegistrationOwnersRef = useRef(createCoachRegistrationOwnerController());
   const userRegistrationOwnersRef = useRef(createUserRegistrationOwnerController());
+  const signupConfirmationOwnersRef = useRef(createPortalResolutionOwnerController());
   const currentUserIdRef = useRef<string | null>(null);
   const blockedCoachIdentityUserIdRef = useRef<string | null>(null);
   const coachIdentitySwitchRef = useRef<CoachIdentitySwitchPending | null>(null);
+  const signupConfirmationRef = useRef<SignupConfirmationPending | null>(null);
   const initialResolutionPendingRef = useRef(true);
   const signOutNoticeRef = useRef(createSinglePublicationNoticeController<PortalSignOutReason>());
+  const signupConfirmationNoticeRef = useRef(
+    createSinglePublicationNoticeController<PublishableSignupConfirmationResult>(),
+  );
 
   useEffect(() => {
     const controller = controllerRef.current;
     const portalResolutionOwners = portalResolutionOwnersRef.current;
     const coachRegistrationOwners = coachRegistrationOwnersRef.current;
     const userRegistrationOwners = userRegistrationOwnersRef.current;
+    const signupConfirmationOwners = signupConfirmationOwnersRef.current;
     return () => {
       controller?.dispose();
       portalResolutionOwners.invalidate();
       coachRegistrationOwners.invalidate();
       userRegistrationOwners.invalidate();
+      signupConfirmationOwners.invalidate();
       settleCoachIdentitySwitch("stale");
+      settleSignupConfirmation("stale");
     };
   }, []);
 
@@ -127,11 +138,20 @@ export function useMultiportalAuthBoundary(input: {
     portalResolutionOwnersRef.current.invalidate();
     coachRegistrationOwnersRef.current.invalidate();
     userRegistrationOwnersRef.current.invalidate();
+    signupConfirmationOwnersRef.current.invalidate();
     initialResolutionPendingRef.current = false;
   }
 
   function settleCoachIdentitySwitch(result: PortalSignOutResult): boolean {
     const pending = coachIdentitySwitchRef.current;
+    if (!pending || pending.settled) return false;
+    pending.settled = true;
+    pending.resolveEvent(result);
+    return true;
+  }
+
+  function settleSignupConfirmation(result: PortalSignOutResult): boolean {
+    const pending = signupConfirmationRef.current;
     if (!pending || pending.settled) return false;
     pending.settled = true;
     pending.resolveEvent(result);
@@ -145,8 +165,12 @@ export function useMultiportalAuthBoundary(input: {
   ): PortalSessionEventDecision {
     if (event === "SIGNED_OUT") {
       const pendingIdentitySwitch = coachIdentitySwitchRef.current;
+      const pendingSignupConfirmation = signupConfirmationRef.current;
       invalidatePortalOperations();
       currentUserIdRef.current = null;
+      if (pendingSignupConfirmation && settleSignupConfirmation("signed_out")) {
+        return "complete_signup_confirmation";
+      }
       if (pendingIdentitySwitch && settleCoachIdentitySwitch("signed_out")) {
         blockedCoachIdentityUserIdRef.current = pendingIdentitySwitch.expectedUserId;
         return "complete_coach_identity_switch";
@@ -160,6 +184,7 @@ export function useMultiportalAuthBoundary(input: {
       const replacedIdentity = portalResolutionOwnersRef.current.acceptIdentity(currentUserId);
       coachRegistrationOwnersRef.current.acceptIdentity(currentUserId);
       userRegistrationOwnersRef.current.acceptIdentity(currentUserId);
+      signupConfirmationOwnersRef.current.acceptIdentity(currentUserId);
       if (replacedIdentity) {
         initialResolutionPendingRef.current = false;
       }
@@ -189,6 +214,7 @@ export function useMultiportalAuthBoundary(input: {
     portalResolutionOwnersRef.current.acceptIdentity(currentUserId);
     coachRegistrationOwnersRef.current.acceptIdentity(currentUserId);
     userRegistrationOwnersRef.current.acceptIdentity(currentUserId);
+    signupConfirmationOwnersRef.current.acceptIdentity(currentUserId);
     if (input.initialRoute.mode === "registro") {
       return input.initialRoute.accountType === "coach"
         ? "hold_coach_registration"
@@ -252,6 +278,83 @@ export function useMultiportalAuthBoundary(input: {
       };
     }
     return controllerRef.current!.registerUser(payload, owner, createGateway(supabase));
+  }
+
+  function completeSignupConfirmation(
+    authState: SupabaseSessionState,
+    forceInvalid = false,
+  ): Promise<PortalSignOutResult> {
+    const expectedUserId = authState.session?.user.id ?? null;
+    if (!expectedUserId) return Promise.resolve("stale");
+
+    const existing = signupConfirmationRef.current;
+    if (existing?.operation && existing.expectedUserId === expectedUserId) {
+      return existing.operation;
+    }
+    if (existing && existing.expectedUserId !== expectedUserId) {
+      settleSignupConfirmation("stale");
+      signupConfirmationRef.current = null;
+    }
+
+    signupConfirmationOwnersRef.current.acceptIdentity(expectedUserId);
+    const owner = signupConfirmationOwnersRef.current.begin(expectedUserId);
+    if (!owner.isCurrent()) return Promise.resolve("stale");
+
+    const pending = createSignupConfirmationPending(expectedUserId);
+    signupConfirmationRef.current = pending;
+    const operation = (async () => {
+      try {
+        const supabase = getSupabaseBrowserClient();
+        if (!supabase || !owner.isCurrent()) {
+          settleSignupConfirmation("stale");
+          return await pending.event;
+        }
+        const gateway = createGateway(supabase);
+        const resolution: SignupConfirmationResult = forceInvalid
+          ? {
+            state: "invalid",
+            requestedPortal: "usuario",
+            message: SIGNUP_CONFIRMATION_INVALID_MESSAGE,
+          }
+          : await controllerRef.current!.resolveSignupConfirmation(
+            { expectedUserId, owner },
+            gateway,
+          );
+        if (!owner.isCurrent() || resolution.state === "stale") {
+          settleSignupConfirmation("stale");
+          return await pending.event;
+        }
+
+        signupConfirmationNoticeRef.current.begin(resolution);
+        const signOutResult = await gateway.signOutAfterSignupConfirmation(
+          expectedUserId,
+          owner,
+        );
+        if (signOutResult === "stale") {
+          signupConfirmationNoticeRef.current.clear();
+          settleSignupConfirmation("stale");
+        }
+        const eventResult = await pending.event;
+        signupConfirmationNoticeRef.current.settle();
+        return eventResult;
+      } catch (error) {
+        signupConfirmationNoticeRef.current.fail();
+        signupConfirmationNoticeRef.current.settle();
+        settleSignupConfirmation("stale");
+        throw error;
+      } finally {
+        signupConfirmationOwnersRef.current.end(owner);
+        if (signupConfirmationRef.current === pending) {
+          signupConfirmationRef.current = null;
+        }
+      }
+    })();
+    pending.operation = operation;
+    return operation;
+  }
+
+  function consumeSignupConfirmationResult(): PublishableSignupConfirmationResult | null {
+    return signupConfirmationNoticeRef.current.consumeEvent();
   }
 
   function signOutForCoachIdentitySwitch(requestedEmail: string): Promise<PortalSignOutResult> {
@@ -339,6 +442,8 @@ export function useMultiportalAuthBoundary(input: {
     resolvePortalAccess,
     registerCoach,
     registerUser,
+    completeSignupConfirmation,
+    consumeSignupConfirmationResult,
     signOutForCoachIdentitySwitch,
     consumePortalSignOutMessage,
     settlePortalSignOutMessage,
@@ -371,7 +476,34 @@ interface CoachIdentitySwitchPending {
   settled: boolean;
 }
 
+type PublishableSignupConfirmationResult = Exclude<
+  SignupConfirmationResult,
+  { state: "stale" }
+>;
+
+interface SignupConfirmationPending {
+  expectedUserId: string;
+  event: Promise<PortalSignOutResult>;
+  resolveEvent(result: PortalSignOutResult): void;
+  operation: Promise<PortalSignOutResult> | null;
+  settled: boolean;
+}
+
 function createCoachIdentitySwitchPending(expectedUserId: string): CoachIdentitySwitchPending {
+  let resolveEvent!: (result: PortalSignOutResult) => void;
+  const event = new Promise<PortalSignOutResult>((resolve) => {
+    resolveEvent = resolve;
+  });
+  return {
+    expectedUserId,
+    event,
+    resolveEvent,
+    operation: null,
+    settled: false,
+  };
+}
+
+function createSignupConfirmationPending(expectedUserId: string): SignupConfirmationPending {
   let resolveEvent!: (result: PortalSignOutResult) => void;
   const event = new Promise<PortalSignOutResult>((resolve) => {
     resolveEvent = resolve;

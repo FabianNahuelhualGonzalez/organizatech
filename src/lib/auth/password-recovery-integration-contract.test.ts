@@ -39,7 +39,8 @@ assert.match(bootstrapSource, /resolvePasswordRecoverySessionDecision\([\s\S]*?e
 assert.match(bootstrapSource, /recoveryDecision === "invalid"[\s\S]*?invalidatePasswordRecoverySession\(\)/);
 assert.match(bootstrapSource, /recoveryDecision === "confirmed"[\s\S]*?confirmPasswordRecoverySession\(authState\.session\)/);
 assert.match(appSource, /event === "PASSWORD_RECOVERY" \|\| event === "INITIAL_SESSION" \|\| event === "SIGNED_IN"/);
-assert.match(appSource, /hasPasswordRecoveryCallbackError\(\{ error, errorCode, errorDescription \}\)/);
+assert.match(appSource, /hasPasswordRecoveryCallbackError\(\{\s*error,\s*errorCode,\s*errorDescription,?\s*\}\)/);
+assert.match(appSource, /return getBrowserAuthCallbackUrl\(PASSWORD_RECOVERY_FLOW\);/);
 assert.match(appSource, /hashParams\.get\("type"\) === "recovery" && accessToken/);
 assert.match(appSource, /authState\.session\?\.access_token === recoveryCallbackAccessToken/);
 assert.match(appSource, /session\?\.access_token === recoveryCallbackAccessToken/);
