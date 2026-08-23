@@ -1,0 +1,440 @@
+.shell {
+  --user-portal-background: var(--background, #07101a);
+  --user-portal-panel: var(--panel, #111827);
+  --user-portal-text: var(--text, #f5f7fb);
+  --user-portal-muted: var(--muted, #9ca3af);
+  --user-portal-primary: var(--primary, #3c7aff);
+  --user-portal-danger: var(--red, #f87171);
+  --user-portal-line: var(--line, rgba(148, 163, 184, 0.22));
+
+  width: min(100%, 560px);
+  max-width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  margin: 0 auto;
+  overflow-x: hidden;
+  overflow-x: clip;
+  color: var(--user-portal-text);
+  background: var(--background, #07101a);
+  background: var(--background);
+  font-family: inherit;
+}
+
+.shell,
+.shell * {
+  box-sizing: border-box;
+}
+
+.backgroundLayer {
+  min-width: 0;
+  min-height: inherit;
+  background: var(--user-portal-background);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: calc(64px + env(safe-area-inset-top, 0px));
+  padding:
+    calc(10px + env(safe-area-inset-top, 0px))
+    clamp(12px, 4vw, 20px)
+    10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--user-portal-line) 70%, transparent);
+  background: color-mix(in srgb, var(--user-portal-background) 94%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.iconButton,
+.notificationButton,
+.closeButton {
+  display: inline-grid;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  padding: 0;
+  color: var(--user-portal-text);
+  background: transparent;
+  font: inherit;
+  touch-action: manipulation;
+}
+
+.iconButton:hover,
+.notificationButton:hover,
+.closeButton:hover {
+  border-color: color-mix(in srgb, var(--user-portal-primary) 38%, transparent);
+  background: color-mix(in srgb, var(--user-portal-primary) 13%, transparent);
+}
+
+.iconButton:focus-visible,
+.notificationButton:focus-visible,
+.closeButton:focus-visible,
+.menuItem:focus-visible,
+.logoutButton:focus-visible {
+  outline: 2px solid var(--user-portal-primary);
+  outline-offset: 3px;
+}
+
+.brand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.brandIcon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+}
+
+.brandName {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--user-portal-text);
+  font-size: clamp(15px, 4.7vw, 20px);
+  font-weight: 700;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notificationShell {
+  position: relative;
+  width: 44px;
+  height: 44px;
+}
+
+.notificationButton {
+  position: relative;
+}
+
+.notificationButton[data-has-unread="true"] {
+  color: var(--user-portal-primary);
+}
+
+.notificationBadge {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  display: inline-grid;
+  min-width: 19px;
+  max-width: 34px;
+  height: 19px;
+  place-items: center;
+  overflow: hidden;
+  border: 2px solid var(--user-portal-background);
+  border-radius: 999px;
+  padding: 0 4px;
+  color: #ffffff;
+  background: var(--user-portal-primary);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  min-width: 0;
+  min-height: calc(100svh - 64px);
+  overflow-wrap: anywhere;
+  padding:
+    clamp(16px, 4vw, 24px)
+    clamp(16px, 5vw, 24px)
+    calc(28px + env(safe-area-inset-bottom, 0px));
+}
+
+.backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.7);
+  animation: userPortalBackdropEnter 180ms ease-out both;
+}
+
+.drawer {
+  position: fixed;
+  z-index: 90;
+  inset: 0 auto 0 0;
+  width: min(90vw, 390px);
+  max-width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding:
+    calc(12px + env(safe-area-inset-top, 0px))
+    clamp(14px, 4.5vw, 20px)
+    calc(22px + env(safe-area-inset-bottom, 0px));
+  color: var(--user-portal-text);
+  background: #0b1522;
+  box-shadow: 24px 0 70px rgba(0, 0, 0, 0.58);
+  animation: userPortalDrawerEnter 200ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+
+.drawerTopbar {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.closeButton {
+  margin-left: auto;
+}
+
+.drawerIdentity {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  margin: 14px 0 18px;
+  padding: 16px;
+  border: 1px solid var(--user-portal-line);
+  border-radius: 15px;
+  background: var(--user-portal-panel);
+}
+
+.drawerAvatar {
+  position: relative;
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--user-portal-primary) 48%, transparent);
+  border-radius: 50%;
+  color: #b8ceff;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--user-portal-primary) 20%, var(--user-portal-panel)),
+      var(--user-portal-background)
+    );
+}
+
+.avatarImage {
+  object-fit: cover;
+}
+
+.avatarInitials {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 4px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.identityCopy {
+  min-width: 0;
+}
+
+.identityCopy p,
+.identityCopy span,
+.menuItem span,
+.logoutButton span {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.identityCopy p {
+  margin: 0 0 5px;
+  color: var(--user-portal-text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.identityCopy span {
+  display: block;
+  color: var(--user-portal-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.menuList {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menuItem,
+.logoutButton {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  padding: 10px 12px;
+  text-align: left;
+  font: inherit;
+  line-height: 1.35;
+  touch-action: manipulation;
+}
+
+.menuItem {
+  position: relative;
+  color: var(--user-portal-text);
+  background: transparent;
+}
+
+.menuItem:hover,
+.menuItem[aria-current="page"] {
+  border-color: color-mix(in srgb, var(--user-portal-primary) 42%, transparent);
+  background: color-mix(in srgb, var(--user-portal-primary) 15%, transparent);
+}
+
+.menuItem[aria-current="page"] {
+  color: #dce7ff;
+  box-shadow: inset 3px 0 0 var(--user-portal-primary);
+}
+
+.menuItem span,
+.logoutButton span {
+  min-width: 0;
+  font-size: 12px;
+}
+
+.logoutRow {
+  margin-top: 13px;
+  padding-top: 13px;
+  border-top: 1px solid var(--user-portal-line);
+}
+
+.logoutButton {
+  color: var(--user-portal-danger);
+  background: color-mix(in srgb, var(--user-portal-danger) 7%, transparent);
+}
+
+.logoutButton:hover {
+  border-color: color-mix(in srgb, var(--user-portal-danger) 38%, transparent);
+  background: color-mix(in srgb, var(--user-portal-danger) 13%, transparent);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}
+
+@keyframes userPortalDrawerEnter {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes userPortalBackdropEnter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 359px) {
+  .topbar {
+    gap: 6px;
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .brand {
+    gap: 6px;
+  }
+
+  .brandIcon {
+    width: 30px;
+    height: 30px;
+  }
+
+  .brandName {
+    font-size: 15px;
+  }
+
+  .drawerIdentity {
+    grid-template-columns: 50px minmax(0, 1fr);
+    gap: 11px;
+    padding: 13px;
+  }
+
+  .drawerAvatar {
+    width: 50px;
+    height: 50px;
+  }
+
+  .menuItem,
+  .logoutButton {
+    gap: 10px;
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+}
+
+@media (min-width: 393px) {
+  .drawerIdentity {
+    padding: 17px;
+  }
+
+  .menuItem span,
+  .logoutButton span {
+    font-size: 13px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .drawer {
+    animation: none;
+  }
+
+  .iconButton,
+  .notificationButton,
+  .closeButton,
+  .menuItem,
+  .logoutButton {
+    scroll-behavior: auto;
+    transition: none;
+  }
+}
