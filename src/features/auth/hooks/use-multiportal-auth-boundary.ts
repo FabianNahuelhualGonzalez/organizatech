@@ -9,6 +9,11 @@ import type {
 } from "@/features/auth/model/auth-form";
 import type { AuthAccountType, AuthRouteState } from "@/features/auth/model/auth-route";
 import {
+  createPasswordRecoveryPortalGuard,
+  type PasswordRecoveryPortalGuard,
+  type PasswordRecoveryPortalMountPermit,
+} from "@/features/auth/model/password-recovery-portal-guard";
+import {
   COACH_REGISTRATION_REQUIRED_MESSAGE,
   MULTIPORTAL_AUTH_ERROR_MESSAGE,
   SIGNUP_CONFIRMATION_INVALID_MESSAGE,
@@ -49,6 +54,7 @@ export type { CoachRegistrationOwner, PortalResolutionOwner, UserRegistrationOwn
 export function useMultiportalAuthBoundary(input: {
   initialRoute: AuthRouteState;
   currentRoute: AuthRouteState;
+  initialPasswordRecoveryActive?: boolean;
 }) {
   const routeRef = useRef(input.currentRoute);
   routeRef.current = input.currentRoute;
@@ -60,6 +66,15 @@ export function useMultiportalAuthBoundary(input: {
   const coachRegistrationOwnersRef = useRef(createCoachRegistrationOwnerController());
   const userRegistrationOwnersRef = useRef(createUserRegistrationOwnerController());
   const signupConfirmationOwnersRef = useRef(createPortalResolutionOwnerController());
+  const passwordRecoveryPortalGuardRef = useRef<PasswordRecoveryPortalGuard | null>(null);
+  if (!passwordRecoveryPortalGuardRef.current) {
+    passwordRecoveryPortalGuardRef.current = createPasswordRecoveryPortalGuard(
+      input.initialPasswordRecoveryActive,
+    );
+  }
+  const passwordRecoveryMountPermitsRef = useRef(
+    new WeakMap<PortalResolutionOwner, PasswordRecoveryPortalMountPermit>(),
+  );
   const currentUserIdRef = useRef<string | null>(null);
   const blockedCoachIdentityUserIdRef = useRef<string | null>(null);
   const coachIdentitySwitchRef = useRef<CoachIdentitySwitchPending | null>(null);
@@ -82,6 +97,7 @@ export function useMultiportalAuthBoundary(input: {
       coachRegistrationOwners.invalidate();
       userRegistrationOwners.invalidate();
       signupConfirmationOwners.invalidate();
+      passwordRecoveryPortalGuardRef.current?.release();
       settleCoachIdentitySwitch("stale");
       settleSignupConfirmation("stale");
     };
@@ -91,15 +107,22 @@ export function useMultiportalAuthBoundary(input: {
     blockedCoachIdentityUserIdRef.current = null;
     currentUserIdRef.current = expectedUserId;
     portalResolutionOwnersRef.current.acceptIdentity(expectedUserId);
-    return portalResolutionOwnersRef.current.begin(expectedUserId);
+    const owner = portalResolutionOwnersRef.current.begin(expectedUserId);
+    passwordRecoveryMountPermitsRef.current.set(
+      owner,
+      passwordRecoveryPortalGuardRef.current!.capturePortalMountPermit(),
+    );
+    return owner;
   }
 
   function endPortalResolution(owner: PortalResolutionOwner) {
     portalResolutionOwnersRef.current.end(owner);
+    passwordRecoveryMountPermitsRef.current.delete(owner);
   }
 
   function isPortalResolutionCurrent(owner: PortalResolutionOwner) {
-    return portalResolutionOwnersRef.current.isCurrent(owner);
+    return portalResolutionOwnersRef.current.isCurrent(owner)
+      && passwordRecoveryMountPermitsRef.current.get(owner)?.isCurrent() === true;
   }
 
   function beginCoachRegistrationSubmit(): CoachRegistrationOwner {
@@ -142,6 +165,29 @@ export function useMultiportalAuthBoundary(input: {
     initialResolutionPendingRef.current = false;
   }
 
+  function beginPasswordRecoveryPortalGuard() {
+    const becameActive = passwordRecoveryPortalGuardRef.current!.begin();
+    invalidatePortalOperations();
+    return becameActive;
+  }
+
+  function releasePasswordRecoveryPortalGuard() {
+    return passwordRecoveryPortalGuardRef.current!.release();
+  }
+
+  function isPasswordRecoveryPortalBlocked() {
+    return passwordRecoveryPortalGuardRef.current!.isBlocked();
+  }
+
+  function signOutPasswordRecoveryLocally() {
+    return passwordRecoveryPortalGuardRef.current!.runLocalSignOut(async () => {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return { error: null };
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      return { error };
+    });
+  }
+
   function settleCoachIdentitySwitch(result: PortalSignOutResult): boolean {
     const pending = coachIdentitySwitchRef.current;
     if (!pending || pending.settled) return false;
@@ -163,6 +209,9 @@ export function useMultiportalAuthBoundary(input: {
     currentUserId: string | null,
     deferForInteractiveAttempt = false,
   ): PortalSessionEventDecision {
+    if (event !== "SIGNED_OUT" && isPasswordRecoveryPortalBlocked()) {
+      return "defer";
+    }
     if (event === "SIGNED_OUT") {
       const pendingIdentitySwitch = coachIdentitySwitchRef.current;
       const pendingSignupConfirmation = signupConfirmationRef.current;
@@ -209,6 +258,7 @@ export function useMultiportalAuthBoundary(input: {
   }
 
   function resolveInitialSessionDecision(currentUserId: string | null): PortalSessionEventDecision {
+    if (isPasswordRecoveryPortalBlocked()) return "defer";
     if (!currentUserId) return "continue";
     currentUserIdRef.current = currentUserId;
     portalResolutionOwnersRef.current.acceptIdentity(currentUserId);
@@ -237,7 +287,7 @@ export function useMultiportalAuthBoundary(input: {
     if (
       !expectedUserId
       || owner.expectedUserId !== expectedUserId
-      || !owner.isCurrent()
+      || !isPortalResolutionCurrent(owner)
     ) {
       return { state: "stale", requestedPortal };
     }
@@ -436,6 +486,10 @@ export function useMultiportalAuthBoundary(input: {
     isUserRegistrationSubmitCurrent,
     invalidateUserRegistrationSubmits,
     invalidatePortalOperations,
+    beginPasswordRecoveryPortalGuard,
+    releasePasswordRecoveryPortalGuard,
+    isPasswordRecoveryPortalBlocked,
+    signOutPasswordRecoveryLocally,
     resolveSessionEventDecision,
     resolveInitialSessionDecision,
     completeInitialResolution,

@@ -5,7 +5,8 @@ export type PasswordRecoverySessionEvent =
   | "bootstrap"
   | "PASSWORD_RECOVERY"
   | "INITIAL_SESSION"
-  | "SIGNED_IN";
+  | "SIGNED_IN"
+  | "TOKEN_REFRESHED";
 
 export type PasswordRecoverySessionDecision = "none" | "pending" | "confirmed" | "invalid";
 
@@ -17,10 +18,10 @@ export function resolvePasswordRecoverySessionDecision(input: {
   hasCallbackEvidence: boolean;
   callbackMatchesSession: boolean;
   storedRecoveryStatus: "pending" | "confirmed" | null;
-  storedRecoveryUserId: string | null;
+  confirmedRecoveryUserId: string | null;
 }): PasswordRecoverySessionDecision {
   const sessionUserId = normalizePasswordRecoveryUserId(input.sessionUserId);
-  const storedRecoveryUserId = normalizePasswordRecoveryUserId(input.storedRecoveryUserId);
+  const confirmedRecoveryUserId = normalizePasswordRecoveryUserId(input.confirmedRecoveryUserId);
 
   if (input.routeState === "expired") return "invalid";
 
@@ -32,21 +33,25 @@ export function resolvePasswordRecoverySessionDecision(input: {
 
   if (input.event === "bootstrap" && input.sessionLookup === "error") return "pending";
 
-  if (input.storedRecoveryStatus === "confirmed") {
-    return sessionUserId && storedRecoveryUserId === sessionUserId
+  if (confirmedRecoveryUserId) {
+    return sessionUserId && confirmedRecoveryUserId === sessionUserId
       ? "confirmed"
       : "invalid";
   }
 
   if (input.hasCallbackEvidence) {
-    return sessionUserId && input.callbackMatchesSession ? "confirmed" : "invalid";
+    return sessionUserId && input.callbackMatchesSession ? "confirmed" : "pending";
   }
 
-  if (input.event === "bootstrap" || input.event === "INITIAL_SESSION" || input.event === "SIGNED_IN") {
-    return "invalid";
-  }
+  // A persisted "confirmed" marker deliberately carries no identity. After a reload it cannot
+  // authorize a recovery session by itself; only in-memory identity or callback evidence can.
+  if (input.storedRecoveryStatus === "confirmed") return "invalid";
 
   return "pending";
+}
+
+export function getPasswordRecoveryClearedHref(href: string): string {
+  return new URL(href).pathname;
 }
 
 export function hasPasswordRecoveryCallbackError(input: {
@@ -67,7 +72,7 @@ interface PasswordRecoveryAuthPort {
     error: unknown | null;
   }>;
   updateUser: (attributes: { password: string }) => Promise<{ error: unknown | null }>;
-  signOut: () => Promise<{ error: unknown | null }>;
+  signOut: (options: { scope: "local" }) => Promise<{ error: unknown | null }>;
 }
 
 export type PasswordRecoveryUpdateResult =
@@ -113,7 +118,7 @@ export async function executePasswordRecoveryUpdate(input: {
     return { kind: "stale" };
   }
 
-  const signOutResult = await input.auth.signOut();
+  const signOutResult = await input.auth.signOut({ scope: "local" });
   if (!input.isTerminalOperationCurrent()) return { kind: "stale" };
   if (signOutResult.error) return { kind: "sign-out-error", error: signOutResult.error };
 

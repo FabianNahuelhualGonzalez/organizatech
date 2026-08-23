@@ -166,6 +166,7 @@ import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode,
 import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
 import {
   executePasswordRecoveryUpdate,
+  getPasswordRecoveryClearedHref,
   hasPasswordRecoveryCallbackError,
   resolvePasswordRecoverySessionDecision,
 } from "@/lib/auth/password-recovery-session";
@@ -432,6 +433,7 @@ export function OrganizatechApp({
   const multiportalAuth = useMultiportalAuthBoundary({
     initialRoute: initialAuthRoute,
     currentRoute: authRouteController.route,
+    initialPasswordRecoveryActive: initialPasswordRecoveryRouteState === "active",
   });
   const [sessionName, setSessionName] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
@@ -802,7 +804,25 @@ export function OrganizatechApp({
       });
   }
 
+  function beginPasswordRecoveryPortalSession() {
+    const becameActive = multiportalAuth.beginPasswordRecoveryPortalGuard();
+    authenticatedSessionCoordinatorRef.current.reset();
+    replaceCoachPortalSession(null);
+    if (!becameActive) return false;
+
+    loginSubmitOwnerRef.current?.invalidate();
+    interactiveAuthAttemptRef.current = false;
+    resetUserScopedTransientState();
+    setSupabaseSession(null);
+    setSupabaseUser(null);
+    setSessionName("");
+    setDataMode("demo");
+    return true;
+  }
+
   function confirmPasswordRecoverySession(session: SupabaseSessionState["session"]) {
+    beginPasswordRecoveryPortalSession();
+    clearPasswordRecoveryUrl();
     const recoveryUserId = normalizePasswordRecoveryUserId(session?.user.id);
     if (!recoveryUserId) {
       invalidatePasswordRecoverySession();
@@ -812,13 +832,14 @@ export function OrganizatechApp({
     passwordRecoveryUserIdRef.current = recoveryUserId;
     passwordRecoveryStateRef.current = "confirmed";
     setIsPasswordRecoveryConfirmed(true);
-    confirmPasswordRecoveryFlow(recoveryUserId);
+    confirmPasswordRecoveryFlow();
     setIsAuthLoading(false);
     setAuthStatus(resolveInitialAuthStatusMessage("active"), "info");
     navigation.transition(resolvePasswordRecoveryRouteTransition("active"));
   }
 
   function invalidatePasswordRecoverySession() {
+    beginPasswordRecoveryPortalSession();
     passwordRecoveryUserIdRef.current = null;
     passwordRecoveryUpdateOwnerRef.current = null;
     passwordRecoveryStateRef.current = "invalid";
@@ -831,18 +852,109 @@ export function OrganizatechApp({
     navigation.transition(resolvePasswordRecoveryRouteTransition("expired"));
   }
 
+  function finalizePasswordRecoveryToLogin(
+    message: string,
+    statusTone: AuthStatusTone,
+    storageScope: BrowserStorageScope | null,
+  ) {
+    multiportalAuth.releasePasswordRecoveryPortalGuard();
+    clearPasswordRecoveryUrl();
+    const clearedSession = clearUserSessionState(message, storageScope, { statusTone });
+    if (clearedSession) return;
+
+    passwordRecoveryUserIdRef.current = null;
+    passwordRecoveryUpdateOwnerRef.current = null;
+    passwordRecoveryStateRef.current = "none";
+    setIsPasswordRecoveryConfirmed(false);
+    clearPasswordRecoveryFlow();
+    clearAuthForms();
+    setIsBusy(false);
+    setIsAuthLoading(false);
+    authRouteController.replace({ mode: "login", accountType: "usuario" });
+    navigation.reset("login");
+    setAuthStatus(message, statusTone);
+  }
+
+  async function closePasswordRecoverySessionLocally(
+    message: string,
+    statusTone: AuthStatusTone,
+    storageScope = activeBrowserStorageScopeRef.current,
+  ): Promise<boolean> {
+    clearPasswordRecoveryUrl();
+    const { error } = await multiportalAuth.signOutPasswordRecoveryLocally();
+    if (error) {
+      setIsBusy(false);
+      setIsAuthLoading(false);
+      setAuthStatus(translateAuthError(error), "error");
+      return false;
+    }
+    finalizePasswordRecoveryToLogin(message, statusTone, storageScope);
+    return true;
+  }
+
   function completePasswordRecoveryUpdate(storageScope: BrowserStorageScope | null): boolean {
     if (!passwordUpdateSuccessRef.current) return false;
 
     passwordUpdateSuccessRef.current = false;
     setNewPassword("");
     setNewPasswordConfirm("");
-    clearPasswordRecoveryUrl();
-    clearUserSessionState(
+    finalizePasswordRecoveryToLogin(
       "Contraseña actualizada correctamente. Ya puedes iniciar sesión.",
+      "success",
       storageScope,
-      { statusTone: "success" },
     );
+    return true;
+  }
+
+  function holdPasswordRecoverySessionEvent(
+    event: string,
+    session: SupabaseSessionState["session"],
+    recoveryCallbackAccessToken: string | null,
+  ): boolean {
+    if (event === "PASSWORD_RECOVERY") {
+      markPasswordRecoveryFlow();
+      beginPasswordRecoveryPortalSession();
+    }
+    if (!multiportalAuth.isPasswordRecoveryPortalBlocked() || event === "SIGNED_OUT") {
+      return false;
+    }
+
+    const recoveryState = getPasswordRecoveryRouteState();
+    const storedRecovery = loadPasswordRecoveryFlow();
+    const recoveryEvent =
+      event === "PASSWORD_RECOVERY"
+      || event === "INITIAL_SESSION"
+      || event === "SIGNED_IN"
+      || event === "TOKEN_REFRESHED"
+        ? event
+        : null;
+    const recoveryDecision = resolvePasswordRecoverySessionDecision({
+      routeState: recoveryState,
+      event: recoveryEvent,
+      sessionLookup: "success",
+      sessionUserId: session?.user.id ?? null,
+      hasCallbackEvidence: Boolean(recoveryCallbackAccessToken),
+      callbackMatchesSession: Boolean(
+        recoveryCallbackAccessToken
+        && session?.access_token === recoveryCallbackAccessToken
+      ),
+      storedRecoveryStatus: storedRecovery?.status ?? null,
+      confirmedRecoveryUserId: passwordRecoveryUserIdRef.current,
+    });
+    if (recoveryDecision === "invalid") {
+      invalidatePasswordRecoverySession();
+      return true;
+    }
+    if (recoveryDecision === "confirmed") {
+      confirmPasswordRecoverySession(session);
+      return true;
+    }
+
+    passwordRecoveryStateRef.current = "pending";
+    setIsPasswordRecoveryConfirmed(false);
+    setIsAuthLoading(true);
+    setAuthStatus(resolveInitialAuthStatusMessage("none"), "info");
+    navigation.transition(resolvePasswordRecoveryRouteTransition("active"));
     return true;
   }
 
@@ -867,6 +979,7 @@ export function OrganizatechApp({
         invalidatePasswordRecoverySession();
         return;
       } else if (recoveryState === "active") {
+        beginPasswordRecoveryPortalSession();
         markPasswordRecoveryFlow();
         passwordRecoveryUserIdRef.current = null;
         passwordRecoveryStateRef.current = "pending";
@@ -901,8 +1014,6 @@ export function OrganizatechApp({
           }
         }
 
-        applySessionState(authState);
-        requestToken = captureSessionDataRequestToken();
         const storedRecovery = loadPasswordRecoveryFlow();
         const recoveryDecision = resolvePasswordRecoverySessionDecision({
           routeState: recoveryState,
@@ -915,7 +1026,7 @@ export function OrganizatechApp({
             && authState.session?.access_token === recoveryCallbackAccessToken
           ),
           storedRecoveryStatus: storedRecovery?.status ?? null,
-          storedRecoveryUserId: storedRecovery?.userId ?? null,
+          confirmedRecoveryUserId: passwordRecoveryUserIdRef.current,
         });
         if (recoveryDecision === "invalid") {
           invalidatePasswordRecoverySession();
@@ -925,6 +1036,16 @@ export function OrganizatechApp({
           confirmPasswordRecoverySession(authState.session);
           return;
         }
+        if (recoveryDecision === "pending") {
+          beginPasswordRecoveryPortalSession();
+          passwordRecoveryStateRef.current = "pending";
+          setIsPasswordRecoveryConfirmed(false);
+          setIsAuthLoading(true);
+          return;
+        }
+
+        applySessionState(authState);
+        requestToken = captureSessionDataRequestToken();
         if (authState.session) {
           const portalDecision = multiportalAuth.resolveInitialSessionDecision(authState.session.user.id);
           if (
@@ -972,7 +1093,7 @@ export function OrganizatechApp({
               hasCallbackEvidence: Boolean(recoveryCallbackAccessToken),
               callbackMatchesSession: false,
               storedRecoveryStatus: storedRecovery?.status ?? null,
-              storedRecoveryUserId: storedRecovery?.userId ?? null,
+              confirmedRecoveryUserId: passwordRecoveryUserIdRef.current,
             });
             passwordRecoveryStateRef.current = recoveryDecision;
             setIsPasswordRecoveryConfirmed(false);
@@ -1077,6 +1198,9 @@ export function OrganizatechApp({
         }
         if (event !== "SIGNED_OUT") return;
       }
+      if (holdPasswordRecoverySessionEvent(event, session, recoveryCallbackAccessToken)) {
+        return;
+      }
       if (portalEventDecision === "defer") return;
       if (
         portalEventDecision === "hold_user_registration" ||
@@ -1134,6 +1258,14 @@ export function OrganizatechApp({
           completePasswordRecoveryUpdate(previousStorageScope);
           return;
         }
+        if (multiportalAuth.isPasswordRecoveryPortalBlocked()) {
+          finalizePasswordRecoveryToLogin(
+            "Sesión cerrada correctamente.",
+            "success",
+            previousStorageScope,
+          );
+          return;
+        }
         passwordRecoveryUpdateOwnerRef.current = null;
         clearUserSessionState("Sesión cerrada correctamente.", previousStorageScope, { statusTone: "success" });
         return;
@@ -1156,39 +1288,7 @@ export function OrganizatechApp({
           interactiveAuthAttemptRef.current = false;
           applySessionState(state);
         },
-        canContinueAfterSessionApplied: () => {
-          if (passwordRecoveryStateRef.current === "invalid" && event !== "PASSWORD_RECOVERY") {
-            return false;
-          }
-          const recoveryState = getPasswordRecoveryRouteState();
-          const storedRecovery = loadPasswordRecoveryFlow();
-          const recoveryEvent =
-            event === "PASSWORD_RECOVERY" || event === "INITIAL_SESSION" || event === "SIGNED_IN"
-              ? event
-              : null;
-          const recoveryDecision = resolvePasswordRecoverySessionDecision({
-            routeState: recoveryState,
-            event: recoveryEvent,
-            sessionLookup: "success",
-            sessionUserId: session?.user.id ?? null,
-            hasCallbackEvidence: Boolean(recoveryCallbackAccessToken),
-            callbackMatchesSession: Boolean(
-              recoveryCallbackAccessToken
-              && session?.access_token === recoveryCallbackAccessToken
-            ),
-            storedRecoveryStatus: storedRecovery?.status ?? null,
-            storedRecoveryUserId: storedRecovery?.userId ?? null,
-          });
-          if (recoveryDecision === "invalid") {
-            invalidatePasswordRecoverySession();
-            return false;
-          }
-          if (recoveryDecision === "confirmed") {
-            confirmPasswordRecoverySession(session);
-            return false;
-          }
-          return true;
-        },
+        canContinueAfterSessionApplied: () => !multiportalAuth.isPasswordRecoveryPortalBlocked(),
         continueSession: (state, intent) => {
           passwordRecoveryUpdateOwnerRef.current = null;
           return continueAuthenticatedSession(state, intent);
@@ -1200,6 +1300,12 @@ export function OrganizatechApp({
         setAuthStatus(nextState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage(), "info");
       }
     }).data.subscription;
+
+    const handlePasswordRecoveryHistoryExit = () => {
+      if (!multiportalAuth.isPasswordRecoveryPortalBlocked()) return;
+      void closePasswordRecoverySessionLocally("", "info");
+    };
+    window.addEventListener("popstate", handlePasswordRecoveryHistoryExit);
 
     if ("serviceWorker" in navigator) {
       const hostname = window.location.hostname;
@@ -1224,6 +1330,7 @@ export function OrganizatechApp({
     return () => {
       isMounted = false;
       authSubscription?.unsubscribe();
+      window.removeEventListener("popstate", handlePasswordRecoveryHistoryExit);
     };
     // This effect owns the auth subscription lifecycle and must run once. The
     // local orchestration callbacks are intentionally captured at bootstrap.
@@ -2323,11 +2430,7 @@ export function OrganizatechApp({
         auth: {
           getSession: () => supabase.auth.getSession(),
           updateUser: (attributes) => supabase.auth.updateUser(attributes),
-          signOut: async () => {
-            const { error: signOutError } = await supabase.auth.signOut();
-            if (signOutError) return { error: signOutError };
-            return { error: null };
-          },
+          signOut: () => multiportalAuth.signOutPasswordRecoveryLocally(),
         },
         isRecoveryCurrent: (userId) => (
           passwordRecoveryStateRef.current === "confirmed"
@@ -2351,10 +2454,23 @@ export function OrganizatechApp({
         return;
       }
       if (result.kind === "invalid-recovery") {
-        invalidatePasswordRecoverySession();
+        await closePasswordRecoverySessionLocally(
+          resolveInitialAuthStatusMessage("expired"),
+          "error",
+          recoveryStorageScope,
+        );
         return;
       }
-      if (result.kind === "update-error" || result.kind === "sign-out-error") {
+      if (result.kind === "update-error") {
+        passwordUpdateSuccessRef.current = false;
+        await closePasswordRecoverySessionLocally(
+          translateAuthError(result.error),
+          "error",
+          recoveryStorageScope,
+        );
+        return;
+      }
+      if (result.kind === "sign-out-error") {
         passwordUpdateSuccessRef.current = false;
         setAuthStatus(translateAuthError(result.error), "error");
         return;
@@ -2366,7 +2482,11 @@ export function OrganizatechApp({
       if (
         !isActiveWorkoutOperationCurrent(passwordRecoveryUpdateOwnerRef, operationOwner)
       ) return;
-      setAuthStatus(translateAuthError(error), "error");
+      await closePasswordRecoverySessionLocally(
+        translateAuthError(error),
+        "error",
+        recoveryStorageScope,
+      );
     } finally {
       const operationStillAuthorized = isActiveWorkoutOperationCurrent(
         passwordRecoveryUpdateOwnerRef,
@@ -3935,6 +4055,14 @@ export function OrganizatechApp({
     navigation.transition(createAuthNavigationReset(nextScreen, "auth-screen-switch"));
   }
 
+  async function handleRequestNewRecoveryLink() {
+    if (multiportalAuth.isPasswordRecoveryPortalBlocked()) {
+      const closed = await closePasswordRecoverySessionLocally("", "info");
+      if (!closed) return;
+    }
+    switchAuthScreen("recuperar-password");
+  }
+
   function switchAuthAccountType(accountType: AuthAccountType) {
     if (screen !== "login" && screen !== "registro") return;
     setAuthFieldErrors({});
@@ -3948,13 +4076,13 @@ export function OrganizatechApp({
       <main className="app-shell">
         <RecoveryExpiredScreen
           message={statusMessage}
-          onRequestNewLink={() => switchAuthScreen("recuperar-password")}
+          onRequestNewLink={handleRequestNewRecoveryLink}
         />
       </main>
     );
   }
 
-  if (screen === "nueva-password" && isPasswordRecoveryConfirmed) {
+  if (multiportalAuth.isPasswordRecoveryPortalBlocked() && isPasswordRecoveryConfirmed) {
     return (
       <main className="app-shell">
         <NewPasswordScreen
@@ -3969,6 +4097,14 @@ export function OrganizatechApp({
           onSubmit={handleUpdatePassword}
           onFieldErrorClear={clearAuthFieldError}
         />
+      </main>
+    );
+  }
+
+  if (multiportalAuth.isPasswordRecoveryPortalBlocked()) {
+    return (
+      <main className="app-shell">
+        <AuthLoadingScreen />
       </main>
     );
   }
@@ -4886,13 +5022,7 @@ function clearPasswordRecoveryFlow() {
 
 function clearPasswordRecoveryUrl() {
   if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  url.searchParams.delete("flow");
-  url.searchParams.delete("type");
-  url.searchParams.delete("error");
-  url.searchParams.delete("error_code");
-  url.searchParams.delete("error_description");
-  window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  window.history.replaceState({}, "", getPasswordRecoveryClearedHref(window.location.href));
 }
 
 function clearSignupConfirmationUrl() {
