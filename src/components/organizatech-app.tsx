@@ -88,6 +88,11 @@ import {
   shouldMountAuthorizedUserPortal,
   type UserPortalAuthorizationProof,
 } from "@/features/auth/model/user-portal-authorization-proof";
+import {
+  FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
+  resolveUserPortalSessionRevalidation,
+  type UserPortalSessionRevalidation,
+} from "@/features/auth/model/user-portal-session-revalidation";
 import { CoachPortalBoundary } from "@/features/coach-portal/components/coach-portal";
 import {
   createCoachPortalSession,
@@ -1087,6 +1092,7 @@ export function OrganizatechApp({
                 requestedPortal,
                 "restore-active-flow",
                 resolutionOwner,
+                FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
               );
             } finally {
               multiportalAuth.endPortalResolution(resolutionOwner);
@@ -1240,9 +1246,30 @@ export function OrganizatechApp({
         }
 
         const requestedPortal = portalEventDecision === "authorize_coach" ? "coach" : "usuario";
+        const userPortalSessionRevalidation = resolveUserPortalSessionRevalidation({
+          event,
+          authorizationProof: userPortalAuthorizationProofRef.current,
+          nextSessionUserId: nextState.session?.user.id,
+          nextAuthenticatedUserId: resolveEffectiveAuthenticatedUser(
+            nextState.session,
+            nextState.user,
+          )?.id,
+          requestedPortal,
+          isInteractiveAuthAttempt: interactiveAuthAttemptRef.current,
+          isPasswordRecoveryBlocked: multiportalAuth.isPasswordRecoveryPortalBlocked(),
+          isLogoutInFlight: logoutInFlightRef.current,
+          hasCoachPortalSession: Boolean(coachPortalSessionRef.current),
+        });
+        replaceUserPortalAuthorizationProof(userPortalSessionRevalidation.authorizationProof);
         const resolutionOwner = multiportalAuth.beginPortalResolution(session!.user.id);
         queueMicrotask(() => {
-          void authorizeAndContinuePortalSession(nextState, requestedPortal, "dashboard", resolutionOwner)
+          void authorizeAndContinuePortalSession(
+            nextState,
+            requestedPortal,
+            "dashboard",
+            resolutionOwner,
+            userPortalSessionRevalidation,
+          )
             .finally(() => {
               multiportalAuth.endPortalResolution(resolutionOwner);
             });
@@ -1647,8 +1674,8 @@ export function OrganizatechApp({
     requestedPortal: AuthAccountType,
     intent: AuthenticatedSessionIntent,
     resolutionOwner: PortalResolutionOwner,
+    sessionRevalidation: UserPortalSessionRevalidation,
   ): Promise<AuthorizedPortalAccess | null> {
-    replaceUserPortalAuthorizationProof(null);
     const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);
     if (access.state === "stale" || !multiportalAuth.isPortalResolutionCurrent(resolutionOwner)) {
       return null;
@@ -1658,6 +1685,7 @@ export function OrganizatechApp({
       || access.state === "coach_registration_required"
       || access.state === "error"
     ) {
+      replaceUserPortalAuthorizationProof(null);
       const rejectionMessage = multiportalAuth.settlePortalSignOutMessage(access.message);
       setIsAuthLoading(false);
       if (rejectionMessage) setAuthStatus(rejectionMessage, "error");
@@ -1669,6 +1697,7 @@ export function OrganizatechApp({
       authState,
       intent,
       () => multiportalAuth.isPortalResolutionCurrent(resolutionOwner),
+      sessionRevalidation,
     );
     return access;
   }
@@ -1678,6 +1707,7 @@ export function OrganizatechApp({
     authState: SupabaseSessionState,
     intent: AuthenticatedSessionIntent,
     isAuthorizationCurrent: () => boolean,
+    sessionRevalidation: UserPortalSessionRevalidation,
   ): Promise<void> {
     switch (access.state) {
       case "user_authorized": {
@@ -1686,16 +1716,19 @@ export function OrganizatechApp({
           sessionUserId: authState.session?.user.id,
           authenticatedUserId: authState.user?.id,
         });
-        if (!authorizationProof || !isAuthorizationCurrent()) {
+        if (!authorizationProof) {
           replaceUserPortalAuthorizationProof(null);
-          if (!authorizationProof) {
-            authenticatedSessionCoordinatorRef.current.reset();
-            setIsAuthLoading(false);
-            setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
-          }
+          authenticatedSessionCoordinatorRef.current.reset();
+          setIsAuthLoading(false);
+          setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
           return;
         }
+        if (!isAuthorizationCurrent()) return;
         replaceCoachPortalSession(null);
+        if (sessionRevalidation.kind === "silent_revalidation") {
+          replaceUserPortalAuthorizationProof(authorizationProof);
+          return;
+        }
         const continuation = await continueAuthenticatedSession(authState, intent);
         if (continuation.kind === "stale" || !isAuthorizationCurrent()) return;
         replaceUserPortalAuthorizationProof(authorizationProof);
@@ -2264,7 +2297,7 @@ export function OrganizatechApp({
           coach: registration.coach,
         }, registration.authState, "dashboard", () => (
           multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner!)
-        ));
+        ), FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION);
         return;
       }
 
@@ -2304,7 +2337,7 @@ export function OrganizatechApp({
           userId: registration.userId,
         }, registration.authState, "dashboard", () => (
           multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner!)
-        ));
+        ), FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION);
         return;
       }
 
@@ -2343,6 +2376,7 @@ export function OrganizatechApp({
         requestedPortal,
         "dashboard",
         portalResolutionOwner,
+        FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
       );
       if (access) appliedIdentityToken = captureSessionDataRequestToken();
     } catch (error) {

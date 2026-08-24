@@ -7,6 +7,10 @@ import {
   shouldMountAuthorizedUserPortal,
   type UserPortalAuthorizationProof,
 } from "@/features/auth/model/user-portal-authorization-proof";
+import {
+  FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
+  resolveUserPortalSessionRevalidation,
+} from "@/features/auth/model/user-portal-session-revalidation";
 import type { AuthorizedPortalAccess } from "@/features/auth/model/multiportal-auth-controller";
 
 const USER_ID = "user-a";
@@ -40,6 +44,24 @@ function mountInput(authorizationProof: UserPortalAuthorizationProof | null) {
     isAuthLoading: false,
     isPasswordRecoveryBlocked: false,
     isRenderableScreen: true,
+  };
+}
+
+function revalidationInput(
+  authorizationProof: UserPortalAuthorizationProof | null,
+  overrides: Partial<Parameters<typeof resolveUserPortalSessionRevalidation>[0]> = {},
+) {
+  return {
+    event: "SIGNED_IN",
+    authorizationProof,
+    nextSessionUserId: USER_ID,
+    nextAuthenticatedUserId: USER_ID,
+    requestedPortal: "usuario" as const,
+    isInteractiveAuthAttempt: false,
+    isPasswordRecoveryBlocked: false,
+    isLogoutInFlight: false,
+    hasCoachPortalSession: false,
+    ...overrides,
   };
 }
 
@@ -138,4 +160,106 @@ test("metadata, email y objetos sin la marca privada no conceden membresía", ()
     sessionUserId: USER_ID,
     authenticatedUserId: USER_ID,
   }), false);
+});
+
+test("SIGNED_IN, INITIAL_SESSION y TOKEN_REFRESHED de la misma identidad conservan la prueba", () => {
+  const proof = createUserPortalAuthorizationProof({
+    access: USER_ACCESS,
+    sessionUserId: USER_ID,
+    authenticatedUserId: USER_ID,
+  });
+  assert.ok(proof);
+
+  for (const event of ["SIGNED_IN", "INITIAL_SESSION", "TOKEN_REFRESHED"] as const) {
+    const decision = resolveUserPortalSessionRevalidation(revalidationInput(proof, { event }));
+    assert.equal(decision.kind, "silent_revalidation", event);
+    assert.equal(decision.authorizationProof, proof, `${event}: conserva la capacidad efímera`);
+  }
+});
+
+test("eventos redundantes y en ráfaga conservan exactamente la misma capacidad en memoria", () => {
+  const proof = createUserPortalAuthorizationProof({
+    access: USER_ACCESS,
+    sessionUserId: USER_ID,
+    authenticatedUserId: USER_ID,
+  });
+  assert.ok(proof);
+
+  const events = [
+    "SIGNED_IN",
+    "SIGNED_IN",
+    "INITIAL_SESSION",
+    "TOKEN_REFRESHED",
+    "SIGNED_IN",
+  ] as const;
+  for (const event of events) {
+    const decision = resolveUserPortalSessionRevalidation(revalidationInput(proof, { event }));
+    assert.equal(decision.kind, "silent_revalidation");
+    assert.equal(decision.authorizationProof, proof);
+  }
+});
+
+test("resultado autoritativo válido renueva la prueba e inválido bloquea el portal", () => {
+  const currentProof = createUserPortalAuthorizationProof({
+    access: USER_ACCESS,
+    sessionUserId: USER_ID,
+    authenticatedUserId: USER_ID,
+  });
+  assert.ok(currentProof);
+  assert.equal(
+    resolveUserPortalSessionRevalidation(revalidationInput(currentProof)).authorizationProof,
+    currentProof,
+    "la prueba sigue montada mientras la resolución está pendiente",
+  );
+
+  const renewedProof = createUserPortalAuthorizationProof({
+    access: USER_ACCESS,
+    sessionUserId: USER_ID,
+    authenticatedUserId: USER_ID,
+  });
+  assert.ok(renewedProof);
+  assert.equal(shouldMountAuthorizedUserPortal(mountInput(renewedProof)), true);
+
+  const rejectedProof = createUserPortalAuthorizationProof({
+    access: COACH_ACCESS,
+    sessionUserId: USER_ID,
+    authenticatedUserId: USER_ID,
+  });
+  assert.equal(rejectedProof, null);
+  assert.equal(shouldMountAuthorizedUserPortal(mountInput(rejectedProof)), false);
+});
+
+test("bootstrap, identidad nueva y condiciones de seguridad fallan cerradas", () => {
+  const proof = createUserPortalAuthorizationProof({
+    access: USER_ACCESS,
+    sessionUserId: USER_ID,
+    authenticatedUserId: USER_ID,
+  });
+  assert.ok(proof);
+
+  const failClosedCases: Array<{
+    name: string;
+    input: Parameters<typeof resolveUserPortalSessionRevalidation>[0];
+  }> = [
+    { name: "primer bootstrap sin prueba", input: revalidationInput(null, { event: "INITIAL_SESSION" }) },
+    { name: "sesión ausente", input: revalidationInput(proof, { nextSessionUserId: null }) },
+    { name: "usuario efectivo ausente", input: revalidationInput(proof, { nextAuthenticatedUserId: null }) },
+    { name: "A→B", input: revalidationInput(proof, { nextSessionUserId: "user-b", nextAuthenticatedUserId: "user-b" }) },
+    { name: "mismatch sesión/usuario", input: revalidationInput(proof, { nextAuthenticatedUserId: "user-b" }) },
+    { name: "recovery", input: revalidationInput(proof, { isPasswordRecoveryBlocked: true }) },
+    { name: "logout", input: revalidationInput(proof, { event: "SIGNED_OUT", isLogoutInFlight: true }) },
+    { name: "Coach activo", input: revalidationInput(proof, { hasCoachPortalSession: true }) },
+    { name: "resolución Coach solicitada", input: revalidationInput(proof, { requestedPortal: "coach" }) },
+    { name: "login explícito", input: revalidationInput(proof, { isInteractiveAuthAttempt: true }) },
+    { name: "evento no permitido", input: revalidationInput(proof, { event: "USER_UPDATED" }) },
+  ];
+
+  assert.equal(failClosedCases.length, 11);
+  for (const candidate of failClosedCases) {
+    assert.equal(
+      resolveUserPortalSessionRevalidation(candidate.input),
+      FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
+      candidate.name,
+    );
+  }
 });

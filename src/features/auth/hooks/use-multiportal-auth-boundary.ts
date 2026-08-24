@@ -238,7 +238,9 @@ export function useMultiportalAuthBoundary(input: {
         initialResolutionPendingRef.current = false;
       }
     }
-    const isSessionEstablishingEvent = event === "SIGNED_IN" || event === "INITIAL_SESSION";
+    const isSessionEstablishingEvent = event === "SIGNED_IN"
+      || event === "INITIAL_SESSION"
+      || event === "TOKEN_REFRESHED";
     if (!currentUserId || !isSessionEstablishingEvent) return "continue";
     if (
       deferForInteractiveAttempt

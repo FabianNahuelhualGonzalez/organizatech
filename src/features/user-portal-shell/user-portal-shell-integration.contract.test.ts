@@ -19,7 +19,9 @@ const BASE_SHA = "8b98ac9774fd7512191551234ebf4ee61fe36181";
 
 const paths = {
   root: "src/components/organizatech-app.tsx",
+  authBoundary: "src/features/auth/hooks/use-multiportal-auth-boundary.ts",
   authProof: "src/features/auth/model/user-portal-authorization-proof.ts",
+  sessionRevalidation: "src/features/auth/model/user-portal-session-revalidation.ts",
   model: "src/features/user-portal-shell/model/user-portal-navigation.ts",
   logoutSingleFlight: "src/features/user-portal-shell/model/user-portal-logout-single-flight.ts",
   shell: "src/features/user-portal-shell/components/user-portal-shell.tsx",
@@ -348,6 +350,15 @@ function assertExclusiveShellReturns(source: string) {
 }
 
 const AUTHORIZATION_PROOF_WIRING_BARRIER = "[UI-NAV-01.authorization-proof-wiring]";
+const SILENT_REVALIDATION_POLICY_BARRIER = "[UI-NAV-01S.same-identity-policy]";
+const SILENT_REVALIDATION_WIRING_BARRIER = "[UI-NAV-01S.silent-wiring]";
+const SILENT_REVALIDATION_INVALIDATION_BARRIER = "[UI-NAV-01S.immediate-invalidation]";
+const SILENT_REVALIDATION_RESULT_BARRIER = "[UI-NAV-01S.authoritative-result]";
+const SILENT_REVALIDATION_VISUAL_BARRIER = "[UI-NAV-01S.visual-continuity]";
+const SILENT_REVALIDATION_STALE_BARRIER = "[UI-NAV-01S.stale-callback]";
+const SILENT_REVALIDATION_TOKEN_BARRIER = "[UI-NAV-01S.token-refresh-continuity]";
+const TOKEN_REFRESHED_REACHABILITY_BARRIER =
+  "[UI-NAV-01S.token-refresh-authoritative-reachability]";
 
 function flattenLogicalAnd(expression: ts.Expression): ts.Expression[] {
   const candidate = unwrapExpression(expression);
@@ -358,6 +369,20 @@ function flattenLogicalAnd(expression: ts.Expression): ts.Expression[] {
     return [
       ...flattenLogicalAnd(candidate.left),
       ...flattenLogicalAnd(candidate.right),
+    ];
+  }
+  return [candidate];
+}
+
+function flattenLogicalOr(expression: ts.Expression): ts.Expression[] {
+  const candidate = unwrapExpression(expression);
+  if (
+    ts.isBinaryExpression(candidate)
+    && candidate.operatorToken.kind === ts.SyntaxKind.BarBarToken
+  ) {
+    return [
+      ...flattenLogicalOr(candidate.left),
+      ...flattenLogicalOr(candidate.right),
     ];
   }
   return [candidate];
@@ -682,6 +707,751 @@ function assertAuthorizationProofWiring(source: string) {
   );
 }
 
+function assertTokenRefreshedAuthoritativeReachability(sources: Sources) {
+  const failure = (message: string) => (
+    TOKEN_REFRESHED_REACHABILITY_BARRIER + " " + message
+  );
+  const decision = findNamedFunction(
+    paths.authBoundary,
+    sources.authBoundary,
+    "resolveSessionEventDecision",
+  );
+  const decisionBody = decision.declaration.body;
+  assert.ok(decisionBody, failure("decisión con cuerpo"));
+  assert.equal(decision.declaration.parameters.length, 3, failure("señales del evento exactas"));
+  const parameterNames = decision.declaration.parameters.map((parameter) => {
+    assert.ok(ts.isIdentifier(parameter.name), failure("parámetros identificables"));
+    return parameter.name.text;
+  });
+  const [eventName, currentUserIdName, interactiveAttemptName] = parameterNames;
+
+  const exactTerms = (
+    expression: ts.Expression,
+    expected: readonly string[],
+    flatten: (candidate: ts.Expression) => ts.Expression[],
+  ) => {
+    const actual = flatten(expression)
+      .map((term) => compact(term.getText(decision.sourceFile)))
+      .sort();
+    const sortedExpected = [...expected].sort();
+    return actual.length === sortedExpected.length
+      && actual.every((term, index) => term === sortedExpected[index]);
+  };
+  const readSingleStringReturn = (
+    statement: ts.Statement,
+    expected: string,
+    description: string,
+  ) => {
+    const statements = ts.isBlock(statement) ? [...statement.statements] : [statement];
+    assert.equal(statements.length, 1, failure(description + " tiene salida única"));
+    const candidate = statements[0];
+    assert.ok(
+      ts.isReturnStatement(candidate) && candidate.expression,
+      failure(description + " retorna decisión"),
+    );
+    const expression = unwrapExpression(candidate.expression);
+    assert.ok(ts.isStringLiteralLike(expression), failure(description + " retorna literal"));
+    assert.equal(expression.text, expected, failure(description + " retorna " + expected));
+    return candidate;
+  };
+
+  const directVariables = decisionBody.statements.flatMap((statement) => (
+    ts.isVariableStatement(statement) ? [...statement.declarationList.declarations] : []
+  ));
+  const expectedEvents = [
+    eventName + '==="INITIAL_SESSION"',
+    eventName + '==="SIGNED_IN"',
+    eventName + '==="TOKEN_REFRESHED"',
+  ].sort();
+  const eventBindings = directVariables.filter((declaration) => {
+    if (!ts.isIdentifier(declaration.name) || !declaration.initializer) return false;
+    const terms = flattenLogicalOr(declaration.initializer)
+      .map((term) => compact(term.getText(decision.sourceFile)))
+      .sort();
+    return terms.length === expectedEvents.length
+      && terms.every((term, index) => term === expectedEvents[index]);
+  });
+  assert.equal(eventBindings.length, 1, failure("tres eventos comparten binding autoritativo"));
+  const eventBinding = eventBindings[0];
+  const eventBindingName = (eventBinding.name as ts.Identifier).text;
+  const topLevelIfs = decisionBody.statements.filter(
+    (statement): statement is ts.IfStatement => ts.isIfStatement(statement),
+  );
+
+  const recoveryBranches = topLevelIfs.filter((statement) => exactTerms(
+    statement.expression,
+    [eventName + '!=="SIGNED_OUT"', "isPasswordRecoveryPortalBlocked()"],
+    flattenLogicalAnd,
+  ));
+  assert.equal(recoveryBranches.length, 1, failure("recovery bloquea salvo SIGNED_OUT"));
+  readSingleStringReturn(recoveryBranches[0].thenStatement, "defer", "recovery");
+
+  const acceptIdentityCalls = findCalls(decision.declaration, (call) => (
+    compact(call.expression.getText(decision.sourceFile))
+      === "portalResolutionOwnersRef.current.acceptIdentity"
+  ));
+  assert.equal(acceptIdentityCalls.length, 1, failure("acceptIdentity único"));
+  assert.equal(
+    compact(acceptIdentityCalls[0].arguments[0]?.getText(decision.sourceFile) ?? ""),
+    currentUserIdName,
+    failure("acceptIdentity usa identidad entrante"),
+  );
+  assert.ok(
+    acceptIdentityCalls[0].pos < eventBinding.pos,
+    failure("A→B invalida owners A antes de autorizar B"),
+  );
+
+  const continueBranches = topLevelIfs.filter((statement) => exactTerms(
+    statement.expression,
+    ["!" + currentUserIdName, "!" + eventBindingName],
+    flattenLogicalOr,
+  ));
+  assert.equal(continueBranches.length, 1, failure("continue fail-closed único"));
+  const continueReturn = readSingleStringReturn(
+    continueBranches[0].thenStatement,
+    "continue",
+    "continue fail-closed",
+  );
+  const continueReturns: ts.ReturnStatement[] = [];
+  const visitContinueReturns = (node: ts.Node) => {
+    if (
+      ts.isReturnStatement(node)
+      && node.expression
+      && ts.isStringLiteralLike(unwrapExpression(node.expression))
+      && (unwrapExpression(node.expression) as ts.StringLiteralLike).text === "continue"
+    ) continueReturns.push(node);
+    ts.forEachChild(node, visitContinueReturns);
+  };
+  visitContinueReturns(decision.declaration);
+  assert.deepEqual(continueReturns, [continueReturn], failure("TOKEN_REFRESHED no tiene bypass continue"));
+
+  const pendingBranches = topLevelIfs.filter((statement) => exactTerms(
+    statement.expression,
+    [
+      interactiveAttemptName,
+      "initialResolutionPendingRef.current",
+      "portalResolutionOwnersRef.current.hasPending()",
+    ],
+    flattenLogicalOr,
+  ));
+  assert.equal(pendingBranches.length, 1, failure("defer sólo por interacción o resolución pendiente"));
+  readSingleStringReturn(pendingBranches[0].thenStatement, "defer", "resolución pendiente");
+
+  const finalReturns = decisionBody.statements.filter(
+    (statement): statement is ts.ReturnStatement => ts.isReturnStatement(statement),
+  );
+  assert.equal(finalReturns.length, 1, failure("salida autoritativa terminal única"));
+  assert.ok(finalReturns[0].expression, failure("salida autoritativa explícita"));
+  const authorizationDecision = unwrapExpression(finalReturns[0].expression);
+  assert.ok(ts.isConditionalExpression(authorizationDecision), failure("separación Usuario/Coach"));
+  assert.equal(
+    compact(authorizationDecision.whenTrue.getText(decision.sourceFile)),
+    '"authorize_coach"',
+    failure("Coach conserva authorize_coach"),
+  );
+  assert.equal(
+    compact(authorizationDecision.whenFalse.getText(decision.sourceFile)),
+    '"authorize_user"',
+    failure("Usuario alcanza authorize_user"),
+  );
+
+  const beginResolution = findNamedFunction(
+    paths.authBoundary,
+    sources.authBoundary,
+    "beginPortalResolution",
+  );
+  const beginBody = beginResolution.declaration.body;
+  assert.ok(beginBody, failure("beginPortalResolution con cuerpo"));
+  const expectedUserIdParameter = beginResolution.declaration.parameters[0]?.name;
+  assert.ok(
+    expectedUserIdParameter && ts.isIdentifier(expectedUserIdParameter),
+    failure("owner recibe identidad esperada"),
+  );
+  const expectedUserIdName = (expectedUserIdParameter as ts.Identifier).text;
+  const ownerCalls = findCalls(beginResolution.declaration, (call) => (
+    compact(call.expression.getText(beginResolution.sourceFile))
+      === "portalResolutionOwnersRef.current.begin"
+  ));
+  assert.equal(ownerCalls.length, 1, failure("owner creado una vez"));
+  assert.equal(
+    compact(ownerCalls[0].arguments[0]?.getText(beginResolution.sourceFile) ?? ""),
+    expectedUserIdName,
+    failure("owner captura identidad esperada"),
+  );
+  assert.ok(
+    ts.isVariableDeclaration(ownerCalls[0].parent) && ts.isIdentifier(ownerCalls[0].parent.name),
+    failure("owner local identificable"),
+  );
+  const ownerName = (ownerCalls[0].parent as ts.VariableDeclaration & {
+    name: ts.Identifier;
+  }).name.text;
+  const permitWrites = findCalls(beginResolution.declaration, (call) => (
+    compact(call.expression.getText(beginResolution.sourceFile))
+      === "passwordRecoveryMountPermitsRef.current.set"
+  ));
+  assert.equal(permitWrites.length, 1, failure("permit creado una vez"));
+  assert.equal(
+    compact(permitWrites[0].arguments[0]?.getText(beginResolution.sourceFile) ?? ""),
+    ownerName,
+    failure("permit pertenece al owner"),
+  );
+  const permitCapture = unwrapExpression(permitWrites[0].arguments[1]);
+  assert.ok(
+    ts.isCallExpression(permitCapture)
+    && compact(permitCapture.expression.getText(beginResolution.sourceFile))
+      === "passwordRecoveryPortalGuardRef.current!.capturePortalMountPermit",
+    failure("permit captura recovery vigente"),
+  );
+  const ownerReturns = beginBody.statements.filter(
+    (statement): statement is ts.ReturnStatement => ts.isReturnStatement(statement),
+  );
+  assert.equal(ownerReturns.length, 1, failure("owner retorna una vez"));
+  assert.ok(ownerReturns[0].expression, failure("owner retornado"));
+  assert.equal(
+    compact(ownerReturns[0].expression.getText(beginResolution.sourceFile)),
+    ownerName,
+    failure("retorna owner con permit"),
+  );
+  assert.ok(
+    ownerCalls[0].pos < permitWrites[0].pos && permitWrites[0].pos < ownerReturns[0].pos,
+    failure("owner y permit existen antes de continuar"),
+  );
+
+  const rootSourceFile = parseSource(paths.root, sources.root);
+  const root = findOrganizatechApp(rootSourceFile, TOKEN_REFRESHED_REACHABILITY_BARRIER);
+  const listeners = findCalls(root, (call) => (
+    compact(call.expression.getText(rootSourceFile)).endsWith(".onAuthStateChange")
+  ));
+  assert.equal(listeners.length, 1, failure("listener Auth único"));
+  const listener = unwrapExpression(listeners[0].arguments[0]);
+  assert.ok(
+    ts.isArrowFunction(listener) || ts.isFunctionExpression(listener),
+    failure("callback Auth identificable"),
+  );
+  const decisionCalls = findCalls(listener, (call) => (
+    compact(call.expression.getText(rootSourceFile))
+      === "multiportalAuth.resolveSessionEventDecision"
+  ));
+  assert.equal(decisionCalls.length, 1, failure("clasificación consumida una vez"));
+  assert.deepEqual(
+    decisionCalls[0].arguments.map((argument) => compact(argument.getText(rootSourceFile))),
+    ["event", "session?.user.id??null", "interactiveAuthAttemptRef.current"],
+    failure("clasificación usa evento, identidad e interacción reales"),
+  );
+  assert.ok(
+    ts.isVariableDeclaration(decisionCalls[0].parent)
+    && ts.isIdentifier(decisionCalls[0].parent.name),
+    failure("decisión root identificable"),
+  );
+  const rootDecisionName = (decisionCalls[0].parent as ts.VariableDeclaration & {
+    name: ts.Identifier;
+  }).name.text;
+  const policyCalls = findCalls(listener, (call) => (
+    compact(call.expression.getText(rootSourceFile)) === "resolveUserPortalSessionRevalidation"
+  ));
+  assert.equal(policyCalls.length, 1, failure("política silenciosa alcanzable"));
+  let authorizationBranch: ts.Node | undefined = policyCalls[0].parent;
+  while (
+    authorizationBranch
+    && !(
+      ts.isIfStatement(authorizationBranch)
+      && compact(authorizationBranch.expression.getText(rootSourceFile))
+        .includes(rootDecisionName + '==="authorize_user"')
+    )
+  ) authorizationBranch = authorizationBranch.parent;
+  assert.ok(
+    authorizationBranch && ts.isIfStatement(authorizationBranch),
+    failure("authorize_user alcanza política silenciosa"),
+  );
+  const policyDeclaration = policyCalls[0].parent;
+  assert.ok(
+    ts.isVariableDeclaration(policyDeclaration) && ts.isIdentifier(policyDeclaration.name),
+    failure("decisión silenciosa identificable"),
+  );
+  const policyDecisionName = (policyDeclaration as ts.VariableDeclaration & {
+    name: ts.Identifier;
+  }).name.text;
+  const beginCalls = findCalls(authorizationBranch.thenStatement, (call) => (
+    compact(call.expression.getText(rootSourceFile)) === "multiportalAuth.beginPortalResolution"
+  ));
+  assert.equal(beginCalls.length, 1, failure("owner root único"));
+  assert.ok(
+    ts.isVariableDeclaration(beginCalls[0].parent) && ts.isIdentifier(beginCalls[0].parent.name),
+    failure("owner root identificable"),
+  );
+  const rootOwnerName = (beginCalls[0].parent as ts.VariableDeclaration & {
+    name: ts.Identifier;
+  }).name.text;
+  const queueCalls = findCalls(authorizationBranch.thenStatement, (call) => (
+    compact(call.expression.getText(rootSourceFile)) === "queueMicrotask"
+  ));
+  assert.equal(queueCalls.length, 1, failure("continuación diferida única"));
+  const authorizationCalls = findCalls(queueCalls[0], (call) => (
+    compact(call.expression.getText(rootSourceFile)) === "authorizeAndContinuePortalSession"
+  ));
+  assert.equal(authorizationCalls.length, 1, failure("microtask alcanza autorización"));
+  assert.equal(
+    compact(authorizationCalls[0].arguments[3]?.getText(rootSourceFile) ?? ""),
+    rootOwnerName,
+    failure("continuación recibe owner vigente"),
+  );
+  assert.equal(
+    compact(authorizationCalls[0].arguments[4]?.getText(rootSourceFile) ?? ""),
+    policyDecisionName,
+    failure("continuación recibe decisión silenciosa"),
+  );
+  assert.ok(
+    decisionCalls[0].pos < policyCalls[0].pos
+    && policyCalls[0].pos < beginCalls[0].pos
+    && beginCalls[0].pos < queueCalls[0].pos,
+    failure("orden clasificación→política→owner→continuación"),
+  );
+
+  const authorization = findNamedFunction(
+    paths.root,
+    sources.root,
+    "authorizeAndContinuePortalSession",
+  );
+  const accessCalls = findCalls(authorization.declaration, (call) => (
+    compact(call.expression.getText(authorization.sourceFile))
+      === "multiportalAuth.resolvePortalAccess"
+  ));
+  assert.equal(accessCalls.length, 1, failure("resolvePortalAccess no se omite"));
+  assert.ok(ts.isAwaitExpression(accessCalls[0].parent), failure("resolvePortalAccess se espera"));
+}
+
+function assertSilentSessionRevalidationBoundary(sources: Sources) {
+  const policy = findNamedFunction(
+    paths.sessionRevalidation,
+    sources.sessionRevalidation,
+    "resolveUserPortalSessionRevalidation",
+  );
+  assert.ok(policy.declaration.body, `${SILENT_REVALIDATION_POLICY_BARRIER} política con cuerpo`);
+  assert.equal(
+    policy.declaration.parameters.length,
+    1,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} input único y explícito`,
+  );
+  const inputParameter = policy.declaration.parameters[0].name;
+  assert.ok(
+    ts.isIdentifier(inputParameter),
+    `${SILENT_REVALIDATION_POLICY_BARRIER} input identificable`,
+  );
+  const inputName = inputParameter.text;
+  const policyVariables = policy.declaration.body.statements.flatMap((statement) => (
+    ts.isVariableStatement(statement) ? [...statement.declarationList.declarations] : []
+  ));
+  const proofBindings = policyVariables.filter((declaration) => (
+    ts.isIdentifier(declaration.name)
+    && declaration.initializer
+    && compact(declaration.initializer.getText(policy.sourceFile)) === `${inputName}.authorizationProof`
+  ));
+  assert.equal(
+    proofBindings.length,
+    1,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} prueba efímera leída una vez`,
+  );
+  const proofName = (proofBindings[0].name as ts.Identifier).text;
+
+  const expectedEventTerms = [
+    `${inputName}.event==="INITIAL_SESSION"`,
+    `${inputName}.event==="SIGNED_IN"`,
+    `${inputName}.event==="TOKEN_REFRESHED"`,
+  ].sort();
+  const eventBindings = policyVariables.filter((declaration) => {
+    if (!ts.isIdentifier(declaration.name) || !declaration.initializer) return false;
+    const terms = flattenLogicalOr(declaration.initializer)
+      .map((term) => compact(term.getText(policy.sourceFile)))
+      .sort();
+    return terms.length === expectedEventTerms.length
+      && terms.every((term, index) => term === expectedEventTerms[index]);
+  });
+  assert.equal(
+    eventBindings.length,
+    1,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} eventos redundantes exactos`,
+  );
+  const eventBindingName = (eventBindings[0].name as ts.Identifier).text;
+
+  const policyIfs = policy.declaration.body.statements.filter((statement): statement is ts.IfStatement => (
+    ts.isIfStatement(statement)
+  ));
+  assert.equal(
+    policyIfs.length,
+    1,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} rechazo fail-closed único`,
+  );
+  const rejectionTerms = flattenLogicalOr(policyIfs[0].expression);
+  const helperTerms = rejectionTerms.filter((term) => {
+    const candidate = unwrapExpression(term);
+    if (
+      !ts.isPrefixUnaryExpression(candidate)
+      || candidate.operator !== ts.SyntaxKind.ExclamationToken
+    ) return false;
+    const operand = unwrapExpression(candidate.operand);
+    return ts.isCallExpression(operand)
+      && compact(operand.expression.getText(policy.sourceFile)) === "hasCurrentUserPortalAuthorization";
+  });
+  assert.equal(
+    helperTerms.length,
+    1,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} usa la capacidad autoritativa actual`,
+  );
+  const helperCall = unwrapExpression(
+    (unwrapExpression(helperTerms[0]) as ts.PrefixUnaryExpression).operand,
+  );
+  assert.ok(ts.isCallExpression(helperCall), `${SILENT_REVALIDATION_POLICY_BARRIER} helper invocable`);
+  assert.equal(
+    helperCall.arguments.length,
+    1,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} helper recibe identidad exacta`,
+  );
+  const helperInput = unwrapExpression(helperCall.arguments[0]);
+  assert.ok(
+    ts.isObjectLiteralExpression(helperInput),
+    `${SILENT_REVALIDATION_POLICY_BARRIER} helper recibe objeto explícito`,
+  );
+  assert.equal(
+    helperInput.properties.length,
+    3,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} sin fuentes permisivas adicionales`,
+  );
+  assert.equal(
+    compact(objectPropertyExpression(helperInput, policy.sourceFile, "authorizationProof").getText(policy.sourceFile)),
+    proofName,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} valida la prueba real`,
+  );
+  assert.equal(
+    compact(objectPropertyExpression(helperInput, policy.sourceFile, "sessionUserId").getText(policy.sourceFile)),
+    `${inputName}.nextSessionUserId`,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} valida la sesión entrante`,
+  );
+  assert.equal(
+    compact(objectPropertyExpression(helperInput, policy.sourceFile, "authenticatedUserId").getText(policy.sourceFile)),
+    `${inputName}.nextAuthenticatedUserId`,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} valida el usuario efectivo entrante`,
+  );
+
+  const helperTermText = compact(helperTerms[0].getText(policy.sourceFile));
+  const simpleTerms = rejectionTerms
+    .map((term) => compact(term.getText(policy.sourceFile)))
+    .filter((term) => term !== helperTermText)
+    .sort();
+  assert.deepEqual(simpleTerms, [
+    `!${eventBindingName}`,
+    `!${proofName}`,
+    `${inputName}.hasCoachPortalSession`,
+    `${inputName}.isInteractiveAuthAttempt`,
+    `${inputName}.isLogoutInFlight`,
+    `${inputName}.isPasswordRecoveryBlocked`,
+    `${inputName}.requestedPortal!=="usuario"`,
+  ].sort(), `${SILENT_REVALIDATION_POLICY_BARRIER} guards de seguridad exactos`);
+
+  assert.equal(
+    compact(policyIfs[0].thenStatement.getText(policy.sourceFile)),
+    "returnFAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION;",
+    `${SILENT_REVALIDATION_POLICY_BARRIER} cualquier fallo invalida`,
+  );
+  const finalReturns = policy.declaration.body.statements.filter((statement): statement is ts.ReturnStatement => (
+    ts.isReturnStatement(statement)
+  ));
+  assert.equal(finalReturns.length, 1, `${SILENT_REVALIDATION_POLICY_BARRIER} éxito único`);
+  assert.ok(finalReturns[0].expression, `${SILENT_REVALIDATION_POLICY_BARRIER} éxito explícito`);
+  const silentReturn = unwrapExpression(finalReturns[0].expression);
+  assert.ok(
+    ts.isCallExpression(silentReturn)
+    && compact(silentReturn.expression.getText(policy.sourceFile)) === "Object.freeze"
+    && silentReturn.arguments.length === 1,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} decisión inmutable`,
+  );
+  const silentDecision = unwrapExpression(silentReturn.arguments[0]);
+  assert.ok(
+    ts.isObjectLiteralExpression(silentDecision),
+    `${SILENT_REVALIDATION_POLICY_BARRIER} decisión explícita`,
+  );
+  assert.equal(
+    compact(objectPropertyExpression(silentDecision, policy.sourceFile, "kind").getText(policy.sourceFile)),
+    '"silent_revalidation"',
+    `${SILENT_REVALIDATION_POLICY_BARRIER} resultado silencioso`,
+  );
+  assert.equal(
+    compact(objectPropertyExpression(silentDecision, policy.sourceFile, "authorizationProof").getText(policy.sourceFile)),
+    proofName,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} conserva exactamente la prueba vigente`,
+  );
+  assert.doesNotMatch(
+    sources.sessionRevalidation,
+    /localStorage|sessionStorage|cookie|document\.cookie|URLSearchParams|setTimeout|setInterval|hasSupabaseSession|metadata|email/i,
+    `${SILENT_REVALIDATION_POLICY_BARRIER} sin persistencia, timers ni señales visuales`,
+  );
+
+  const rootSourceFile = parseSource(paths.root, sources.root);
+  const root = findOrganizatechApp(rootSourceFile, SILENT_REVALIDATION_WIRING_BARRIER);
+  const policyCalls = findCalls(root, (call) => (
+    compact(call.expression.getText(rootSourceFile)) === "resolveUserPortalSessionRevalidation"
+  ));
+  assert.equal(policyCalls.length, 1, `${SILENT_REVALIDATION_WIRING_BARRIER} decisión única`);
+  const policyCall = policyCalls[0];
+  assert.equal(policyCall.arguments.length, 1, `${SILENT_REVALIDATION_WIRING_BARRIER} input único`);
+  const rootPolicyInput = unwrapExpression(policyCall.arguments[0]);
+  assert.ok(
+    ts.isObjectLiteralExpression(rootPolicyInput),
+    `${SILENT_REVALIDATION_WIRING_BARRIER} wiring explícito`,
+  );
+  assert.deepEqual(
+    rootPolicyInput.properties.map((property) => propertyName(property, rootSourceFile)).sort(),
+    [
+      "authorizationProof",
+      "event",
+      "hasCoachPortalSession",
+      "isInteractiveAuthAttempt",
+      "isLogoutInFlight",
+      "isPasswordRecoveryBlocked",
+      "nextAuthenticatedUserId",
+      "nextSessionUserId",
+      "requestedPortal",
+    ],
+    `${SILENT_REVALIDATION_WIRING_BARRIER} señales exactas`,
+  );
+  const expectedRootWiring = {
+    event: "event",
+    authorizationProof: "userPortalAuthorizationProofRef.current",
+    nextSessionUserId: "nextState.session?.user.id",
+    nextAuthenticatedUserId:
+      "resolveEffectiveAuthenticatedUser(nextState.session,nextState.user)?.id",
+    requestedPortal: "requestedPortal",
+    isInteractiveAuthAttempt: "interactiveAuthAttemptRef.current",
+    isPasswordRecoveryBlocked: "multiportalAuth.isPasswordRecoveryPortalBlocked()",
+    isLogoutInFlight: "logoutInFlightRef.current",
+    hasCoachPortalSession: "Boolean(coachPortalSessionRef.current)",
+  } as const;
+  for (const [name, expected] of Object.entries(expectedRootWiring)) {
+    assert.equal(
+      compact(objectPropertyExpression(rootPolicyInput, rootSourceFile, name).getText(rootSourceFile))
+        .replace(/,\)/g, ")"),
+      expected,
+      `${SILENT_REVALIDATION_WIRING_BARRIER} ${name} usa su fuente real`,
+    );
+  }
+  assert.ok(
+    ts.isVariableDeclaration(policyCall.parent)
+    && ts.isIdentifier(policyCall.parent.name),
+    `${SILENT_REVALIDATION_WIRING_BARRIER} decisión local tipada`,
+  );
+  const decisionName = (policyCall.parent as ts.VariableDeclaration & { name: ts.Identifier }).name.text;
+  const authorizationCalls = findCalls(root, (call) => (
+    compact(call.expression.getText(rootSourceFile)) === "authorizeAndContinuePortalSession"
+  ));
+  assert.equal(authorizationCalls.length, 3, `${SILENT_REVALIDATION_WIRING_BARRIER} superficies exactas`);
+  const silentAuthorizationCalls = authorizationCalls.filter((call) => (
+    call.arguments.length === 5
+    && isIdentifierExpression(call.arguments[4], decisionName)
+  ));
+  assert.equal(
+    silentAuthorizationCalls.length,
+    1,
+    `${SILENT_REVALIDATION_WIRING_BARRIER} evento consume la decisión exacta`,
+  );
+  const failClosedAuthorizationCalls = authorizationCalls.filter((call) => (
+    call.arguments.length === 5
+    && isIdentifierExpression(call.arguments[4], "FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION")
+  ));
+  assert.equal(
+    failClosedAuthorizationCalls.length,
+    2,
+    `${SILENT_REVALIDATION_WIRING_BARRIER} bootstrap y login permanecen fail-closed`,
+  );
+  let queuedAncestor: ts.Node | undefined = silentAuthorizationCalls[0].parent;
+  while (
+    queuedAncestor
+    && !(
+      ts.isCallExpression(queuedAncestor)
+      && compact(queuedAncestor.expression.getText(rootSourceFile)) === "queueMicrotask"
+    )
+  ) queuedAncestor = queuedAncestor.parent;
+  assert.ok(queuedAncestor, `${SILENT_REVALIDATION_WIRING_BARRIER} revalidación difiere el I/O`);
+  const synchronousProofWrites = findCalls(root, (call) => (
+    compact(call.expression.getText(rootSourceFile)) === "replaceUserPortalAuthorizationProof"
+    && call.arguments.length === 1
+    && compact(call.arguments[0].getText(rootSourceFile)) === `${decisionName}.authorizationProof`
+  ));
+  assert.equal(
+    synchronousProofWrites.length,
+    1,
+    `${SILENT_REVALIDATION_INVALIDATION_BARRIER} aplica la decisión exactamente una vez antes del I/O`,
+  );
+  assert.ok(
+    synchronousProofWrites[0].pos > policyCall.pos
+    && synchronousProofWrites[0].pos < queuedAncestor.pos,
+    `${SILENT_REVALIDATION_INVALIDATION_BARRIER} A→B, Coach o mismatch invalidan síncronamente`,
+  );
+  let authorizationBranch: ts.Node | undefined = policyCall.parent;
+  while (
+    authorizationBranch
+    && !(
+      ts.isIfStatement(authorizationBranch)
+      && compact(authorizationBranch.expression.getText(rootSourceFile))
+        .includes('portalEventDecision==="authorize_user"')
+    )
+  ) authorizationBranch = authorizationBranch.parent;
+  assert.ok(
+    authorizationBranch && ts.isIfStatement(authorizationBranch),
+    `${SILENT_REVALIDATION_WIRING_BARRIER} decisión vive en el branch de autorización`,
+  );
+  const loadingCalls = findCalls(authorizationBranch.thenStatement, (call) => (
+    compact(call.expression.getText(rootSourceFile)) === "setIsAuthLoading"
+  ));
+  assert.equal(
+    loadingCalls.filter((call) => compact(call.arguments[0]?.getText(rootSourceFile) ?? "") === "false").length,
+    1,
+    `${SILENT_REVALIDATION_VISUAL_BARRIER} revalidación nunca activa AuthLoadingScreen`,
+  );
+  assert.equal(
+    loadingCalls.some((call) => compact(call.arguments[0]?.getText(rootSourceFile) ?? "") !== "false"),
+    false,
+    `${SILENT_REVALIDATION_VISUAL_BARRIER} branch sin loading permisivo`,
+  );
+  const authStateListeners = findCalls(root, (call) => (
+    compact(call.expression.getText(rootSourceFile)).endsWith(".onAuthStateChange")
+  ));
+  assert.equal(authStateListeners.length, 1, `${SILENT_REVALIDATION_TOKEN_BARRIER} listener único`);
+  const authStateListener = unwrapExpression(authStateListeners[0].arguments[0]);
+  assert.ok(
+    ts.isArrowFunction(authStateListener) || ts.isFunctionExpression(authStateListener),
+    `${SILENT_REVALIDATION_TOKEN_BARRIER} callback identificable`,
+  );
+  const listenerProofWrites = findCalls(authStateListener, (call) => (
+    compact(call.expression.getText(rootSourceFile)) === "replaceUserPortalAuthorizationProof"
+  ));
+  assert.equal(
+    listenerProofWrites.length,
+    1,
+    `${SILENT_REVALIDATION_TOKEN_BARRIER} TOKEN_REFRESHED no tiene invalidación paralela`,
+  );
+  assert.equal(
+    listenerProofWrites[0],
+    synchronousProofWrites[0],
+    `${SILENT_REVALIDATION_TOKEN_BARRIER} única escritura directa deriva de la política`,
+  );
+  assert.ok(
+    sources.root.indexOf('if (portalEventDecision === "defer") return;')
+      < policyCall.getStart(rootSourceFile),
+    `${SILENT_REVALIDATION_WIRING_BARRIER} ráfagas pendientes no tocan la prueba`,
+  );
+
+  const authorization = findNamedFunction(
+    paths.root,
+    sources.root,
+    "authorizeAndContinuePortalSession",
+  );
+  assert.equal(
+    authorization.declaration.parameters.length,
+    5,
+    `${SILENT_REVALIDATION_WIRING_BARRIER} resolución recibe decisión explícita`,
+  );
+  const revalidationParameter = authorization.declaration.parameters[4].name;
+  assert.ok(
+    ts.isIdentifier(revalidationParameter),
+    `${SILENT_REVALIDATION_WIRING_BARRIER} decisión identificable`,
+  );
+  const revalidationParameterName = revalidationParameter.text;
+  assert.ok(authorization.declaration.body, `${SILENT_REVALIDATION_WIRING_BARRIER} resolución con cuerpo`);
+  const authorizationProofWrites = findCalls(authorization.declaration, (call) => (
+    compact(call.expression.getText(authorization.sourceFile)) === "replaceUserPortalAuthorizationProof"
+  ));
+  assert.equal(
+    authorizationProofWrites.filter((call) => (
+      compact(call.arguments[0]?.getText(authorization.sourceFile) ?? "")
+        === `${revalidationParameterName}.authorizationProof`
+    )).length,
+    0,
+    `${SILENT_REVALIDATION_STALE_BARRIER} el microtask no republica una decisión capturada`,
+  );
+  const authorizationIfs = authorization.declaration.body.statements.filter(
+    (statement): statement is ts.IfStatement => ts.isIfStatement(statement),
+  );
+  const staleBranches = authorizationIfs.filter((statement) => (
+    compact(statement.expression.getText(authorization.sourceFile)).includes('access.state==="stale"')
+  ));
+  assert.equal(staleBranches.length, 1, `${SILENT_REVALIDATION_STALE_BARRIER} branch stale único`);
+  assert.equal(
+    countCalls(staleBranches[0].thenStatement, authorization.sourceFile, "replaceUserPortalAuthorizationProof"),
+    0,
+    `${SILENT_REVALIDATION_STALE_BARRIER} callback stale no publica ni borra una decisión más nueva`,
+  );
+  const rejectedBranches = authorizationIfs.filter((statement) => {
+    const expression = compact(statement.expression.getText(authorization.sourceFile));
+    return expression.includes('access.state==="user_registration_required"')
+      && expression.includes('access.state==="coach_registration_required"')
+      && expression.includes('access.state==="error"');
+  });
+  assert.equal(rejectedBranches.length, 1, `${SILENT_REVALIDATION_RESULT_BARRIER} rechazo único`);
+  const rejectedWrites = findCalls(rejectedBranches[0].thenStatement, (call) => (
+    compact(call.expression.getText(authorization.sourceFile)) === "replaceUserPortalAuthorizationProof"
+    && compact(call.arguments[0]?.getText(authorization.sourceFile) ?? "") === "null"
+  ));
+  assert.equal(
+    rejectedWrites.length,
+    1,
+    `${SILENT_REVALIDATION_RESULT_BARRIER} resultado inválido limpia la prueba`,
+  );
+
+  const continuation = findNamedFunction(
+    paths.root,
+    sources.root,
+    "continueAuthorizedPortalAccess",
+  );
+  assert.ok(continuation.declaration.body, `${SILENT_REVALIDATION_VISUAL_BARRIER} continuación con cuerpo`);
+  const continuationParameter = continuation.declaration.parameters[4]?.name;
+  assert.ok(
+    continuationParameter && ts.isIdentifier(continuationParameter),
+    `${SILENT_REVALIDATION_VISUAL_BARRIER} decisión llega a la publicación`,
+  );
+  const continuationParameterName = (continuationParameter as ts.Identifier).text;
+  const silentBranches: ts.IfStatement[] = [];
+  const visitSilentBranches = (node: ts.Node) => {
+    if (
+      ts.isIfStatement(node)
+      && compact(node.expression.getText(continuation.sourceFile))
+        === `${continuationParameterName}.kind==="silent_revalidation"`
+    ) silentBranches.push(node);
+    ts.forEachChild(node, visitSilentBranches);
+  };
+  visitSilentBranches(continuation.declaration);
+  assert.equal(silentBranches.length, 1, `${SILENT_REVALIDATION_VISUAL_BARRIER} branch silencioso único`);
+  const silentBranchCode = compact(silentBranches[0].thenStatement.getText(continuation.sourceFile));
+  assert.equal(
+    countCalls(silentBranches[0].thenStatement, continuation.sourceFile, "replaceUserPortalAuthorizationProof"),
+    1,
+    `${SILENT_REVALIDATION_RESULT_BARRIER} autorización válida renueva la prueba`,
+  );
+  assert.ok(
+    silentBranchCode.includes("replaceUserPortalAuthorizationProof(authorizationProof)")
+    && silentBranchCode.endsWith("return;}"),
+    `${SILENT_REVALIDATION_RESULT_BARRIER} publica sólo la prueba autoritativa vigente`,
+  );
+  assert.doesNotMatch(
+    silentBranchCode,
+    /continueAuthenticatedSession|navigation|reset|transition|setIsAuthLoading|appShell|close|refresh|setScreen/,
+    `${SILENT_REVALIDATION_VISUAL_BARRIER} no desmonta, navega, refresca ni cierra overlays`,
+  );
+  const staleCurrentBranches: ts.IfStatement[] = [];
+  const visitCurrentBranches = (node: ts.Node) => {
+    if (
+      ts.isIfStatement(node)
+      && compact(node.expression.getText(continuation.sourceFile)) === "!isAuthorizationCurrent()"
+    ) staleCurrentBranches.push(node);
+    ts.forEachChild(node, visitCurrentBranches);
+  };
+  visitCurrentBranches(continuation.declaration);
+  assert.equal(staleCurrentBranches.length, 1, `${SILENT_REVALIDATION_STALE_BARRIER} guard owner único previo`);
+  assert.equal(
+    countCalls(staleCurrentBranches[0].thenStatement, continuation.sourceFile, "replaceUserPortalAuthorizationProof"),
+    0,
+    `${SILENT_REVALIDATION_STALE_BARRIER} owner stale no borra una prueba vigente más nueva`,
+  );
+}
+
 function replaceAuthorizationProofInitializer(
   source: string,
   replacement: string | ((currentInitializer: string) => string),
@@ -789,7 +1559,6 @@ function assertAuthorizationBoundary(sources: Sources) {
   for (const name of [
     "beginPasswordRecoveryPortalSession",
     "holdAuthenticatedSessionWithoutContinuation",
-    "authorizeAndContinuePortalSession",
     "clearUserSessionState",
     "handleCoachIdentitySwitch",
     "handleAuth",
@@ -843,10 +1612,16 @@ function assertAuthorizationBoundary(sources: Sources) {
   };
   visitContinuation(continuation.declaration);
   assert.equal(awaitContinuations.length, 1, "[UI-NAV-01.proof-publication] continuación única");
-  assert.equal(publications.length, 1, "[UI-NAV-01.proof-publication] publicación única");
-  assert.ok(
-    publications[0].pos > awaitContinuations[0].pos,
-    "[UI-NAV-01.proof-publication] prueba se publica después de continuación vigente",
+  assert.equal(publications.length, 2, "[UI-NAV-01.proof-publication] publicaciones por lifecycle exactas");
+  assert.equal(
+    publications.filter((publication) => publication.pos < awaitContinuations[0].pos).length,
+    1,
+    "[UI-NAV-01.proof-publication] revalidación silenciosa publica antes de omitir continuación",
+  );
+  assert.equal(
+    publications.filter((publication) => publication.pos > awaitContinuations[0].pos).length,
+    1,
+    "[UI-NAV-01.proof-publication] bootstrap/login publica después de continuación vigente",
   );
 }
 
@@ -919,10 +1694,13 @@ function validateIntegration(sources: Sources) {
     "@/features/user-portal-shell/components/user-portal-shell",
     "@/features/user-portal-shell/model/user-portal-navigation",
     "@/features/auth/model/user-portal-authorization-proof",
+    "@/features/auth/model/user-portal-session-revalidation",
   ]) assert.ok(rootImports.includes(requiredImport), `[UI-NAV-01.root-import] falta ${requiredImport}`);
 
   assertExclusiveShellReturns(sources.root);
   assertAuthorizationBoundary(sources);
+  assertSilentSessionRevalidationBoundary(sources);
+  assertTokenRefreshedAuthoritativeReachability(sources);
 
   const rootLegacyTopbars = findJsxElements(paths.root, sources.root, "AppTopbar");
   const rootLegacyDrawers = findJsxElements(paths.root, sources.root, "AppNavigationDrawer");
@@ -1097,6 +1875,7 @@ function validateIntegration(sources: Sources) {
 
   const featureProduction = [
     sources.authProof,
+    sources.sessionRevalidation,
     sources.model,
     sources.logoutSingleFlight,
     sources.shell,
@@ -1105,6 +1884,7 @@ function validateIntegration(sources: Sources) {
   ].join("\n");
   const featureImports = [
     ...moduleSpecifiers(paths.authProof, sources.authProof),
+    ...moduleSpecifiers(paths.sessionRevalidation, sources.sessionRevalidation),
     ...moduleSpecifiers(paths.model, sources.model),
     ...moduleSpecifiers(paths.logoutSingleFlight, sources.logoutSingleFlight),
     ...moduleSpecifiers(paths.shell, sources.shell),
@@ -1365,6 +2145,82 @@ test("wiring AST de autorización tolera cinco controles inocentes focales", () 
   }
 });
 
+test("UI-NAV-01S tolera comentarios, formato, renombres locales y reordenamiento", () => {
+  const policyPrinter = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
+  const printedPolicy = policyPrinter.printFile(
+    parseSource(paths.sessionRevalidation, baseline.sessionRevalidation),
+  );
+  const printedBoundary = policyPrinter.printFile(
+    parseSource(paths.authBoundary, baseline.authBoundary),
+  );
+  const renamedPolicy = baseline.sessionRevalidation
+    .replaceAll("isRedundantSessionEvent", "isSilentResumeEvent")
+    .replace(/\bproof\b/g, "currentProof");
+  const renamedBoundary = baseline.authBoundary.replaceAll(
+    "isSessionEstablishingEvent",
+    "isAuthoritativeSessionEvent",
+  );
+  const reorderedBoundary = replaceExactlyOnce(
+    baseline.authBoundary,
+    `    const isSessionEstablishingEvent = event === "SIGNED_IN"
+      || event === "INITIAL_SESSION"
+      || event === "TOKEN_REFRESHED";`,
+    `    const isSessionEstablishingEvent = event === "TOKEN_REFRESHED"
+      || event === "SIGNED_IN"
+      || event === "INITIAL_SESSION";`,
+    "UI-NAV-01S innocent authorizing-event reorder",
+  );
+  const reorderedRoot = replaceExactlyOnce(
+    baseline.root,
+    `        const userPortalSessionRevalidation = resolveUserPortalSessionRevalidation({
+          event,
+          authorizationProof: userPortalAuthorizationProofRef.current,
+          nextSessionUserId: nextState.session?.user.id,
+          nextAuthenticatedUserId: resolveEffectiveAuthenticatedUser(
+            nextState.session,
+            nextState.user,
+          )?.id,
+          requestedPortal,
+          isInteractiveAuthAttempt: interactiveAuthAttemptRef.current,
+          isPasswordRecoveryBlocked: multiportalAuth.isPasswordRecoveryPortalBlocked(),
+          isLogoutInFlight: logoutInFlightRef.current,
+          hasCoachPortalSession: Boolean(coachPortalSessionRef.current),
+        });`,
+    `        const userPortalSessionRevalidation = resolveUserPortalSessionRevalidation({
+          hasCoachPortalSession: Boolean(coachPortalSessionRef.current),
+          isLogoutInFlight: logoutInFlightRef.current,
+          requestedPortal,
+          nextAuthenticatedUserId: resolveEffectiveAuthenticatedUser(
+            nextState.session,
+            nextState.user,
+          )?.id,
+          event,
+          isPasswordRecoveryBlocked: multiportalAuth.isPasswordRecoveryPortalBlocked(),
+          authorizationProof: userPortalAuthorizationProofRef.current,
+          isInteractiveAuthAttempt: interactiveAuthAttemptRef.current,
+          nextSessionUserId: nextState.session?.user.id,
+        });`,
+    "UI-NAV-01S innocent property reorder",
+  );
+  const controls: Sources[] = [
+    {
+      ...baseline,
+      sessionRevalidation: `${baseline.sessionRevalidation}\n// comentario inocente de lifecycle\n`,
+    },
+    { ...baseline, sessionRevalidation: printedPolicy },
+    { ...baseline, sessionRevalidation: renamedPolicy },
+    { ...baseline, root: reorderedRoot },
+    { ...baseline, authBoundary: `${baseline.authBoundary}\n// comentario inocente de reachability\n` },
+    { ...baseline, authBoundary: printedBoundary },
+    { ...baseline, authBoundary: renamedBoundary },
+    { ...baseline, authBoundary: reorderedBoundary },
+  ];
+  assert.equal(controls.length, 8, "conteo fijo de controles inocentes UI-NAV-01S");
+  for (const control of controls) {
+    assert.doesNotThrow(() => validateIntegration(control));
+  }
+});
+
 test("la lista de consumidores del gestor de foco es exacta e incluye el drawer Usuario", () => {
   assert.deepEqual(collectOverlayConsumers("src").sort(), [
     "src/components/profile/ProfileAvatarEditor.tsx",
@@ -1376,10 +2232,9 @@ test("la lista de consumidores del gestor de foco es exacta e incluye el drawer 
   ]);
 });
 
-test("Auth, Coach, NotificationPanel, perfil y fallbacks legacy conservan paridad byte a byte", () => {
+test("Auth visual/recovery, Coach, NotificationPanel, perfil y fallbacks conservan paridad", () => {
   for (const path of [
     "src/features/auth/components/auth-screen.tsx",
-    "src/features/auth/hooks/use-multiportal-auth-boundary.ts",
     "src/features/auth/model/password-recovery-portal-guard.ts",
     "src/features/coach-portal/components/coach-portal.tsx",
     "src/features/notifications/components/NotificationPanel.tsx",
@@ -1409,6 +2264,210 @@ const mutationProbes: Array<{
     mutate: (source) => replaceAuthorizationProofInitializer(
       source,
       (initializer) => `(${initializer}) || hasSupabaseSession`,
+    ),
+  },
+  {
+    name: "F1 · excluir TOKEN_REFRESHED de los eventos autorizantes",
+    target: "authBoundary",
+    barrier: TOKEN_REFRESHED_REACHABILITY_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      `    const isSessionEstablishingEvent = event === "SIGNED_IN"
+      || event === "INITIAL_SESSION"
+      || event === "TOKEN_REFRESHED";`,
+      `    const isSessionEstablishingEvent = event === "SIGNED_IN"
+      || event === "INITIAL_SESSION";`,
+      "TOKEN_REFRESHED excluded from authorizing events",
+    ),
+  },
+  {
+    name: "F2 · devolver continue exclusivamente para TOKEN_REFRESHED",
+    target: "authBoundary",
+    barrier: TOKEN_REFRESHED_REACHABILITY_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      '    if (!currentUserId || !isSessionEstablishingEvent) return "continue";',
+      '    if (event === "TOKEN_REFRESHED" || !currentUserId || !isSessionEstablishingEvent) return "continue";',
+      "TOKEN_REFRESHED forced to continue",
+    ),
+  },
+  {
+    name: "UI-NAV-01S · conservar por presencia de sesión sin capacidad válida",
+    target: "sessionRevalidation",
+    barrier: SILENT_REVALIDATION_POLICY_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      `    || !hasCurrentUserPortalAuthorization({
+      authorizationProof: proof,
+      sessionUserId: input.nextSessionUserId,
+      authenticatedUserId: input.nextAuthenticatedUserId,
+    })`,
+      "    || !Boolean(input.nextSessionUserId)",
+      "Silent revalidation without authoritative proof",
+    ),
+  },
+  {
+    name: "UI-NAV-01S · conservar durante recovery",
+    target: "sessionRevalidation",
+    barrier: SILENT_REVALIDATION_POLICY_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      "    || input.isPasswordRecoveryBlocked",
+      "    || false",
+      "Silent revalidation during recovery",
+    ),
+  },
+  {
+    name: "UI-NAV-01S · ignorar decisión silenciosa y ejecutar continuación",
+    target: "root",
+    barrier: SILENT_REVALIDATION_WIRING_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      "            userPortalSessionRevalidation,\n          )",
+      "            FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,\n          )",
+      "Redundant event discards silent decision",
+    ),
+  },
+  {
+    name: "UI-NAV-01S · microtask republica una prueba capturada antes de recovery/A→B",
+    target: "root",
+    barrier: SILENT_REVALIDATION_STALE_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      `  ): Promise<AuthorizedPortalAccess | null> {
+    const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);`,
+      `  ): Promise<AuthorizedPortalAccess | null> {
+    replaceUserPortalAuthorizationProof(sessionRevalidation.authorizationProof);
+    const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);`,
+      "Deferred callback republishes captured proof",
+    ),
+  },
+  {
+    name: "F3 · conservar prueba A durante A→B",
+    target: "root",
+    barrier: SILENT_REVALIDATION_INVALIDATION_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      "        replaceUserPortalAuthorizationProof(userPortalSessionRevalidation.authorizationProof);",
+      "        void userPortalSessionRevalidation.authorizationProof;",
+      "Delayed unsafe identity invalidation",
+    ),
+  },
+  {
+    name: "F4 · mostrar loading durante TOKEN_REFRESHED A→A",
+    target: "root",
+    barrier: SILENT_REVALIDATION_VISUAL_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      `        portalEventDecision === "authorize_coach"
+      ) {
+        setIsAuthLoading(false);`,
+      `        portalEventDecision === "authorize_coach"
+      ) {
+        setIsAuthLoading(true);`,
+      "Redundant event activates auth loading",
+    ),
+  },
+  {
+    name: "F5 · saltarse resolvePortalAccess",
+    target: "root",
+    barrier: TOKEN_REFRESHED_REACHABILITY_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      "    const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);",
+      `    const access = await Promise.resolve({
+      state: "stale",
+      requestedPortal,
+    } as Awaited<ReturnType<typeof multiportalAuth.resolvePortalAccess>>);`,
+      "TOKEN_REFRESHED skips resolvePortalAccess",
+    ),
+  },
+  {
+    name: "F6 · publicar prueba después de owner stale",
+    target: "root",
+    barrier: SILENT_REVALIDATION_STALE_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      "        if (!isAuthorizationCurrent()) return;",
+      "        if (isAuthorizationCurrent()) return;",
+      "Stale owner reaches authoritative publication",
+    ),
+  },
+  {
+    name: "UI-NAV-01S · TOKEN_REFRESHED borra la prueba vigente",
+    target: "root",
+    barrier: SILENT_REVALIDATION_TOKEN_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      "      const authEventResult = coordinateAuthenticatedSessionEvent({",
+      `      if (event === "TOKEN_REFRESHED") replaceUserPortalAuthorizationProof(null);
+      const authEventResult = coordinateAuthenticatedSessionEvent({`,
+      "Token refresh invalidates current proof",
+    ),
+  },
+  {
+    name: "F7 · conservar prueba ante rechazo autoritativo",
+    target: "root",
+    barrier: SILENT_REVALIDATION_RESULT_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      "      replaceUserPortalAuthorizationProof(null);\n      const rejectionMessage = multiportalAuth.settlePortalSignOutMessage(access.message);",
+      "      void userPortalAuthorizationProofRef.current;\n      const rejectionMessage = multiportalAuth.settlePortalSignOutMessage(access.message);",
+      "Invalid authoritative result retains proof",
+    ),
+  },
+  {
+    name: "F8 · ejecutar refresh o navegación durante continuidad silenciosa",
+    target: "root",
+    barrier: SILENT_REVALIDATION_VISUAL_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      '        if (sessionRevalidation.kind === "silent_revalidation") {',
+      '        if (sessionRevalidation.kind === "fail_closed") {',
+      "Silent revalidation falls through to continuation",
+    ),
+  },
+  {
+    name: "F9 · tratar TOKEN_REFRESHED como login interactivo",
+    target: "authBoundary",
+    barrier: TOKEN_REFRESHED_REACHABILITY_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      `    if (
+      deferForInteractiveAttempt
+      || portalResolutionOwnersRef.current.hasPending()`,
+      `    if (
+      deferForInteractiveAttempt
+      || event === "TOKEN_REFRESHED"
+      || portalResolutionOwnersRef.current.hasPending()`,
+      "TOKEN_REFRESHED treated as interactive login",
+    ),
+  },
+  {
+    name: "F10 · permitir TOKEN_REFRESHED durante recovery bloqueada",
+    target: "authBoundary",
+    barrier: TOKEN_REFRESHED_REACHABILITY_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      '    if (event !== "SIGNED_OUT" && isPasswordRecoveryPortalBlocked()) {',
+      '    if (event !== "SIGNED_OUT" && event !== "TOKEN_REFRESHED" && isPasswordRecoveryPortalBlocked()) {',
+      "TOKEN_REFRESHED bypasses recovery guard",
+    ),
+  },
+  {
+    name: "UI-NAV-01S · callback stale borra prueba vigente",
+    target: "root",
+    barrier: SILENT_REVALIDATION_STALE_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      `    if (access.state === "stale" || !multiportalAuth.isPortalResolutionCurrent(resolutionOwner)) {
+      return null;
+    }`,
+      `    if (access.state === "stale" || !multiportalAuth.isPortalResolutionCurrent(resolutionOwner)) {
+      replaceUserPortalAuthorizationProof(null);
+      return null;
+    }`,
+      "Stale callback clears current proof",
     ),
   },
   {
@@ -1694,8 +2753,8 @@ const mutationProbes: Array<{
   },
 ];
 
-test("UI-NAV-01 fija 23/23 mutantes semánticos con TypeScript válido y restauración SHA", () => {
-  assert.equal(mutationProbes.length, 23, "conteo fijo de mutantes");
+test("UI-NAV-01/UI-NAV-01S fija 39/39 mutantes semánticos con TypeScript válido y restauración SHA", () => {
+  assert.equal(mutationProbes.length, 39, "conteo fijo de mutantes");
   const temporaryRoot = mkdtempSync(join(tmpdir(), "organizatech-ui-nav-01-"));
   try {
     for (const path of Object.values(paths)) {

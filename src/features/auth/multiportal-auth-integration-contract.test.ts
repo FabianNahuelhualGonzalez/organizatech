@@ -14,10 +14,14 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 
 import "@/features/coach-portal/coach-portal-integration-contract";
 import "@/features/coach-portal/model/coach-portal.contract";
+import { useMultiportalAuthBoundary } from "@/features/auth/hooks/use-multiportal-auth-boundary";
+import type { AuthRouteState } from "@/features/auth/model/auth-route";
 
 const ROOT_PATH = "src/components/organizatech-app.tsx";
 const CONTROLLER_PATH = "src/features/auth/model/multiportal-auth-controller.ts";
@@ -31,6 +35,8 @@ const METADATA_RUNTIME_PROBE_PATH =
   "src/features/auth/model/multiportal-auth-metadata-mutation-runtime.test.ts";
 const NO_SENSITIVE_BROWSER_STORAGE_FAILURE =
   "[AUTH-COACH-01.SWITCH.no-sensitive-browser-storage]";
+const TOKEN_REFRESHED_AUTHORIZATION_FAILURE =
+  "[UI-NAV-01S.token-refresh-authoritative-reachability]";
 const AMBIGUOUS_IDENTITY_FAILURE =
   "[AUTH-CONFIRM-01.existing-identity-neutral] existing_identity termina sin autorización ni navegación";
 const AC039_FAILURES = {
@@ -2019,6 +2025,11 @@ function auditIntegration(sources: Sources) {
     /const replacedIdentity = portalResolutionOwnersRef\.current\.acceptIdentity\(currentUserId\);/,
     "[AUTH-COACH-01.hook.identity-change-invalidation] acepta B mediante el owner controller",
   );
+  assert.match(
+    hook,
+    /const isSessionEstablishingEvent = event === "SIGNED_IN"\s*\|\| event === "INITIAL_SESSION"\s*\|\| event === "TOKEN_REFRESHED";/,
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} TOKEN_REFRESHED comparte el camino autoritativo`,
+  );
   assert.match(hook, /beginPortalResolution\(expectedUserId: string\)/);
   assert.match(hook, /\{ requestedPortal, expectedUserId, owner \}/);
   assert.match(hook, /beginCoachRegistrationSubmit\(\)[\s\S]*coachRegistrationOwnersRef\.current\.begin\(\)/);
@@ -2061,7 +2072,7 @@ function auditIntegration(sources: Sources) {
   );
   assert.match(
     root,
-    /const requestedPortal = portalEventDecision === "authorize_coach" \? "coach" : "usuario";[\s\S]{0,180}const resolutionOwner = multiportalAuth\.beginPortalResolution\(session!\.user\.id\);\n        queueMicrotask\(/,
+    /const requestedPortal = portalEventDecision === "authorize_coach" \? "coach" : "usuario";\n        const userPortalSessionRevalidation = resolveUserPortalSessionRevalidation\(\{[\s\S]*?\n        \}\);\n        replaceUserPortalAuthorizationProof\(userPortalSessionRevalidation\.authorizationProof\);\n        const resolutionOwner = multiportalAuth\.beginPortalResolution\(session!\.user\.id\);\n        queueMicrotask\(/,
     "[AUTH-COACH-01.root.no-timeout-authorization] autorización Auth se difiere sin timeout",
   );
   assert.match(root, /event === "SIGNED_OUT"[\s\S]*interactiveAuthAttemptRef\.current = false/);
@@ -2111,6 +2122,129 @@ function auditIntegration(sources: Sources) {
   assert.match(screen, /disabled=\{isBusy\}/);
   assert.doesNotMatch(screen, /COACH_REGISTRATION_SUBMIT_ENABLED|isCoachRegistration \? undefined : onSubmit/);
 }
+
+type RuntimeMultiportalAuthBoundary = ReturnType<typeof useMultiportalAuthBoundary>;
+
+function renderRuntimeMultiportalAuthBoundary(input: {
+  route?: AuthRouteState;
+  initialPasswordRecoveryActive?: boolean;
+  completeInitialResolution?: boolean;
+} = {}): RuntimeMultiportalAuthBoundary {
+  const route = input.route ?? { mode: "login", accountType: "usuario" };
+  const captured: { current: RuntimeMultiportalAuthBoundary | null } = { current: null };
+
+  function BoundaryHarness() {
+    captured.current = useMultiportalAuthBoundary({
+      initialRoute: route,
+      currentRoute: route,
+      initialPasswordRecoveryActive: input.initialPasswordRecoveryActive,
+    });
+    return null;
+  }
+
+  renderToStaticMarkup(createElement(BoundaryHarness));
+  assert.ok(captured.current, `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} harness disponible`);
+  if (input.completeInitialResolution !== false) captured.current.completeInitialResolution();
+  return captured.current;
+}
+
+test("TOKEN_REFRESHED comparte autorización autoritativa y conserva invalidaciones", () => {
+  const userIdA = "user-a";
+  const userIdB = "user-b";
+
+  for (const event of ["SIGNED_IN", "INITIAL_SESSION", "TOKEN_REFRESHED"] as const) {
+    const boundary = renderRuntimeMultiportalAuthBoundary();
+    assert.equal(
+      boundary.resolveSessionEventDecision(event, userIdA, false),
+      "authorize_user",
+      `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} ${event} alcanza Usuario`,
+    );
+  }
+
+  const sameIdentity = renderRuntimeMultiportalAuthBoundary();
+  assert.equal(sameIdentity.resolveSessionEventDecision("SIGNED_IN", userIdA), "authorize_user");
+  const completedOwner = sameIdentity.beginPortalResolution(userIdA);
+  assert.equal(sameIdentity.isPortalResolutionCurrent(completedOwner), true);
+  sameIdentity.endPortalResolution(completedOwner);
+  assert.equal(
+    sameIdentity.resolveSessionEventDecision("TOKEN_REFRESHED", userIdA),
+    "authorize_user",
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} A→A vuelve a autorización backend`,
+  );
+
+  const identitySwitch = renderRuntimeMultiportalAuthBoundary();
+  assert.equal(identitySwitch.resolveSessionEventDecision("SIGNED_IN", userIdA), "authorize_user");
+  const ownerA = identitySwitch.beginPortalResolution(userIdA);
+  assert.equal(identitySwitch.isPortalResolutionCurrent(ownerA), true);
+  assert.equal(
+    identitySwitch.resolveSessionEventDecision("TOKEN_REFRESHED", userIdB),
+    "authorize_user",
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} A→B inicia autorización B`,
+  );
+  assert.equal(
+    identitySwitch.isPortalResolutionCurrent(ownerA),
+    false,
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} A→B invalida owner y permit A`,
+  );
+
+  const pendingOwnerBoundary = renderRuntimeMultiportalAuthBoundary();
+  assert.equal(pendingOwnerBoundary.resolveSessionEventDecision("SIGNED_IN", userIdA), "authorize_user");
+  pendingOwnerBoundary.beginPortalResolution(userIdA);
+  assert.equal(
+    pendingOwnerBoundary.resolveSessionEventDecision("TOKEN_REFRESHED", userIdA),
+    "defer",
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} resolución pendiente difiere`,
+  );
+
+  const initialPending = renderRuntimeMultiportalAuthBoundary({ completeInitialResolution: false });
+  assert.equal(
+    initialPending.resolveSessionEventDecision("TOKEN_REFRESHED", userIdA),
+    "defer",
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} bootstrap pendiente difiere`,
+  );
+
+  const recovery = renderRuntimeMultiportalAuthBoundary({ initialPasswordRecoveryActive: true });
+  assert.equal(
+    recovery.resolveSessionEventDecision("TOKEN_REFRESHED", userIdA),
+    "defer",
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} recovery bloqueada difiere`,
+  );
+
+  const interactive = renderRuntimeMultiportalAuthBoundary();
+  assert.equal(
+    interactive.resolveSessionEventDecision("TOKEN_REFRESHED", userIdA, true),
+    "defer",
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} intento interactivo no es continuidad silenciosa`,
+  );
+
+  const registration = renderRuntimeMultiportalAuthBoundary({
+    route: { mode: "registro", accountType: "usuario" },
+  });
+  assert.equal(
+    registration.resolveSessionEventDecision("TOKEN_REFRESHED", userIdA),
+    "hold_user_registration",
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} registro conserva su boundary`,
+  );
+
+  const coach = renderRuntimeMultiportalAuthBoundary({
+    route: { mode: "login", accountType: "coach" },
+  });
+  assert.equal(
+    coach.resolveSessionEventDecision("TOKEN_REFRESHED", userIdA),
+    "authorize_coach",
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} Coach permanece separado`,
+  );
+
+  const logout = renderRuntimeMultiportalAuthBoundary();
+  assert.equal(logout.resolveSessionEventDecision("SIGNED_IN", userIdA), "authorize_user");
+  const logoutOwner = logout.beginPortalResolution(userIdA);
+  assert.equal(logout.resolveSessionEventDecision("SIGNED_OUT", null), "continue");
+  assert.equal(
+    logout.isPortalResolutionCurrent(logoutOwner),
+    false,
+    `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} logout invalida owner y permit`,
+  );
+});
 
 function replaceExactlyOnce(source: string, target: string, replacement: string, name: string) {
   assert.equal(source.split(target).length - 1, 1, `${name}: target único`);
