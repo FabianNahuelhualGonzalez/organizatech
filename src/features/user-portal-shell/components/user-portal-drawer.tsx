@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import {
   ChartNoAxesCombined,
   Dumbbell,
@@ -12,16 +11,17 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import type { KeyboardEvent, Ref } from "react";
+import type { Ref } from "react";
 
+import { UserAvatar } from "@/components/profile/UserAvatar";
 import {
   USER_PORTAL_DRAWER_ID,
   isUserPortalDestination,
   type UserPortalDestinationId,
-  type UserPortalLogoutHandler,
   type UserPortalNavigateHandler,
   type UserPortalNavigationModel,
 } from "@/features/user-portal-shell/model/user-portal-navigation";
+import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
 
 import styles from "./user-portal-shell.module.css";
 
@@ -34,57 +34,34 @@ const userPortalDestinationIcons: Record<UserPortalDestinationId, LucideIcon> = 
   "cycle-history": History,
 };
 
-export type UserPortalAvatar =
-  | {
-      readonly kind: "image";
-      readonly src: string;
-      readonly alt: string;
-    }
-  | {
-      readonly kind: "initials";
-      readonly initials: string;
-      readonly accessibleLabel: string;
-    };
-
-export interface UserPortalVisualIdentity {
-  readonly displayName: string;
-  /** Correo del Usuario o un contexto equivalente preparado por el futuro integrador. */
-  readonly detail: string;
-  readonly avatar: UserPortalAvatar;
-}
-
 export interface UserPortalDrawerProps {
   readonly isOpen: boolean;
-  readonly identity: UserPortalVisualIdentity;
+  readonly profile: ProfileViewModel;
   readonly navigation: UserPortalNavigationModel;
   readonly focusBoundaryRef?: Ref<HTMLDivElement>;
+  readonly initialFocusAttribute: string;
+  readonly isLogoutDisabled: boolean;
+  readonly onAvatarImageError?: () => void;
+  readonly avatarResetKey?: number;
   readonly onClose: () => void;
   readonly onNavigate: UserPortalNavigateHandler;
-  readonly onLogout: UserPortalLogoutHandler;
+  readonly onLogout: () => void;
 }
 
-/**
- * Escape cierra exclusivamente este drawer mediante `onClose`. La referencia opcional del boundary
- * permite que la integración futura entregue el gestor canónico de foco sin cambiar esta API ni
- * duplicar ahora su stack global.
- */
 export function UserPortalDrawer({
   isOpen,
-  identity,
+  profile,
   navigation,
   focusBoundaryRef,
+  initialFocusAttribute,
+  isLogoutDisabled,
+  onAvatarImageError,
+  avatarResetKey,
   onClose,
   onNavigate,
   onLogout,
 }: UserPortalDrawerProps) {
   if (!isOpen) return null;
-
-  function handleDrawerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "Escape") return;
-    event.preventDefault();
-    event.stopPropagation();
-    onClose();
-  }
 
   return (
     <>
@@ -103,7 +80,6 @@ export function UserPortalDrawer({
         aria-modal="true"
         aria-labelledby="user-portal-drawer-title"
         tabIndex={-1}
-        onKeyDown={handleDrawerKeyDown}
       >
         <div className={styles.drawerTopbar}>
           <h2 id="user-portal-drawer-title" className={styles.srOnly}>
@@ -113,18 +89,25 @@ export function UserPortalDrawer({
             className={styles.closeButton}
             type="button"
             aria-label="Cerrar menú Usuario"
-            autoFocus
             onClick={onClose}
+            {...{ [initialFocusAttribute]: "" }}
           >
             <X aria-hidden="true" focusable="false" size={24} />
           </button>
         </div>
 
         <div className={styles.drawerIdentity}>
-          <UserPortalIdentityAvatar avatar={identity.avatar} />
+          <div className={styles.drawerAvatar}>
+            <UserAvatar
+              profile={profile}
+              size="medium"
+              onImageError={onAvatarImageError}
+              resetKey={avatarResetKey}
+            />
+          </div>
           <div className={styles.identityCopy}>
-            <p>{identity.displayName}</p>
-            <span>{identity.detail}</span>
+            <p>{profile.displayName}</p>
+            <span>{profile.secondaryLabel}</span>
           </div>
         </div>
 
@@ -138,9 +121,9 @@ export function UserPortalDrawer({
                       className={styles.logoutButton}
                       type="button"
                       aria-label="Cerrar sesión"
-                      onClick={() => {
-                        void onLogout();
-                      }}
+                      disabled={isLogoutDisabled}
+                      aria-busy={isLogoutDisabled}
+                      onClick={onLogout}
                     >
                       <LogOut aria-hidden="true" focusable="false" size={20} />
                       <span>{item.label}</span>
@@ -170,30 +153,5 @@ export function UserPortalDrawer({
         </nav>
       </div>
     </>
-  );
-}
-
-function UserPortalIdentityAvatar({ avatar }: { avatar: UserPortalAvatar }) {
-  if (avatar.kind === "image") {
-    return (
-      <div className={styles.drawerAvatar}>
-        <Image
-          className={styles.avatarImage}
-          src={avatar.src}
-          alt={avatar.alt}
-          fill
-          sizes="58px"
-          unoptimized
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className={styles.drawerAvatar} role="img" aria-label={avatar.accessibleLabel}>
-      <span className={styles.avatarInitials} aria-hidden="true">
-        {avatar.initials}
-      </span>
-    </div>
   );
 }

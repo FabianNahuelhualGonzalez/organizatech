@@ -142,7 +142,7 @@ function assertProfileForegroundWiring(source: string) {
 }
 
 const appSource = readSource("src/components/organizatech-app.tsx");
-const packageSource = readSource("package.json");
+const packageSource = readSource(process.env.UI_NAV_01_PACKAGE_PATH ?? "package.json");
 const profileHookSource = readSource("src/features/profile/hooks/useProfileController.ts");
 const profileControllerSource = readSource("src/features/profile/model/profile-controller.ts");
 const authScreenSource = readSource("src/features/auth/components/auth-screen.tsx");
@@ -150,6 +150,17 @@ const appBackButtonSource = readSource("src/ui/navigation/app-back-button.tsx");
 const appBackButtonStyles = readSource("src/ui/navigation/app-back-button.module.css");
 const productTsxFiles = readProductTsxFiles("src");
 const productTsxSource = productTsxFiles.map((file) => file.source).join("\n");
+
+const packageTestRunner = (JSON.parse(packageSource) as {
+  scripts?: Record<string, string>;
+}).scripts?.test ?? "";
+assert.equal(
+  packageTestRunner.split(
+    "src/features/user-portal-shell/user-portal-shell-integration.contract.test.ts",
+  ).length - 1,
+  1,
+  "[UI-NAV-01.runner-external] el contrato de integración debe estar registrado exactamente una vez",
+);
 
 const components = {
   shellLayout: readSource("src/features/app-shell/components/app-shell-layout.tsx"),
@@ -301,10 +312,11 @@ Object.entries(components).forEach(([label, source]) => {
   assert.doesNotMatch(source, /refreshProfileAvatar/, `${label} no debe conocer refreshProfileAvatar (logica de produccion del root)`);
 });
 
-// 7. Notifications sigue siendo responsabilidad externa a AppShellLayout: el root llena el slot
-//    con NotificationPanel (P3-07C) — el estado, las props y los callbacks siguen siendo del
-//    root, y ninguno de los 5 componentes de App Shell dibuja el panel.
-assert.match(appSource, /notificationOverlay=\{\s*<NotificationPanel/);
+// 7. Notifications sigue siendo responsabilidad externa a ambos layouts: el root construye una
+//    única instancia de NotificationPanel y transporta ese slot al shell seleccionado. El estado,
+//    las props y los callbacks siguen siendo del root, y ningún componente legacy lo redibuja.
+assert.match(appSource, /const notificationOverlay = \(\s*<NotificationPanel/);
+assert.match(appSource, /notificationOverlay=\{notificationOverlay\}/);
 assert.match(appSource, /isOpen=\{isNotificationPanelOpen\}/);
 Object.entries(components).forEach(([label, source]) => {
   assert.doesNotMatch(source, /notification-panel"|<NotificationPanel/, `${label} no debe dibujar el panel de notificaciones (sigue siendo slot del root)`);
@@ -333,7 +345,8 @@ assert.match(components.drawer, /onClick={\(\) => onNavigate\(item\.id\)}/);
 
 // 9e. Back button: AppScreenHeader solo se pasa cuando canGoBackFromScreen(screen) es true — el
 //     componente en si no tiene guard interno, asi que el gating debe vivir en el root.
-assert.match(appSource, /screenHeader={canGoBackFromScreen\(screen\) \? <AppScreenHeader onBack={goBack} \/> : null}/);
+assert.match(appSource, /const screenHeader = canGoBackFromScreen\(screen\)[\s\S]*?\? <AppScreenHeader onBack=\{goBack\} \/>[\s\S]*?: null;/);
+assert.match(appSource, /screenHeader=\{screenHeader\}/);
 assert.doesNotMatch(components.screenHeader, /screen !== "dashboard"|canGoBackFromScreen/, "AppScreenHeader no debe reimplementar el gating, lo recibe del root");
 
 // ---------------------------------------------------------------------------------------------

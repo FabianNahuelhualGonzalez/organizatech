@@ -131,6 +131,6 @@ assert.match(normalizationSource, /export function normalizeTrainingPlanInput\(/
 const integrationTestCommand = "tsx src/lib/training/training-plan-controller-integration-contract.test.ts";
 const testCommands = packageJson.scripts.test.split(" && ");
 assert.equal(testCommands.filter((command) => command === integrationTestCommand).length, 1);
-assert.equal(testCommands.length, 126);
+assert.equal(testCommands.length, 127);
 
 console.log("training plan controller static integration contract tests passed");

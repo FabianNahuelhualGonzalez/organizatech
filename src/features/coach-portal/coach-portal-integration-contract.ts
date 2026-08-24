@@ -193,6 +193,13 @@ function auditDestinations(sources: Sources) {
   ));
   assertContract(!sharedDestination, FAILURE.destinationsShared);
 
+  const userClauses = clauses.filter((clause) => caseLabel(clause) === "user_authorized");
+  const userText = userClauses.map((clause) => clause.getText(sourceFile)).join("\n");
+  assertContract(
+    userClauses.length === 1 && /continueAuthenticatedSession\(authState, intent\)/.test(userText),
+    FAILURE.destinationsShared,
+  );
+
   const coachClauses = clauses.filter((clause) => caseLabel(clause) === "coach_authorized");
   const coachText = coachClauses.map((clause) => clause.getText(sourceFile)).join("\n");
   assertContract(
@@ -201,13 +208,6 @@ function auditDestinations(sources: Sources) {
     && /createCoachPortalSession/.test(coachText)
     && /replaceCoachPortalSession/.test(coachText),
     FAILURE.coachContinuesUser,
-  );
-
-  const userClauses = clauses.filter((clause) => caseLabel(clause) === "user_authorized");
-  const userText = userClauses.map((clause) => clause.getText(sourceFile)).join("\n");
-  assertContract(
-    userClauses.length === 1 && /continueAuthenticatedSession\(authState, intent\)/.test(userText),
-    FAILURE.destinationsShared,
   );
 }
 
@@ -550,8 +550,8 @@ const mutations = [
     expectedFailure: FAILURE.destinationsShared,
     apply: (value: string) => replaceExactlyOnce(
       value,
-      '      case "user_authorized":\n        replaceCoachPortalSession(null);',
-      '      case "user_authorized":\n      case "coach_authorized":\n        replaceCoachPortalSession(null);',
+      '      case "user_authorized": {',
+      '      case "coach_authorized": {',
       "M02",
     ),
   },
@@ -704,8 +704,8 @@ const mutations = [
     expectedFailure: FAILURE.logoutRetainsState,
     apply: (value: string) => replaceExactlyOnce(
       value,
-      "  ) {\n    replaceCoachPortalSession(null);\n    if (\n",
-      "  ) {\n    void coachPortalSessionRef.current;\n    if (\n",
+      "  ) {\n    replaceUserPortalAuthorizationProof(null);\n    replaceCoachPortalSession(null);\n    if (\n",
+      "  ) {\n    replaceUserPortalAuthorizationProof(null);\n    void coachPortalSessionRef.current;\n    if (\n",
       "M16",
     ),
   },
@@ -801,8 +801,8 @@ const positiveControls = [
     source: "root" as const,
     apply: (value: string) => replaceExactlyOnce(
       value,
-      "  function continueAuthorizedPortalAccess(\n",
-      "  // Selección de destino ya autorizada por backend.\n  function continueAuthorizedPortalAccess(\n",
+      "  async function continueAuthorizedPortalAccess(\n",
+      "  // Selección de destino ya autorizada por backend.\n  async function continueAuthorizedPortalAccess(\n",
       "control comentario",
     ),
   },

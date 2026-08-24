@@ -12,6 +12,7 @@
   min-height: 100vh;
   min-height: 100svh;
   margin: 0 auto;
+  padding: 0;
   overflow-x: hidden;
   overflow-x: clip;
   color: var(--user-portal-text);
@@ -48,6 +49,13 @@
   border-bottom: 1px solid color-mix(in srgb, var(--user-portal-line) 70%, transparent);
   background: color-mix(in srgb, var(--user-portal-background) 94%, transparent);
   backdrop-filter: blur(14px);
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.topbarHidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-110%);
 }
 
 .iconButton,
@@ -215,37 +223,16 @@
 }
 
 .drawerAvatar {
-  position: relative;
   display: grid;
   width: 58px;
   height: 58px;
   place-items: center;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--user-portal-primary) 48%, transparent);
-  border-radius: 50%;
-  color: #b8ceff;
-  background:
-    linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--user-portal-primary) 20%, var(--user-portal-panel)),
-      var(--user-portal-background)
-    );
 }
 
-.avatarImage {
-  object-fit: cover;
-}
-
-.avatarInitials {
-  max-width: 100%;
-  overflow: hidden;
-  padding: 4px;
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
+.drawerAvatar :global(.user-avatar) {
+  width: 58px;
+  height: 58px;
+  font-size: 22px;
 }
 
 .identityCopy {
@@ -340,6 +327,11 @@
   background: color-mix(in srgb, var(--user-portal-danger) 13%, transparent);
 }
 
+.logoutButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .srOnly {
   position: absolute;
   width: 1px;
@@ -400,6 +392,11 @@
   }
 
   .drawerAvatar {
+    width: 50px;
+    height: 50px;
+  }
+
+  .drawerAvatar :global(.user-avatar) {
     width: 50px;
     height: 50px;
   }

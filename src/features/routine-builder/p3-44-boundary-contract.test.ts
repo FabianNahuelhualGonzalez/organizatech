@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import ts from "typescript";
+import { legacyAppShellLayoutAst } from "@/features/app-shell/test-support/legacy-app-shell-layout-ast";
 
 const BASE_SHA = "d5ed28ffa452ca59eac93c4cc868279171e143a4";
 const files = {
@@ -36,48 +36,6 @@ function readSources(base = "."): Sources {
   return Object.fromEntries(
     Object.entries(files).map(([key, path]) => [key, readFileSync(join(base, path), "utf8")]),
   ) as Sources;
-}
-
-function productiveJsx(source: string) {
-  const start = source.indexOf("  return (\n    <AppShellLayout");
-  const end = source.indexOf("\n  );\n}", start);
-  assert.ok(start >= 0 && end > start, "se encontró el JSX productivo del root");
-  return source.slice(start, end + 5);
-}
-
-function productiveJsxAst(source: string): string {
-  const sourceFile = ts.createSourceFile(
-    files.root,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TSX,
-  );
-  let expression: ts.Expression | undefined;
-  const visit = (node: ts.Node) => {
-    if (ts.isReturnStatement(node) && node.expression) {
-      let candidate = node.expression;
-      while (ts.isParenthesizedExpression(candidate)) candidate = candidate.expression;
-      if (
-        ts.isJsxElement(candidate) &&
-        candidate.openingElement.tagName.getText(sourceFile) === "AppShellLayout"
-      ) {
-        expression = candidate;
-        return;
-      }
-    }
-    if (!expression) ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  assert.ok(expression, "se encontró el AST del JSX productivo del root");
-
-  const serialize = (node: ts.Node): unknown => {
-    const children = node.getChildren(sourceFile);
-    return children.length === 0
-      ? [node.kind, node.getText(sourceFile)]
-      : [node.kind, children.map(serialize)];
-  };
-  return JSON.stringify(serialize(expression));
 }
 
 function validate(sources: Sources) {
@@ -161,8 +119,12 @@ function validate(sources: Sources) {
 
   const baseRoot = execFileSync("git", ["show", `${BASE_SHA}:${files.root}`], { encoding: "utf8" });
   const baseCompletion = execFileSync("git", ["show", `${BASE_SHA}:${files.completion}`], { encoding: "utf8" });
-  assert.equal(productiveJsxAst(sources.root), productiveJsxAst(baseRoot));
-  assert.equal(productiveJsx(sources.root), productiveJsx(baseRoot));
+  // UI-NAV-01 cambia exclusivamente el contenedor aprobado. El fallback legacy COMPLETO conserva
+  // topbar, overlays, screenHeader, pantallas, props, callbacks y orden del baseline P3-44.
+  assert.equal(
+    legacyAppShellLayoutAst(files.root, sources.root),
+    legacyAppShellLayoutAst(files.root, baseRoot),
+  );
   assert.equal(sources.completion, baseCompletion);
 }
 

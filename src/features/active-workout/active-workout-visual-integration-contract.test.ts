@@ -600,10 +600,10 @@ const globalStyles = readSource("src/app/globals.css");
 
 const protectedFileHashes = {
   "AGENTS.md": "f0c3ef88979a0ab085551a656ebb1843bfa56138d948ca4236bce6fcd1fa9dd0",
-  "package.json": "5d69297f8121f53ccb4c36e550fa460644e4caeb8c4cee95bb4ea12bc3c60046",
+  "package.json": "d51aa85801147a83aef38c51a1bc7768b0468b3a12a4ef91405c8be3d6ca31c2",
   "package-lock.json": "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5",
   "src/app/globals.css": "57a8d03c03fc729a72a06a7b846ae8a73a721b7d89551edf18b0003b26cfc5c9",
-  "src/components/organizatech-app.tsx": "bbf0fc053f137579f0f288248c105422211330eded668397f58c3f927acf40a4",
+  "src/components/organizatech-app.tsx": "1ff491a02c84e5246414b689d563ba07a5bb811c209fbea618be31091acca7ca",
   "src/features/progress/components/comparison-screen-v2.tsx": "bff390e44cf5a04fe59b0f2a594fcb53fb2a50602c850362f1a88ca136765743",
   "src/features/progress/progress-visual-integration-contract.test.ts": "9c0f432417b1a98a0cd3b9542b2e6a4c3dd4a8126989c6f17bc3a65133a56821",
   "src/features/active-workout/model/active-workout-controller-state.ts": "37006210eabda3f99217bd98b6ebf876780ed5ecc33bb8fba936eda7fd085ea5",
@@ -884,7 +884,7 @@ assert.match(
   /<button className="button training-completion-button" type="button" onClick=\{onDashboard\}>\s*Ir al panel principal\s*<\/button>/,
   "el boton Dashboard conserva clase, tipo, handler y texto",
 );
-assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 126);
+assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 127);
 
 // GuidedTrainingScreen conserva el boundary de P3-30: TRAIN-UI-01 cambia su presentacion,
 // reutiliza el normalizador canonico de P3-29 y no introduce estado ni efectos propios.

@@ -382,9 +382,10 @@ const notificationsHookSource = readSource("src/features/notifications/hooks/use
 const notificationsControllerSource = readSource("src/features/notifications/model/notifications-controller.ts");
 const packageSource = readSource("package.json");
 
-// 1. El root importa NotificationPanel y lo usa dentro del slot notificationOverlay.
+// 1. El root importa NotificationPanel, crea una sola instancia y transporta el slot al layout.
 assert.match(appSource, /import \{ NotificationPanel \} from "@\/features\/notifications\/components\/NotificationPanel";/);
-assert.match(appSource, /notificationOverlay=\{\s*<NotificationPanel/);
+assert.match(appSource, /const notificationOverlay = \(\s*<NotificationPanel/);
+assert.match(appSource, /notificationOverlay=\{notificationOverlay\}/);
 
 // 2. Props exactas: total completo (no métricas derivadas), arrays correctos, registros vistos,
 //    mensaje vacío canónico, apertura y cierre productivos.

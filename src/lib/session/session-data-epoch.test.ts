@@ -495,7 +495,8 @@ function assertP341StaticContracts(sources: P341ContractSources) {
     "multiportalAuth.settlePortalSignOutMessage(access.message)",
     'if (rejectionMessage) setAuthStatus(rejectionMessage, "error")',
     "applySessionState(authState)",
-    "continueAuthorizedPortalAccess(access, authState, intent)",
+    "await continueAuthorizedPortalAccess(",
+    "() => multiportalAuth.isPortalResolutionCurrent(resolutionOwner)",
   ], "autorización multiportal antes de aplicar y continuar la sesión");
 
   assert.match(

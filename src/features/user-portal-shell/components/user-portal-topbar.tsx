@@ -2,35 +2,38 @@
 
 import Image from "next/image";
 import { Bell, Menu } from "lucide-react";
+import type { Ref } from "react";
 
+import { NOTIFICATION_PANEL_ID } from "@/features/notifications/components/NotificationPanel";
 import { USER_PORTAL_DRAWER_ID } from "@/features/user-portal-shell/model/user-portal-navigation";
 
 import styles from "./user-portal-shell.module.css";
 
-export type UserPortalNotificationState = {
-  readonly isPanelOpen: boolean;
-  readonly accessibleLabel: string;
-} & (
-  | { readonly hasUnread: false; readonly badgeText: null }
-  | { readonly hasUnread: true; readonly badgeText: string }
-);
-
 export interface UserPortalTopbarProps {
+  readonly isHidden: boolean;
   readonly isDrawerOpen: boolean;
-  readonly notifications: UserPortalNotificationState;
+  readonly isNotificationPanelOpen: boolean;
+  readonly notificationBadgeText: string | null;
+  readonly notificationBadgeAriaLabel: string | null;
+  readonly menuButtonRef?: Ref<HTMLButtonElement>;
   readonly onMenuToggle: () => void;
   readonly onToggleNotifications: () => void;
 }
 
 export function UserPortalTopbar({
+  isHidden,
   isDrawerOpen,
-  notifications,
+  isNotificationPanelOpen,
+  notificationBadgeText,
+  notificationBadgeAriaLabel,
+  menuButtonRef,
   onMenuToggle,
   onToggleNotifications,
 }: UserPortalTopbarProps) {
   return (
-    <header className={styles.topbar}>
+    <header className={`${styles.topbar} ${isHidden ? styles.topbarHidden : ""}`}>
       <button
+        ref={menuButtonRef}
         className={styles.iconButton}
         type="button"
         aria-label={isDrawerOpen ? "Cerrar menú Usuario" : "Abrir menú Usuario"}
@@ -56,15 +59,19 @@ export function UserPortalTopbar({
         <button
           className={styles.notificationButton}
           type="button"
-          aria-label={notifications.accessibleLabel}
-          aria-expanded={notifications.isPanelOpen}
-          data-has-unread={notifications.hasUnread ? "true" : "false"}
+          aria-label={notificationBadgeAriaLabel ?? "Ver notificaciones"}
+          aria-expanded={isNotificationPanelOpen}
+          aria-controls={NOTIFICATION_PANEL_ID}
+          data-has-unread={notificationBadgeText ? "true" : "false"}
           onClick={onToggleNotifications}
         >
           <Bell aria-hidden="true" focusable="false" size={22} />
-          {notifications.hasUnread ? (
-            <span className={styles.notificationBadge} aria-hidden="true">
-              {notifications.badgeText}
+          {notificationBadgeText ? (
+            <span
+              className={styles.notificationBadge}
+              aria-label={notificationBadgeAriaLabel ?? undefined}
+            >
+              {notificationBadgeText}
             </span>
           ) : null}
         </button>

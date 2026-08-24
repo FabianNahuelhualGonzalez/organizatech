@@ -82,6 +82,12 @@ import {
   type AuthorizedPortalAccess,
   type SignupConfirmationResult,
 } from "@/features/auth/model/multiportal-auth-controller";
+import {
+  createUserPortalAuthorizationProof,
+  hasCurrentUserPortalAuthorization,
+  shouldMountAuthorizedUserPortal,
+  type UserPortalAuthorizationProof,
+} from "@/features/auth/model/user-portal-authorization-proof";
 import { CoachPortalBoundary } from "@/features/coach-portal/components/coach-portal";
 import {
   createCoachPortalSession,
@@ -92,6 +98,11 @@ import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard"
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
 import { useNotificationsController } from "@/features/notifications/hooks/useNotificationsController";
 import { useProfileController } from "@/features/profile/hooks/useProfileController";
+import { UserPortalShell } from "@/features/user-portal-shell/components/user-portal-shell";
+import {
+  createUserPortalNavigationModel,
+  isUserPortalRenderableScreen,
+} from "@/features/user-portal-shell/model/user-portal-navigation";
 import { useLegacyCycleHistoryController } from "@/features/cycle-history/hooks/useLegacyCycleHistoryController";
 import {
   coordinateAuthenticatedSessionEvent,
@@ -453,6 +464,9 @@ export function OrganizatechApp({
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
   const [coachPortalSession, setCoachPortalSession] = useState<CoachPortalSession | null>(null);
   const coachPortalSessionRef = useRef<CoachPortalSession | null>(null);
+  const [userPortalAuthorizationProof, setUserPortalAuthorizationProof] =
+    useState<UserPortalAuthorizationProof | null>(null);
+  const userPortalAuthorizationProofRef = useRef<UserPortalAuthorizationProof | null>(null);
   const [coachIdentitySwitchRequired, setCoachIdentitySwitchRequired] = useState(false);
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(initialAuthState.isAuthLoading);
@@ -476,6 +490,7 @@ export function OrganizatechApp({
   const authenticatedSessionCoordinatorRef = useRef(createAuthenticatedSessionCoordinator());
   const interactiveAuthAttemptRef = useRef(false);
   const loginSubmitOwnerRef = useRef<LoginSubmitOwnerController | null>(null);
+  const logoutInFlightRef = useRef(false);
 
   const captureSessionDataRequestToken = useCallback((): SessionDataRequestToken => {
     return createSessionDataRequestToken(sessionDataEpochRef.current);
@@ -622,6 +637,11 @@ export function OrganizatechApp({
   const hasSupabaseSession = Boolean(
     supabaseSession && supabaseUser && supabaseSession.user.id === supabaseUser.id,
   );
+  const hasCurrentUserPortalAuthorizationProof = hasCurrentUserPortalAuthorization({
+    authorizationProof: userPortalAuthorizationProof,
+    sessionUserId: supabaseSession?.user.id,
+    authenticatedUserId: supabaseUser?.id,
+  });
   const canEditProfilePersonalData = Boolean(hasSupabaseSession && getSupabaseBrowserClient());
   const activeFeatureStorageScope = getBrowserStorageScope(dataMode, supabaseUser?.id);
   const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);
@@ -805,6 +825,7 @@ export function OrganizatechApp({
   }
 
   function beginPasswordRecoveryPortalSession() {
+    replaceUserPortalAuthorizationProof(null);
     const becameActive = multiportalAuth.beginPasswordRecoveryPortalGuard();
     authenticatedSessionCoordinatorRef.current.reset();
     replaceCoachPortalSession(null);
@@ -1575,14 +1596,21 @@ export function OrganizatechApp({
   }
 
   function replaceCoachPortalSession(session: CoachPortalSession | null) {
+    if (session) replaceUserPortalAuthorizationProof(null);
     coachPortalSessionRef.current = session;
     setCoachPortalSession(session);
+  }
+
+  function replaceUserPortalAuthorizationProof(proof: UserPortalAuthorizationProof | null) {
+    userPortalAuthorizationProofRef.current = proof;
+    setUserPortalAuthorizationProof(proof);
   }
 
   function holdAuthenticatedSessionWithoutContinuation(
     event: string,
     authState: SupabaseSessionState,
   ) {
+    replaceUserPortalAuthorizationProof(null);
     coordinateAuthenticatedSessionEvent({
       event,
       state: authState,
@@ -1620,6 +1648,7 @@ export function OrganizatechApp({
     intent: AuthenticatedSessionIntent,
     resolutionOwner: PortalResolutionOwner,
   ): Promise<AuthorizedPortalAccess | null> {
+    replaceUserPortalAuthorizationProof(null);
     const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);
     if (access.state === "stale" || !multiportalAuth.isPortalResolutionCurrent(resolutionOwner)) {
       return null;
@@ -1635,19 +1664,43 @@ export function OrganizatechApp({
       return null;
     }
     applySessionState(authState);
-    await continueAuthorizedPortalAccess(access, authState, intent);
+    await continueAuthorizedPortalAccess(
+      access,
+      authState,
+      intent,
+      () => multiportalAuth.isPortalResolutionCurrent(resolutionOwner),
+    );
     return access;
   }
 
-  function continueAuthorizedPortalAccess(
+  async function continueAuthorizedPortalAccess(
     access: AuthorizedPortalAccess,
     authState: SupabaseSessionState,
     intent: AuthenticatedSessionIntent,
-  ) {
+    isAuthorizationCurrent: () => boolean,
+  ): Promise<void> {
     switch (access.state) {
-      case "user_authorized":
+      case "user_authorized": {
+        const authorizationProof = createUserPortalAuthorizationProof({
+          access,
+          sessionUserId: authState.session?.user.id,
+          authenticatedUserId: authState.user?.id,
+        });
+        if (!authorizationProof || !isAuthorizationCurrent()) {
+          replaceUserPortalAuthorizationProof(null);
+          if (!authorizationProof) {
+            authenticatedSessionCoordinatorRef.current.reset();
+            setIsAuthLoading(false);
+            setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+          }
+          return;
+        }
         replaceCoachPortalSession(null);
-        return continueAuthenticatedSession(authState, intent);
+        const continuation = await continueAuthenticatedSession(authState, intent);
+        if (continuation.kind === "stale" || !isAuthorizationCurrent()) return;
+        replaceUserPortalAuthorizationProof(authorizationProof);
+        return;
+      }
       case "coach_authorized": {
         const nextCoachPortalSession = createCoachPortalSession({
           authorizedUserId: access.userId,
@@ -1701,6 +1754,9 @@ export function OrganizatechApp({
 
   function applySessionState(authState: SupabaseSessionState) {
     const authenticatedUser = resolveEffectiveAuthenticatedUser(authState.session, authState.user);
+    if (userPortalAuthorizationProofRef.current?.userId !== authenticatedUser?.id) {
+      replaceUserPortalAuthorizationProof(null);
+    }
     if (coachPortalSessionRef.current?.userId !== authenticatedUser?.id) {
       replaceCoachPortalSession(null);
     }
@@ -1766,6 +1822,7 @@ export function OrganizatechApp({
       statusTone?: AuthStatusTone;
     } = {},
   ) {
+    replaceUserPortalAuthorizationProof(null);
     replaceCoachPortalSession(null);
     if (
       activeBrowserStorageScopeRef.current === null &&
@@ -2066,6 +2123,7 @@ export function OrganizatechApp({
 
   async function handleCoachIdentitySwitch() {
     if (!coachIdentitySwitchRequired) return;
+    replaceUserPortalAuthorizationProof(null);
     interactiveAuthAttemptRef.current = false;
     setIsBusy(true);
     try {
@@ -2081,6 +2139,7 @@ export function OrganizatechApp({
   }
 
   async function handleAuth(mode: "login" | "registro", formData: FormData) {
+    replaceUserPortalAuthorizationProof(null);
     const requestedPortal = authRouteController.route.accountType;
     const isCoachRegistration = mode === "registro" && requestedPortal === "coach";
     const coachRegistrationPreparation = isCoachRegistration
@@ -2203,7 +2262,9 @@ export function OrganizatechApp({
           requestedPortal: "coach",
           userId: registration.userId,
           coach: registration.coach,
-        }, registration.authState, "dashboard");
+        }, registration.authState, "dashboard", () => (
+          multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner!)
+        ));
         return;
       }
 
@@ -2241,7 +2302,9 @@ export function OrganizatechApp({
           state: "user_authorized",
           requestedPortal: "usuario",
           userId: registration.userId,
-        }, registration.authState, "dashboard");
+        }, registration.authState, "dashboard", () => (
+          multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner!)
+        ));
         return;
       }
 
@@ -3015,6 +3078,9 @@ export function OrganizatechApp({
   }
 
   async function handleLogout() {
+    if (logoutInFlightRef.current) return;
+    logoutInFlightRef.current = true;
+    replaceUserPortalAuthorizationProof(null);
     multiportalAuth.invalidatePortalOperations();
     setIsBusy(true);
     const requestToken = captureSessionDataRequestToken();
@@ -3032,6 +3098,7 @@ export function OrganizatechApp({
       if (isSessionDataRequestCurrent(requestToken)) setStatusMessage(translateAuthError(error));
     } finally {
       if (isSessionDataRequestCurrent(requestToken)) setIsBusy(false);
+      logoutInFlightRef.current = false;
     }
   }
 
@@ -4181,6 +4248,18 @@ export function OrganizatechApp({
     );
   }
 
+  if (
+    hasSupabaseSession
+    && isUserPortalRenderableScreen(screen)
+    && !hasCurrentUserPortalAuthorizationProof
+  ) {
+    return (
+      <main className="app-shell">
+        <AuthLoadingScreen />
+      </main>
+    );
+  }
+
   function toggleNotifications() {
     appShell.toggleNotifications();
   }
@@ -4215,6 +4294,19 @@ export function OrganizatechApp({
   }
 
   const menuScreens = resolveMenuScreens(primaryScreens, hasTrainingEntries, visibleCycleHistoryCount);
+  const userPortalNavigation = createUserPortalNavigationModel({
+    currentScreen: screen,
+    visibleScreens: menuScreens,
+  });
+  const useUserPortalShell = shouldMountAuthorizedUserPortal({
+    authorizationProof: userPortalAuthorizationProof,
+    sessionUserId: supabaseSession?.user.id,
+    authenticatedUserId: supabaseUser?.id,
+    hasCoachPortalSession: Boolean(coachPortalSession),
+    isAuthLoading,
+    isPasswordRecoveryBlocked: multiportalAuth.isPasswordRecoveryPortalBlocked(),
+    isRenderableScreen: isUserPortalRenderableScreen(screen),
+  });
 
   const dashboardScreenVariant = resolveDashboardScreenVariant(isCycleScopedPlanBlocked);
   const comparisonScreenVariant = resolveComparisonScreenVariant(isCycleScopedPlanBlocked);
@@ -4237,53 +4329,24 @@ export function OrganizatechApp({
     });
   }
 
-  return (
-    <AppShellLayout
-      topbar={
-        <AppTopbar
-          isHidden={isTopbarHidden}
-          isMenuOpen={isMenuOpen}
-          onMenuToggle={toggleMenu}
-          trainingMeta={trainingTopbarMeta}
-          fallbackText={hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}
-          isNotificationPanelOpen={isNotificationPanelOpen}
-          notificationBadgeText={notificationBadgeText}
-          notificationBadgeAriaLabel={notificationBadgeAriaLabel}
-          onToggleNotifications={toggleNotifications}
-        />
-      }
-      notificationOverlay={
-        <NotificationPanel
-          isOpen={isNotificationPanelOpen}
-          subtitle={notificationPanelSubtitle}
-          totalNotificationsCount={appNotifications.length}
-          newNotifications={newNotifications}
-          historyNotifications={historyNotifications}
-          seenNotificationRecordsById={seenNotificationRecordsById}
-          emptyMessage={NOTIFICATION_EMPTY_MESSAGE}
-          onClose={appShell.closeNotifications}
-          onOpenNotification={openNotificationTarget}
-        />
-      }
-      navigationOverlay={
-        <AppNavigationDrawer
-          isOpen={isMenuOpen}
-          profileHeader={
-            <ProfileMenuHeader
-              profile={profileViewModel}
-              onAvatarImageError={handleProfileAvatarImageError}
-              avatarResetKey={profileAvatarResetKey}
-            />
-          }
-          items={menuScreens.map((item) => ({ id: item, label: screenLabel(item), isActive: screen === item }))}
-          isLogoutDisabled={isBusy}
-          onClose={appShell.closeMenu}
-          onNavigate={navigateTo}
-          onLogout={handleLogout}
-        />
-      }
-      screenHeader={canGoBackFromScreen(screen) ? <AppScreenHeader onBack={goBack} /> : null}
-    >
+  const notificationOverlay = (
+    <NotificationPanel
+      isOpen={isNotificationPanelOpen}
+      subtitle={notificationPanelSubtitle}
+      totalNotificationsCount={appNotifications.length}
+      newNotifications={newNotifications}
+      historyNotifications={historyNotifications}
+      seenNotificationRecordsById={seenNotificationRecordsById}
+      emptyMessage={NOTIFICATION_EMPTY_MESSAGE}
+      onClose={appShell.closeNotifications}
+      onOpenNotification={openNotificationTarget}
+    />
+  );
+  const screenHeader = canGoBackFromScreen(screen)
+    ? <AppScreenHeader onBack={goBack} />
+    : null;
+  const portalScreenContent = (
+    <>
       {screen === "dashboard" && (
         dashboardScreenVariant === "blocked" ? (
           <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
@@ -4477,6 +4540,71 @@ export function OrganizatechApp({
           onConfirm={() => void saveInitialRoutine("confirmed_routine_update")}
         />
       )}
+    </>
+  );
+
+  if (useUserPortalShell) {
+    return (
+      <UserPortalShell
+        profile={profileViewModel}
+        navigation={userPortalNavigation}
+        isDrawerOpen={isMenuOpen}
+        isTopbarHidden={isTopbarHidden}
+        isLogoutDisabled={isBusy}
+        isNotificationPanelOpen={isNotificationPanelOpen}
+        notificationBadgeText={notificationBadgeText}
+        notificationBadgeAriaLabel={notificationBadgeAriaLabel}
+        notificationOverlay={notificationOverlay}
+        screenHeader={screenHeader}
+        avatarResetKey={profileAvatarResetKey}
+        onAvatarImageError={handleProfileAvatarImageError}
+        onOpen={toggleMenu}
+        onClose={appShell.closeMenu}
+        onNavigate={navigateTo}
+        onToggleNotifications={toggleNotifications}
+        onLogout={handleLogout}
+      >
+        {portalScreenContent}
+      </UserPortalShell>
+    );
+  }
+
+  return (
+    <AppShellLayout
+      topbar={
+        <AppTopbar
+          isHidden={isTopbarHidden}
+          isMenuOpen={isMenuOpen}
+          onMenuToggle={toggleMenu}
+          trainingMeta={trainingTopbarMeta}
+          fallbackText={hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}
+          isNotificationPanelOpen={isNotificationPanelOpen}
+          notificationBadgeText={notificationBadgeText}
+          notificationBadgeAriaLabel={notificationBadgeAriaLabel}
+          onToggleNotifications={toggleNotifications}
+        />
+      }
+      notificationOverlay={notificationOverlay}
+      navigationOverlay={
+        <AppNavigationDrawer
+          isOpen={isMenuOpen}
+          profileHeader={
+            <ProfileMenuHeader
+              profile={profileViewModel}
+              onAvatarImageError={handleProfileAvatarImageError}
+              avatarResetKey={profileAvatarResetKey}
+            />
+          }
+          items={menuScreens.map((item) => ({ id: item, label: screenLabel(item), isActive: screen === item }))}
+          isLogoutDisabled={isBusy}
+          onClose={appShell.closeMenu}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      }
+      screenHeader={screenHeader}
+    >
+      {portalScreenContent}
     </AppShellLayout>
   );
 }
