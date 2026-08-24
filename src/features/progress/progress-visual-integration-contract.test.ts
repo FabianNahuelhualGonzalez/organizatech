@@ -52,6 +52,8 @@ for (const forbiddenImport of [
 }
 
 const comparisonSource = sources.get(paths[0]) ?? "";
+const weeklyResultsPanelSource = sources.get(paths[1]) ?? "";
+const weeklySeriesColumnSource = sources.get(paths[2]) ?? "";
 assert.match(appSource, /import type \{ ComparisonScreenV2Props \} from "@\/features\/progress\/components\/comparison-screen-v2";/);
 assert.match(
   appSource,
@@ -74,6 +76,21 @@ assert.match(appSource, /model=\{progressControllerView\.comparisonModel\}/);
 assert.match(featureSource, /formatWeeklyComparisonDate\(record\.date\)/);
 assert.match(featureSource, /formatWeeklyComparisonDate\(baseline\.date\)/);
 assert.match(featureSource, /<ResponsiveContainer width="100%" height=\{210\}>/);
+assert.ok(
+  weeklyResultsPanelSource.indexOf('title={`Semana ${baseline.week}`}') <
+    weeklyResultsPanelSource.indexOf('title={`Semana ${effective?.week ?? "—"}`}'),
+  "UI-NAV-01V: Semana inicial debe permanecer a la izquierda de la semana elegida",
+);
+assert.equal(
+  weeklyResultsPanelSource.split("Primer registro vs semana elegida").length - 1,
+  1,
+  "UI-NAV-01V: Tus resultados debe conservar el texto final aprobado una sola vez",
+);
+assert.match(
+  weeklySeriesColumnSource,
+  /record\.reps\.map\(\(reps, index\) => \([\s\S]*?className="weekly-series-pill"[\s\S]*?<span>S\{index \+ 1\}:<\/span>[\s\S]*?<strong>\{formatKg\(record\.weight\)\} · \{reps\} reps<\/strong>/,
+  "UI-NAV-01V: cada columna debe conservar sus series completas con peso y repeticiones",
+);
 
 const registration = "tsx src/features/progress/progress-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);
@@ -404,6 +421,7 @@ function normalizeProgressSelector(selector: string) {
 interface ProgressCssElement {
   tag?: string;
   classes?: readonly string[];
+  pseudoElement?: string;
   adjacentPreviousSiblings?: readonly ProgressCssElement[];
   generalPreviousSiblings?: readonly ProgressCssElement[];
 }
@@ -514,6 +532,37 @@ const progressCssTargets = {
     allowAnyAncestorPrefix: true,
     ancestorPrefixBoundary: 1,
   },
+  weeklyResultsGrid: {
+    label: ".weekly-results-grid",
+    classes: ["weekly-results-grid"],
+    ancestors: [
+      { classes: ["weekly-results-card"] },
+      { classes: ["weekly-comparison-section"] },
+      { classes: ["weekly-comparison-shell"] },
+      { classes: ["weekly-comparison-screen", "screen"] },
+      { classes: ["content"] },
+      { classes: ["backgroundLayer"] },
+      { tag: "main", classes: ["app-shell", "shell"] },
+    ],
+    allowAnyAncestorPrefix: true,
+    ancestorPrefixBoundary: 0,
+  },
+  weeklyResultsDivider: {
+    label: ".weekly-results-grid::before",
+    classes: ["weekly-results-grid"],
+    pseudoElement: "before",
+    ancestors: [
+      { classes: ["weekly-results-card"] },
+      { classes: ["weekly-comparison-section"] },
+      { classes: ["weekly-comparison-shell"] },
+      { classes: ["weekly-comparison-screen", "screen"] },
+      { classes: ["content"] },
+      { classes: ["backgroundLayer"] },
+      { tag: "main", classes: ["app-shell", "shell"] },
+    ],
+    allowAnyAncestorPrefix: true,
+    ancestorPrefixBoundary: 0,
+  },
 } satisfies Record<string, ProgressCssTarget>;
 
 type ProgressSelectorCombinator = "descendant" | "child" | "adjacent" | "sibling";
@@ -592,7 +641,10 @@ function progressSelectorCompounds(selector: string) {
 }
 
 function progressCompoundMatchesElement(compound: string, element: ProgressCssElement) {
-  if (/::[a-z-]+/i.test(compound)) return false;
+  const pseudoElements = [...compound.matchAll(/::([a-z-]+)/gi)].map((match) => match[1].toLowerCase());
+  if (element.pseudoElement) {
+    if (pseudoElements.length !== 1 || pseudoElements[0] !== element.pseudoElement.toLowerCase()) return false;
+  } else if (pseudoElements.length > 0) return false;
   const classes = new Set(element.classes ?? []);
   for (const match of compound.matchAll(/\.([_a-z][\w-]*)/gi)) {
     if (!classes.has(match[1])) return false;
@@ -601,6 +653,7 @@ function progressCompoundMatchesElement(compound: string, element: ProgressCssEl
     .replace(/#[\w-]+/g, "")
     .replace(/\.[\w-]+/g, "")
     .replace(/\[[^\]]+\]/g, "")
+    .replace(/::[\w-]+/g, "")
     .replace(/:[\w-]+(?:\([^)]*\))?/g, "")
     .trim();
   return !tag || tag === "*" || tag.toLowerCase() === element.tag?.toLowerCase();
@@ -759,6 +812,9 @@ function resolveProgressDeclarationValue(
     (property === "overflow-x" || property === "overflow-y") &&
     declaration.property === "overflow"
   ) return declaration.value;
+  if (property === "background-color" && declaration.property === "background") {
+    return declaration.value;
+  }
   return null;
 }
 
@@ -844,13 +900,42 @@ function readProgressCssValue(input: {
   return value;
 }
 
+function splitProgressCssWhitespace(source: string) {
+  const parts: string[] = [];
+  let start = 0;
+  let quote = "";
+  let parentheses = 0;
+  let brackets = 0;
+  for (let index = 0; index <= source.length; index += 1) {
+    const character = source[index] ?? " ";
+    if (quote) {
+      if (character === "\\") index += 1;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "(") parentheses += 1;
+    else if (character === ")") parentheses -= 1;
+    else if (character === "[") brackets += 1;
+    else if (character === "]") brackets -= 1;
+    else if (/\s/.test(character) && parentheses === 0 && brackets === 0) {
+      const part = source.slice(start, index).trim();
+      if (part) parts.push(part);
+      start = index + 1;
+    }
+  }
+  return parts;
+}
+
 function evaluateProgressCssLength(valueInput: string, viewportWidth: number): number {
   const value = normalizeProgressCssValue(valueInput).toLowerCase();
-  const numeric = value.match(/^(-?\d*\.?\d+)(px|rem|vw)$/i);
+  if (/^[-+]?(?:0+(?:\.0*)?|\.0+)$/.test(value)) return 0;
+  const numeric = value.match(/^(-?\d*\.?\d+)(px|rem|vw|%)$/i);
   if (numeric) {
     const amount = Number(numeric[1]);
     if (numeric[2] === "px") return amount;
     if (numeric[2] === "rem") return amount * 16;
+    if (numeric[2] === "%") return (amount / 100) * viewportWidth;
     return (amount / 100) * viewportWidth;
   }
   if (value === "initial" || value === "medium") return 16;
@@ -864,7 +949,24 @@ function evaluateProgressCssLength(valueInput: string, viewportWidth: number): n
     assert.equal(parts.length, 3, `UI-NAV-01V CSS: clamp inválido (${valueInput})`);
     return Math.max(parts[0], Math.min(parts[1], parts[2]));
   }
-  assert.fail(`UI-NAV-01V CSS: font-size no evaluable (${valueInput})`);
+  assert.fail(`UI-NAV-01V CSS: longitud no evaluable (${valueInput})`);
+}
+
+function evaluateProgressHorizontalInsets(valueInput: string, viewportWidth: number) {
+  const parts = splitProgressCssWhitespace(normalizeProgressCssValue(valueInput));
+  assert.ok(parts.length >= 1 && parts.length <= 4, `UI-NAV-01W CSS: shorthand inválido (${valueInput})`);
+  if (parts.length === 1) return evaluateProgressCssLength(parts[0], viewportWidth) * 2;
+  if (parts.length === 2 || parts.length === 3) {
+    return evaluateProgressCssLength(parts[1], viewportWidth) * 2;
+  }
+  return evaluateProgressCssLength(parts[1], viewportWidth) +
+    evaluateProgressCssLength(parts[3], viewportWidth);
+}
+
+function evaluateProgressBorderWidth(valueInput: string, viewportWidth: number) {
+  const [width] = splitProgressCssWhitespace(normalizeProgressCssValue(valueInput));
+  assert.ok(width, `UI-NAV-01W CSS: borde sin ancho (${valueInput})`);
+  return evaluateProgressCssLength(width, viewportWidth);
 }
 
 function readProgressInheritedFontSizePixels(input: {
@@ -976,6 +1078,82 @@ function transformScaleHidesContent(valueInput: string) {
     if (relevantFactors.some(isZeroFactor)) return true;
   }
   return false;
+}
+
+function progressCssValueIsZero(valueInput: string) {
+  const value = normalizeProgressCssValue(valueInput).toLowerCase();
+  return /^[-+]?(?:0+(?:\.0*)?|\.0+)(?:px|rem|vw|%)?$/.test(value) ||
+    /^calc\([-+]?(?:0+(?:\.0*)?|\.0+)(?:px|rem|vw|%)?\)$/.test(value);
+}
+
+function progressCssColorIsTransparent(valueInput: string) {
+  const value = normalizeProgressCssValue(valueInput).toLowerCase();
+  if (value === "transparent" || value === "none") return true;
+  if (/^#[0-9a-f]{3}0$|^#[0-9a-f]{6}00$/i.test(value)) return true;
+  const alphaColor = value.match(/^(?:rgba|hsla)\((.*)\)$/i);
+  if (!alphaColor) return false;
+  const components = splitProgressCssOutsideGroups(alphaColor[1], ",").map((part) => part.trim());
+  return components.length === 4 && progressCssValueIsZero(components[3]);
+}
+
+function assertWeeklyResultsDividerVisible(
+  rules: readonly ProgressCssRule[],
+  viewportWidth: number,
+) {
+  const target = progressCssTargets.weeklyResultsDivider;
+  const read = (property: string) => readProgressTargetCssValue({
+    rules,
+    target,
+    property,
+    viewportWidth,
+  });
+  const display = normalizeProgressCssValue(read("display") ?? "").toLowerCase();
+  if (display === "none") {
+    assert.fail(`UI-NAV-01W: el divisor no puede usar display: none a ${viewportWidth}px`);
+  }
+  if (!display) {
+    assert.fail(`UI-NAV-01W: el divisor debe conservar display ejecutable a ${viewportWidth}px`);
+  }
+
+  const visibility = normalizeProgressCssValue(read("visibility") ?? "").toLowerCase();
+  if (visibility === "hidden" || visibility === "collapse") {
+    assert.fail(`UI-NAV-01W: el divisor no puede usar visibility: ${visibility} a ${viewportWidth}px`);
+  }
+
+  const opacity = normalizeProgressCssValue(read("opacity") ?? "").toLowerCase();
+  if (opacity && progressCssValueIsZero(opacity)) {
+    assert.fail(`UI-NAV-01W: el divisor no puede usar opacity: ${opacity} a ${viewportWidth}px`);
+  }
+
+  const content = normalizeProgressCssValue(read("content") ?? "").toLowerCase();
+  if (!content || content === "none" || content === "normal") {
+    assert.fail(`UI-NAV-01W: el divisor debe conservar content visible a ${viewportWidth}px`);
+  }
+
+  const background = normalizeProgressCssValue(read("background-color") ?? "").toLowerCase();
+  if (!background || progressCssColorIsTransparent(background)) {
+    assert.fail(`UI-NAV-01W: el divisor debe conservar un fondo visible a ${viewportWidth}px`);
+  }
+
+  const width = normalizeProgressCssValue(read("width") ?? "").toLowerCase();
+  if (!width || progressCssValueIsZero(width)) {
+    assert.fail(`UI-NAV-01W: el divisor debe conservar ancho positivo a ${viewportWidth}px`);
+  }
+
+  const transform = normalizeProgressCssValue(read("transform") ?? "").toLowerCase();
+  if (transformScaleHidesContent(transform)) {
+    assert.fail(`UI-NAV-01W: el divisor no puede ocultarse mediante transform: ${transform} a ${viewportWidth}px`);
+  }
+
+  const scale = normalizeProgressCssValue(read("scale") ?? "").toLowerCase();
+  if (scaleValueHidesContent(scale)) {
+    assert.fail(`UI-NAV-01W: el divisor no puede ocultarse mediante scale: ${scale} a ${viewportWidth}px`);
+  }
+
+  const clipPath = normalizeProgressCssValue(read("clip-path") ?? "").toLowerCase();
+  if (clipPath && clipPath !== "none") {
+    assert.fail(`UI-NAV-01W: el divisor no puede usar clip-path: ${clipPath} a ${viewportWidth}px`);
+  }
 }
 
 function assertWeeklySeriesPillContentVisible(
@@ -1108,10 +1286,269 @@ function readComparisonTableHeaders(source: string) {
   });
 }
 
+const weeklyResultsBoundaryWidths = [
+  319, 320,
+  339, 340, 341,
+  359, 360,
+  392, 393,
+  429, 430, 431,
+  479, 480, 481, 482, 483,
+  519, 520, 521,
+  768,
+] as const;
+
+const weeklyResultsNormalSeries = {
+  label: "S1:",
+  value: "100,25 kg · 20 reps",
+} as const;
+
+const weeklyResultsExceptionalSeries = [
+  { label: "S10:", value: "100,25 kg · 100 reps" },
+  { label: "S100:", value: "1000,25 kg · 1000 reps" },
+] as const;
+
+function estimateProgressMonoTextWidth(text: string, fontSizePixels: number) {
+  return text.length * fontSizePixels * 0.6;
+}
+
+function readProgressRequiredTargetValue(input: {
+  rules: readonly ProgressCssRule[];
+  target: ProgressCssTarget;
+  property: string;
+  viewportWidth: number;
+}) {
+  const value = readProgressTargetCssValue(input);
+  if (value === null) {
+    assert.fail(`UI-NAV-01W CSS: falta ${input.property} efectivo en ${input.target.label} a ${input.viewportWidth}px`);
+  }
+  return value;
+}
+
+function calculateWeeklyResultsGeometry(input: {
+  rules: readonly ProgressCssRule[];
+  shellRules: readonly ProgressCssRule[];
+  viewportWidth: number;
+}) {
+  const { rules, shellRules, viewportWidth } = input;
+  const portalWidth = Math.min(viewportWidth, 560);
+  const portalHorizontalPadding = evaluateProgressHorizontalInsets(readProgressCssValue({
+    rules: shellRules,
+    selector: ".content",
+    property: "padding",
+    viewportWidth,
+  }), viewportWidth);
+  const comparisonWidth = portalWidth - portalHorizontalPadding;
+  const shellHorizontalBorder = evaluateProgressBorderWidth(readProgressCssValue({
+    rules,
+    selector: ".weekly-comparison-shell",
+    property: "border",
+    viewportWidth,
+  }), viewportWidth) * 2;
+  const shellHorizontalPadding = evaluateProgressHorizontalInsets(readProgressCssValue({
+    rules,
+    selector: ".weekly-comparison-shell",
+    property: "padding",
+    viewportWidth,
+  }), viewportWidth);
+  const resultsCardWidth = comparisonWidth - shellHorizontalBorder - shellHorizontalPadding;
+  const resultsCardHorizontalBorder = evaluateProgressBorderWidth(readProgressCssValue({
+    rules,
+    selector: ".weekly-results-card",
+    property: "border",
+    viewportWidth,
+  }), viewportWidth) * 2;
+  const resultsCardHorizontalPadding = evaluateProgressHorizontalInsets(readProgressCssValue({
+    rules,
+    selector: ".weekly-results-card",
+    property: "padding",
+    viewportWidth,
+  }), viewportWidth);
+  const gridWidth = resultsCardWidth - resultsCardHorizontalBorder - resultsCardHorizontalPadding;
+  const gridGap = evaluateProgressCssLength(readProgressRequiredTargetValue({
+    rules,
+    target: progressCssTargets.weeklyResultsGrid,
+    property: "gap",
+    viewportWidth,
+  }), viewportWidth);
+  const columnWidth = (gridWidth - gridGap) / 2;
+  const pillHorizontalBorder = evaluateProgressBorderWidth(readProgressRequiredTargetValue({
+    rules,
+    target: progressCssTargets.weeklySeriesPill,
+    property: "border",
+    viewportWidth,
+  }), viewportWidth) * 2;
+  const pillHorizontalPadding = evaluateProgressHorizontalInsets(readProgressRequiredTargetValue({
+    rules,
+    target: progressCssTargets.weeklySeriesPill,
+    property: "padding",
+    viewportWidth,
+  }), viewportWidth);
+  const pillGap = evaluateProgressCssLength(readProgressRequiredTargetValue({
+    rules,
+    target: progressCssTargets.weeklySeriesPill,
+    property: "gap",
+    viewportWidth,
+  }), viewportWidth);
+  const pillContentWidth = columnWidth - pillHorizontalBorder - pillHorizontalPadding;
+  const pillFontSizePixels = readProgressInheritedFontSizePixels({
+    rules,
+    target: progressCssTargets.weeklySeriesPill,
+    ancestorTargets: [],
+    viewportWidth,
+  });
+  const normalRequiredWidth = estimateProgressMonoTextWidth(
+    weeklyResultsNormalSeries.label + weeklyResultsNormalSeries.value,
+    pillFontSizePixels,
+  ) + pillGap;
+
+  return {
+    viewportWidth,
+    portalWidth,
+    comparisonWidth,
+    resultsCardWidth,
+    gridWidth,
+    gridGap,
+    columnWidth,
+    pillContentWidth,
+    pillGap,
+    pillFontSizePixels,
+    normalRequiredWidth,
+    normalSlack: pillContentWidth - normalRequiredWidth,
+  };
+}
+
+function assertWeeklyResultsGeometryAtWidth(
+  rules: readonly ProgressCssRule[],
+  shellRules: readonly ProgressCssRule[],
+  viewportWidth: number,
+) {
+  const columns = normalizeProgressCssValue(readProgressRequiredTargetValue({
+    rules,
+    target: progressCssTargets.weeklyResultsGrid,
+    property: "grid-template-columns",
+    viewportWidth,
+  }));
+  if (columns !== "minmax(0,1fr) minmax(0,1fr)") {
+    assert.fail(`UI-NAV-01W: Tus resultados debe conservar dos columnas a ${viewportWidth}px`);
+  }
+
+  assertWeeklyResultsDividerVisible(rules, viewportWidth);
+  assertWeeklySeriesPillContentVisible(rules, viewportWidth);
+
+  const spanWhiteSpace = normalizeProgressCssValue(readProgressRequiredTargetValue({
+    rules,
+    target: progressCssTargets.weeklySeriesPillSpan,
+    property: "white-space",
+    viewportWidth,
+  })).toLowerCase();
+  if (spanWhiteSpace !== "nowrap") {
+    assert.fail(`UI-NAV-01W: la etiqueta de serie debe permanecer completa a ${viewportWidth}px`);
+  }
+
+  const strongWhiteSpace = normalizeProgressCssValue(readProgressRequiredTargetValue({
+    rules,
+    target: progressCssTargets.weeklySeriesPillStrong,
+    property: "white-space",
+    viewportWidth,
+  })).toLowerCase();
+  if (strongWhiteSpace !== "normal") {
+    assert.fail(`UI-NAV-01W: el valor excepcional debe poder envolver por espacios a ${viewportWidth}px`);
+  }
+  for (const [property, expected] of [
+    ["overflow-wrap", "normal"],
+    ["word-break", "normal"],
+  ] as const) {
+    const actual = normalizeProgressCssValue(readProgressRequiredTargetValue({
+      rules,
+      target: progressCssTargets.weeklySeriesPillStrong,
+      property,
+      viewportWidth,
+    })).toLowerCase();
+    if (actual !== expected) {
+      assert.fail(`UI-NAV-01W: el valor debe usar saltos naturales (${property}: ${expected}) a ${viewportWidth}px`);
+    }
+  }
+
+  const position = normalizeProgressCssValue(readProgressTargetCssValue({
+    rules,
+    target: progressCssTargets.weeklySeriesPillStrong,
+    property: "position",
+    viewportWidth,
+  }) ?? "static").toLowerCase();
+  if (position === "absolute" || position === "fixed") {
+    assert.fail(`UI-NAV-01W: el valor no puede superponerse a la etiqueta a ${viewportWidth}px`);
+  }
+  const marginLeft = normalizeProgressCssValue(readProgressTargetCssValue({
+    rules,
+    target: progressCssTargets.weeklySeriesPillStrong,
+    property: "margin-left",
+    viewportWidth,
+  }) ?? "0").toLowerCase();
+  if (/^-/.test(marginLeft) && evaluateProgressCssLength(marginLeft, viewportWidth) < 0) {
+    assert.fail(`UI-NAV-01W: el valor no puede superponerse a la etiqueta a ${viewportWidth}px`);
+  }
+
+  const geometry = calculateWeeklyResultsGeometry({ rules, shellRules, viewportWidth });
+  for (const [name, value] of [
+    ["comparación", geometry.comparisonWidth],
+    ["card", geometry.resultsCardWidth],
+    ["grilla", geometry.gridWidth],
+    ["columna", geometry.columnWidth],
+    ["contenido de pill", geometry.pillContentWidth],
+  ] as const) {
+    if (!(value > 0)) {
+      assert.fail(`UI-NAV-01W: ${name} debe conservar ancho positivo a ${viewportWidth}px`);
+    }
+  }
+  if (geometry.gridWidth > geometry.resultsCardWidth || geometry.columnWidth > geometry.gridWidth) {
+    assert.fail(`UI-NAV-01W: Tus resultados no puede introducir scroll horizontal a ${viewportWidth}px`);
+  }
+  if (geometry.pillFontSizePixels < 9) {
+    assert.fail(
+      `UI-NAV-01W: la pill debe conservar fuente legible a ${viewportWidth}px; ` +
+      `fuente efectiva ${geometry.pillFontSizePixels}px`,
+    );
+  }
+  const valueFontSizePixels = readProgressInheritedFontSizePixels({
+    rules,
+    target: progressCssTargets.weeklySeriesPillStrong,
+    ancestorTargets: [progressCssTargets.weeklySeriesPill],
+    viewportWidth,
+  });
+  if (valueFontSizePixels < 9) {
+    assert.fail(
+      `UI-NAV-01W: el valor de la pill debe conservar fuente legible a ${viewportWidth}px; ` +
+      `fuente efectiva ${valueFontSizePixels}px`,
+    );
+  }
+  if (geometry.normalSlack < 0) {
+    assert.fail(
+      `UI-NAV-01W: S1: 100,25 kg · 20 reps debe caber en una línea a ${viewportWidth}px ` +
+      `(holgura ${geometry.normalSlack.toFixed(2)}px)`,
+    );
+  }
+
+  for (const exceptional of weeklyResultsExceptionalSeries) {
+    const labelWidth = estimateProgressMonoTextWidth(exceptional.label, geometry.pillFontSizePixels);
+    const valueTrackWidth = geometry.pillContentWidth - labelWidth - geometry.pillGap;
+    const longestTokenWidth = Math.max(
+      ...exceptional.value.split(/\s+/).map((token) => estimateProgressMonoTextWidth(token, geometry.pillFontSizePixels)),
+    );
+    if (valueTrackWidth < longestTokenWidth) {
+      assert.fail(
+        `UI-NAV-01W: ${exceptional.label} ${exceptional.value} debe envolver sin colisión a ${viewportWidth}px`,
+      );
+    }
+  }
+
+  return geometry;
+}
+
 function assertWeeklyComparisonResponsiveContract(
   stylesSource: string,
   comparisonComponentSource: string,
   shellStylesSource: string,
+  geometryWidths?: readonly number[],
 ) {
   const rules = parseProgressCss(stylesSource);
   const shellRules = parseProgressCss(shellStylesSource);
@@ -1131,8 +1568,58 @@ function assertWeeklyComparisonResponsiveContract(
     shellPadding.includes("clamp(16px,5vw,24px)"),
     "UI-NAV-01V: el cálculo móvil debe considerar el padding horizontal real del UserPortalShell",
   );
+  assert.equal(
+    normalizeProgressCssValue(readProgressCssValue({
+      rules: shellRules,
+      selector: ".shell",
+      property: "width",
+      viewportWidth: 768,
+    })),
+    "min(100%,560px)",
+    "UI-NAV-01W: el barrido debe derivar el ancho máximo real del UserPortalShell",
+  );
 
-  for (const viewportWidth of [320, 360, 393, 430] as const) {
+  for (const viewportWidth of [320, 360, 393, 430, 431] as const) {
+    assert.equal(
+      normalizeProgressCssValue(readProgressCssValue({
+        rules,
+        selector: ".weekly-comparison-shell",
+        property: "padding",
+        viewportWidth,
+      })),
+      viewportWidth <= 430 ? "12px" : "clamp(14px,4vw,18px)",
+      `UI-NAV-01V: el shell debe conservar su padding aprobado a ${viewportWidth}px`,
+    );
+    assert.equal(
+      normalizeProgressCssValue(readProgressCssValue({
+        rules,
+        selector: ".weekly-results-card",
+        property: "padding",
+        viewportWidth,
+      })),
+      viewportWidth <= 340 ? "8px 3px" : "8px 5px",
+      `UI-NAV-01V: Tus resultados debe conservar padding compacto a ${viewportWidth}px`,
+    );
+    assert.equal(
+      normalizeProgressCssValue(readProgressCssValue({
+        rules,
+        selector: ".weekly-results-grid",
+        property: "gap",
+        viewportWidth,
+      })),
+      viewportWidth <= 340 ? "2px" : "6px",
+      `UI-NAV-01V: Tus resultados debe conservar separación compacta a ${viewportWidth}px`,
+    );
+    assert.equal(
+      normalizeProgressCssValue(readProgressCssValue({
+        rules,
+        selector: ".weekly-series-pill",
+        property: "padding",
+        viewportWidth,
+      })),
+      viewportWidth <= 340 ? "4px 1px" : "4px 2px",
+      `UI-NAV-01V: las pills deben conservar padding compacto a ${viewportWidth}px`,
+    );
     for (const [selector, property, expected] of [
       [".weekly-comparison-screen", "width", "100%"],
       [".weekly-comparison-screen", "min-width", "0"],
@@ -1154,11 +1641,15 @@ function assertWeeklyComparisonResponsiveContract(
       [".weekly-series-pill", "min-width", "0"],
       [".weekly-series-pill", "max-width", "100%"],
     ] as const) {
-      assert.equal(
-        normalizeProgressCssValue(readProgressCssValue({ rules, selector, property, viewportWidth })),
-        expected,
-        `UI-NAV-01V: ${selector} debe conservar ${property}: ${expected} a ${viewportWidth}px`,
-      );
+      const actual = normalizeProgressCssValue(readProgressCssValue({
+        rules,
+        selector,
+        property,
+        viewportWidth,
+      }));
+      if (actual !== expected) {
+        assert.fail(`UI-NAV-01V: ${selector} debe conservar ${property}: ${expected} a ${viewportWidth}px`);
+      }
     }
 
     assert.equal(
@@ -1202,25 +1693,35 @@ function assertWeeklyComparisonResponsiveContract(
         `UI-NAV-01V: Series debe conservar una fuente legible en Comparación a ${viewportWidth}px; fuente efectiva ${seriesFontSizePixels}px`,
       );
     }
+    const weeklyResultsColumns = normalizeProgressCssValue(readProgressRequiredTargetValue({
+      rules,
+      target: progressCssTargets.weeklyResultsGrid,
+      property: "grid-template-columns",
+      viewportWidth,
+    }));
+    if (weeklyResultsColumns !== "minmax(0,1fr) minmax(0,1fr)") {
+      assert.fail(`UI-NAV-01V: Tus resultados debe conservar dos columnas a ${viewportWidth}px`);
+    }
+    assertWeeklyResultsDividerVisible(rules, viewportWidth);
     assert.equal(
       normalizeProgressCssValue(readProgressCssValue({
         rules,
-        selector: ".weekly-results-grid",
-        property: "grid-template-columns",
+        selector: ".weekly-series-column > span",
+        property: "text-align",
         viewportWidth,
       })),
-      "minmax(0,1fr)",
-      `UI-NAV-01V: las semanas deben apilarse a ${viewportWidth}px`,
+      "center",
+      `UI-NAV-01V: el título semanal debe permanecer centrado a ${viewportWidth}px`,
     );
     assert.equal(
-      readProgressCssValue({
+      normalizeProgressCssValue(readProgressCssValue({
         rules,
-        selector: ".weekly-results-grid::before",
-        property: "display",
+        selector: ".weekly-series-column > small",
+        property: "text-align",
         viewportWidth,
-      }),
-      "none",
-      `UI-NAV-01V: el divisor de dos columnas debe ocultarse a ${viewportWidth}px`,
+      })),
+      "center",
+      `UI-NAV-01V: la fecha semanal debe permanecer centrada a ${viewportWidth}px`,
     );
     assert.equal(
       normalizeProgressCssValue(readProgressCssValue({
@@ -1232,6 +1733,37 @@ function assertWeeklyComparisonResponsiveContract(
       "max-content minmax(0,1fr)",
       `UI-NAV-01V: las pills no deben depender de una columna fija a ${viewportWidth}px`,
     );
+    assert.equal(
+      normalizeProgressCssValue(readProgressTargetCssValue({
+        rules,
+        target: progressCssTargets.weeklySeriesPillSpan,
+        property: "white-space",
+        viewportWidth,
+      }) ?? ""),
+      "nowrap",
+      `UI-NAV-01V: la etiqueta de la pill debe permanecer en una línea a ${viewportWidth}px`,
+    );
+    const valueWhiteSpace = normalizeProgressCssValue(readProgressTargetCssValue({
+      rules,
+      target: progressCssTargets.weeklySeriesPillStrong,
+      property: "white-space",
+      viewportWidth,
+    }) ?? "");
+    if (valueWhiteSpace !== "normal") {
+      assert.fail(`UI-NAV-01W: el valor excepcional debe poder envolver por espacios a ${viewportWidth}px`);
+    }
+
+    const pillFontSizePixels = readProgressInheritedFontSizePixels({
+      rules,
+      target: progressCssTargets.weeklySeriesPill,
+      ancestorTargets: [],
+      viewportWidth,
+    });
+    if (pillFontSizePixels < 9) {
+      assert.fail(
+        `UI-NAV-01V: .weekly-series-pill debe conservar una fuente legible a ${viewportWidth}px; fuente efectiva ${pillFontSizePixels}px`,
+      );
+    }
 
     const portalPadding = Math.max(16, Math.min(viewportWidth * 0.05, 24));
     const comparisonWidth = viewportWidth - (portalPadding * 2);
@@ -1246,18 +1778,36 @@ function assertWeeklyComparisonResponsiveContract(
     assertWeeklySeriesPillContentVisible(rules, viewportWidth);
   }
 
-  assert.equal(
-    normalizeProgressCssValue(readProgressCssValue({
-      rules,
-      selector: ".weekly-results-grid",
-      property: "grid-template-columns",
-      viewportWidth: 431,
-    })),
-    "minmax(0,1fr) minmax(0,1fr)",
-    "UI-NAV-01V: tablet y desktop deben conservar las dos columnas cuando vuelven a caber",
-  );
+  const requestedGeometryWidths = geometryWidths ?? Array.from({ length: 449 }, (_, index) => 320 + index);
+  const geometrySweep = requestedGeometryWidths
+    .map((viewportWidth) => assertWeeklyResultsGeometryAtWidth(rules, shellRules, viewportWidth));
+  const geometry319 = geometryWidths === undefined
+    ? assertWeeklyResultsGeometryAtWidth(rules, shellRules, 319)
+    : null;
+  if (geometry319) {
+    const geometryByWidth = new Map<number, ReturnType<typeof calculateWeeklyResultsGeometry>>();
+    geometryByWidth.set(319, geometry319);
+    for (const geometry of geometrySweep) geometryByWidth.set(geometry.viewportWidth, geometry);
+    for (const viewportWidth of weeklyResultsBoundaryWidths) {
+      assert.ok(
+        geometryByWidth.has(viewportWidth),
+        `UI-NAV-01W: falta validar la frontera ${viewportWidth}px`,
+      );
+    }
+  }
 
-  for (const viewportWidth of [431, 768] as const) {
+  for (const viewportWidth of [768] as const) {
+    assert.equal(
+      normalizeProgressCssValue(readProgressCssValue({
+        rules,
+        selector: ".weekly-results-grid",
+        property: "grid-template-columns",
+        viewportWidth,
+      })),
+      "minmax(0,1fr) minmax(0,1fr)",
+      `UI-NAV-01V: Tus resultados debe conservar dos columnas a ${viewportWidth}px`,
+    );
+    assertWeeklyResultsDividerVisible(rules, viewportWidth);
     const seriesFontSizePixels = readProgressInheritedFontSizePixels({
       rules,
       target: progressCssTargets.comparisonHeaderCell,
@@ -1271,9 +1821,23 @@ function assertWeeklyComparisonResponsiveContract(
     }
     assertWeeklySeriesPillContentVisible(rules, viewportWidth);
   }
+
+
+  return {
+    geometrySweep,
+    geometry319,
+    minimumNormalSlack: Math.min(
+      ...(geometry319 ? [geometry319.normalSlack] : []),
+      ...geometrySweep.map((geometry) => geometry.normalSlack),
+    ),
+  };
 }
 
-assertWeeklyComparisonResponsiveContract(globalStylesSource, comparisonSource, userPortalShellStylesSource);
+const weeklyResultsContractResult = assertWeeklyComparisonResponsiveContract(
+  globalStylesSource,
+  comparisonSource,
+  userPortalShellStylesSource,
+);
 
 function replaceProgressProbeOnce(source: string, search: string, replacement: string) {
   assert.equal(source.split(search).length - 1, 1, `UI-NAV-01V probe ambiguo: ${search}`);
@@ -1489,11 +2053,60 @@ const weeklyComparisonMutationProbes = [
     mutate: (source: string) => replaceProgressProbeOnce(source, "white-space: nowrap;\n}\n\n.weekly-plan-row:not(.heading)", "white-space: normal;\n}\n\n.weekly-plan-row:not(.heading)"),
   },
   {
-    name: "eliminar apilado móvil",
+    name: "restaurar apilado móvil rechazado",
     target: "css" as const,
-    expectedFailure: "las semanas deben apilarse a 320px",
-    exactFailure: false,
-    mutate: (source: string) => replaceProgressProbeOnce(source, "grid-template-columns: minmax(0, 1fr);\n    gap: 16px;", "grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);\n    gap: 16px;"),
+    expectedFailure: "UI-NAV-01V: Tus resultados debe conservar dos columnas a 320px",
+    exactFailure: true,
+    mutate: (source: string) => `${source}\n@media (max-width: 430px) {\n  .weekly-results-grid {\n    grid-template-columns: minmax(0, 1fr) !important;\n  }\n}\n`,
+  },
+  {
+    name: "ocultar el divisor central móvil",
+    target: "css" as const,
+    expectedFailure: "UI-NAV-01W: el divisor no puede usar display: none a 320px",
+    exactFailure: true,
+    mutate: (source: string) => `${source}\n@media (max-width: 430px) {\n  .weekly-results-grid::before {\n    display: none !important;\n  }\n}\n`,
+  },
+  {
+    name: "recortar y aplicar ellipsis al valor de una pill",
+    target: "css" as const,
+    expectedFailure: "UI-NAV-01V: .weekly-series-pill strong no puede recortar contenido con overflow: hidden a 320px",
+    exactFailure: true,
+    mutate: (source: string) => `${source}\n.weekly-series-pill strong {\n  overflow: hidden !important;\n  text-overflow: ellipsis !important;\n}\n`,
+  },
+  {
+    name: "ocultar una pill mediante visibility",
+    target: "css" as const,
+    expectedFailure: "UI-NAV-01V: .weekly-series-pill debe permanecer visible a 320px; visibility: hidden oculta el contenido",
+    exactFailure: true,
+    mutate: (source: string) => `${source}\n.weekly-series-pill {\n  visibility: hidden !important;\n}\n`,
+  },
+  {
+    name: "reducir la fuente de las pills a 1px",
+    target: "css" as const,
+    expectedFailure: "UI-NAV-01V: .weekly-series-pill debe conservar una fuente legible a 320px; fuente efectiva 1px",
+    exactFailure: true,
+    mutate: (source: string) => `${source}\n.weekly-series-pill {\n  font-size: 1px !important;\n}\n`,
+  },
+  {
+    name: "introducir ancho fijo incompatible en las pills",
+    target: "css" as const,
+    expectedFailure: "UI-NAV-01V: .weekly-series-pill debe conservar width: 100% a 320px",
+    exactFailure: true,
+    mutate: (source: string) => `${source}\n.weekly-series-pill {\n  width: 200px !important;\n}\n`,
+  },
+  {
+    name: "reducir la primera columna semanal a cero",
+    target: "css" as const,
+    expectedFailure: "UI-NAV-01V: Tus resultados debe conservar dos columnas a 320px",
+    exactFailure: true,
+    mutate: (source: string) => `${source}\n.weekly-results-grid {\n  grid-template-columns: minmax(0, 0fr) minmax(0, 1fr) !important;\n}\n`,
+  },
+  {
+    name: "romper exclusivamente el límite de 320px",
+    target: "css" as const,
+    expectedFailure: "UI-NAV-01V: Tus resultados debe conservar dos columnas a 320px",
+    exactFailure: true,
+    mutate: (source: string) => `${source}\n@media (max-width: 320px) {\n  .weekly-results-grid {\n    grid-template-columns: minmax(0, 1fr) !important;\n  }\n}\n`,
   },
   {
     name: "eliminar límite de ancho de pill",
@@ -1550,7 +2163,7 @@ for (const probe of weeklyComparisonMutationProbes) {
   else readComparisonTableHeaders(mutatedSource);
   let failure: unknown;
   try {
-    assertWeeklyComparisonResponsiveContract(mutatedCss, mutatedTsx, userPortalShellStylesSource);
+    assertWeeklyComparisonResponsiveContract(mutatedCss, mutatedTsx, userPortalShellStylesSource, [320]);
   } catch (error) {
     failure = error;
   } finally {
@@ -1676,10 +2289,253 @@ for (const control of weeklyComparisonInnocentControls) {
     controlledCss,
     comparisonSource,
     userPortalShellStylesSource,
+    [320],
+  );
+}
+
+const weeklyResultsGeometryMutationProbes = [
+  {
+    name: "restaurar discontinuidad 480/481",
+    attackWidth: 481,
+    expectedFailure: "UI-NAV-01W: S1: 100,25 kg · 20 reps debe caber en una línea a 481px (holgura -7.90px)",
+    mutate: (source: string) => replaceProgressProbeOnce(
+      source,
+      "@media (max-width: 520px) {\n  .weekly-results-card",
+      "@media (max-width: 480px) {\n  .weekly-results-card",
+    ),
+  },
+  {
+    name: "romper únicamente 481 y 482",
+    attackWidth: 481,
+    expectedFailure: "UI-NAV-01W: Tus resultados debe conservar dos columnas a 481px",
+    mutate: (source: string) => `${source}\n@media (min-width: 481px) and (max-width: 482px) {\n  .weekly-results-grid {\n    grid-template-columns: minmax(0, 1fr) !important;\n  }\n}\n`,
+  },
+  {
+    name: "romper únicamente la frontera 340/341",
+    attackWidth: 341,
+    expectedFailure: "UI-NAV-01W: Tus resultados debe conservar dos columnas a 341px",
+    mutate: (source: string) => `${source}\n@media (min-width: 341px) and (max-width: 341px) {\n  .weekly-results-grid {\n    grid-template-columns: minmax(0, 1fr) !important;\n  }\n}\n`,
+  },
+  {
+    name: "forzar nowrap en valores excepcionales",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el valor excepcional debe poder envolver por espacios a 320px",
+    mutate: (source: string) => `${source}\n.weekly-series-pill strong {\n  white-space: nowrap !important;\n}\n`,
+  },
+  {
+    name: "superponer el valor sobre S1",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el valor no puede superponerse a la etiqueta a 320px",
+    mutate: (source: string) => `${source}\n.weekly-series-pill strong {\n  margin-left: -12px !important;\n}\n`,
+  },
+  {
+    name: "recortar el valor excepcional",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01V: .weekly-series-pill strong no puede recortar contenido con overflow: hidden a 320px",
+    mutate: (source: string) => `${source}\n.weekly-series-pill strong {\n  overflow: hidden !important;\n  text-overflow: ellipsis !important;\n}\n`,
+  },
+  {
+    name: "reducir sólo el valor a 1px",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el valor de la pill debe conservar fuente legible a 320px; fuente efectiva 1px",
+    mutate: (source: string) => `${source}\n.weekly-series-pill strong {\n  font-size: 1px !important;\n}\n`,
+  },
+  {
+    name: "apilar semanas ante contenido largo",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01V: Tus resultados debe conservar dos columnas a 320px",
+    mutate: (source: string) => `${source}\n.weekly-results-grid.weekly-results-grid {\n  grid-template-columns: minmax(0, 1fr) !important;\n}\n`,
+  },
+  {
+    name: "divisor display none con mayor especificidad",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el divisor no puede usar display: none a 320px",
+    mutate: (source: string) => `${source}\nbody .weekly-results-grid.weekly-results-grid::before {\n  display: none !important;\n}\n`,
+  },
+  {
+    name: "divisor visibility hidden",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el divisor no puede usar visibility: hidden a 320px",
+    mutate: (source: string) => `${source}\n.weekly-results-grid::before {\n  visibility: hidden !important;\n}\n`,
+  },
+  {
+    name: "divisor visibility collapse",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el divisor no puede usar visibility: collapse a 320px",
+    mutate: (source: string) => `${source}\n.weekly-results-grid::before {\n  visibility: collapse !important;\n}\n`,
+  },
+  {
+    name: "divisor opacity cero",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el divisor no puede usar opacity: 0 a 320px",
+    mutate: (source: string) => `${source}\n.weekly-results-grid::before {\n  opacity: 0 !important;\n}\n`,
+  },
+  {
+    name: "divisor content none",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el divisor debe conservar content visible a 320px",
+    mutate: (source: string) => `${source}\n.weekly-results-grid::before {\n  content: none !important;\n}\n`,
+  },
+  {
+    name: "divisor background transparente",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el divisor debe conservar un fondo visible a 320px",
+    mutate: (source: string) => `${source}\n.weekly-results-grid::before {\n  background: transparent !important;\n}\n`,
+  },
+  {
+    name: "divisor ancho cero",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el divisor debe conservar ancho positivo a 320px",
+    mutate: (source: string) => `${source}\n.weekly-results-grid::before {\n  width: 0 !important;\n}\n`,
+  },
+  {
+    name: "divisor transform scale cero",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el divisor no puede ocultarse mediante transform: scale(0) a 320px",
+    mutate: (source: string) => `${source}\n.weekly-results-grid::before {\n  transform: scale(0) !important;\n}\n`,
+  },
+  {
+    name: "divisor propiedad scale cero",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el divisor no puede ocultarse mediante scale: 0 a 320px",
+    mutate: (source: string) => `${source}\n.weekly-results-grid::before {\n  scale: 0 !important;\n}\n`,
+  },
+  {
+    name: "divisor clip-path",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01W: el divisor no puede usar clip-path: inset(50%) a 320px",
+    mutate: (source: string) => `${source}\n.weekly-results-grid::before {\n  clip-path: inset(50%) !important;\n}\n`,
+  },
+  {
+    name: "divisor oculto dentro de media query",
+    attackWidth: 430,
+    expectedFailure: "UI-NAV-01W: el divisor no puede usar opacity: 0 a 430px",
+    mutate: (source: string) => `${source}\n@media (min-width: 430px) and (max-width: 430px) {\n  main.app-shell .weekly-results-grid::before {\n    opacity: 0 !important;\n  }\n}\n`,
+  },
+  {
+    name: "romper ancho intermedio 607 no listado",
+    attackWidth: 607,
+    expectedFailure: "UI-NAV-01W: Tus resultados debe conservar dos columnas a 607px",
+    mutate: (source: string) => `${source}\n@media (min-width: 607px) and (max-width: 607px) {\n  .weekly-results-grid {\n    grid-template-columns: minmax(0, 1fr) !important;\n  }\n}\n`,
+  },
+  {
+    name: "introducir scroll horizontal",
+    attackWidth: 320,
+    expectedFailure: "UI-NAV-01V: .weekly-comparison-screen debe conservar width: 100% a 320px",
+    mutate: (source: string) => `${source}\n.weekly-comparison-screen {\n  width: 120vw !important;\n}\n`,
+  },
+] as const;
+
+for (const probe of weeklyResultsGeometryMutationProbes) {
+  const diskPath = "src/app/globals.css";
+  const originalDiskSource = readFileSync(diskPath, "utf8");
+  const originalDiskHash = progressSha256(originalDiskSource);
+  assert.equal(
+    originalDiskSource,
+    globalStylesSource,
+    `UI-NAV-01W: el CSS base debe coincidir byte a byte con disco (${probe.name})`,
+  );
+  const mutatedCss = probe.mutate(globalStylesSource);
+  assert.notEqual(mutatedCss, globalStylesSource, `UI-NAV-01W: mutación sin cambio real (${probe.name})`);
+  assert.notEqual(
+    progressSha256(mutatedCss),
+    originalDiskHash,
+    `UI-NAV-01W: mutación sin cambio SHA (${probe.name})`,
+  );
+  parseProgressCss(mutatedCss);
+  let failure: unknown;
+  try {
+    assertWeeklyComparisonResponsiveContract(
+      mutatedCss,
+      comparisonSource,
+      userPortalShellStylesSource,
+      [probe.attackWidth],
+    );
+  } catch (error) {
+    failure = error;
+  } finally {
+    const restoredDiskSource = readFileSync(diskPath, "utf8");
+    assert.equal(
+      restoredDiskSource,
+      originalDiskSource,
+      `UI-NAV-01W: restauración byte a byte fallida (${probe.name})`,
+    );
+    assert.equal(
+      progressSha256(restoredDiskSource),
+      originalDiskHash,
+      `UI-NAV-01W: restauración SHA fallida (${probe.name})`,
+    );
+  }
+  assert.ok(failure instanceof Error, `UI-NAV-01W: el mutante debe morir (${probe.name})`);
+  assert.equal(
+    failure.message,
+    probe.expectedFailure,
+    `UI-NAV-01W: el mutante debe morir primero por su barrera exacta (${probe.name})`,
+  );
+}
+
+const weeklyResultsGeometryInnocentControls = [
+  {
+    name: "comentario inocente",
+    mutate: (source: string) => `${source}\n/* UI-NAV-01W: dos columnas y divisor visible */\n`,
+  },
+  {
+    name: "formato equivalente del media compacto",
+    mutate: (source: string) => replaceProgressProbeOnce(
+      source,
+      "@media (max-width: 520px) {\n  .weekly-results-card",
+      "@media (max-width: 520px)\n{\n  .weekly-results-card",
+    ),
+  },
+  {
+    name: "reordenamiento equivalente del valor",
+    mutate: (source: string) => replaceProgressProbeOnce(
+      source,
+      "  overflow-wrap: normal;\n  word-break: normal;\n  white-space: normal;",
+      "  white-space: normal;\n  overflow-wrap: normal;\n  word-break: normal;",
+    ),
+  },
+  {
+    name: "override seguro del divisor con mayor prioridad",
+    mutate: (source: string) => `${source}\nbody .weekly-results-grid.weekly-results-grid::before {\n  display: block !important;\n  visibility: visible !important;\n  opacity: 1 !important;\n  content: "" !important;\n  background: rgba(255, 255, 255, 0.78) !important;\n  width: 1px !important;\n  transform: scale(1) !important;\n  scale: 1 !important;\n  clip-path: none !important;\n}\n`,
+  },
+  {
+    name: "regla no relacionada invisible",
+    mutate: (source: string) => `${source}\n.unrelated-results-grid::before {\n  display: none;\n  opacity: 0;\n  width: 0;\n}\n`,
+  },
+  {
+    name: "wrap natural limitado al rango estrecho",
+    mutate: (source: string) => `${source}\n@media (max-width: 340px) {\n  .weekly-series-pill strong {\n    overflow-wrap: normal;\n    word-break: normal;\n    white-space: normal;\n  }\n}\n`,
+  },
+  {
+    name: "regla peligrosa anulada por cascada prioritaria",
+    mutate: (source: string) => `${source}\n.weekly-results-grid::before {\n  opacity: 0;\n}\nbody .weekly-results-grid::before {\n  opacity: 1 !important;\n}\n`,
+  },
+] as const;
+
+for (const control of weeklyResultsGeometryInnocentControls) {
+  const controlledCss = control.mutate(globalStylesSource);
+  assert.notEqual(
+    progressSha256(controlledCss),
+    progressSha256(globalStylesSource),
+    `UI-NAV-01W: control inocente sin cambio real (${control.name})`,
+  );
+  parseProgressCss(controlledCss);
+  assertWeeklyComparisonResponsiveContract(
+    controlledCss,
+    comparisonSource,
+    userPortalShellStylesSource,
+    [320, 481, 520, 521, 768],
   );
 }
 
 console.log(`UI-NAV-01V Progress mutation probes passed (${weeklyComparisonMutationProbes.length})`);
 console.log(`UI-NAV-01V Progress innocent controls passed (${weeklyComparisonInnocentControls.length})`);
+console.log(`UI-NAV-01W geometry/divider mutation probes passed (${weeklyResultsGeometryMutationProbes.length})`);
+console.log(`UI-NAV-01W geometry/divider innocent controls passed (${weeklyResultsGeometryInnocentControls.length})`);
+console.log(
+  `UI-NAV-01W geometry sweep passed (320-768: ${weeklyResultsContractResult.geometrySweep.length} widths; ` +
+  `319px boundary; minimum normal slack ${weeklyResultsContractResult.minimumNormalSlack.toFixed(2)}px)`,
+);
 
 console.log("progress visual static integration contract tests passed");
