@@ -4,6 +4,8 @@ import {
 } from "@/lib/profile/profile-form";
 
 export const COACH_PROFESSIONAL_TITLE_MAX_LENGTH = 160;
+export const AUTH_REGISTRATION_PORTAL_METADATA_KEY =
+  "organizatech_registration_portal" as const;
 export const AUTH_REGISTRATION_GENDER_VALUES = [
   "male",
   "female",
@@ -50,6 +52,25 @@ export interface UserSignupPayload {
   password: string;
   options: {
     data: UserSignupMetadata;
+    emailRedirectTo?: string;
+  };
+}
+
+export type ConfirmationRegistrationMetadata =
+  | (UserSignupMetadata & {
+    organizatech_registration_portal: "usuario";
+  })
+  | (UserSignupMetadata & {
+    organizatech_registration_portal: "coach";
+    professional_title: string;
+  });
+
+export interface ConfirmationRegistrationSignupPayload {
+  email: string;
+  password: string;
+  options: {
+    data: ConfirmationRegistrationMetadata;
+    emailRedirectTo: string;
   };
 }
 
@@ -214,6 +235,41 @@ export function buildCoachRegistrationPayload(
         phone_number,
         professional_title: professionalTitle,
       },
+    },
+  };
+}
+
+export function withSignupConfirmationMetadata(
+  auth: UserSignupPayload,
+  registration:
+    | { portal: "usuario"; professionalTitle: null }
+    | { portal: "coach"; professionalTitle: string },
+  emailRedirectTo: string,
+): ConfirmationRegistrationSignupPayload {
+  const data = auth.options.data;
+  const allowlistedData: UserSignupMetadata = {
+    display_name: data.display_name,
+    first_name: data.first_name,
+    last_name: data.last_name,
+    birth_date: data.birth_date,
+    gender: data.gender,
+    phone_number: data.phone_number,
+  };
+  return {
+    email: auth.email,
+    password: auth.password,
+    options: {
+      emailRedirectTo,
+      data: registration.portal === "coach"
+        ? {
+          ...allowlistedData,
+          [AUTH_REGISTRATION_PORTAL_METADATA_KEY]: "coach",
+          professional_title: registration.professionalTitle,
+        }
+        : {
+          ...allowlistedData,
+          [AUTH_REGISTRATION_PORTAL_METADATA_KEY]: "usuario",
+        },
     },
   };
 }

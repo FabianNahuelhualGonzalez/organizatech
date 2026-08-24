@@ -3,9 +3,11 @@ import { after, test } from "node:test";
 
 import {
   executePasswordRecoveryUpdate,
+  getPasswordRecoveryClearedHref,
   hasPasswordRecoveryCallbackError,
   resolvePasswordRecoverySessionDecision,
 } from "@/lib/auth/password-recovery-session";
+import { createPasswordRecoveryPortalGuard } from "@/features/auth/model/password-recovery-portal-guard";
 import {
   finalizeSessionOperationOwner,
   isSessionOperationOwner,
@@ -37,7 +39,7 @@ function decide(patch: Partial<DecisionInput>): ReturnType<typeof resolvePasswor
     hasCallbackEvidence: false,
     callbackMatchesSession: false,
     storedRecoveryStatus: null,
-    storedRecoveryUserId: null,
+    confirmedRecoveryUserId: null,
     ...patch,
   });
 }
@@ -48,18 +50,18 @@ test("recovery decision requires recovery evidence and a valid matching identity
     event: "bootstrap",
     sessionUserId: DIFFERENT_USER,
     storedRecoveryStatus: "pending",
-  }), "invalid");
+  }), "pending");
   assert.equal(decide({
     routeState: "active",
     event: "INITIAL_SESSION",
     sessionUserId: DIFFERENT_USER,
     storedRecoveryStatus: "pending",
-  }), "invalid");
+  }), "pending");
   assert.equal(decide({
     routeState: "active",
     event: "bootstrap",
     storedRecoveryStatus: "pending",
-  }), "invalid");
+  }), "pending");
   assert.equal(decide({ routeState: "expired", event: "bootstrap" }), "invalid");
   assert.equal(decide({
     routeState: "active",
@@ -91,28 +93,35 @@ test("recovery decision requires recovery evidence and a valid matching identity
     hasCallbackEvidence: true,
     callbackMatchesSession: false,
     storedRecoveryStatus: "pending",
-  }), "invalid");
+  }), "pending");
   assert.equal(decide({
     routeState: "active",
     event: "INITIAL_SESSION",
     sessionUserId: RECOVERY_USER_UPPER,
     storedRecoveryStatus: "confirmed",
-    storedRecoveryUserId: RECOVERY_USER_LOWER,
+    confirmedRecoveryUserId: RECOVERY_USER_LOWER,
   }), "confirmed");
   assert.equal(decide({
     routeState: "active",
     event: "INITIAL_SESSION",
     sessionUserId: DIFFERENT_USER,
     storedRecoveryStatus: "confirmed",
-    storedRecoveryUserId: RECOVERY_USER,
+    confirmedRecoveryUserId: RECOVERY_USER,
   }), "invalid");
   assert.equal(decide({
     routeState: "active",
     event: "INITIAL_SESSION",
     sessionUserId: RECOVERY_USER,
     storedRecoveryStatus: "confirmed",
-    storedRecoveryUserId: "invalid",
+    confirmedRecoveryUserId: null,
   }), "invalid");
+  assert.equal(decide({
+    routeState: "active",
+    event: "TOKEN_REFRESHED",
+    sessionUserId: RECOVERY_USER,
+    storedRecoveryStatus: "confirmed",
+    confirmedRecoveryUserId: RECOVERY_USER,
+  }), "confirmed");
   assert.equal(decide({
     routeState: "active",
     event: "bootstrap",
@@ -125,6 +134,85 @@ test("recovery decision requires recovery evidence and a valid matching identity
     event: "SIGNED_IN",
     sessionUserId: DIFFERENT_USER,
   }), "none");
+});
+
+function runRecoveryEventSequence(
+  events: Array<"PASSWORD_RECOVERY" | "INITIAL_SESSION" | "SIGNED_IN" | "TOKEN_REFRESHED">,
+) {
+  const guard = createPasswordRecoveryPortalGuard();
+  let confirmedRecoveryUserId: string | null = null;
+  const decisions: string[] = [];
+
+  for (const event of events) {
+    if (event === "PASSWORD_RECOVERY") guard.begin();
+    if (!guard.isBlocked()) guard.begin();
+    const decision = decide({
+      routeState: "active",
+      event,
+      sessionUserId: RECOVERY_USER,
+      hasCallbackEvidence: true,
+      callbackMatchesSession: event === "PASSWORD_RECOVERY",
+      storedRecoveryStatus: confirmedRecoveryUserId ? "confirmed" : "pending",
+      confirmedRecoveryUserId,
+    });
+    decisions.push(decision);
+    if (decision === "confirmed") confirmedRecoveryUserId = RECOVERY_USER;
+    assert.equal(guard.isBlocked(), true, `${event} no puede abrir el portal`);
+  }
+
+  return decisions;
+}
+
+for (const scenario of [
+  {
+    name: "PASSWORD_RECOVERY → INITIAL_SESSION",
+    events: ["PASSWORD_RECOVERY", "INITIAL_SESSION"],
+    expected: ["confirmed", "confirmed"],
+  },
+  {
+    name: "INITIAL_SESSION → PASSWORD_RECOVERY",
+    events: ["INITIAL_SESSION", "PASSWORD_RECOVERY"],
+    expected: ["pending", "confirmed"],
+  },
+  {
+    name: "PASSWORD_RECOVERY → SIGNED_IN",
+    events: ["PASSWORD_RECOVERY", "SIGNED_IN"],
+    expected: ["confirmed", "confirmed"],
+  },
+  {
+    name: "PASSWORD_RECOVERY → TOKEN_REFRESHED",
+    events: ["PASSWORD_RECOVERY", "TOKEN_REFRESHED"],
+    expected: ["confirmed", "confirmed"],
+  },
+] as const) {
+  test(`AUTH-RECOVERY-02 · ${scenario.name} mantiene cero portal`, () => {
+    assert.deepEqual(runRecoveryEventSequence([...scenario.events]), [...scenario.expected]);
+  });
+}
+
+test("late Usuario and Coach mount permits stay stale after recovery is released", () => {
+  const guard = createPasswordRecoveryPortalGuard();
+  const lateUserMount = guard.capturePortalMountPermit();
+  const lateCoachMount = guard.capturePortalMountPermit();
+
+  assert.equal(lateUserMount.isCurrent(), true);
+  assert.equal(lateCoachMount.isCurrent(), true);
+  assert.equal(guard.begin(), true);
+  assert.equal(lateUserMount.isCurrent(), false, "callback Usuario previo queda invalidado");
+  assert.equal(lateCoachMount.isCurrent(), false, "callback Coach previo queda invalidado");
+  assert.equal(guard.release(), true);
+  assert.equal(lateUserMount.isCurrent(), false, "Usuario no revive tras volver al login");
+  assert.equal(lateCoachMount.isCurrent(), false, "Coach no revive tras volver al login");
+  assert.equal(guard.capturePortalMountPermit().isCurrent(), true, "el login manual obtiene un permiso nuevo");
+});
+
+test("password recovery URL cleanup removes query credentials and the complete fragment", () => {
+  assert.equal(
+    getPasswordRecoveryClearedHref(
+      "https://preview.example/login?flow=password-recovery&code=private-code&access_token=private-query#type=recovery&access_token=private-fragment&refresh_token=private-refresh",
+    ),
+    "/login",
+  );
 });
 
 test("callback errors are detected without exposing their details as product copy", () => {
@@ -175,7 +263,8 @@ function createAuthHarness(options: {
         options.onUpdateUser?.();
         return { error: options.updateError ?? null };
       },
-      async signOut() {
+      async signOut(signOutOptions: { scope: "local" }) {
+        assert.deepEqual(signOutOptions, { scope: "local" });
         signOutCalls += 1;
         options.onSignOut?.();
         return { error: options.signOutError ?? null };
@@ -206,6 +295,50 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
     if (timeout) clearTimeout(timeout);
   }
 }
+
+test("cancel/back and duplicate recovery events share one local signOut without touching another device", async () => {
+  const guard = createPasswordRecoveryPortalGuard();
+  assert.equal(guard.begin(), true);
+  assert.equal(guard.begin(), false, "el evento PASSWORD_RECOVERY duplicado no reinicia el intento");
+  let localSessionActive = true;
+  const otherDeviceSessionActive = true;
+  let localSignOutCalls = 0;
+
+  const signOut = () => guard.runLocalSignOut(async () => {
+    localSignOutCalls += 1;
+    localSessionActive = false;
+    return { error: null };
+  });
+  const fromCancel = signOut();
+  const fromBack = signOut();
+  assert.equal(fromCancel, fromBack, "cancelar y volver comparten la misma promesa terminal");
+  assert.deepEqual(await Promise.all([fromCancel, fromBack]), [{ error: null }, { error: null }]);
+  assert.equal(localSignOutCalls, 1);
+  assert.equal(localSessionActive, false);
+  assert.equal(otherDeviceSessionActive, true);
+});
+
+test("update error keeps every portal permit blocked until the local recovery session closes", async () => {
+  const guard = createPasswordRecoveryPortalGuard(true);
+  const portalPermit = guard.capturePortalMountPermit();
+  const updateError = new Error("private update diagnostic");
+  const harness = createAuthHarness({ updateError });
+  const result = await executePasswordRecoveryUpdate({
+    password: "Password123",
+    confirmedUserId: RECOVERY_USER,
+    auth: harness.auth,
+    isRecoveryCurrent: () => guard.isBlocked(),
+    isOperationCurrent: () => true,
+    isTerminalOperationCurrent: () => true,
+    onPasswordUpdated: () => assert.fail("un update fallido no publica éxito"),
+  });
+
+  assert.deepEqual(result, { kind: "update-error", error: updateError });
+  assert.equal(harness.calls().signOutCalls, 0, "el owner terminal del root ejecuta el cierre local");
+  assert.equal(portalPermit.isCurrent(), false);
+  await guard.runLocalSignOut(async () => ({ error: null }));
+  assert.equal(portalPermit.isCurrent(), false);
+});
 
 let completedAsyncTests = 0;
 after(() => {
@@ -291,7 +424,8 @@ test("double submit owns one awaited operation and cannot exit with pending work
             updateUserCalls += 1;
             return { error: null };
           },
-          signOut: async () => {
+          signOut: async (options) => {
+            assert.deepEqual(options, { scope: "local" });
             signOutCalls += 1;
             return { error: null };
           },
@@ -444,7 +578,8 @@ test("own SIGNED_OUT may advance epoch before signOut resolves and still complet
         assert.deepEqual(attributes, { password: "Password123" });
         return { error: null };
       },
-      signOut: async () => {
+      signOut: async (options) => {
+        assert.deepEqual(options, { scope: "local" });
         signOutCalls += 1;
         order.push("signOut:start");
         order.push("SIGNED_OUT");

@@ -4,10 +4,15 @@ import test from "node:test";
 import type { CoachRegistrationPreparationPayload } from "@/features/auth/model/auth-form";
 import {
   COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,
+  COACH_REGISTRATION_CONFIRMED_MESSAGE,
   COACH_REGISTRATION_CONFIRMATION_MESSAGE,
   COACH_REGISTRATION_IDENTITY_SWITCH_MESSAGE,
   COACH_REGISTRATION_REQUIRED_MESSAGE,
   MULTIPORTAL_AUTH_ERROR_MESSAGE,
+  REGISTRATION_EXISTING_IDENTITY_MESSAGE,
+  SIGNUP_CONFIRMATION_INVALID_MESSAGE,
+  USER_REGISTRATION_CONFIRMATION_MESSAGE,
+  USER_REGISTRATION_CONFIRMED_MESSAGE,
   USER_REGISTRATION_REQUIRED_MESSAGE,
   createMultiportalAuthController,
   type AuthenticatedPortalIdentity,
@@ -106,6 +111,10 @@ function createGateway(
     signUpForCoachRegistration: async () => assert.fail("signUp inesperado"),
     signInForUserRegistration: async () => assert.fail("signIn Usuario inesperado"),
     signUpForUserRegistration: async () => assert.fail("signUp Usuario inesperado"),
+    getOwnSignupConfirmation: async () => ({ status: "confirmed", portal: "usuario" }),
+    signOutAfterSignupConfirmation: async (_expectedUserId, owner) => (
+      owner.isCurrent() ? "signed_out" : "stale"
+    ),
     hasUserRegistration: async () => true,
     getCoachRegistration: async () => null,
     createUserRegistration: async (expectedUserId) => ({ userId: expectedUserId }),
@@ -154,6 +163,18 @@ function createDeferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+test("copy existing_identity es neutral y mantiene Login y recuperación disponibles", () => {
+  assert.equal(
+    REGISTRATION_EXISTING_IDENTITY_MESSAGE,
+    "Revisa tu correo para continuar. Si no recibes un mensaje, inicia sesión o recupera tu contraseña.",
+  );
+  assert.equal(REGISTRATION_EXISTING_IDENTITY_MESSAGE.includes("ya está registrado"), false);
+  assert.doesNotMatch(REGISTRATION_EXISTING_IDENTITY_MESSAGE, /correo enviado|cuenta creada/i);
+  assert.doesNotMatch(REGISTRATION_EXISTING_IDENTITY_MESSAGE, /Usuario|Coach/);
+  assert.match(REGISTRATION_EXISTING_IDENTITY_MESSAGE, /inicia sesión/);
+  assert.match(REGISTRATION_EXISTING_IDENTITY_MESSAGE, /recupera tu contraseña/);
+});
 
 test("Usuario autenticado sólo resuelve user_authorized con membresía Usuario", async () => {
   const controller = createMultiportalAuthController<TestAuthState>();
@@ -890,10 +911,19 @@ test("Registro Usuario con confirmación pendiente no concede membresía sin ses
   const controller = createMultiportalAuthController<TestAuthState>();
   const { owner } = beginCurrentUserRegistration(null);
   let writes = 0;
+  const order: string[] = [];
+  let signupPayload: unknown;
   const result = await controller.registerUser(coachInput.auth, owner, createGateway({
     getCurrentIdentity: async () => null,
-    signInForUserRegistration: async () => ({ kind: "invalid_credentials" }),
-    signUpForUserRegistration: async () => ({ kind: "confirmation_required" }),
+    signInForUserRegistration: async () => {
+      order.push("sign_in_miss");
+      return { kind: "invalid_credentials" };
+    },
+    signUpForUserRegistration: async (payload) => {
+      order.push("sign_up");
+      signupPayload = payload;
+      return { kind: "confirmation_required" };
+    },
     createUserRegistration: async () => {
       writes += 1;
       assert.fail("sin sesión autenticada no se crea membresía Usuario");
@@ -903,9 +933,76 @@ test("Registro Usuario con confirmación pendiente no concede membresía sin ses
   assert.deepEqual(result, {
     state: "user_confirmation_required",
     requestedPortal: "usuario",
-    message: "Cuenta creada. Revisa tu correo para confirmar el registro.",
+    message: USER_REGISTRATION_CONFIRMATION_MESSAGE,
   });
+  assert.deepEqual(order, ["sign_in_miss", "sign_up"]);
+  assert.deepEqual(signupPayload, coachInput.auth);
   assert.equal(writes, 0);
+});
+
+test("existing_identity Usuario devuelve el copy ambiguo sin efectos autorizados", async () => {
+  const controller = createMultiportalAuthController<TestAuthState>();
+  const { owner } = beginCurrentUserRegistration(null);
+  const effects = {
+    signIns: 0,
+    signUps: 0,
+    membershipReads: 0,
+    creates: 0,
+    activations: 0,
+    signOuts: 0,
+    authorizedPublications: 0,
+    navigation: 0,
+  };
+  const result = await controller.registerUser(coachInput.auth, owner, createGateway({
+    getCurrentIdentity: async () => null,
+    signInForUserRegistration: async () => {
+      effects.signIns += 1;
+      return { kind: "invalid_credentials" };
+    },
+    signUpForUserRegistration: async () => {
+      effects.signUps += 1;
+      return { kind: "existing_identity" };
+    },
+    hasUserRegistration: async () => {
+      effects.membershipReads += 1;
+      return false;
+    },
+    createUserRegistration: async () => {
+      effects.creates += 1;
+      assert.fail("un reintento sin sesión no crea membresía Usuario");
+    },
+    activateUserRegistrationIdentity: async (identity) => {
+      effects.activations += 1;
+      return identity;
+    },
+    signOut: async () => {
+      effects.signOuts += 1;
+      return "signed_out";
+    },
+  }));
+
+  if (result.state === "user_authorized") {
+    effects.authorizedPublications += 1;
+    effects.navigation += 1;
+  }
+  assert.deepEqual(result, {
+    state: "error",
+    requestedPortal: "usuario",
+    message: REGISTRATION_EXISTING_IDENTITY_MESSAGE,
+  });
+  const publicMessage = result.state === "error" ? result.message : "";
+  assert.equal(publicMessage.includes("ya está registrado"), false);
+  assert.doesNotMatch(publicMessage, /correo enviado|cuenta creada|Usuario|Coach/i);
+  assert.deepEqual(effects, {
+    signIns: 1,
+    signUps: 1,
+    membershipReads: 0,
+    creates: 0,
+    activations: 0,
+    signOuts: 0,
+    authorizedPublications: 0,
+    navigation: 0,
+  });
 });
 
 test("repetir Registro Usuario es idempotente y no reescribe la membresía", async () => {
@@ -1328,10 +1425,7 @@ test("cuenta Coach nueva sin sesión conserva confirmación y no concede acceso 
   assert.equal(writes, 0);
   assert.equal(activations, 0);
   assert.equal(signOuts, 0);
-  const serialized = JSON.stringify(signupPayload);
-  for (const forbidden of ["professional_title", "role", "is_coach", "user_id"] as const) {
-    assert.equal(serialized.includes(forbidden), false, `${forbidden} no debe concederse por Auth metadata`);
-  }
+  assert.deepEqual(signupPayload, coachInput);
 });
 
 test("cuenta Coach nueva con sesión crea la fila sólo después de Auth", async () => {
@@ -1405,7 +1499,7 @@ test("sesión A + formulario Coach B exige cambio tipado antes de lookup o write
   assert.equal(activations, 0);
 });
 
-test("B existente con contraseña incorrecta no crea Coach y conserva el mensaje aprobado", async () => {
+test("existing_identity Coach devuelve el copy ambiguo sin efectos autorizados", async () => {
   const controller = createMultiportalAuthController<TestAuthState>();
   const { owner } = beginCurrentRegistration(null);
   let signIns = 0;
@@ -1414,6 +1508,8 @@ test("B existente con contraseña incorrecta no crea Coach y conserva el mensaje
   let writes = 0;
   let activations = 0;
   let signOuts = 0;
+  let authorizedPublications = 0;
+  let navigation = 0;
   const result = await controller.registerCoach({
     ...coachInput,
     auth: { ...coachInput.auth, email: userB.email! },
@@ -1445,11 +1541,14 @@ test("B existente con contraseña incorrecta no crea Coach y conserva el mensaje
     },
   }));
 
+  if (result.state === "coach_authorized") {
+    authorizedPublications += 1;
+    navigation += 1;
+  }
   assert.deepEqual(result, {
     state: "error",
     requestedPortal: "coach",
-    field: "register-email",
-    message: "Este correo ya está registrado. Inicia sesión con esa cuenta para agregar el acceso Coach.",
+    message: REGISTRATION_EXISTING_IDENTITY_MESSAGE,
   });
   assert.equal(signIns, 1);
   assert.equal(signups, 1);
@@ -1457,7 +1556,14 @@ test("B existente con contraseña incorrecta no crea Coach y conserva el mensaje
   assert.equal(writes, 0);
   assert.equal(activations, 0);
   assert.equal(signOuts, 0);
-  assert.equal(JSON.stringify(result).includes(COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE), false);
+  assert.equal(authorizedPublications, 0);
+  assert.equal(navigation, 0);
+  const publicMessage = result.state === "error" ? result.message : "";
+  assert.equal(publicMessage.includes("ya está registrado"), false);
+  assert.doesNotMatch(publicMessage, /correo enviado|cuenta creada|Usuario|Coach/i);
+  assert.equal("coach" in result, false);
+  assert.equal("authState" in result, false);
+  assert.equal("userId" in result, false);
 });
 
 test("B existente con contraseña correcta crea y activa sólo la membresía Coach B", async () => {
@@ -1879,4 +1985,159 @@ test("un cambio directo A→B invalida A antes de aceptar el owner inmutable de 
   assert.equal(Object.isFrozen(ownerB), true);
   assert.equal(ownerB.expectedUserId, userB.userId);
   assert.equal(ownerB.isCurrent(), true);
+});
+
+test("confirmación resuelve el portal exclusivamente desde el resultado backend propio", async () => {
+  const cases = [
+    {
+      portal: "usuario" as const,
+      message: USER_REGISTRATION_CONFIRMED_MESSAGE,
+    },
+    {
+      portal: "coach" as const,
+      message: COACH_REGISTRATION_CONFIRMED_MESSAGE,
+    },
+  ];
+
+  for (const candidate of cases) {
+    const controller = createMultiportalAuthController<TestAuthState>();
+    const { owner } = beginCurrentResolution();
+    const requestedIds: string[] = [];
+    const result = await controller.resolveSignupConfirmation({
+      expectedUserId: userA.userId,
+      owner,
+    }, createGateway({
+      getOwnSignupConfirmation: async (expectedUserId) => {
+        requestedIds.push(expectedUserId);
+        return { status: "confirmed", portal: candidate.portal };
+      },
+    }));
+
+    assert.deepEqual(result, {
+      state: "confirmed",
+      requestedPortal: candidate.portal,
+      message: candidate.message,
+    });
+    assert.deepEqual(requestedIds, [userA.userId]);
+  }
+});
+
+test("portal cliente, metadata, roles y correo nunca reemplazan el portal confirmado backend", async () => {
+  const controller = createMultiportalAuthController<TestAuthState>();
+  const { owner } = beginCurrentResolution();
+  const manipulatedIdentity = {
+    ...userA,
+    email: "coach@attacker.test",
+    user_metadata: { portal: "usuario", role: "admin" },
+    app_metadata: { portal: "usuario" },
+  } as unknown as AuthenticatedPortalIdentity<TestAuthState>;
+  const result = await controller.resolveSignupConfirmation({
+    expectedUserId: userA.userId,
+    owner,
+    requestedPortal: "usuario",
+    query: { portal: "usuario" },
+  } as Parameters<typeof controller.resolveSignupConfirmation>[0], createGateway({
+    getCurrentIdentity: async () => manipulatedIdentity,
+    getOwnSignupConfirmation: async () => ({ status: "confirmed", portal: "coach" }),
+  }));
+
+  assert.deepEqual(result, {
+    state: "confirmed",
+    requestedPortal: "coach",
+    message: COACH_REGISTRATION_CONFIRMED_MESSAGE,
+  });
+});
+
+test("confirmación vencida, inválida o reutilizada falla cerrada con copy controlado", async () => {
+  for (const status of ["expired", "invalid"] as const) {
+    const controller = createMultiportalAuthController<TestAuthState>();
+    const { owner } = beginCurrentResolution();
+    const result = await controller.resolveSignupConfirmation({
+      expectedUserId: userA.userId,
+      owner,
+    }, createGateway({
+      getOwnSignupConfirmation: async () => ({ status, portal: "coach" }),
+    }));
+    assert.deepEqual(result, {
+      state: "invalid",
+      requestedPortal: "coach",
+      message: SIGNUP_CONFIRMATION_INVALID_MESSAGE,
+    });
+  }
+});
+
+test("confirmación A tardía queda stale después de SIGNED_OUT→B y no publica portal A", async () => {
+  const controller = createMultiportalAuthController<TestAuthState>();
+  const owners = createPortalResolutionOwnerController();
+  owners.acceptIdentity(userA.userId);
+  const ownerA = owners.begin(userA.userId);
+  const lookupStarted = createDeferred<void>();
+  const backendResult = createDeferred<{
+    status: "confirmed";
+    portal: "coach";
+  }>();
+  const resolutionA = controller.resolveSignupConfirmation({
+    expectedUserId: userA.userId,
+    owner: ownerA,
+  }, createGateway({
+    getOwnSignupConfirmation: async () => {
+      lookupStarted.resolve();
+      return backendResult.promise;
+    },
+  }));
+  await lookupStarted.promise;
+
+  owners.invalidate();
+  owners.acceptIdentity(userB.userId);
+  const ownerB = owners.begin(userB.userId);
+  backendResult.resolve({ status: "confirmed", portal: "coach" });
+
+  assert.deepEqual(await resolutionA, {
+    state: "stale",
+    requestedPortal: "usuario",
+  });
+  assert.equal(ownerA.isCurrent(), false);
+  assert.equal(ownerB.isCurrent(), true);
+});
+
+test("identidad A→B directa antes del RPC no consulta ni publica confirmación cruzada", async () => {
+  const controller = createMultiportalAuthController<TestAuthState>();
+  const { owner } = beginCurrentResolution(userA.userId);
+  let confirmationReads = 0;
+  const result = await controller.resolveSignupConfirmation({
+    expectedUserId: userA.userId,
+    owner,
+  }, createGateway({
+    getCurrentIdentity: async () => userB,
+    getOwnSignupConfirmation: async () => {
+      confirmationReads += 1;
+      return { status: "confirmed", portal: "coach" };
+    },
+  }));
+
+  assert.deepEqual(result, {
+    state: "stale",
+    requestedPortal: "usuario",
+  });
+  assert.equal(confirmationReads, 0);
+});
+
+test("error backend de confirmación se sanitiza y falla cerrado", async () => {
+  const controller = createMultiportalAuthController<TestAuthState>();
+  const { owner } = beginCurrentResolution();
+  const result = await controller.resolveSignupConfirmation({
+    expectedUserId: userA.userId,
+    owner,
+  }, createGateway({
+    getOwnSignupConfirmation: async () => {
+      throw new Error("private.auth_registration_pending_memberships secret-detail");
+    },
+  }));
+
+  assert.deepEqual(result, {
+    state: "error",
+    requestedPortal: "usuario",
+    message: MULTIPORTAL_AUTH_ERROR_MESSAGE,
+  });
+  assert.equal(JSON.stringify(result).includes("secret-detail"), false);
 });

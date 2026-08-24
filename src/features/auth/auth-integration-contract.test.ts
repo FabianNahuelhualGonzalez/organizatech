@@ -3,7 +3,11 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import test from "node:test";
+import { runInNewContext } from "node:vm";
 import ts from "typescript";
+
+import { SIGNUP_CONFIRMATION_INVALID_MESSAGE } from "@/features/auth/model/multiportal-auth-controller";
 
 function readSource(path: string) {
   return readFileSync(path, "utf8");
@@ -33,6 +37,16 @@ const root = readSource("src/components/organizatech-app.tsx");
 const authScreen = readSource("src/features/auth/components/auth-screen.tsx");
 const authStyles = readSource("src/features/auth/components/auth-screen.module.css");
 const authRouteController = readSource("src/features/auth/hooks/use-auth-route-controller.ts");
+const authCallback = readSource("src/features/auth/model/auth-callback.ts");
+const multiportalController = readSource("src/features/auth/model/multiportal-auth-controller.ts");
+const multiportalGateway = readSource("src/features/auth/data/supabase-multiportal-auth-gateway.ts");
+const multiportalBoundary = readSource("src/features/auth/hooks/use-multiportal-auth-boundary.ts");
+const authConfirmationDesign = readSource("docs/product/auth-confirmation-recovery-design.md");
+const environmentsDesign = readSource("docs/ambientes.md");
+const signupConfirmationController = multiportalController.slice(
+  multiportalController.indexOf("async function resolveSignupConfirmation"),
+  multiportalController.indexOf("async function rejectPortalSession"),
+);
 
 // Landing: cada intención entra al modo y tipo de cuenta autorizados.
 assert.match(landing, /className=\{styles\.headerCta\} href="\/login"/);
@@ -72,6 +86,39 @@ assert.match(root, /<AuthLoadingScreen \/>/);
 for (const flowScreen of ["PasswordRecoveryScreen", "RecoveryExpiredScreen", "NewPasswordScreen"]) {
   assert.ok(authScreen.includes(`export function ${flowScreen}`));
 }
+
+// AUTH-CONFIRM-01: callback cerrado, portal backend y coalescing de eventos.
+assert.match(authCallback, /export const AUTH_CALLBACK_PATH = "\/login"/);
+assert.match(authCallback, /target\.origin !== source\.origin \|\| target\.pathname !== AUTH_CALLBACK_PATH/);
+assert.match(authCallback, /input\.evidence\.flow !== SIGNUP_CONFIRMATION_FLOW/);
+assert.match(authCallback, /input\.event === "PASSWORD_RECOVERY"/);
+assert.match(authCallback, /input\.callbackAccessToken !== input\.sessionAccessToken/);
+assert.doesNotMatch(authCallback, /portal|professional_title|phone_number|birth_date/);
+assert.doesNotMatch(multiportalGateway, /prepare_auth_registration_intent/);
+assert.match(multiportalGateway, /withSignupConfirmationMetadata/);
+assert.match(multiportalGateway, /organizatech_registration_portal|portal: "coach"/);
+assert.match(multiportalGateway, /get_own_auth_registration_confirmation/);
+assert.match(multiportalGateway, /getBrowserAuthCallbackUrl\(SIGNUP_CONFIRMATION_FLOW\)/);
+assert.match(multiportalGateway, /signOut\(\{ scope: "local" \}\)/);
+assert.match(multiportalController, /confirmation\.portal === "coach"/);
+assert.doesNotMatch(signupConfirmationController, /input\.requestedPortal/);
+assert.match(
+  multiportalBoundary,
+  /existing\?\.operation && existing\.expectedUserId === expectedUserId[\s\S]*?return existing\.operation/,
+);
+assert.match(
+  multiportalBoundary,
+  /pendingSignupConfirmation && settleSignupConfirmation\("signed_out"\)[\s\S]*?return "complete_signup_confirmation"/,
+);
+assert.match(root, /getBrowserAuthCallbackUrl\(PASSWORD_RECOVERY_FLOW\)/);
+assert.match(root, /clearSignupConfirmationUrl\(\)/);
+assert.match(root, /result === "stale"[\s\S]*?invalidateSignupConfirmation\(\)/);
+assertSignupConfirmationCleanupOrder(root);
+test("error de signOut limpia el fragmento y publica sólo estado controlado", async () => {
+  await assertSignupConfirmationSignOutFailureIsContained(root);
+});
+assert.doesNotMatch(`${authConfirmationDesign}\n${environmentsDesign}`, /https:\/\/\*\.vercel\.app\/\*\*/);
+assert.match(environmentsDesign, /https:\/\/\*-<team-or-account-slug>\.vercel\.app\/\*\*/);
 
 // Presentación y accesibilidad de login/registro.
 for (const marker of [
@@ -1598,5 +1645,188 @@ function runCoachContractRunnerPositiveControls(source: string) {
 
   console.log(
     `AUTH-COACH-01 runner import AST positive controls passed (${controls.length}/${expectedControlCount})`,
+  );
+}
+
+function findNamedFunctionText(source: string, functionName: string) {
+  const sourceFile = ts.createSourceFile(
+    "src/components/organizatech-app.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const matches: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === functionName) {
+      matches.push(node.getText(sourceFile));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  assert.equal(matches.length, 1, `${functionName}: declaración única`);
+  return matches[0]!;
+}
+
+function assertSignupConfirmationCleanupOrder(source: string) {
+  const completeSource = findNamedFunctionText(source, "completeSignupConfirmationSession");
+  const cleanupOffset = completeSource.indexOf("clearSignupConfirmationUrl();");
+  const completionOffset = completeSource.indexOf("multiportalAuth.completeSignupConfirmation(");
+  assert.ok(cleanupOffset >= 0, "signup confirmation debe limpiar la URL");
+  assert.ok(
+    cleanupOffset < completionOffset,
+    "signup confirmation debe limpiar el fragmento antes de esperar cualquier cierre",
+  );
+  assert.match(completeSource, /\.catch\(\(\) => \{\s*invalidateSignupConfirmation\(\);\s*\}\)/);
+  assert.doesNotMatch(
+    completeSource,
+    /publishSignupConfirmationResult|continueAuthorizedPortalAccess|replaceCoachPortalSession|setCoachPortalSession/,
+  );
+  assert.doesNotMatch(completeSource, /localStorage|sessionStorage|history\.back|console\./);
+}
+
+interface SignupConfirmationHarnessContext {
+  [key: string]: unknown;
+  __completeSignupConfirmationSession?: (authState: unknown, forceInvalid?: boolean) => void;
+}
+
+async function assertSignupConfirmationSignOutFailureIsContained(source: string) {
+  const privateToken = "private-signup-token-never-publish";
+  const initialUrl = new URL(
+    `https://qa-preview.example.test/login?flow=signup-confirmation#access_token=${privateToken}&type=signup`,
+  );
+  const location = { href: initialUrl.href };
+  const replaceTargets: string[] = [];
+  let historyBackCalls = 0;
+  let externalNavigationCalls = 0;
+  const fakeWindow = {
+    location: {
+      get href() {
+        return location.href;
+      },
+      set href(value: string) {
+        location.href = value;
+      },
+      assign() {
+        externalNavigationCalls += 1;
+      },
+      replace() {
+        externalNavigationCalls += 1;
+      },
+    },
+    history: {
+      replaceState(_state: unknown, _title: string, target?: string | URL | null) {
+        const targetValue = String(target ?? "");
+        replaceTargets.push(targetValue);
+        location.href = new URL(targetValue, initialUrl.origin).href;
+      },
+      back() {
+        historyBackCalls += 1;
+      },
+    },
+  };
+  const signupConfirmationStateRef = { current: "pending" };
+  const busyStates: boolean[] = [];
+  const loadingStates: boolean[] = [];
+  const routeReplacements: unknown[] = [];
+  const transitions: unknown[] = [];
+  const statuses: Array<{ message: string; tone: string }> = [];
+  const logs: unknown[][] = [];
+  let signOutAttempts = 0;
+
+  const signOutAfterSignupConfirmation = async () => {
+    signOutAttempts += 1;
+    throw new Error(`signOutAfterSignupConfirmation failed: ${privateToken}`);
+  };
+  const context: SignupConfirmationHarnessContext = {
+    URL,
+    window: fakeWindow,
+    multiportalAuth: {
+      async completeSignupConfirmation() {
+        await signOutAfterSignupConfirmation();
+        return "signed_out";
+      },
+    },
+    signupConfirmationStateRef,
+    setIsBusy(value: boolean) {
+      busyStates.push(value);
+    },
+    setIsAuthLoading(value: boolean) {
+      loadingStates.push(value);
+    },
+    authRouteController: {
+      replace(value: unknown) {
+        routeReplacements.push(value);
+      },
+    },
+    navigation: {
+      transition(value: unknown) {
+        transitions.push(value);
+      },
+    },
+    createAuthNavigationReset(screen: string, reason: string) {
+      return { screen, reason };
+    },
+    setAuthStatus(message: string, tone: string) {
+      statuses.push({ message, tone });
+    },
+    SIGNUP_CONFIRMATION_INVALID_MESSAGE,
+    console: {
+      log: (...values: unknown[]) => logs.push(values),
+      warn: (...values: unknown[]) => logs.push(values),
+      error: (...values: unknown[]) => logs.push(values),
+    },
+  };
+  const harnessSource = [
+    findNamedFunctionText(source, "clearSignupConfirmationUrl"),
+    findNamedFunctionText(source, "invalidateSignupConfirmation"),
+    findNamedFunctionText(source, "completeSignupConfirmationSession"),
+    "globalThis.__completeSignupConfirmationSession = completeSignupConfirmationSession;",
+  ].join("\n");
+  const transpiled = ts.transpileModule(harnessSource, {
+    fileName: "signup-confirmation-cleanup-harness.ts",
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.None,
+    },
+    reportDiagnostics: true,
+  });
+  const syntaxErrors = (transpiled.diagnostics ?? []).filter(
+    ({ category }) => category === ts.DiagnosticCategory.Error,
+  );
+  assert.deepEqual(syntaxErrors, [], "harness de callback conserva sintaxis ejecutable");
+  runInNewContext(transpiled.outputText, context);
+  const complete = context.__completeSignupConfirmationSession;
+  assert.equal(typeof complete, "function");
+
+  complete!({ session: { user: { id: "user-a" } } });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(signOutAttempts, 1, "la falla forzada proviene del cierre post-confirmación");
+  assert.equal(signupConfirmationStateRef.current, "invalid");
+  assert.ok(replaceTargets.length >= 2, "limpieza inmediata y limpieza idempotente de error");
+  assert.equal(new URL(location.href).hash, "");
+  assert.equal(new URL(location.href).searchParams.has("flow"), false);
+  assert.equal(
+    replaceTargets.every((target) => new URL(target, initialUrl.origin).origin === initialUrl.origin),
+    true,
+  );
+  assert.equal(historyBackCalls, 0);
+  assert.equal(externalNavigationCalls, 0);
+  assert.equal(
+    JSON.stringify(routeReplacements),
+    JSON.stringify([{ mode: "login", accountType: "usuario" }]),
+  );
+  assert.equal(
+    JSON.stringify(transitions),
+    JSON.stringify([{ screen: "login", reason: "signup-confirmation-completed" }]),
+  );
+  assert.deepEqual(busyStates, [false]);
+  assert.deepEqual(loadingStates, [false]);
+  assert.deepEqual(statuses, [{ message: SIGNUP_CONFIRMATION_INVALID_MESSAGE, tone: "error" }]);
+  assert.equal(logs.length, 0);
+  assert.equal(
+    JSON.stringify({ statuses, logs, routeReplacements, transitions }).includes(privateToken),
+    false,
   );
 }

@@ -29,6 +29,7 @@ export type AuthResetReason =
   | "password-recovery-expired"
   | "session-established"
   | "signup-confirmation-pending"
+  | "signup-confirmation-completed"
   | "password-updated"
   | "auth-screen-switch";
 

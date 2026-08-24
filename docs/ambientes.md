@@ -72,10 +72,11 @@ El archivo `.env.local` no debe subirse al repositorio.
 QA debe aceptar solo URLs de prueba y desarrollo:
 
 ```text
-https://*.vercel.app/**
+https://<qa-preview-alias>.vercel.app/**
+# Alternativa sólo después de confirmar el owner real:
+https://*-<team-or-account-slug>.vercel.app/**
 http://localhost:3000/**
 http://localhost:3066/**
-https://qa.organizatech.cl/**  # futuro, solo si se habilita
 ```
 
 QA no debe usar URLs productivas como redirect principal.
@@ -137,4 +138,3 @@ feature/training-sessions-fuente-verdad
 ```
 
 Esa fase debe hacer que `training_sessions` represente una sesion diaria real de entrenamiento y sea la fuente de verdad para dashboard, carrusel, resumen y comparacion semanal.
-

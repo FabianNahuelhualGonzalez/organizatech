@@ -22,6 +22,8 @@ const COMPONENT_PATH = "src/features/coach-portal/components/coach-portal.tsx";
 const PRODUCT_CONTRACT_PATH = "docs/product/auth-coach-product-contract.md";
 const ROADMAP_PATH = "docs/product/auth-coach-roadmap.md";
 const PACKAGE_PATH = "package.json";
+const AUTH_CONFIRMATION_MIGRATION_PATH =
+  "supabase/migrations/20260820041942_auth_confirmation_pending_memberships.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -463,7 +465,10 @@ function auditProhibitedArtifacts(sources: Sources) {
     !dependencyNames.some((name) => /resend|sendgrid|postmark|mailgun|nodemailer|emailjs/i.test(name))
     && !changedPaths.some((path) => (
       path === "package-lock.json"
-      || path.startsWith("supabase/migrations/")
+      || (
+        path.startsWith("supabase/migrations/")
+        && path !== AUTH_CONFIRMATION_MIGRATION_PATH
+      )
       || /(^|\/)\.env(?:\.|$)/.test(path)
     ))
     && !/service_role|SUPABASE_SERVICE_ROLE|PRIVATE_KEY/.test(allSources),
@@ -473,7 +478,7 @@ function auditProhibitedArtifacts(sources: Sources) {
 
 function auditConfirmationAndFutureEmailContract(sources: Sources) {
   assertContract(
-    /export const COACH_REGISTRATION_CONFIRMATION_MESSAGE\s*=\s*\n\s*"Cuenta creada\. Revisa tu correo para confirmar el registro\.";/.test(
+    /export const COACH_REGISTRATION_CONFIRMATION_MESSAGE\s*=\s*\n\s*"Muchas gracias por crear tu cuenta Coach en Organizatech\. Revisa tu correo y haz clic en el enlace de confirmación para activar tu cuenta\. Después podrás iniciar sesión como Coach\.";/.test(
       sources.controller,
     )
     && /state:\s*"coach_confirmation_required"[\s\S]*message:\s*COACH_REGISTRATION_CONFIRMATION_MESSAGE/.test(
@@ -754,7 +759,7 @@ const mutations = [
     expectedFailure: FAILURE.confirmationRemoved,
     apply: (value: string) => replaceExactlyOnce(
       value,
-      'export const COACH_REGISTRATION_CONFIRMATION_MESSAGE =\n  "Cuenta creada. Revisa tu correo para confirmar el registro.";',
+      'export const COACH_REGISTRATION_CONFIRMATION_MESSAGE =\n  "Muchas gracias por crear tu cuenta Coach en Organizatech. Revisa tu correo y haz clic en el enlace de confirmación para activar tu cuenta. Después podrás iniciar sesión como Coach.";',
       'export const COACH_REGISTRATION_CONFIRMATION_MESSAGE =\n  "Cuenta Coach creada.";',
       "M21",
     ),

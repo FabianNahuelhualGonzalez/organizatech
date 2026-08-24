@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 
 import {
   AUTH_REGISTRATION_GENDER_VALUES,
+  AUTH_REGISTRATION_PORTAL_METADATA_KEY,
   buildCoachRegistrationPayload,
   buildLoginPayload,
   buildUserSignupPayload,
+  withSignupConfirmationMetadata,
 } from "@/features/auth/model/auth-form";
 
 function createUserRegistrationForm(overrides: Record<string, string> = {}) {
@@ -151,5 +153,71 @@ assert.deepEqual(
     message: "Ingresa tu título de estudios.",
   },
 );
+
+{
+  const built = buildCoachRegistrationPayload(createUserRegistrationForm({
+    "register-professional-title": "Preparador físico",
+  }), new Date(2026, 7, 14));
+  assert.equal(built.ok, true);
+  if (built.ok) {
+    const maliciousAuth = {
+      ...built.payload.auth,
+      options: {
+        data: {
+          ...built.payload.auth.options.data,
+          user_id: "attacker-user",
+          owner_id: "attacker-owner",
+          profile_id: "attacker-profile",
+          role: "admin",
+        },
+      },
+      user_id: "attacker-user",
+      owner_id: "attacker-owner",
+      profile_id: "attacker-profile",
+      role: "admin",
+    } as typeof built.payload.auth;
+
+    const coachSignup = withSignupConfirmationMetadata(
+      maliciousAuth,
+      {
+        portal: "coach",
+        professionalTitle: built.payload.registration.professional_title,
+      },
+      "https://preview.example.test/login?flow=signup-confirmation",
+    );
+    assert.deepEqual(coachSignup.options.data, {
+      display_name: "Fabian Nahuelhual",
+      first_name: "Fabian",
+      last_name: "Nahuelhual",
+      birth_date: "1990-08-14",
+      gender: "male",
+      phone_number: "+56 9 1234 5678",
+      [AUTH_REGISTRATION_PORTAL_METADATA_KEY]: "coach",
+      professional_title: "Preparador físico",
+    });
+    assert.equal(
+      coachSignup.options.emailRedirectTo,
+      "https://preview.example.test/login?flow=signup-confirmation",
+    );
+    const userSignup = withSignupConfirmationMetadata(
+      maliciousAuth,
+      { portal: "usuario", professionalTitle: null },
+      "https://preview.example.test/login?flow=signup-confirmation",
+    );
+    assert.equal(userSignup.options.data[AUTH_REGISTRATION_PORTAL_METADATA_KEY], "usuario");
+    assert.equal("professional_title" in userSignup.options.data, false);
+
+    const serializedSignup = JSON.stringify({ coachSignup, userSignup });
+    for (const forbidden of [
+      "organizatech_registration_intent_id",
+      "user_id",
+      "owner_id",
+      "profile_id",
+      "role",
+    ] as const) {
+      assert.equal(serializedSignup.includes(forbidden), false, `${forbidden} no entra al signup`);
+    }
+  }
+}
 
 console.log("auth-form tests passed");

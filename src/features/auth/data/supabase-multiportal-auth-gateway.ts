@@ -1,17 +1,24 @@
 import { createClient, type Session, type SupabaseClient, type User } from "@supabase/supabase-js";
 
 import type {
+  CoachRegistrationPreparationPayload,
   CoachRegistrationWritePayload,
   LoginPayload,
   UserSignupPayload,
 } from "@/features/auth/model/auth-form";
+import { withSignupConfirmationMetadata } from "@/features/auth/model/auth-form";
 import type {
   AuthenticatedPortalIdentity,
   CoachRegistrationRecord,
   MultiportalAuthGateway,
   PortalSignOutReason,
+  SignupConfirmationRecord,
   UserRegistrationRecord,
 } from "@/features/auth/model/multiportal-auth-controller";
+import {
+  SIGNUP_CONFIRMATION_FLOW,
+  getBrowserAuthCallbackUrl,
+} from "@/features/auth/model/auth-callback";
 import { translateAuthError } from "@/lib/supabase/auth-errors";
 import type { SupabaseSessionState } from "@/lib/supabase/session";
 import type {
@@ -98,10 +105,18 @@ export function createSupabaseMultiportalAuthGateway(
         : { kind: "error", message: translateAuthError(new Error("auth session missing")) };
     },
 
-    async signUpForCoachRegistration(payload: UserSignupPayload, owner) {
+    async signUpForCoachRegistration(payload: CoachRegistrationPreparationPayload, owner) {
       if (!owner.isCurrent()) return { kind: "stale" };
       const isolatedClient = getRegistrationClient();
-      const { data, error } = await isolatedClient.auth.signUp(payload);
+      const signupPayload = withSignupConfirmationMetadata(
+        payload.auth,
+        {
+          portal: "coach",
+          professionalTitle: payload.registration.professional_title,
+        },
+        getBrowserAuthCallbackUrl(SIGNUP_CONFIRMATION_FLOW),
+      );
+      const { data, error } = await isolatedClient.auth.signUp(signupPayload);
       if (!owner.isCurrent()) return { kind: "stale" };
       if (error) return { kind: "error", message: translateAuthError(error) };
       if (Array.isArray(data.user?.identities) && data.user.identities.length === 0) {
@@ -145,7 +160,12 @@ export function createSupabaseMultiportalAuthGateway(
     async signUpForUserRegistration(payload: UserSignupPayload, owner) {
       if (!owner.isCurrent()) return { kind: "stale" };
       const isolatedClient = getRegistrationClient();
-      const { data, error } = await isolatedClient.auth.signUp(payload);
+      const signupPayload = withSignupConfirmationMetadata(
+        payload,
+        { portal: "usuario", professionalTitle: null },
+        getBrowserAuthCallbackUrl(SIGNUP_CONFIRMATION_FLOW),
+      );
+      const { data, error } = await isolatedClient.auth.signUp(signupPayload);
       if (!owner.isCurrent()) return { kind: "stale" };
       if (error) return { kind: "error", message: translateAuthError(error) };
       if (Array.isArray(data.user?.identities) && data.user.identities.length === 0) {
@@ -161,6 +181,36 @@ export function createSupabaseMultiportalAuthGateway(
       return identity
         ? { kind: "authenticated", identity }
         : { kind: "error", message: translateAuthError(new Error("auth session missing")) };
+    },
+
+    async getOwnSignupConfirmation(expectedUserId, owner) {
+      await requireAuthoritativeIdentity(supabase, expectedUserId, owner);
+      if (!owner.isCurrent()) throw staleRegistrationError();
+      const { data, error } = await supabase.rpc("get_own_auth_registration_confirmation");
+      if (error) {
+        throw new MultiportalAuthRepositoryError(
+          "No pudimos validar la confirmación del registro.",
+          error,
+        );
+      }
+      if (!owner.isCurrent()) throw staleRegistrationError();
+      const confirmation = mapSignupConfirmationRecord(data);
+      await requireAuthoritativeIdentity(supabase, expectedUserId, owner);
+      return confirmation;
+    },
+
+    async signOutAfterSignupConfirmation(expectedUserId, owner) {
+      if (!owner.isCurrent() || owner.expectedUserId !== expectedUserId) return "stale";
+      const identity = await getAuthoritativeIdentity(supabase, expectedUserId, owner);
+      if (!owner.isCurrent() || !identity || identity.userId !== expectedUserId) return "stale";
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      if (error) {
+        throw new MultiportalAuthRepositoryError(
+          "No pudimos cerrar la sesión de confirmación.",
+          error,
+        );
+      }
+      return "signed_out";
     },
 
     async hasUserRegistration(expectedUserId, owner) {
@@ -505,6 +555,25 @@ function mapUserRegistrationRow(value: unknown): UserRegistrationRecord | null {
     throw new MultiportalAuthRepositoryError("La respuesta de autorización Usuario no es válida.");
   }
   return { userId: row.user_id };
+}
+
+function mapSignupConfirmationRecord(value: unknown): SignupConfirmationRecord {
+  const rows = Array.isArray(value) ? value : [];
+  if (rows.length !== 1 || !rows[0] || typeof rows[0] !== "object") {
+    throw new MultiportalAuthRepositoryError("La confirmación del registro no es válida.");
+  }
+  const row = rows[0] as { status?: unknown; portal?: unknown };
+  if (
+    row.status !== "confirmed"
+    && row.status !== "expired"
+    && row.status !== "invalid"
+  ) {
+    throw new MultiportalAuthRepositoryError("El estado de confirmación no es válido.");
+  }
+  if (row.portal !== null && row.portal !== "usuario" && row.portal !== "coach") {
+    throw new MultiportalAuthRepositoryError("El portal de confirmación no es válido.");
+  }
+  return { status: row.status, portal: row.portal };
 }
 
 function readErrorCode(error: unknown): string {

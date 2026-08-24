@@ -31,6 +31,8 @@ const METADATA_RUNTIME_PROBE_PATH =
   "src/features/auth/model/multiportal-auth-metadata-mutation-runtime.test.ts";
 const NO_SENSITIVE_BROWSER_STORAGE_FAILURE =
   "[AUTH-COACH-01.SWITCH.no-sensitive-browser-storage]";
+const AMBIGUOUS_IDENTITY_FAILURE =
+  "[AUTH-CONFIRM-01.existing-identity-neutral] existing_identity termina sin autorización ni navegación";
 const AC039_FAILURES = {
   exactMessage: "[AUTH-COACH-01.AC039.exact-message] conserva el mensaje de duplicado aprobado",
   authenticatedLookup: "[AUTH-COACH-01.AC039.authenticated-own-lookup] el duplicado deriva sólo de identity.userId autenticado",
@@ -46,7 +48,7 @@ const AC039_FAILURES = {
   minimalResult: "[AUTH-COACH-01.AC039.minimal-result] el error no transporta coach, authState, userId ni professional_title",
   userOnlyAllowed: "[AUTH-COACH-01.AC039.user-only-allowed] una identidad Usuario-only alcanza exactamente un create Coach",
   noClientInference: "[AUTH-COACH-01.AC039.no-client-inference] metadata, email, roles y estado cliente no revelan duplicado",
-  invalidPasswordPrivacy: "[AUTH-COACH-01.AC039.invalid-password-privacy] contraseña incorrecta conserva el mensaje genérico",
+  invalidPasswordPrivacy: "[AUTH-COACH-01.AC039.invalid-password-privacy] contraseña incorrecta conserva el mensaje ambiguo neutral",
   rootNoContinuation: "[AUTH-COACH-01.AC039.root-no-continuation] el error corta sesión, portal y navegación antes de publicar éxito",
 } as const;
 
@@ -721,18 +723,127 @@ function gatewayMethodName(call: ts.CallExpression, gatewayName: string): string
     : null;
 }
 
-function locateCoachRegistrationErrorGuard(root: string) {
+function locateRegistrationErrorGuard(root: string, payloadName: string) {
   const sourceFile = parseTypeScript(root, ROOT_PATH);
   const handleAuth = findNamedFunctionDeep(sourceFile, "handleAuth");
   const guard = collectIfStatements(handleAuth.body).find((ifStatement) => {
     if (!/\.state\s*===\s*"error"/.test(ifStatement.expression.getText(sourceFile))) return false;
     return ancestorIfStatements(ifStatement, handleAuth.body).some((ancestor) => (
-      isIdentifierNamed(ancestor.expression, "coachRegistrationPayload")
+      isIdentifierNamed(ancestor.expression, payloadName)
       && isWithin(ifStatement, ancestor.thenStatement)
     ));
   });
-  assert.ok(guard, "handleAuth conserva la rama error de registro Coach");
+  assert.ok(guard, `handleAuth conserva la rama error de ${payloadName}`);
   return { sourceFile, handleAuth, guard: guard! };
+}
+
+function auditAmbiguousExistingIdentitySemantics(sources: Sources) {
+  const sourceFile = parseTypeScript(sources.controller, CONTROLLER_PATH);
+  const approvedMessage =
+    "Revisa tu correo para continuar. Si no recibes un mensaje, inicia sesión o recupera tu contraseña.";
+  const approvedMessageNames: string[] = [];
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const initializer = declaration.initializer
+        ? unwrapExpression(declaration.initializer)
+        : null;
+      if (
+        ts.isIdentifier(declaration.name)
+        && initializer
+        && ts.isStringLiteralLike(initializer)
+        && initializer.text === approvedMessage
+      ) approvedMessageNames.push(declaration.name.text);
+    }
+  }
+  assert.equal(approvedMessageNames.length, 1, AMBIGUOUS_IDENTITY_FAILURE);
+  const approvedMessageName = approvedMessageNames[0]!;
+
+  const cases = [
+    {
+      functionName: "registerUser",
+      portal: "usuario",
+      payloadName: "signupPayload",
+    },
+    {
+      functionName: "registerCoach",
+      portal: "coach",
+      payloadName: "coachRegistrationPayload",
+    },
+  ] as const;
+
+  for (const registrationCase of cases) {
+    const registration = findNamedFunction(sourceFile, registrationCase.functionName);
+    const gatewayParameter = registration.parameters[2]?.name;
+    const gatewayName = gatewayParameter && ts.isIdentifier(gatewayParameter)
+      ? gatewayParameter.text
+      : null;
+    assert.ok(gatewayName, AMBIGUOUS_IDENTITY_FAILURE);
+    const guards = collectIfStatements(registration.body).filter(
+      (ifStatement) => /\.kind\s*===\s*"existing_identity"/.test(
+        ifStatement.expression.getText(sourceFile),
+      ),
+    );
+    assert.equal(guards.length, 1, AMBIGUOUS_IDENTITY_FAILURE);
+    const ambiguousBranch = guards[0]!.thenStatement;
+    if (!ts.isBlock(ambiguousBranch)) assert.fail(AMBIGUOUS_IDENTITY_FAILURE);
+    const returns = collectReturns(ambiguousBranch).filter(
+      (returnStatement) => Boolean(returnStatement.expression),
+    );
+    assert.equal(returns.length, 1, AMBIGUOUS_IDENTITY_FAILURE);
+    const expression = returns[0]!.expression!;
+    const message = objectLiteralPropertyExpression(expression, "message");
+    assert.equal(
+      objectLiteralStringProperty(expression, "state") === "error"
+        && objectLiteralStringProperty(expression, "requestedPortal") === registrationCase.portal
+        && Boolean(message && isIdentifierNamed(message, approvedMessageName)),
+      true,
+      AMBIGUOUS_IDENTITY_FAILURE,
+    );
+    assert.deepEqual(
+      objectLiteralPropertyNames(expression).sort(),
+      ["message", "requestedPortal", "state"],
+      AMBIGUOUS_IDENTITY_FAILURE,
+    );
+    assert.equal(
+      collectCallExpressions(ambiguousBranch).some(
+        (call) => gatewayMethodName(call, gatewayName!) !== null,
+      ),
+      false,
+      AMBIGUOUS_IDENTITY_FAILURE,
+    );
+
+    const { guard: rootErrorGuard } =
+      locateRegistrationErrorGuard(sources.root, registrationCase.payloadName);
+    const forbiddenRootCalls = new Set([
+      "applySessionState",
+      "beginPortalResolution",
+      "continueAuthorizedPortalAccess",
+      "replaceCoachPortalSession",
+      "signOut",
+      "transition",
+      "replace",
+      "push",
+      "back",
+      "assign",
+    ]);
+    const rootErrorCalls = collectCallExpressions(rootErrorGuard.thenStatement);
+    const hasTerminalReturn = ts.isBlock(rootErrorGuard.thenStatement)
+      && rootErrorGuard.thenStatement.statements.some(ts.isReturnStatement);
+    assert.equal(
+      hasTerminalReturn
+        && !rootErrorCalls.some((call) => {
+          const callExpression = unwrapExpression(call.expression);
+          if (ts.isIdentifier(callExpression)) {
+            return forbiddenRootCalls.has(callExpression.text);
+          }
+          return ts.isPropertyAccessExpression(callExpression)
+            && forbiddenRootCalls.has(callExpression.name.text);
+        }),
+      true,
+      `${AMBIGUOUS_IDENTITY_FAILURE}: ${registrationCase.portal}`,
+    );
+  }
 }
 
 function auditDuplicateCoachRegistrationSemantics(sources: Sources) {
@@ -971,18 +1082,26 @@ function auditDuplicateCoachRegistrationSemantics(sources: Sources) {
       ifStatement.expression.getText(sourceFile),
     ),
   );
-  const invalidPasswordMessage =
-    "Este correo ya está registrado. Inicia sesión con esa cuenta para agregar el acceso Coach.";
   assert.equal(
     Boolean(existingIdentityGuard && statementContainsReturn(
       existingIdentityGuard.thenStatement,
-      (expression) => objectLiteralStringProperty(expression, "message") === invalidPasswordMessage,
+      (expression) => {
+        const message = objectLiteralPropertyExpression(expression, "message");
+        return objectLiteralStringProperty(expression, "state") === "error"
+          && Boolean(message && isIdentifierNamed(
+            message,
+            "REGISTRATION_EXISTING_IDENTITY_MESSAGE",
+          ));
+      },
     )),
     true,
     AC039_FAILURES.invalidPasswordPrivacy,
   );
 
-  const { guard: rootErrorGuard } = locateCoachRegistrationErrorGuard(sources.root);
+  const { guard: rootErrorGuard } = locateRegistrationErrorGuard(
+    sources.root,
+    "coachRegistrationPayload",
+  );
   const rootErrorCalls = collectCallExpressions(rootErrorGuard.thenStatement);
   const forbiddenRootCalls = new Set([
     "applySessionState",
@@ -1741,6 +1860,7 @@ function auditIntegration(sources: Sources) {
   auditNoSensitiveBrowserStorage(sources);
   auditCoachIdentitySwitchSemantics(sources);
   auditDuplicateCoachRegistrationSemantics(sources);
+  auditAmbiguousExistingIdentitySemantics(sources);
   const { root, controller, owner, gateway, hook, form, screen } = sources;
   const controllerSourceFile = parseTypeScript(controller, CONTROLLER_PATH);
   const registerCoachFunction = findNamedFunction(controllerSourceFile, "registerCoach");
@@ -2448,7 +2568,10 @@ const mutations = [
     expectedFailure: AC039_FAILURES.rootNoContinuation,
     exactFailureLine: true,
     apply(source: string) {
-      const { sourceFile, guard } = locateCoachRegistrationErrorGuard(source);
+      const { sourceFile, guard } = locateRegistrationErrorGuard(
+        source,
+        "coachRegistrationPayload",
+      );
       assert.ok(ts.isBlock(guard.thenStatement), "AC-039 localiza bloque error Coach");
       const block = guard.thenStatement;
       const mutatedBlock = replaceExactlyOnce(
@@ -2520,12 +2643,24 @@ const mutations = [
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.invalidPasswordPrivacy,
     exactFailureLine: true,
-    apply: (source: string) => replaceExactlyOnce(
-      source,
-      'message: "Este correo ya está registrado. Inicia sesión con esa cuenta para agregar el acceso Coach.",',
-      "message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,",
-      "AC-039 revela duplicado con password inválida",
-    ),
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const registerCoach = findNamedFunction(sourceFile, "registerCoach");
+      const existingIdentityGuard = collectIfStatements(registerCoach.body).find(
+        (ifStatement) => /\.kind\s*===\s*"existing_identity"/.test(
+          ifStatement.expression.getText(sourceFile),
+        ),
+      );
+      assert.ok(existingIdentityGuard, "AC-039 localiza respuesta Auth ofuscada");
+      const branch = existingIdentityGuard.thenStatement.getText(sourceFile);
+      const mutatedBranch = replaceExactlyOnce(
+        branch,
+        "message: REGISTRATION_EXISTING_IDENTITY_MESSAGE,",
+        "message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,",
+        "AC-039 revela duplicado con password inválida",
+      );
+      return replaceNodeText(source, sourceFile, existingIdentityGuard.thenStatement, mutatedBranch);
+    },
   },
   {
     name: "AC-039 · rechaza incorrectamente a Usuario-only",

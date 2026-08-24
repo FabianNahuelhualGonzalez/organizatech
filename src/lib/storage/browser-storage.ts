@@ -36,7 +36,7 @@ export const LEGACY_BROWSER_STORAGE_KEYS = {
 } as const;
 
 export const PASSWORD_RECOVERY_STORAGE_KEY = "organizatech:password-recovery-flow";
-export const PASSWORD_RECOVERY_STORAGE_VERSION = 2;
+export const PASSWORD_RECOVERY_STORAGE_VERSION = 3;
 export const PASSWORD_RECOVERY_TTL_MS = 60 * 60 * 1000;
 
 export type PasswordRecoveryStorageStatus = "pending" | "confirmed";
@@ -46,7 +46,6 @@ export interface PasswordRecoveryStorageRecord {
   status: PasswordRecoveryStorageStatus;
   startedAt: number;
   expiresAt: number;
-  userId?: string;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -254,13 +253,11 @@ export function startPasswordRecoveryFlow(
 }
 
 export function confirmPasswordRecoveryFlow(
-  userId: string,
   sessionStorage: BrowserStorageLike | null = getBrowserSessionStorage(),
   localStorage: BrowserStorageLike | null = getBrowserLocalStorage(),
   now = Date.now(),
 ): boolean {
-  const normalizedUserId = normalizePasswordRecoveryUserId(userId);
-  if (!sessionStorage || !normalizedUserId) return false;
+  if (!sessionStorage) return false;
   if (localStorage) removeBrowserStorageItem(localStorage, PASSWORD_RECOVERY_STORAGE_KEY);
 
   const current = loadPasswordRecoveryFlow(sessionStorage, null, now);
@@ -269,7 +266,6 @@ export function confirmPasswordRecoveryFlow(
     status: "confirmed",
     startedAt: current?.startedAt ?? now,
     expiresAt: current?.expiresAt ?? now + PASSWORD_RECOVERY_TTL_MS,
-    userId: normalizedUserId,
   } satisfies PasswordRecoveryStorageRecord);
 }
 
@@ -389,18 +385,10 @@ function isPasswordRecoveryRecord(value: unknown): value is PasswordRecoveryStor
     || !Number.isFinite(value.expiresAt)
   ) return false;
 
-  const commonKeys = ["version", "status", "startedAt", "expiresAt"];
-  if (value.status === "pending") {
-    return Object.keys(value).length === commonKeys.length
-      && commonKeys.every((key) => key in value);
-  }
-
-  return value.status === "confirmed"
-    && typeof value.userId === "string"
-    && UUID_PATTERN.test(value.userId)
-    && Object.keys(value).length === commonKeys.length + 1
-    && commonKeys.every((key) => key in value)
-    && "userId" in value;
+  const allowedKeys = ["version", "status", "startedAt", "expiresAt"];
+  return (value.status === "pending" || value.status === "confirmed")
+    && Object.keys(value).length === allowedKeys.length
+    && allowedKeys.every((key) => key in value);
 }
 
 function isUnknownArray(value: unknown): value is unknown[] {

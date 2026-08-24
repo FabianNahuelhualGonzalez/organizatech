@@ -359,13 +359,12 @@ function run() {
       startedAt,
       expiresAt: startedAt + PASSWORD_RECOVERY_TTL_MS,
     });
-    assert.equal(confirmPasswordRecoveryFlow(USER_A, sessionStorage, localStorage, startedAt + 2), true);
+    assert.equal(confirmPasswordRecoveryFlow(sessionStorage, localStorage, startedAt + 2), true);
     assert.deepEqual(loadPasswordRecoveryFlow(sessionStorage, localStorage, startedAt + 3), {
       version: PASSWORD_RECOVERY_STORAGE_VERSION,
       status: "confirmed",
       startedAt,
       expiresAt: startedAt + PASSWORD_RECOVERY_TTL_MS,
-      userId: USER_A,
     });
 
     startPasswordRecoveryFlow(sessionStorage, localStorage, startedAt + 4);
@@ -422,7 +421,13 @@ function run() {
     });
     assert.equal(loadPasswordRecoveryFlow(tokenBearingRecord.storage, null, 1_500), null);
     assert.equal(tokenBearingRecord.values.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
-    assert.equal(confirmPasswordRecoveryFlow("not-a-user-id", tokenBearingRecord.storage, null, 1_500), false);
+    assert.equal(confirmPasswordRecoveryFlow(tokenBearingRecord.storage, null, 1_500), true);
+    assert.deepEqual(loadPasswordRecoveryFlow(tokenBearingRecord.storage, null, 1_501), {
+      version: PASSWORD_RECOVERY_STORAGE_VERSION,
+      status: "confirmed",
+      startedAt: 1_500,
+      expiresAt: 1_500 + PASSWORD_RECOVERY_TTL_MS,
+    });
   }
 
   {
@@ -438,32 +443,32 @@ function run() {
         },
       },
       {
-        label: "confirmed sin userId",
+        label: "confirmed con PII userId",
         record: {
           version: PASSWORD_RECOVERY_STORAGE_VERSION,
           status: "confirmed",
           startedAt: 1_000,
           expiresAt: 2_000,
+          userId: USER_A,
         },
       },
       {
-        label: "confirmed con userId no string",
+        label: "confirmed con token",
         record: {
           version: PASSWORD_RECOVERY_STORAGE_VERSION,
           status: "confirmed",
           startedAt: 1_000,
           expiresAt: 2_000,
-          userId: [USER_A],
+          accessToken: "must-not-persist",
         },
       },
       {
-        label: "confirmed con UUID inválido",
+        label: "status no permitido",
         record: {
           version: PASSWORD_RECOVERY_STORAGE_VERSION,
-          status: "confirmed",
+          status: "completed",
           startedAt: 1_000,
           expiresAt: 2_000,
-          userId: "not-a-uuid",
         },
       },
     ];
@@ -476,12 +481,17 @@ function run() {
       assert.equal(candidate.values.has(PASSWORD_RECOVERY_STORAGE_KEY), false, `${label}: debe purgar`);
     });
 
-    const uppercaseConfirmation = createStorage();
-    assert.equal(confirmPasswordRecoveryFlow(USER_UPPER, uppercaseConfirmation.storage, null, 1_000), true);
-    assert.equal(
-      loadPasswordRecoveryFlow(uppercaseConfirmation.storage, null, 1_001)?.userId,
-      USER_UPPER.toLowerCase(),
-    );
+    const legacyIdentityRecord = createStorage({
+      [PASSWORD_RECOVERY_STORAGE_KEY]: JSON.stringify({
+        version: 2,
+        status: "confirmed",
+        startedAt: 1_000,
+        expiresAt: 2_000,
+        userId: USER_UPPER,
+      }),
+    });
+    assert.equal(loadPasswordRecoveryFlow(legacyIdentityRecord.storage, null, 1_500), null);
+    assert.equal(legacyIdentityRecord.values.has(PASSWORD_RECOVERY_STORAGE_KEY), false);
   }
 
   {

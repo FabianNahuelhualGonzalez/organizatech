@@ -389,8 +389,12 @@ function assertP341StaticContracts(sources: P341ContractSources) {
     "async function handleUpdatePassword",
     "function prepareRoutineBuilderStateFromExercises",
   );
-  assert.match(passwordUpdate, /const \{ error: signOutError \} = await supabase\.auth\.signOut\(\)/);
-  assert.match(passwordUpdate, /if \(signOutError\)/);
+  assert.match(
+    passwordUpdate,
+    /signOut: \(\) => multiportalAuth\.signOutPasswordRecoveryLocally\(\)/,
+  );
+  assert.match(passwordUpdate, /result\.kind === "sign-out-error"/);
+  assert.doesNotMatch(passwordUpdate, /supabase\.auth\.signOut\(\)/);
   assert.doesNotMatch(passwordUpdate, /setStatusMessage\("Contrase\\u00f1a actualizada/);
 
   const refresh = extractBetween(
