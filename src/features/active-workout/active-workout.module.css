@@ -182,7 +182,7 @@
   display: grid;
   width: 100%;
   min-width: 0;
-  grid-template-columns: minmax(0, 2.25fr) repeat(3, minmax(38px, 0.72fr));
+  grid-template-columns: minmax(0, 2.25fr) minmax(50px, 0.72fr) repeat(2, minmax(38px, 0.72fr));
   gap: clamp(4px, 1.8vw, 10px);
   align-items: center;
 }
@@ -200,6 +200,11 @@
   min-width: 0;
   text-align: center;
   overflow-wrap: anywhere;
+}
+
+.tableHeader span {
+  overflow-wrap: normal;
+  white-space: nowrap;
 }
 
 .tableHeader span:first-child,
@@ -766,7 +771,7 @@
   .tableHeader,
   .tableRow,
   .selectableTableRow {
-    grid-template-columns: minmax(0, 1.9fr) repeat(3, minmax(34px, 0.68fr));
+    grid-template-columns: minmax(0, 1.9fr) minmax(50px, 0.68fr) repeat(2, minmax(34px, 0.68fr));
     gap: 4px;
   }
 }
@@ -813,7 +818,7 @@
   .tableHeader,
   .tableRow,
   .selectableTableRow {
-    grid-template-columns: minmax(0, 1.7fr) repeat(3, minmax(31px, 0.66fr));
+    grid-template-columns: minmax(0, 1.7fr) minmax(50px, 0.66fr) repeat(2, minmax(31px, 0.66fr));
     font-size: 0.64rem;
   }
 
