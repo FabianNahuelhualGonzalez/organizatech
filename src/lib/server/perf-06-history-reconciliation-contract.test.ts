@@ -51,6 +51,8 @@ const invariantMigration = "20260811035538_ensure_legacy_exercise_lineage_invari
 const compensationMigration = "20260811035542_reconcile_legacy_exercise_lineages.sql";
 const aclMigration = "20260811190144_perf_06r_daily_readiness_acl_normalization.sql";
 const aclMigrationSha256 = "3e49a2328f87bd09ad620287af801f71d82330aad2546aef324d4d50c1852749";
+const secReadiness01Migration = "20260824011330_sec_readiness_01_bound_workout_readiness_writes.sql";
+const secReadiness01MigrationSha256 = "bea5294e991d1368200e8b712d0f829b2449a33e414433f0c1568dae435bbb95";
 const productRepository = "src/lib/data/repository.ts";
 const cycleScopedRepository = "src/lib/training/cycle-scoped-training-repository.ts";
 const lineageModel = "src/lib/training/training-exercise-lineage.ts";
@@ -1291,23 +1293,45 @@ function validateBaselineArtifacts(root: string): void {
     "diagnóstico ausente de migrations",
   );
 
-  const expectedMigrationFiles = [
+  const expectedPerf06BaselineMigrationFiles = [
     ...historicalMappings.map(([, newName]) => newName),
     ...protectedPerfMigrations.map(([file]) => file),
     ...protectedPerf06RMigrations.map(([file]) => file),
     aclMigration,
   ].sort();
-  assert.equal(expectedMigrationFiles.length, 24, "inventario esperado: 18 históricas + 6 PERF-06");
+  assert.equal(
+    expectedPerf06BaselineMigrationFiles.length,
+    24,
+    "inventario PERF-06 previo intacto: 18 históricas + 6 PERF-06",
+  );
+  const expectedMigrationFiles = [
+    ...expectedPerf06BaselineMigrationFiles,
+    secReadiness01Migration,
+  ].sort();
+  assert.equal(expectedMigrationFiles.length, 25, "inventario global fijo: 24 previas + SEC-READINESS-01");
   const actualMigrationFiles = migrationFiles(root);
-  assert.deepEqual(actualMigrationFiles, expectedMigrationFiles, "inventario exacto de 24 versiones sin diagnóstico ni versión inventada");
+  assert.deepEqual(
+    actualMigrationFiles,
+    expectedMigrationFiles,
+    "inventario global exacto de 25 migraciones sin diagnóstico ni versión inventada",
+  );
   assert.ok(
     actualMigrationFiles.every((file) => /^\d{14}_.+\.sql$/.test(file)),
-    "las 24 migraciones usan versiones CLI de 14 dígitos",
+    "las 25 migraciones usan versiones CLI de 14 dígitos",
   );
   assert.equal(
     new Set(actualMigrationFiles.map((file) => file.slice(0, 14))).size,
-    24,
-    "las 24 versiones de migración son únicas",
+    25,
+    "las 25 versiones de migración son únicas",
+  );
+  assert.equal(
+    sha256(readFileSync(join(root, migrationsDirectory, secReadiness01Migration))),
+    secReadiness01MigrationSha256,
+    "SEC-READINESS-01 conserva su SHA-256 exacto",
+  );
+  assert.ok(
+    secReadiness01Migration.slice(0, 14) > aclMigration.slice(0, 14),
+    "SEC-READINESS-01 queda estrictamente después del inventario PERF-06 previo",
   );
 
   validateProfileSchema(read(root, schemaBaseline));
@@ -2048,6 +2072,7 @@ function copyFixture(): string {
     join(migrationsDirectory, invariantFile(repositoryRoot)),
     join(migrationsDirectory, compensationFile(repositoryRoot)),
     join(migrationsDirectory, aclMigration),
+    join(migrationsDirectory, secReadiness01Migration),
     join(diagnosticsDirectory, diagnosticArtifact),
     join(diagnosticsDirectory, fingerprintArtifact),
     schemaBaseline,
@@ -2086,6 +2111,7 @@ function canonicalSourcesSha(): string {
     join(migrationsDirectory, invariantFile(repositoryRoot)),
     join(migrationsDirectory, compensationFile(repositoryRoot)),
     join(migrationsDirectory, aclMigration),
+    join(migrationsDirectory, secReadiness01Migration),
     join(diagnosticsDirectory, diagnosticArtifact),
     join(diagnosticsDirectory, fingerprintArtifact),
     schemaBaseline,
@@ -2964,9 +2990,22 @@ const mutationProbes: MutationProbe[] = [
     expectedFailure: /migración ACL conserva su SHA-256 aprobado/,
   },
   {
+    name: "alterar bytes de migración SEC-READINESS-01",
+    apply: (root) => {
+      const path = join(root, migrationsDirectory, secReadiness01Migration);
+      writeFileSync(path, `${readFileSync(path, "utf8")}\n-- mutation\n`);
+    },
+    expectedFailure: /SEC-READINESS-01 conserva su SHA-256 exacto/,
+  },
+  {
+    name: "omitir migración SEC-READINESS-01 del inventario global",
+    apply: (root) => rmSync(join(root, migrationsDirectory, secReadiness01Migration)),
+    expectedFailure: /inventario global exacto de 25 migraciones/,
+  },
+  {
     name: "omitir migración ACL",
     apply: (root) => rmSync(join(root, migrationsDirectory, aclMigration)),
-    expectedFailure: /inventario exacto de 24 versiones/,
+    expectedFailure: /inventario global exacto de 25 migraciones/,
   },
   {
     name: "desregistrar migración ACL fuera de migrations",
@@ -2974,7 +3013,7 @@ const mutationProbes: MutationProbe[] = [
       join(root, migrationsDirectory, aclMigration),
       join(root, diagnosticsDirectory, aclMigration),
     ),
-    expectedFailure: /inventario exacto de 24 versiones/,
+    expectedFailure: /inventario global exacto de 25 migraciones/,
   },
   {
     name: "recrear ACL suelto no versionado",
