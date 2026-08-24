@@ -602,10 +602,8 @@ const protectedFileHashes = {
   "AGENTS.md": "f0c3ef88979a0ab085551a656ebb1843bfa56138d948ca4236bce6fcd1fa9dd0",
   "package.json": "d51aa85801147a83aef38c51a1bc7768b0468b3a12a4ef91405c8be3d6ca31c2",
   "package-lock.json": "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5",
-  "src/app/globals.css": "57a8d03c03fc729a72a06a7b846ae8a73a721b7d89551edf18b0003b26cfc5c9",
   "src/components/organizatech-app.tsx": "1ff491a02c84e5246414b689d563ba07a5bb811c209fbea618be31091acca7ca",
   "src/features/progress/components/comparison-screen-v2.tsx": "bff390e44cf5a04fe59b0f2a594fcb53fb2a50602c850362f1a88ca136765743",
-  "src/features/progress/progress-visual-integration-contract.test.ts": "9c0f432417b1a98a0cd3b9542b2e6a4c3dd4a8126989c6f17bc3a65133a56821",
   "src/features/active-workout/model/active-workout-controller-state.ts": "37006210eabda3f99217bd98b6ebf876780ed5ecc33bb8fba936eda7fd085ea5",
   "src/features/active-workout/hooks/useActiveWorkoutController.ts": "c7b475636a3b8731a9e8b9a46702584b9c2a4a06333b75139791bf3ef2ce25bf",
   "src/features/active-workout/hooks/useActiveWorkoutBoundary.ts": "5ee8be6ccea0e751659c0d20b76184874f161be04a89ea3a4f41c640b8aef1e9",
@@ -1063,8 +1061,29 @@ interface CssDeclaration {
   declarationOrder: number;
 }
 
+type CssClassScope = "local" | "global";
+
+interface CssClassIdentity {
+  name: string;
+  scope: CssClassScope;
+}
+
+type CssSelectorCombinator = "descendant" | "child" | "adjacent" | "sibling";
+
+interface CssSelectorCompound {
+  encoded: string;
+  source: string;
+  classes: readonly CssClassIdentity[];
+}
+
+interface CssParsedSelector {
+  source: string;
+  compounds: readonly CssSelectorCompound[];
+  combinators: readonly CssSelectorCombinator[];
+}
+
 interface CssExecutableRule {
-  selectors: string[];
+  selectors: CssParsedSelector[];
   declarations: CssDeclaration[];
   minWidth: number;
   maxWidth: number;
@@ -1073,16 +1092,35 @@ interface CssExecutableRule {
 
 interface CssAuditElement {
   tag?: string;
-  classes?: readonly string[];
+  classes?: readonly CssClassIdentity[];
   attributes?: Readonly<Record<string, string>>;
   states?: readonly string[];
   pseudoElement?: string;
   childIndex?: number;
+  adjacentPreviousSiblings?: readonly CssAuditElement[];
+  generalPreviousSiblings?: readonly CssAuditElement[];
 }
 
 interface CssAuditTarget extends CssAuditElement {
   label: string;
   ancestors?: readonly CssAuditElement[];
+  useStructuralSelectorMatcher?: boolean;
+}
+
+function cssClassIdentities(scope: CssClassScope, ...names: readonly string[]) {
+  return names.map((name): CssClassIdentity => ({ name, scope }));
+}
+
+function localCssClasses(...names: readonly string[]) {
+  return cssClassIdentities("local", ...names);
+}
+
+function globalCssClasses(...names: readonly string[]) {
+  return cssClassIdentities("global", ...names);
+}
+
+function mergeCssClasses(...groups: readonly (readonly CssClassIdentity[])[]) {
+  return groups.flat();
 }
 
 function stripExecutableCssComments(source: string) {
@@ -1216,10 +1254,14 @@ function parseCssDeclarations(body: string) {
     });
 }
 
-function parseExecutableCss(source: string) {
+function parseExecutableCss(
+  source: string,
+  defaultClassScope: CssClassScope = "local",
+  initialOrder = 0,
+) {
   const executableSource = stripExecutableCssComments(source);
   const rules: CssExecutableRule[] = [];
-  let order = 0;
+  let order = initialOrder;
 
   const visit = (block: string, inheritedMinWidth: number, inheritedMaxWidth: number) => {
     let cursor = 0;
@@ -1242,8 +1284,11 @@ function parseExecutableCss(source: string) {
         assert.ok(minWidth <= maxWidth, `CSS inválido: media query imposible (${prelude})`);
         visit(body, minWidth, maxWidth);
       } else if (!prelude.startsWith("@")) {
-        const selectors = splitCssOutsideGroups(prelude, ",").map((selector) => selector.trim());
-        assert.ok(selectors.every(Boolean), `CSS inválido: selector vacío (${prelude})`);
+        const rawSelectors = splitCssOutsideGroups(prelude, ",").map((selector) => selector.trim());
+        assert.ok(rawSelectors.every(Boolean), `CSS inválido: selector vacío (${prelude})`);
+        const selectors = rawSelectors.map((selector) => (
+          parseSelectorStructure(selector, defaultClassScope)
+        ));
         rules.push({
           selectors,
           declarations: parseCssDeclarations(body),
@@ -1262,29 +1307,84 @@ function parseExecutableCss(source: string) {
   return rules;
 }
 
-function normalizeCssModulesSelector(selector: string) {
-  let normalized = "";
+function parseExecutableCssSources(
+  sources: readonly { source: string; defaultClassScope: CssClassScope }[],
+) {
+  const rules: CssExecutableRule[] = [];
+  for (const input of sources) {
+    const parsed = parseExecutableCss(input.source, input.defaultClassScope, rules.length);
+    rules.push(...parsed);
+  }
+  return rules;
+}
+
+function cssDefaultClassScopeForPath(path: string): CssClassScope {
+  return path.endsWith(".module.css") ? "local" : "global";
+}
+
+function scopedClassMarkerPattern() {
+  return /\.__css_(local|global)__([_a-z][\w-]*)/gi;
+}
+
+function readScopedClassIdentities(encoded: string): CssClassIdentity[] {
+  return [...encoded.matchAll(scopedClassMarkerPattern())].map((match) => ({
+    name: match[2],
+    scope: match[1].toLowerCase() as CssClassScope,
+  }));
+}
+
+function decodeScopedClassMarkers(encoded: string) {
+  return encoded.replace(scopedClassMarkerPattern(), (_match, _scope, name: string) => `.${name}`);
+}
+
+function encodeCssModulesSelector(selector: string, defaultClassScope: CssClassScope) {
+  let encoded = "";
+  let quote = "";
 
   for (let index = 0; index < selector.length; index += 1) {
+    const character = selector[index];
+    if (quote) {
+      encoded += character;
+      if (character === "\\") {
+        encoded += selector[index + 1] ?? "";
+        index += 1;
+      } else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      encoded += character;
+      continue;
+    }
+    if (
+      character === "." &&
+      /[_a-z]/i.test(selector[index + 1] ?? "")
+    ) {
+      const match = selector.slice(index + 1).match(/^[_a-z][\w-]*/i);
+      assert.ok(match, `selector CSS Modules inválido: clase sin nombre (${selector})`);
+      encoded += `.__css_${defaultClassScope}__${match[0]}`;
+      index += match[0].length;
+      continue;
+    }
     if (!selector.startsWith(":global(", index)) {
-      normalized += selector[index];
+      encoded += character;
       continue;
     }
 
     const contentStart = index + ":global(".length;
     let depth = 1;
-    let quote = "";
+    let globalQuote = "";
     let closingIndex = -1;
     for (let cursor = contentStart; cursor < selector.length; cursor += 1) {
-      const character = selector[cursor];
-      if (quote) {
-        if (character === "\\") cursor += 1;
-        else if (character === quote) quote = "";
+      const globalCharacter = selector[cursor];
+      if (globalQuote) {
+        if (globalCharacter === "\\") cursor += 1;
+        else if (globalCharacter === globalQuote) globalQuote = "";
         continue;
       }
-      if (character === '"' || character === "'") quote = character;
-      else if (character === "(") depth += 1;
-      else if (character === ")") {
+      if (globalCharacter === '"' || globalCharacter === "'") globalQuote = globalCharacter;
+      else if (globalCharacter === "(") depth += 1;
+      else if (globalCharacter === ")") {
         depth -= 1;
         if (depth === 0) {
           closingIndex = cursor;
@@ -1294,54 +1394,102 @@ function normalizeCssModulesSelector(selector: string) {
     }
 
     assert.ok(closingIndex >= 0, `selector CSS Modules inválido: :global sin cierre (${selector})`);
-    normalized += normalizeCssModulesSelector(selector.slice(contentStart, closingIndex));
+    encoded += encodeCssModulesSelector(selector.slice(contentStart, closingIndex), "global");
     index = closingIndex;
   }
 
-  return normalized;
+  assert.equal(quote, "", `selector CSS Modules inválido: string sin cierre (${selector})`);
+  return encoded;
 }
 
-function splitSelectorCompounds(selector: string) {
-  const normalized = normalizeCssModulesSelector(selector);
-  const compounds: string[] = [];
-  let start = 0;
+function parseSelectorCompound(encoded: string): CssSelectorCompound {
+  return {
+    encoded,
+    source: decodeScopedClassMarkers(encoded),
+    classes: readScopedClassIdentities(encoded),
+  };
+}
+
+function parseSelectorStructure(
+  selector: string,
+  defaultClassScope: CssClassScope = "local",
+): CssParsedSelector {
+  const encodedSelector = encodeCssModulesSelector(selector, defaultClassScope);
+  const compounds: CssSelectorCompound[] = [];
+  const combinators: CssSelectorCombinator[] = [];
+  let current = "";
   let quote = "";
   let parentheses = 0;
   let brackets = 0;
+  let pendingWhitespace = false;
 
-  const push = (end: number) => {
-    const compound = normalized.slice(start, end).trim();
-    if (compound) compounds.push(compound);
+  const pushCurrent = () => {
+    const compound = current.trim();
+    if (compound) compounds.push(parseSelectorCompound(compound));
+    current = "";
   };
 
-  for (let index = 0; index < normalized.length; index += 1) {
-    const character = normalized[index];
+  for (let index = 0; index < encodedSelector.length; index += 1) {
+    const character = encodedSelector[index];
     if (quote) {
-      if (character === "\\") index += 1;
-      else if (character === quote) quote = "";
+      current += character;
+      if (character === "\\") {
+        current += encodedSelector[index + 1] ?? "";
+        index += 1;
+      } else if (character === quote) quote = "";
       continue;
     }
-    if (character === '"' || character === "'") quote = character;
-    else if (character === "(") parentheses += 1;
-    else if (character === ")") parentheses -= 1;
-    else if (character === "[") brackets += 1;
-    else if (character === "]") brackets -= 1;
-    else if (parentheses === 0 && brackets === 0 && (character === ">" || character === "+" || character === "~" || /\s/.test(character))) {
-      push(index);
-      while (index + 1 < normalized.length && /\s/.test(normalized[index + 1])) index += 1;
-      start = index + 1;
+    if (character === '"' || character === "'") {
+      quote = character;
+      current += character;
+    } else if (character === "(") {
+      parentheses += 1;
+      current += character;
+    } else if (character === ")") {
+      parentheses -= 1;
+      current += character;
+    } else if (character === "[") {
+      brackets += 1;
+      current += character;
+    } else if (character === "]") {
+      brackets -= 1;
+      current += character;
+    } else if (parentheses === 0 && brackets === 0 && /\s/.test(character)) {
+      pushCurrent();
+      pendingWhitespace = compounds.length > combinators.length;
+    } else if (parentheses === 0 && brackets === 0 && (character === ">" || character === "+" || character === "~")) {
+      pushCurrent();
+      assert.ok(compounds.length > combinators.length, `selector inválido: combinador sin lado izquierdo (${selector})`);
+      combinators.push(character === ">" ? "child" : character === "+" ? "adjacent" : "sibling");
+      pendingWhitespace = false;
+    } else {
+      if (pendingWhitespace) {
+        combinators.push("descendant");
+        pendingWhitespace = false;
+      }
+      current += character;
     }
   }
-  push(normalized.length);
-  return compounds;
+  pushCurrent();
+  assert.equal(
+    combinators.length,
+    Math.max(0, compounds.length - 1),
+    `selector inválido: relación incompleta (${selector})`,
+  );
+  return {
+    source: decodeScopedClassMarkers(encodedSelector),
+    compounds,
+    combinators,
+  };
 }
 
-function compoundMatchesElement(compoundInput: string, element: CssAuditElement) {
-  let compound = compoundInput;
-  for (const match of [...compound.matchAll(/:not\(([^()]*)\)/g)]) {
-    if (compoundMatchesElement(match[1], element)) return false;
+function compoundMatchesElement(compoundInput: CssSelectorCompound, element: CssAuditElement) {
+  let encodedCompound = compoundInput.encoded;
+  for (const match of [...encodedCompound.matchAll(/:not\(([^()]*)\)/g)]) {
+    if (compoundMatchesElement(parseSelectorCompound(match[1]), element)) return false;
   }
-  compound = compound.replace(/:not\(([^()]*)\)/g, "");
+  encodedCompound = encodedCompound.replace(/:not\(([^()]*)\)/g, "");
+  let compound = decodeScopedClassMarkers(encodedCompound);
 
   const pseudoElement = compound.match(/::([a-z-]+)/i)?.[1];
   if ((pseudoElement ?? "") !== (element.pseudoElement ?? "")) return false;
@@ -1358,9 +1506,11 @@ function compoundMatchesElement(compoundInput: string, element: CssAuditElement)
   if (requiredStates.some((state) => !states.has(state))) return false;
   compound = compound.replace(/:(hover|focus-visible|focus|active|disabled|checked|open|visited|target)\b/gi, "");
 
-  const classes = new Set(element.classes ?? []);
-  for (const match of compound.matchAll(/\.([_a-z][\w-]*)/gi)) {
-    if (!classes.has(match[1])) return false;
+  const classes = element.classes ?? [];
+  for (const requiredClass of readScopedClassIdentities(encodedCompound)) {
+    if (!classes.some((candidate) => (
+      candidate.name === requiredClass.name && candidate.scope === requiredClass.scope
+    ))) return false;
   }
 
   const attributes = element.attributes ?? {};
@@ -1383,31 +1533,122 @@ function compoundMatchesElement(compoundInput: string, element: CssAuditElement)
   return true;
 }
 
-function selectorMatchesTarget(selector: string, target: CssAuditTarget) {
-  if (/:has\(/.test(selector)) return false;
-  const compounds = splitSelectorCompounds(selector);
+interface CssProtectedSelectorState {
+  parentAncestorIndex: number;
+  adjacentPreviousSiblings: readonly CssAuditElement[];
+  generalPreviousSiblings: readonly CssAuditElement[];
+}
+
+function selectorMatchesProtectedTarget(
+  compounds: readonly CssSelectorCompound[],
+  combinators: readonly CssSelectorCombinator[],
+  target: CssAuditTarget,
+) {
+  const ancestors = target.ancestors ?? [];
+  let states: CssProtectedSelectorState[] = [{
+    parentAncestorIndex: 0,
+    adjacentPreviousSiblings: target.adjacentPreviousSiblings ?? [],
+    generalPreviousSiblings: target.generalPreviousSiblings ?? [],
+  }];
+
+  for (let index = compounds.length - 2; index >= 0; index -= 1) {
+    const combinator = combinators[index];
+    const nextStates: CssProtectedSelectorState[] = [];
+    for (const state of states) {
+      if (combinator === "child") {
+        const ancestor = ancestors[state.parentAncestorIndex];
+        if (ancestor && compoundMatchesElement(compounds[index], ancestor)) {
+          nextStates.push({
+            parentAncestorIndex: state.parentAncestorIndex + 1,
+            adjacentPreviousSiblings: ancestor.adjacentPreviousSiblings ?? [],
+            generalPreviousSiblings: ancestor.generalPreviousSiblings ?? [],
+          });
+        }
+        continue;
+      }
+      if (combinator === "descendant") {
+        for (let ancestorIndex = state.parentAncestorIndex; ancestorIndex < ancestors.length; ancestorIndex += 1) {
+          const ancestor = ancestors[ancestorIndex];
+          if (!compoundMatchesElement(compounds[index], ancestor)) continue;
+          nextStates.push({
+            parentAncestorIndex: ancestorIndex + 1,
+            adjacentPreviousSiblings: ancestor.adjacentPreviousSiblings ?? [],
+            generalPreviousSiblings: ancestor.generalPreviousSiblings ?? [],
+          });
+        }
+        continue;
+      }
+      const siblingCandidates = combinator === "adjacent"
+        ? state.adjacentPreviousSiblings
+        : state.generalPreviousSiblings;
+      for (const sibling of siblingCandidates) {
+        if (!compoundMatchesElement(compounds[index], sibling)) continue;
+        nextStates.push({
+          parentAncestorIndex: state.parentAncestorIndex,
+          adjacentPreviousSiblings: sibling.adjacentPreviousSiblings ?? [],
+          generalPreviousSiblings: sibling.generalPreviousSiblings ?? [],
+        });
+      }
+    }
+
+    if (nextStates.length > 0) {
+      states = nextStates;
+      continue;
+    }
+    return false;
+  }
+  return states.length > 0;
+}
+
+function selectorMatchesTarget(selector: CssParsedSelector, target: CssAuditTarget) {
+  if (/:has\(/.test(selector.source)) return false;
+  const { compounds, combinators } = selector;
   if (compounds.length === 0 || !compoundMatchesElement(compounds.at(-1)!, target)) return false;
+  if (target.useStructuralSelectorMatcher) {
+    return selectorMatchesProtectedTarget(compounds, combinators, target);
+  }
 
   const ancestors = target.ancestors ?? [];
   let ancestorIndex = 0;
   for (let index = compounds.length - 2; index >= 0; index -= 1) {
-    let matched = false;
-    while (ancestorIndex < ancestors.length) {
-      if (compoundMatchesElement(compounds[index], ancestors[ancestorIndex])) {
-        matched = true;
-        ancestorIndex += 1;
-        break;
+    const combinator = combinators[index];
+    if (combinator === "descendant" || combinator === "child") {
+      let candidateIndex = ancestorIndex;
+      const maximumAncestorIndex = combinator === "child"
+        ? Math.min(ancestors.length, ancestorIndex + 1)
+        : ancestors.length;
+      while (candidateIndex < maximumAncestorIndex) {
+        if (compoundMatchesElement(compounds[index], ancestors[candidateIndex])) {
+          ancestorIndex = candidateIndex + 1;
+          break;
+        }
+        candidateIndex += 1;
       }
-      ancestorIndex += 1;
+      if (candidateIndex < maximumAncestorIndex) continue;
     }
-    if (!matched) return false;
+
+    // El extremo derecho y la cadena estructural conocida ya identifican el objetivo.
+    // Cualquier resto a la izquierda es un prefijo contextual potencial, no una allowlist
+    // de shells. Su especificidad completa sigue participando en la cascada.
+    const externalTag = compounds[index].source
+      .replace(/:[\w-]+(?:\([^)]*\))?/g, "")
+      .trim()
+      .toLowerCase();
+    if (
+      combinator === "descendant" &&
+      /^(?:html|body|main)$/.test(externalTag) &&
+      !/[.#\[]/.test(compounds[index].source)
+    ) {
+      ancestorIndex = ancestors.length;
+      continue;
+    }
+    return false;
   }
   return true;
 }
 
-function cssSpecificity(selector: string) {
-  const normalized = normalizeCssModulesSelector(selector);
-  const specificitySource = normalized.replace(/:where\([^)]*\)/g, "");
+function cssSpecificity(selector: CssParsedSelector) {
+  const specificitySource = selector.source.replace(/:where\([^)]*\)/g, "");
   const ids = (specificitySource.match(/#[\w-]+/g) ?? []).length;
   const classes = (specificitySource.match(/\.[\w-]+/g) ?? []).length;
   const attributes = (specificitySource.match(/\[[^\]]+\]/g) ?? []).length;
@@ -1416,8 +1657,8 @@ function cssSpecificity(selector: string) {
   const pseudoClasses = (withoutPseudoElements.match(/:(?!:|global\b)[\w-]+/g) ?? [])
     .filter((pseudoClass) => !/^:(?:not|is|where|has)$/.test(pseudoClass))
     .length;
-  const types = splitSelectorCompounds(specificitySource).filter((compound) => (
-    /^[a-z][\w-]*/i.test(compound) && !/^:/.test(compound)
+  const types = selector.compounds.filter((compound) => (
+    /^[a-z][\w-]*/i.test(compound.source) && !/^:/.test(compound.source)
   )).length;
   return [ids, classes + attributes + pseudoClasses, types + pseudoElements] as const;
 }
@@ -1617,235 +1858,563 @@ function assertMobileFontAtLeast16Px(ruleBody: string, label: string) {
 
 const mobileAuditWidths = [320, 360, 361, 375, 390, 393, 400, 401, 420, 421, 430] as const;
 
+interface RenderedJsxClassModel {
+  globalClasses: readonly string[];
+  localClasses: readonly string[];
+}
+
+interface RenderedSeriesDomModel {
+  target: CssAuditElement;
+  ancestors: readonly CssAuditElement[];
+  card: CssAuditElement;
+}
+
+function readRenderedJsxClassModel(
+  node: ts.JsxElement,
+  fileName: string,
+  label: string,
+): RenderedJsxClassModel {
+  const classNameAttributes = node.openingElement.attributes.properties.filter(
+    (property): property is ts.JsxAttribute => (
+      ts.isJsxAttribute(property) && property.name.getText() === "className"
+    ),
+  );
+  assert.ok(
+    classNameAttributes.length <= 1,
+    `UI-NAV-01V DOM: ${fileName} no puede duplicar className en ${label}`,
+  );
+  if (classNameAttributes.length === 0) return { globalClasses: [], localClasses: [] };
+
+  const globalClasses: string[] = [];
+  const localClasses: string[] = [];
+  const addGlobalClasses = (literal: string) => {
+    for (const className of literal.split(/\s+/).filter(Boolean)) {
+      assert.match(
+        className,
+        /^[_a-z][\w-]*$/i,
+        `UI-NAV-01V DOM: ${fileName} contiene una clase global no literal en ${label}`,
+      );
+      globalClasses.push(className);
+    }
+  };
+  const addExpression = (expression: ts.Expression) => {
+    const unwrapped = unwrapTypeScriptExpression(expression);
+    assert.ok(
+      ts.isPropertyAccessExpression(unwrapped) &&
+      ts.isIdentifier(unwrapped.expression) &&
+      unwrapped.expression.text === "styles",
+      `UI-NAV-01V DOM: ${fileName} debe expresar las clases locales de ${label} mediante styles.<clase>`,
+    );
+    localClasses.push(unwrapped.name.text);
+  };
+
+  const initializer = classNameAttributes[0].initializer;
+  assert.ok(initializer, `UI-NAV-01V DOM: ${fileName} debe inicializar className en ${label}`);
+  if (ts.isStringLiteral(initializer)) {
+    addGlobalClasses(initializer.text);
+  } else {
+    assert.ok(
+      ts.isJsxExpression(initializer) && initializer.expression,
+      `UI-NAV-01V DOM: ${fileName} debe usar un className estructural en ${label}`,
+    );
+    const expression = unwrapTypeScriptExpression(initializer.expression);
+    if (ts.isNoSubstitutionTemplateLiteral(expression) || ts.isStringLiteral(expression)) {
+      addGlobalClasses(expression.text);
+    } else if (ts.isTemplateExpression(expression)) {
+      addGlobalClasses(expression.head.text);
+      for (const span of expression.templateSpans) {
+        addExpression(span.expression);
+        addGlobalClasses(span.literal.text);
+      }
+    } else {
+      addExpression(expression);
+    }
+  }
+
+  assert.equal(
+    new Set(globalClasses).size,
+    globalClasses.length,
+    `UI-NAV-01V DOM: ${fileName} no puede duplicar clases globales en ${label}`,
+  );
+  assert.equal(
+    new Set(localClasses).size,
+    localClasses.length,
+    `UI-NAV-01V DOM: ${fileName} no puede duplicar clases locales en ${label}`,
+  );
+  return { globalClasses, localClasses };
+}
+
+function assertRenderedClassModel(
+  actual: RenderedJsxClassModel,
+  expected: RenderedJsxClassModel,
+  fileName: string,
+  label: string,
+) {
+  assert.deepEqual(
+    [...actual.globalClasses].sort(),
+    [...expected.globalClasses].sort(),
+    `UI-NAV-01V DOM: ${fileName} debe conservar las clases globales reales de ${label}`,
+  );
+  assert.deepEqual(
+    [...actual.localClasses].sort(),
+    [...expected.localClasses].sort(),
+    `UI-NAV-01V DOM: ${fileName} debe conservar las clases CSS Module reales de ${label}`,
+  );
+}
+
+function toCssAuditElement(node: ts.JsxElement, classes: RenderedJsxClassModel): CssAuditElement {
+  return {
+    tag: node.openingElement.tagName.getText(),
+    classes: mergeCssClasses(
+      localCssClasses(...classes.localClasses),
+      globalCssClasses(...classes.globalClasses),
+    ),
+  };
+}
+
+function readRenderedSeriesDomModel(input: {
+  source: string;
+  fileName: string;
+  expectedCardGlobalClasses: readonly string[];
+}) {
+  const sourceFile = ts.createSourceFile(
+    input.fileName,
+    input.source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  assert.equal(
+    readTypeScriptParseDiagnostics(sourceFile).length,
+    0,
+    `UI-NAV-01V DOM: ${input.fileName} debe conservar sintaxis TSX válida`,
+  );
+
+  const seriesCells: ts.JsxElement[] = [];
+  const collectSeriesCells = (node: ts.Node) => {
+    if (
+      ts.isJsxElement(node) &&
+      node.openingElement.tagName.getText() === "span" &&
+      node.children.some((child) => ts.isJsxText(child) && child.text.trim() === "Series")
+    ) {
+      seriesCells.push(node);
+    }
+    ts.forEachChild(node, collectSeriesCells);
+  };
+  collectSeriesCells(sourceFile);
+  assert.equal(
+    seriesCells.length,
+    1,
+    `UI-NAV-01V DOM: ${input.fileName} debe renderizar una única celda Series`,
+  );
+
+  const seriesCell = seriesCells[0];
+  const renderedAncestors: ts.JsxElement[] = [];
+  for (let parent: ts.Node | undefined = seriesCell.parent; parent; parent = parent.parent) {
+    if (ts.isJsxElement(parent)) renderedAncestors.push(parent);
+  }
+  const expectedAncestorTags = ["div", "div", "section", "article", "section"];
+  assert.deepEqual(
+    renderedAncestors.slice(0, expectedAncestorTags.length).map((node) => node.openingElement.tagName.getText()),
+    expectedAncestorTags,
+    `UI-NAV-01V DOM: ${input.fileName} debe conservar la cadena Series→tabla→sección→card→screen`,
+  );
+
+  const expectedClassModels: readonly RenderedJsxClassModel[] = [
+    { globalClasses: [], localClasses: ["tableHeader"] },
+    { globalClasses: [], localClasses: ["exerciseTable"] },
+    { globalClasses: [], localClasses: ["planSection"] },
+    { globalClasses: input.expectedCardGlobalClasses, localClasses: ["workoutCard"] },
+    { globalClasses: ["screen"], localClasses: ["screen"] },
+  ];
+  const ancestors = renderedAncestors.slice(0, expectedClassModels.length).map((node, index) => {
+    const classModel = readRenderedJsxClassModel(
+      node,
+      input.fileName,
+      `${expectedAncestorTags[index]} ancestro ${index + 1} de Series`,
+    );
+    assertRenderedClassModel(
+      classModel,
+      expectedClassModels[index],
+      input.fileName,
+      `${expectedAncestorTags[index]} ancestro ${index + 1} de Series`,
+    );
+    return toCssAuditElement(node, classModel);
+  });
+
+  const tableHeader = renderedAncestors[0];
+  const renderedCells = tableHeader.children.filter((child): child is ts.JsxElement => (
+    ts.isJsxElement(child) && child.openingElement.tagName.getText() === "span"
+  ));
+  const seriesCellIndex = renderedCells.indexOf(seriesCell);
+  assert.equal(
+    seriesCellIndex,
+    1,
+    `UI-NAV-01V DOM: ${input.fileName} debe mantener Series después de Ejercicios`,
+  );
+  const previousSiblings = renderedCells.slice(0, seriesCellIndex).map((sibling) => (
+    toCssAuditElement(
+      sibling,
+      readRenderedJsxClassModel(sibling, input.fileName, "hermano anterior de Series"),
+    )
+  ));
+  const cardIndex = ancestors.findIndex((ancestor) => ancestor.tag === "article");
+  assert.equal(cardIndex, 3, `UI-NAV-01V DOM: ${input.fileName} debe conservar la card como cuarto ancestro`);
+
+  return {
+    target: {
+      tag: "span",
+      adjacentPreviousSiblings: previousSiblings.slice(-1),
+      generalPreviousSiblings: previousSiblings,
+    },
+    ancestors,
+    card: ancestors[cardIndex],
+  } satisfies RenderedSeriesDomModel;
+}
+
+const startSeriesDomModel = readRenderedSeriesDomModel({
+  source: files.start,
+  fileName: "TrainingStartScreen.tsx",
+  expectedCardGlobalClasses: ["card", "wide", "training-start-card"],
+});
+const guidedSeriesDomModel = readRenderedSeriesDomModel({
+  source: files.guided,
+  fileName: "GuidedTrainingScreen.tsx",
+  expectedCardGlobalClasses: ["card", "wide", "routine-summary-card", "mobile-series-card"],
+});
+const activeWorkoutScreenClasses = mergeCssClasses(
+  localCssClasses("screen"),
+  globalCssClasses("screen"),
+);
+const activeWorkoutCardClasses = mergeCssClasses(
+  localCssClasses("workoutCard"),
+  globalCssClasses("card"),
+);
+const userPortalSeriesAncestors: readonly CssAuditElement[] = [
+  { tag: "div" },
+  { tag: "div" },
+  { tag: "main", classes: globalCssClasses("app-shell") },
+  { tag: "body" },
+  { tag: "html" },
+];
+
 const cssAuditTargets = {
   body: { label: "viewport", tag: "body" },
-  shell: { label: "app shell", classes: ["app-shell"] },
-  topbar: { label: "topbar", classes: ["topbar"], ancestors: [{ classes: ["app-shell"] }] },
-  backRow: { label: "zona Back", classes: ["section-back-row"], ancestors: [{ classes: ["app-shell"] }] },
-  screen: { label: "canvas TRAIN-UI-01", classes: ["screen"] },
+  shell: { label: "app shell", classes: globalCssClasses("app-shell") },
+  topbar: {
+    label: "topbar",
+    classes: globalCssClasses("topbar"),
+    ancestors: [{ classes: globalCssClasses("app-shell") }],
+  },
+  backRow: {
+    label: "zona Back",
+    classes: globalCssClasses("section-back-row"),
+    ancestors: [{ classes: globalCssClasses("app-shell") }],
+  },
+  screen: { label: "canvas TRAIN-UI-01", classes: activeWorkoutScreenClasses },
   startCard: {
     label: "tarjeta inicial",
-    tag: "article",
-    classes: ["workoutCard", "card", "wide", "training-start-card"],
-    ancestors: [{ classes: ["screen"] }],
+    ...startSeriesDomModel.card,
+    ancestors: [{ classes: activeWorkoutScreenClasses }],
   },
   guidedCard: {
     label: "tarjeta guiada",
-    tag: "article",
-    classes: ["workoutCard", "card", "wide", "routine-summary-card", "mobile-series-card"],
-    ancestors: [{ classes: ["screen"] }],
+    ...guidedSeriesDomModel.card,
+    ancestors: [{ classes: activeWorkoutScreenClasses }],
   },
   referencePanel: {
     label: "panel de referencia",
     tag: "div",
-    classes: ["referencePanel", "exercise-reference-card"],
-    ancestors: [{ classes: ["workoutCard", "card"] }, { classes: ["screen"] }],
+    classes: mergeCssClasses(
+      localCssClasses("referencePanel"),
+      globalCssClasses("exercise-reference-card"),
+    ),
+    ancestors: [
+      { classes: activeWorkoutCardClasses },
+      { classes: activeWorkoutScreenClasses },
+    ],
   },
   startIntro: {
     label: "introducción de Entrenemos",
     tag: "header",
-    classes: ["startIntro", "wide"],
-    ancestors: [{ classes: ["screen"] }],
+    classes: mergeCssClasses(localCssClasses("startIntro"), globalCssClasses("wide")),
+    ancestors: [{ classes: activeWorkoutScreenClasses }],
   },
   startHeading: {
     label: "título inicial",
     tag: "h2",
-    ancestors: [{ classes: ["startIntro"] }, { classes: ["screen"] }],
+    ancestors: [
+      { classes: localCssClasses("startIntro") },
+      { classes: activeWorkoutScreenClasses },
+    ],
   },
   routineHeading: {
     label: "título de rutina",
     tag: "h2",
-    ancestors: [{ classes: ["routineTitle"] }, { classes: ["routineHeader"] }, { classes: ["workoutCard", "card"] }],
+    ancestors: [
+      { classes: localCssClasses("routineTitle") },
+      { classes: localCssClasses("routineHeader") },
+      { classes: activeWorkoutCardClasses },
+    ],
   },
   routineSubheading: {
     label: "subtítulo de rutina",
     tag: "p",
-    ancestors: [{ classes: ["routineTitle"] }, { classes: ["routineHeader"] }, { classes: ["workoutCard", "card"] }],
+    ancestors: [
+      { classes: localCssClasses("routineTitle") },
+      { classes: localCssClasses("routineHeader") },
+      { classes: activeWorkoutCardClasses },
+    ],
   },
   sectionHeading: {
     label: "título de sección",
     tag: "h3",
-    ancestors: [{ classes: ["sectionHeading"] }, { classes: ["planSection"] }, { classes: ["workoutCard", "card"] }],
+    ancestors: [
+      { classes: localCssClasses("sectionHeading") },
+      { classes: localCssClasses("planSection") },
+      { classes: activeWorkoutCardClasses },
+    ],
   },
   newRecordHeading: {
     label: "título de nuevo registro",
     tag: "h3",
-    ancestors: [{ classes: ["newRecord"] }, { classes: ["workoutCard", "card"] }],
+    ancestors: [
+      { classes: localCssClasses("newRecord") },
+      { classes: activeWorkoutCardClasses },
+    ],
   },
   objectivesHeading: {
     label: "título de objetivos",
     tag: "h3",
-    ancestors: [{ classes: ["objectives"] }, { classes: ["workoutCard", "card"] }],
+    ancestors: [
+      { classes: localCssClasses("objectives") },
+      { classes: activeWorkoutCardClasses },
+    ],
   },
   metricGrid: {
     label: "grilla de métricas",
     tag: "div",
-    classes: ["metric-grid", "wide", "dashboard-metric-grid", "routine-metric-grid"],
-    ancestors: [{ classes: ["metricScope"] }, { classes: ["workoutCard", "card"] }],
+    classes: globalCssClasses("metric-grid", "wide", "dashboard-metric-grid", "routine-metric-grid"),
+    ancestors: [
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
+    ],
   },
   firstMetricCard: {
     label: "primera tarjeta métrica",
     tag: "div",
-    classes: ["metric"],
+    classes: globalCssClasses("metric"),
     childIndex: 1,
     ancestors: [
-      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
-      { classes: ["metricScope"] },
-      { classes: ["workoutCard", "card"] },
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
     ],
   },
   secondMetricCard: {
     label: "segunda tarjeta métrica",
     tag: "div",
-    classes: ["metric"],
+    classes: globalCssClasses("metric"),
     childIndex: 2,
     ancestors: [
-      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
-      { classes: ["metricScope"] },
-      { classes: ["workoutCard", "card"] },
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
     ],
   },
   thirdMetricCard: {
     label: "tercera tarjeta métrica",
     tag: "div",
-    classes: ["metric"],
+    classes: globalCssClasses("metric"),
     childIndex: 3,
     ancestors: [
-      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
-      { classes: ["metricScope"] },
-      { classes: ["workoutCard", "card"] },
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
     ],
   },
   firstMetricLabel: {
     label: "primera etiqueta métrica",
     tag: "span",
     ancestors: [
-      { classes: ["metric-title-row"] },
-      { classes: ["metric"], childIndex: 1 },
-      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
-      { classes: ["metricScope"] },
-      { classes: ["workoutCard", "card"] },
+      { classes: globalCssClasses("metric-title-row") },
+      { classes: globalCssClasses("metric"), childIndex: 1 },
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
     ],
   },
   secondMetricLabel: {
     label: "segunda etiqueta métrica",
     tag: "span",
     ancestors: [
-      { classes: ["metric-title-row"] },
-      { classes: ["metric"], childIndex: 2 },
-      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
-      { classes: ["metricScope"] },
-      { classes: ["workoutCard", "card"] },
+      { classes: globalCssClasses("metric-title-row") },
+      { classes: globalCssClasses("metric"), childIndex: 2 },
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
     ],
   },
   thirdMetricLabel: {
     label: "tercera etiqueta métrica",
     tag: "span",
     ancestors: [
-      { classes: ["metric-title-row"] },
-      { classes: ["metric"], childIndex: 3 },
-      { classes: ["metric-grid", "dashboard-metric-grid", "routine-metric-grid"] },
-      { classes: ["metricScope"] },
-      { classes: ["workoutCard", "card"] },
+      { classes: globalCssClasses("metric-title-row") },
+      { classes: globalCssClasses("metric"), childIndex: 3 },
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
     ],
   },
   routineHeader: {
     label: "cabecera de rutina",
-    classes: ["routineHeader"],
-    ancestors: [{ classes: ["workoutCard", "card"] }],
+    classes: localCssClasses("routineHeader"),
+    ancestors: [{ classes: activeWorkoutCardClasses }],
   },
   routineTitle: {
     label: "contenedor del título de rutina",
-    classes: ["routineTitle"],
-    ancestors: [{ classes: ["routineHeader"] }, { classes: ["workoutCard", "card"] }],
+    classes: localCssClasses("routineTitle"),
+    ancestors: [{ classes: localCssClasses("routineHeader") }, { classes: activeWorkoutCardClasses }],
   },
   routineControls: {
     label: "controles de rutina",
-    classes: ["routineControls"],
-    ancestors: [{ classes: ["routineHeader"] }, { classes: ["workoutCard", "card"] }],
+    classes: localCssClasses("routineControls"),
+    ancestors: [{ classes: localCssClasses("routineHeader") }, { classes: activeWorkoutCardClasses }],
   },
   daySelector: {
     label: "wrapper táctil del selector de día",
     tag: "label",
-    classes: ["daySelector"],
-    ancestors: [{ classes: ["routineControls"] }, { classes: ["routineHeader"] }],
+    classes: localCssClasses("daySelector"),
+    ancestors: [{ classes: localCssClasses("routineControls") }, { classes: localCssClasses("routineHeader") }],
   },
   daySelect: {
     label: "selector de día",
     tag: "select",
-    ancestors: [{ tag: "label", classes: ["daySelector"] }, { classes: ["routineControls"] }],
+    ancestors: [
+      { tag: "label", classes: localCssClasses("daySelector") },
+      { classes: localCssClasses("routineControls") },
+    ],
   },
   editButton: {
     label: "botón Editar",
     tag: "button",
-    classes: ["editRoutineButton", "icon-button"],
-    ancestors: [{ classes: ["routineControls"] }, { classes: ["routineHeader"] }],
+    classes: mergeCssClasses(localCssClasses("editRoutineButton"), globalCssClasses("icon-button")),
+    ancestors: [{ classes: localCssClasses("routineControls") }, { classes: localCssClasses("routineHeader") }],
   },
   editButtonBefore: {
     label: "caja visual del botón Editar",
     tag: "button",
-    classes: ["editRoutineButton", "icon-button"],
+    classes: mergeCssClasses(localCssClasses("editRoutineButton"), globalCssClasses("icon-button")),
     pseudoElement: "before",
-    ancestors: [{ classes: ["routineControls"] }, { classes: ["routineHeader"] }],
+    ancestors: [{ classes: localCssClasses("routineControls") }, { classes: localCssClasses("routineHeader") }],
   },
   editButtonIcon: {
     label: "ícono del botón Editar",
     tag: "svg",
     ancestors: [
-      { tag: "button", classes: ["editRoutineButton", "icon-button"] },
-      { classes: ["routineControls"] },
+      {
+        tag: "button",
+        classes: mergeCssClasses(localCssClasses("editRoutineButton"), globalCssClasses("icon-button")),
+      },
+      { classes: localCssClasses("routineControls") },
     ],
   },
   exerciseTable: {
     label: "tabla de ejercicios",
-    classes: ["exerciseTable"],
-    ancestors: [{ classes: ["planSection"] }, { classes: ["workoutCard", "card"] }],
+    classes: localCssClasses("exerciseTable"),
+    ancestors: [{ classes: localCssClasses("planSection") }, { classes: activeWorkoutCardClasses }],
+  },
+  tableHeader: {
+    label: "cabecera de tabla de ejercicios",
+    classes: localCssClasses("tableHeader"),
+    ancestors: [{ classes: localCssClasses("exerciseTable") }, { classes: localCssClasses("planSection") }],
+  },
+  tableHeaderCell: {
+    label: "celda de cabecera de tabla de ejercicios",
+    ...startSeriesDomModel.target,
+    ancestors: startSeriesDomModel.ancestors.slice(0, 2),
+    useStructuralSelectorMatcher: true,
+  },
+  startTableHeaderCell: {
+    label: "celda Series de Entrenemos inicial",
+    ...startSeriesDomModel.target,
+    ancestors: [
+      ...startSeriesDomModel.ancestors,
+      ...userPortalSeriesAncestors,
+    ],
+    useStructuralSelectorMatcher: true,
+  },
+  guidedTableHeaderCell: {
+    label: "celda Series del entrenamiento guiado",
+    ...guidedSeriesDomModel.target,
+    ancestors: [
+      ...guidedSeriesDomModel.ancestors,
+      ...userPortalSeriesAncestors,
+    ],
+    useStructuralSelectorMatcher: true,
   },
   tableRow: {
     label: "fila de ejercicios",
-    classes: ["tableRow"],
-    ancestors: [{ classes: ["exerciseTable"] }, { classes: ["planSection"] }],
+    classes: localCssClasses("tableRow"),
+    ancestors: [{ classes: localCssClasses("exerciseTable") }, { classes: localCssClasses("planSection") }],
   },
   selectableRow: {
     label: "fila seleccionable",
     tag: "button",
-    classes: ["selectableTableRow"],
+    classes: localCssClasses("selectableTableRow"),
     attributes: { "aria-pressed": "true" },
-    ancestors: [{ classes: ["exerciseRows"] }, { classes: ["exerciseTable"] }],
+    ancestors: [{ classes: localCssClasses("exerciseRows") }, { classes: localCssClasses("exerciseTable") }],
   },
   tableCell: {
     label: "celda de ejercicios",
     tag: "span",
-    ancestors: [{ classes: ["tableRow"] }, { classes: ["exerciseTable"] }],
+    ancestors: [{ classes: localCssClasses("tableRow") }, { classes: localCssClasses("exerciseTable") }],
   },
   disclosureContent: {
     label: "contenido desplegable",
-    classes: ["disclosureContent"],
-    ancestors: [{ classes: ["referencePanel", "exercise-reference-card"] }],
+    classes: localCssClasses("disclosureContent"),
+    ancestors: [{
+      classes: mergeCssClasses(
+        localCssClasses("referencePanel"),
+        globalCssClasses("exercise-reference-card"),
+      ),
+    }],
   },
   seriesDetailList: {
     label: "detalle de series",
     tag: "div",
-    classes: ["exercise-series-detail-list"],
-    ancestors: [{ classes: ["disclosureContent"] }, { classes: ["referencePanel"] }],
+    classes: globalCssClasses("exercise-series-detail-list"),
+    ancestors: [
+      { classes: localCssClasses("disclosureContent") },
+      { classes: localCssClasses("referencePanel") },
+    ],
   },
   loadingHistory: {
     label: "estado loading del historial",
     tag: "div",
-    classes: ["loadingState"],
-    ancestors: [{ classes: ["disclosureContent"] }, { classes: ["referencePanel"] }],
+    classes: localCssClasses("loadingState"),
+    ancestors: [
+      { classes: localCssClasses("disclosureContent") },
+      { classes: localCssClasses("referencePanel") },
+    ],
   },
   historyStatus: {
     label: "estado textual del historial",
     tag: "p",
-    classes: ["historyStatus"],
-    ancestors: [{ classes: ["disclosureContent"] }, { classes: ["referencePanel"] }],
+    classes: localCssClasses("historyStatus"),
+    ancestors: [
+      { classes: localCssClasses("disclosureContent") },
+      { classes: localCssClasses("referencePanel") },
+    ],
   },
   todayGoal: {
     label: "objetivo de hoy",
     tag: "p",
-    classes: ["todayGoal"],
-    ancestors: [{ classes: ["disclosureContent"] }, { classes: ["referencePanel"] }],
+    classes: localCssClasses("todayGoal"),
+    ancestors: [
+      { classes: localCssClasses("disclosureContent") },
+      { classes: localCssClasses("referencePanel") },
+    ],
   },
 } satisfies Record<string, CssAuditTarget>;
 
@@ -2070,6 +2639,165 @@ function readRoutineHeaderCopyAndAssertDom(source: string, fileName: string) {
     `copy geométrico: ${fileName} no puede abreviar el título`,
   );
   return headingChildren[0].text;
+}
+
+function assertExerciseTableColumnHeaders(source: string, fileName: string) {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  assert.equal(
+    readTypeScriptParseDiagnostics(sourceFile).length,
+    0,
+    `UI-NAV-01V: ${fileName} debe conservar sintaxis TSX válida`,
+  );
+  const headers: ts.JsxElement[] = [];
+  const collect = (node: ts.Node) => {
+    if (ts.isJsxElement(node) && readJsxStylesClassName(node, "tableHeader")) headers.push(node);
+    ts.forEachChild(node, collect);
+  };
+  collect(sourceFile);
+  assert.equal(headers.length, 1, `UI-NAV-01V: ${fileName} debe conservar una cabecera de ejercicios`);
+  const labels = headers[0].children.flatMap((child) => {
+    if (!ts.isJsxElement(child) || child.openingElement.tagName.getText() !== "span") return [];
+    const textChildren = child.children.filter((item): item is ts.JsxText => ts.isJsxText(item));
+    return [textChildren.map((item) => item.text).join("").trim()];
+  });
+  assert.deepEqual(
+    labels,
+    ["Ejercicios", "Series", "Reps", "KG"],
+    `UI-NAV-01V: ${fileName} debe conservar Series completo y sin abreviaciones`,
+  );
+}
+
+function normalizeCssValue(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/\s*,\s*/g, ",")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    .trim();
+}
+
+const activeWorkoutSeriesViewportWidths = [320, 360, 393, 430] as const;
+const minimumLegibleSeriesHeaderPixels = 9;
+
+function readEffectiveInheritedFontSizePixels(input: {
+  rules: readonly CssExecutableRule[];
+  target: CssAuditTarget;
+  viewportWidth: number;
+}) {
+  const candidates: CssAuditTarget[] = [
+    input.target,
+    ...(input.target.ancestors ?? []).map((ancestor, index) => ({
+      ...ancestor,
+      label: `${input.target.label} (ancestro ${index + 1})`,
+      ancestors: input.target.ancestors?.slice(index + 1),
+    })),
+  ];
+
+  for (const candidate of candidates) {
+    const value = readEffectiveCssProperty({
+      rules: input.rules,
+      target: candidate,
+      property: "font-size",
+      viewportWidth: input.viewportWidth,
+      required: false,
+    });
+    if (value === null) continue;
+    const normalized = normalizeCssValue(value).toLowerCase();
+    if (["inherit", "unset", "revert", "revert-layer"].includes(normalized)) continue;
+    if (normalized === "initial" || normalized === "medium") return 16;
+    return evaluateCssLength(normalized, input.viewportWidth, 16);
+  }
+
+  assert.fail(
+    `UI-NAV-01V: ${input.target.label} debe resolver una fuente efectiva legible a ${input.viewportWidth}px`,
+  );
+}
+
+function assertActiveWorkoutSeriesSurface(
+  rules: readonly CssExecutableRule[],
+  target: CssAuditTarget,
+  surface: "pantalla inicial" | "entrenamiento guiado",
+) {
+  for (const viewportWidth of activeWorkoutSeriesViewportWidths) {
+    assert.equal(
+      readEffectiveInheritedCssProperty({
+        rules,
+        target,
+        property: "white-space",
+        viewportWidth,
+      }),
+      "nowrap",
+      `UI-NAV-01V: Series en ${surface} debe permanecer en una línea a ${viewportWidth}px`,
+    );
+    assert.equal(
+      readEffectiveInheritedCssProperty({
+        rules,
+        target,
+        property: "overflow-wrap",
+        viewportWidth,
+      }),
+      "normal",
+      `UI-NAV-01V: Series en ${surface} no puede partirse internamente a ${viewportWidth}px`,
+    );
+    const fontSizePixels = readEffectiveInheritedFontSizePixels({ rules, target, viewportWidth });
+    if (fontSizePixels < minimumLegibleSeriesHeaderPixels) {
+      assert.fail(
+        `UI-NAV-01V: Series en ${surface} debe conservar una fuente legible a ${viewportWidth}px; fuente efectiva ${fontSizePixels}px`,
+      );
+    }
+  }
+}
+
+function assertActiveWorkoutSeriesHeader(rules: readonly CssExecutableRule[]) {
+  for (const viewportWidth of activeWorkoutSeriesViewportWidths) {
+    const expectedGrid = viewportWidth <= 360
+      ? "minmax(0,1.7fr) minmax(50px,0.66fr) repeat(2,minmax(31px,0.66fr))"
+      : viewportWidth <= 420
+        ? "minmax(0,1.9fr) minmax(50px,0.68fr) repeat(2,minmax(34px,0.68fr))"
+        : "minmax(0,2.25fr) minmax(50px,0.72fr) repeat(2,minmax(38px,0.72fr))";
+    const columns = readEffectiveCssProperty({
+      rules,
+      target: cssAuditTargets.tableHeader,
+      property: "grid-template-columns",
+      viewportWidth,
+    });
+    assert.equal(
+      normalizeCssValue(columns ?? ""),
+      expectedGrid,
+      `UI-NAV-01V: grilla de Entrenemos debe reservar 50px para Series a ${viewportWidth}px`,
+    );
+    assert.equal(
+      readEffectiveInheritedCssProperty({
+        rules,
+        target: cssAuditTargets.tableHeaderCell,
+        property: "white-space",
+        viewportWidth,
+      }),
+      "nowrap",
+      `UI-NAV-01V: Series debe permanecer en una línea en Entrenemos a ${viewportWidth}px`,
+    );
+    assert.equal(
+      readEffectiveInheritedCssProperty({
+        rules,
+        target: cssAuditTargets.tableHeaderCell,
+        property: "overflow-wrap",
+        viewportWidth,
+      }),
+      "normal",
+      `UI-NAV-01V: Series no puede forzar quiebres internos en Entrenemos a ${viewportWidth}px`,
+    );
+  }
+
+  assertActiveWorkoutSeriesSurface(
+    rules,
+    cssAuditTargets.startTableHeaderCell,
+    "pantalla inicial",
+  );
+  assertActiveWorkoutSeriesSurface(
+    rules,
+    cssAuditTargets.guidedTableHeaderCell,
+    "entrenamiento guiado",
+  );
 }
 
 function evaluateCssLength(valueInput: string, viewportWidth: number, percentageBase: number): number {
@@ -3329,7 +4057,13 @@ function assertTrainUi01AuditContracts(
     /:has\(/,
     "la uniformidad visual no puede depender de :has() en el CSS activo",
   );
-  const effectiveCssRules = parseExecutableCss(`${sources.globalStyles}\n${sources.workoutStyles}`);
+  const effectiveCssRules = parseExecutableCssSources([
+    { source: sources.globalStyles, defaultClassScope: "global" },
+    { source: sources.workoutStyles, defaultClassScope: "local" },
+  ]);
+  assertExerciseTableColumnHeaders(sources.start, "TrainingStartScreen.tsx");
+  assertExerciseTableColumnHeaders(sources.guided, "GuidedTrainingScreen.tsx");
+  assertActiveWorkoutSeriesHeader(effectiveCssRules);
 
   // El h1 pertenece al topbar; estas pantallas comienzan en h2 y sus secciones usan h3.
   assert.doesNotMatch(sources.start, /<h1\b/);
@@ -4152,7 +4886,9 @@ function runTrainUi01VisualMutationProbe(probe: TrainUi01VisualMutationProbe) {
       originalDiskHash,
       `probe sin cambio byte a byte: ${probe.name}`,
     );
-    if (metadata.syntax === "css") parseExecutableCss(mutated);
+    if (metadata.syntax === "css") {
+      parseExecutableCss(mutated, cssDefaultClassScopeForPath(metadata.diskPath));
+    }
     else assertValidTypeScriptMutation(
       mutated,
       metadata.diskPath,
@@ -4271,21 +5007,14 @@ const trainUi01ReauditProbes: TrainUi01ReauditProbe[] = [
     target: { kind: "protected", path: "src/features/progress/components/comparison-screen-v2.tsx" },
     mutate: (source) => `${source}\nexport const trainUi01ProgressMutationProbe = true;\n`,
   },
-  {
-    name: "H · modificar accidentalmente CSS global prohibido",
-    diskPath: "src/app/globals.css",
-    syntax: "css",
-    expectedFailure: /integridad byte a byte: cambió el archivo protegido .*globals\.css/,
-    target: { kind: "protected", path: "src/app/globals.css" },
-    mutate: (source) => `${source}\n.train-ui-01-forbidden-probe { color: var(--text); }\n`,
-  },
 ];
 
 function runTrainUi01IsolatedProbe(probe: TrainUi01ReauditProbe) {
   const original = probe.target.kind === "audit"
     ? trainUi01AuditSources[probe.target.key]
     : protectedFileSources[probe.target.path];
-  const originalDiskHash = sha256(readSource(probe.diskPath));
+  const originalDiskSource = readSource(probe.diskPath);
+  const originalDiskHash = sha256(originalDiskSource);
   assert.equal(
     originalDiskHash,
     sha256(original),
@@ -4295,7 +5024,9 @@ function runTrainUi01IsolatedProbe(probe: TrainUi01ReauditProbe) {
   const mutated = probe.mutate(original);
   assert.notEqual(mutated, original, `probe sin mutación efectiva: ${probe.name}`);
   assert.notEqual(sha256(mutated), originalDiskHash, `probe sin cambio byte a byte: ${probe.name}`);
-  if (probe.syntax === "css") parseExecutableCss(mutated);
+  if (probe.syntax === "css") {
+    parseExecutableCss(mutated, cssDefaultClassScopeForPath(probe.diskPath));
+  }
   else assertValidTypeScriptMutation(
     mutated,
     probe.diskPath,
@@ -4314,17 +5045,24 @@ function runTrainUi01IsolatedProbe(probe: TrainUi01ReauditProbe) {
     assertTrainUi01AuditContracts(mutatedAuditSources, mutatedProtectedSources);
   } catch (error) {
     semanticFailure = error;
+  } finally {
+    const restoredDiskSource = readSource(probe.diskPath);
+    assert.equal(
+      restoredDiskSource,
+      originalDiskSource,
+      `restauración byte a byte fallida después de ${probe.name}`,
+    );
+    assert.equal(
+      sha256(restoredDiskSource),
+      originalDiskHash,
+      `restauración SHA fallida después de ${probe.name}`,
+    );
   }
   assert.ok(semanticFailure instanceof Error, `el contrato debe matar la mutación: ${probe.name}`);
   assert.match(
     semanticFailure.message,
     probe.expectedFailure,
     `el probe debe morir por su aserción semántica específica: ${probe.name}`,
-  );
-  assert.equal(
-    sha256(readSource(probe.diskPath)),
-    originalDiskHash,
-    `restauración byte a byte fallida después de ${probe.name}`,
   );
 }
 
@@ -4510,6 +5248,359 @@ for (const probe of trainUi01HeaderGeometryProbes) runTrainUi01IsolatedProbe(pro
 
 console.log(
   `TRAIN-UI-01 header geometry mutation probes passed (${trainUi01HeaderGeometryProbes.length}): ${trainUi01HeaderGeometryProbes.map((probe) => probe.name).join(" | ")}`,
+);
+
+const uiNav01vSeriesProbes: TrainUi01ReauditProbe[] = [
+  {
+    name: "UI-NAV-01V · relación hijo real reduce Series inicial a 1px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\nmain:global(.app-shell) :global(.training-start-card).workoutCard .exerciseTable > .tableHeader > span {\n  font-size: 1px !important;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · relación hijo real reduce Series guiado a 1px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en entrenamiento guiado debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\nmain:global(.app-shell) :global(.routine-summary-card).workoutCard .exerciseTable > .tableHeader > span {\n  font-size: 1px !important;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · hermano adyacente real alcanza Series inicial",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n:global(.training-start-card).workoutCard .tableHeader span + span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · ancestro main.app-shell reduce Series inicial a 1px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\nmain:global(.app-shell) :global(.training-start-card) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · ancestro body reduce Series inicial a 1px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\nbody :global(.training-start-card) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · mobile-series-card real reduce Series guiado a 1px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en entrenamiento guiado debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\nmain :global(.mobile-series-card).workoutCard .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · clase local workoutCard alcanza Series inicial",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.workoutCard .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · lista combina rama global imposible y rama real",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en entrenamiento guiado debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n:global(.guided-training-card) :global(.tableHeader) span,\n:global(.mobile-series-card) .tableHeader span {\n  font-size: 1px !important;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · media query conserva procedencia real guiada",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en entrenamiento guiado debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n@media (max-width: 430px) {\n  :global(.routine-summary-card) .tableHeader span {\n    font-size: 1px !important;\n  }\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · hermano general real alcanza Series inicial",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n:global(.training-start-card).workoutCard .tableHeader span ~ span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · reducir Series a 1px en Entrenemos",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · permitir wrap de Series en Entrenemos",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /Series debe permanecer en una línea en Entrenemos a 320px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.tableHeader span {\n  white-space: normal;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · permitir quiebre interno de Series",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /Series no puede forzar quiebres internos en Entrenemos a 320px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.tableHeader span {\n  overflow-wrap: anywhere;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · estrechar la columna Series base",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /grilla de Entrenemos debe reservar 50px para Series a 430px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".tableHeader,\n.tableRow,\n.selectableTableRow",
+      "minmax(50px, 0.72fr)",
+      "minmax(38px, 0.72fr)",
+    ),
+  },
+  {
+    name: "UI-NAV-01V · estrechar la columna Series intermedia",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /grilla de Entrenemos debe reservar 50px para Series a 393px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => replaceAuditOnce(source, "minmax(50px, 0.68fr)", "minmax(34px, 0.68fr)"),
+  },
+  {
+    name: "UI-NAV-01V · estrechar la columna Series mínima",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /grilla de Entrenemos debe reservar 50px para Series a 320px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => replaceAuditOnce(source, "minmax(50px, 0.66fr)", "minmax(31px, 0.66fr)"),
+  },
+  {
+    name: "UI-NAV-01V · abreviar Series en pantalla inicial",
+    diskPath: "src/features/active-workout/components/TrainingStartScreen.tsx",
+    syntax: "tsx",
+    expectedFailure: /TrainingStartScreen\.tsx debe conservar Series completo y sin abreviaciones/,
+    target: { kind: "audit", key: "start" },
+    mutate: (source) => replaceAuditOnce(source, ">Series</span>", ">Serie</span>"),
+  },
+  {
+    name: "UI-NAV-01V · abreviar Series en entrenamiento guiado",
+    diskPath: "src/features/active-workout/components/GuidedTrainingScreen.tsx",
+    syntax: "tsx",
+    expectedFailure: /GuidedTrainingScreen\.tsx debe conservar Series completo y sin abreviaciones/,
+    target: { kind: "audit", key: "guided" },
+    mutate: (source) => replaceAuditOnce(source, ">Series</span>", ">Serie</span>"),
+  },
+];
+
+for (const probe of uiNav01vSeriesProbes) runTrainUi01IsolatedProbe(probe);
+
+const uiNav01vActiveWorkoutInnocentControls = [
+  {
+    name: "comentario CSS",
+    mutate: (source: string) => `${source}\n/* UI-NAV-01V: comentario inocente con Series visible */\n`,
+  },
+  {
+    name: "reformateo",
+    mutate: (source: string) => replaceAuditOnce(
+      source,
+      ".tableHeader span {\n  overflow-wrap: normal;\n  white-space: nowrap;\n}",
+      ".tableHeader   span\n{\n  overflow-wrap: normal;\n  white-space: nowrap;\n}",
+    ),
+  },
+  {
+    name: "reordenamiento inocente de declaraciones",
+    mutate: (source: string) => replaceAuditOnce(
+      source,
+      ".tableHeader span {\n  overflow-wrap: normal;\n  white-space: nowrap;\n}",
+      ".tableHeader span {\n  white-space: nowrap;\n  overflow-wrap: normal;\n}",
+    ),
+  },
+  {
+    name: "fuente local equivalente y legible",
+    mutate: (source: string) => `${source}\n.tableHeader span {\n  font-size: 1rem;\n}\n`,
+  },
+  {
+    name: "ancestros adicionales con fuente legible",
+    mutate: (source: string) => `${source}\nbody :global(.app-shell) :global(.training-start-card).workoutCard .tableHeader span {\n  font-size: 1rem;\n}\nmain:global(.app-shell) :global(.routine-summary-card).workoutCard .tableHeader span {\n  font-size: 1rem;\n}\n`,
+  },
+  {
+    name: "selector no relacionado con fuente de 1px",
+    mutate: (source: string) => `${source}\n.unrelated-card .unrelated-table-header span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "hijo directo incorrecto en Entrenemos inicial",
+    mutate: (source: string) => `${source}\n:global(.training-start-card) > .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "hijo directo incorrecto en entrenamiento guiado",
+    mutate: (source: string) => `${source}\n:global(.routine-summary-card) > .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "hermano adyacente incorrecto en Active Workout",
+    mutate: (source: string) => `${source}\n.tableHeader + span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "hermano general incorrecto en Active Workout",
+    mutate: (source: string) => `${source}\n.tableHeader ~ span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "clase global guided-training-card inexistente",
+    mutate: (source: string) => `${source}\n:global(.guided-training-card) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "clase global guided-workout-card inexistente",
+    mutate: (source: string) => `${source}\n:global(.guided-workout-card) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "clase global training-overview-card inexistente",
+    mutate: (source: string) => `${source}\n:global(.training-overview-card) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "training-start-card declarada falsamente local",
+    mutate: (source: string) => `${source}\n.training-start-card .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "routine-summary-card declarada falsamente local",
+    mutate: (source: string) => `${source}\n.routine-summary-card .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "workoutCard declarada falsamente global",
+    mutate: (source: string) => `${source}\n:global(.workoutCard) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "tableHeader declarada falsamente global",
+    mutate: (source: string) => `${source}\n:global(.tableHeader) span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "mezcla de scope y relación de hijo directo imposible",
+    mutate: (source: string) => `${source}\n:global(.training-start-card) > :global(.tableHeader) span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "mezcla de scope y hermano adyacente imposible",
+    mutate: (source: string) => `${source}\n:global(.training-start-card) :global(.tableHeader) span + span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "mezcla de scope y hermano general imposible",
+    mutate: (source: string) => `${source}\n:global(.routine-summary-card) :global(.tableHeader) span ~ span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "scope global imposible dentro de media query",
+    mutate: (source: string) => `${source}\n@media (max-width: 430px) {\n  :global(.routine-summary-card) :global(.tableHeader) span {\n    font-size: 1px !important;\n  }\n}\n`,
+  },
+  {
+    name: "override real seguro de mayor prioridad",
+    mutate: (source: string) => `${source}\n.tableHeader span {\n  font-size: 1px;\n}\n.workoutCard .tableHeader span {\n  font-size: 1rem;\n}\n`,
+  },
+] as const;
+
+for (const control of uiNav01vActiveWorkoutInnocentControls) {
+  const workoutStylesPath = trainUi01AuditSourceFiles.workoutStyles.diskPath;
+  const originalDiskSource = readSource(workoutStylesPath);
+  const originalDiskHash = sha256(originalDiskSource);
+  assert.equal(
+    originalDiskSource,
+    trainUi01AuditSources.workoutStyles,
+    `UI-NAV-01V: el control debe partir del CSS productivo (${control.name})`,
+  );
+  try {
+    const controlledCss = control.mutate(trainUi01AuditSources.workoutStyles);
+    assert.notEqual(
+      controlledCss,
+      trainUi01AuditSources.workoutStyles,
+      `UI-NAV-01V: control inocente sin cambio de bytes (${control.name})`,
+    );
+    assert.notEqual(
+      sha256(controlledCss),
+      originalDiskHash,
+      `UI-NAV-01V: control inocente sin cambio de SHA (${control.name})`,
+    );
+    parseExecutableCss(controlledCss, "local");
+    assertActiveWorkoutSeriesHeader(
+      parseExecutableCssSources([
+        { source: trainUi01AuditSources.globalStyles, defaultClassScope: "global" },
+        { source: controlledCss, defaultClassScope: "local" },
+      ]),
+    );
+  } finally {
+    const restoredDiskSource = readSource(workoutStylesPath);
+    assert.equal(
+      restoredDiskSource,
+      originalDiskSource,
+      `UI-NAV-01V: restauración byte a byte fallida (${control.name})`,
+    );
+    assert.equal(
+      sha256(restoredDiskSource),
+      originalDiskHash,
+      `UI-NAV-01V: restauración SHA fallida (${control.name})`,
+    );
+  }
+}
+
+function renameContractIdentifierForControl(source: string, from: string, to: string) {
+  const sourceFile = ts.createSourceFile(
+    "active-workout-visual-integration-contract.test.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const ranges: Array<{ start: number; end: number }> = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isIdentifier(node) && node.text === from) {
+      ranges.push({ start: node.getStart(sourceFile), end: node.getEnd() });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  assert.ok(ranges.length >= 2, `UI-NAV-01V: falta variable local renombrable ${from}`);
+  return ranges
+    .sort((left, right) => right.start - left.start)
+    .reduce(
+      (mutated, range) => `${mutated.slice(0, range.start)}${to}${mutated.slice(range.end)}`,
+      source,
+    );
+}
+
+const activeWorkoutContractPath =
+  "src/features/active-workout/active-workout-visual-integration-contract.test.ts";
+const activeWorkoutContractSource = readSource(activeWorkoutContractPath);
+const uiNav01vContractSourceControls = [
+  {
+    name: "comentario en el contrato",
+    source: `${activeWorkoutContractSource}\n// UI-NAV-01V: comentario contractual inocente.\n`,
+  },
+  {
+    name: "renombre de variable local del contrato",
+    source: renameContractIdentifierForControl(
+      activeWorkoutContractSource,
+      "activeWorkoutSeriesViewportWidths",
+      "auditedSeriesViewportWidths",
+    ),
+  },
+] as const;
+
+for (const control of uiNav01vContractSourceControls) {
+  assert.notEqual(
+    sha256(control.source),
+    sha256(activeWorkoutContractSource),
+    `UI-NAV-01V: control contractual sin cambio real (${control.name})`,
+  );
+  assertValidTypeScriptMutation(control.source, activeWorkoutContractPath, ts.ScriptKind.TS);
+}
+
+console.log(`UI-NAV-01V Active Workout mutation probes passed (${uiNav01vSeriesProbes.length})`);
+console.log(
+  `UI-NAV-01V Active Workout innocent controls passed (${uiNav01vActiveWorkoutInnocentControls.length + uiNav01vContractSourceControls.length})`,
 );
 
 const registration = "tsx src/features/active-workout/active-workout-visual-integration-contract.test.ts";
