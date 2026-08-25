@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import ts from "typescript";
+import { legacyAppShellLayoutAst } from "@/features/app-shell/test-support/legacy-app-shell-layout-ast";
 
 const BASE_SHA = "920ab40bb3cdf887e6bc57643b0f160d6a9e9195";
 const files = {
@@ -146,31 +147,6 @@ function assertWorkoutShareUnreachable(overrides: Map<string, string>) {
       if (resolved) pending.push(resolved);
     }
   }
-}
-
-function productiveJsxAst(source: string) {
-  const sourceFile = parseSource(files.root, source);
-  let expression: ts.Expression | undefined;
-  const visit = (node: ts.Node) => {
-    if (ts.isReturnStatement(node) && node.expression) {
-      let candidate = node.expression;
-      while (ts.isParenthesizedExpression(candidate)) candidate = candidate.expression;
-      if (
-        ts.isJsxElement(candidate) &&
-        candidate.openingElement.tagName.getText(sourceFile) === "AppShellLayout"
-      ) expression = candidate;
-    }
-    if (!expression) ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  assert.ok(expression, "se encontró el JSX productivo del composition root");
-  const serialize = (node: ts.Node): unknown => {
-    const children = node.getChildren(sourceFile);
-    return children.length === 0
-      ? [node.kind, node.getText(sourceFile)]
-      : [node.kind, children.map(serialize)];
-  };
-  return JSON.stringify(serialize(expression));
 }
 
 function namedFunctionAst(path: string, source: string, functionName: string) {
@@ -349,7 +325,12 @@ const sources = readSources();
 validate(sources);
 
 const baselineRoot = execFileSync("git", ["show", `${BASE_SHA}:${files.root}`], { encoding: "utf8" });
-assert.equal(productiveJsxAst(sources.root), productiveJsxAst(baselineRoot));
+// UI-NAV-01 sustituye sólo el shell aprobado. El fallback legacy COMPLETO conserva topbar,
+// overlays, screenHeader, pantallas, props, callbacks y orden del baseline P3-45.
+assert.equal(
+  legacyAppShellLayoutAst(files.root, sources.root),
+  legacyAppShellLayoutAst(files.root, baselineRoot),
+);
 const profileScreenPath = "src/components/profile/ProfileScreen.tsx";
 assert.equal(
   namedFunctionAst(profileScreenPath, readFileSync(profileScreenPath, "utf8"), "ProfileScreen"),

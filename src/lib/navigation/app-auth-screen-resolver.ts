@@ -28,10 +28,13 @@ export interface InitialAuthState {
 }
 
 /** Igual a la extinta `getInitialAuthScreen()`, eliminada del root al integrar este resolver. */
-export function resolveInitialAuthScreen(routeState: PasswordRecoveryRouteState): Screen {
+export function resolveInitialAuthScreen(
+  routeState: PasswordRecoveryRouteState,
+  requestedAuthScreen: "login" | "registro" = "login",
+): Screen {
   if (routeState === "expired") return "recovery-expired";
   if (routeState === "active") return "nueva-password";
-  return "login";
+  return requestedAuthScreen;
 }
 
 /** Deriva el mensaje inicial desde el estado ya calculado de recuperación de contraseña. */
@@ -47,9 +50,12 @@ export function resolveInitialAuthLoading(routeState: PasswordRecoveryRouteState
 }
 
 /** Combina las tres derivaciones anteriores en un único resultado, para una única lectura del estado de ruta. */
-export function resolveInitialAuthState(routeState: PasswordRecoveryRouteState): InitialAuthState {
+export function resolveInitialAuthState(
+  routeState: PasswordRecoveryRouteState,
+  requestedAuthScreen: "login" | "registro" = "login",
+): InitialAuthState {
   return {
-    screen: resolveInitialAuthScreen(routeState),
+    screen: resolveInitialAuthScreen(routeState, requestedAuthScreen),
     statusMessage: resolveInitialAuthStatusMessage(routeState),
     isAuthLoading: resolveInitialAuthLoading(routeState),
   };

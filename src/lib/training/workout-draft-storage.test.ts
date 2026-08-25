@@ -776,6 +776,7 @@ async function run() {
     const activeWorkoutLifecycleSource = readFileSync("src/features/active-workout/hooks/useActiveWorkoutDraftLifecycle.ts", "utf8");
     const navigationControllerSource = readFileSync("src/features/app-shell/hooks/useAppNavigationController.ts", "utf8");
     const loginPageSource = readFileSync("src/app/login/page.tsx", "utf8");
+    const authEntrySource = readFileSync("src/features/auth/components/auth-entry-client.tsx", "utf8");
     const legacyReadinessSource = readFileSync("src/lib/training/training-daily-readiness-repository.ts", "utf8");
     const packageJson = readFileSync("package.json", "utf8");
     assert.match(activeDraftSource, /export const ACTIVE_WORKOUT_DRAFT_VERSION = 1;/);
@@ -991,7 +992,8 @@ async function run() {
     assert.doesNotMatch(loginPageSource, /NEXT_PUBLIC_ENABLE_TRAINING_WORKOUT_READINESS_V2/, "readiness v2 usa flag server-only");
     assert.doesNotMatch(loginPageSource, /ENABLE_TRAINING_WORKOUT_READINESS_V2[\s\S]*(?:trim|toLowerCase|\|\| true|!== "false"|=== "1")/, "readiness v2 no acepta activacion laxa ni default activo");
     assert.doesNotMatch(loginPageSource, /VERCEL_ENV !== "production"/, "login/page.tsx no bloquea readiness v2 por entorno Production");
-    assert.match(loginPageSource, /<OrganizatechApp[\s\S]*trainingWorkoutReadinessV2Enabled=\{trainingWorkoutReadinessV2Enabled\}/, "OrganizatechApp recibe la flag calculada server-side");
+    assert.match(loginPageSource, /<AuthEntryClient[\s\S]*trainingWorkoutReadinessV2Enabled=\{trainingWorkoutReadinessV2Enabled\}/, "AuthEntryClient recibe la flag calculada server-side");
+    assert.match(authEntrySource, /<OrganizatechApp[\s\S]*trainingWorkoutReadinessV2Enabled=\{trainingWorkoutReadinessV2Enabled\}/, "AuthEntryClient entrega la flag server-side a OrganizatechApp");
     assert.doesNotMatch(storageSource, /save_training_workout_readiness_v2|link_training_workout_readiness_session_v2|crypto\.randomUUID|getSupabaseBrowserClient/, "storage no llama RPCs, Supabase ni genera UUIDs");
     assert.doesNotMatch(storageSource, /window\.localStorage|JSON\.(?:parse|stringify)/, "workout draft delega acceso y serializacion al browser storage compartido");
     assert.match(legacyReadinessSource, /save_daily_training_readiness/, "readiness legacy permanece intacto");

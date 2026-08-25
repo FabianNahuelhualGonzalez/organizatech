@@ -214,6 +214,178 @@ function migrationFiles(root: string): string[] {
     .sort();
 }
 
+const postPerfOwnershipMarker = "POST_PERF_06_MIGRATION_OWNERSHIP";
+
+type PostPerfMigrationOwnership = {
+  migration: string;
+  sha256: string;
+  contractPath: string;
+};
+
+type PostPerfMigrationOwnershipInventory = {
+  byMigration: Map<string, PostPerfMigrationOwnership>;
+  contractPaths: string[];
+};
+
+function sourceTestFiles(root: string): string[] {
+  const sourceRoot = join(root, "src");
+  if (!existsSync(sourceRoot)) return [];
+  const files: string[] = [];
+  const walk = (directory: string) => {
+    for (const entry of readdirSync(directory)) {
+      const path = join(directory, entry);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (/\.test\.tsx?$/.test(entry)) files.push(relative(root, path));
+    }
+  };
+  walk(sourceRoot);
+  return files.sort();
+}
+
+function unwrapOwnershipExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current)
+    || ts.isAsExpression(current)
+    || ts.isTypeAssertionExpression(current)
+    || ts.isSatisfiesExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function ownershipEntriesFromContract(
+  root: string,
+  contractPath: string,
+): PostPerfMigrationOwnership[] | null {
+  const source = read(root, contractPath);
+  const sourceFile = ts.createSourceFile(
+    contractPath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    contractPath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const declarations: Array<{
+    statement: ts.VariableStatement;
+    declaration: ts.VariableDeclaration;
+  }> = [];
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.name.text === postPerfOwnershipMarker) {
+        declarations.push({ statement, declaration });
+      }
+    }
+  }
+  if (declarations.length === 0) return null;
+  assert.equal(
+    declarations.length,
+    1,
+    `[PERF-06.post-cutoff.owner-contract] ${contractPath} declara el marker una sola vez`,
+  );
+
+  const [{ statement, declaration }] = declarations;
+  assert.ok(
+    statement.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword),
+    `[PERF-06.post-cutoff.owner-contract] ${contractPath} exporta ${postPerfOwnershipMarker}`,
+  );
+  assert.ok(
+    (statement.declarationList.flags & ts.NodeFlags.Const) !== 0,
+    `[PERF-06.post-cutoff.owner-contract] ${contractPath} declara ownership inmutable`,
+  );
+  assert.ok(
+    declaration.initializer,
+    `[PERF-06.post-cutoff.owner-contract] ${contractPath} inicializa ownership`,
+  );
+  const initializer = unwrapOwnershipExpression(declaration.initializer);
+  assert.ok(
+    ts.isObjectLiteralExpression(initializer),
+    `[PERF-06.post-cutoff.owner-contract] ${contractPath} usa un mapa literal nombre → SHA-256`,
+  );
+  assert.ok(
+    initializer.properties.length > 0,
+    `[PERF-06.post-cutoff.owner-contract] ${contractPath} registra al menos una migración`,
+  );
+
+  const owned = new Set<string>();
+  return initializer.properties.map((property) => {
+    assert.ok(
+      ts.isPropertyAssignment(property) && ts.isStringLiteral(property.name),
+      `[PERF-06.post-cutoff.owner-contract] ${contractPath} usa nombres literales de migración`,
+    );
+    const value = unwrapOwnershipExpression(property.initializer);
+    assert.ok(
+      ts.isStringLiteral(value),
+      `[PERF-06.post-cutoff.owner-contract] ${contractPath} usa hashes literales`,
+    );
+    const migration = property.name.text;
+    const expectedSha256 = value.text;
+    assert.match(
+      migration,
+      /^\d{14}_.+\.sql$/,
+      `[PERF-06.post-cutoff.owner-contract] nombre CLI válido en ${contractPath}`,
+    );
+    assert.match(
+      expectedSha256,
+      /^[0-9a-f]{64}$/,
+      `[PERF-06.post-cutoff.owner-contract] SHA-256 válido para ${migration}`,
+    );
+    assert.equal(
+      owned.has(migration),
+      false,
+      `[PERF-06.post-cutoff.owner-contract] ${migration} aparece una sola vez en ${contractPath}`,
+    );
+    owned.add(migration);
+    return { migration, sha256: expectedSha256, contractPath };
+  });
+}
+
+function discoverPostPerfMigrationOwnership(root: string): PostPerfMigrationOwnershipInventory {
+  const byMigration = new Map<string, PostPerfMigrationOwnership>();
+  const contractPaths: string[] = [];
+  for (const contractPath of sourceTestFiles(root)) {
+    const entries = ownershipEntriesFromContract(root, contractPath);
+    if (!entries) continue;
+    contractPaths.push(contractPath);
+    for (const entry of entries) {
+      assert.equal(
+        byMigration.has(entry.migration),
+        false,
+        `[PERF-06.post-cutoff.owner-contract] ${entry.migration} tiene un único contrato responsable`,
+      );
+      byMigration.set(entry.migration, entry);
+    }
+  }
+  return { byMigration, contractPaths: contractPaths.sort() };
+}
+
+function postPerfMigrationFiles(root: string): string[] {
+  const cutoffVersion = aclMigration.slice(0, 14);
+  return migrationFiles(root).filter((file) => file.slice(0, 14) > cutoffVersion);
+}
+
+function validatePostPerfMigrationOwnership(root: string): void {
+  const postCutoffMigrations = postPerfMigrationFiles(root);
+  const ownership = discoverPostPerfMigrationOwnership(root);
+  assert.deepEqual(
+    [...ownership.byMigration.keys()].sort(),
+    postCutoffMigrations,
+    "[PERF-06.post-cutoff.ownership-inventory] toda migración posterior al cutoff tiene ownership contractual exacto",
+  );
+  for (const migration of postCutoffMigrations) {
+    const registration = ownership.byMigration.get(migration);
+    assert.ok(registration, `[PERF-06.post-cutoff.ownership-inventory] ${migration} tiene contrato responsable`);
+    assert.equal(
+      sha256(readFileSync(join(root, migrationsDirectory, migration))),
+      registration.sha256,
+      `[PERF-06.post-cutoff.ownership-hash] ${migration} conserva el hash de ${registration.contractPath}`,
+    );
+  }
+}
+
 type SqlMaskOptions = {
   comments: boolean;
   strings: boolean;
@@ -1299,16 +1471,23 @@ function validateBaselineArtifacts(root: string): void {
   ].sort();
   assert.equal(expectedMigrationFiles.length, 24, "inventario esperado: 18 históricas + 6 PERF-06");
   const actualMigrationFiles = migrationFiles(root);
-  assert.deepEqual(actualMigrationFiles, expectedMigrationFiles, "inventario exacto de 24 versiones sin diagnóstico ni versión inventada");
   assert.ok(
     actualMigrationFiles.every((file) => /^\d{14}_.+\.sql$/.test(file)),
-    "las 24 migraciones usan versiones CLI de 14 dígitos",
+    "todas las migraciones usan versiones CLI de 14 dígitos",
+  );
+  const perf06CutoffVersion = aclMigration.slice(0, 14);
+  const perf06MigrationFiles = actualMigrationFiles.filter((file) => file.slice(0, 14) <= perf06CutoffVersion);
+  assert.deepEqual(
+    perf06MigrationFiles,
+    expectedMigrationFiles,
+    "inventario exacto de 24 versiones hasta el cierre PERF-06, sin diagnóstico ni versión inventada",
   );
   assert.equal(
     new Set(actualMigrationFiles.map((file) => file.slice(0, 14))).size,
-    24,
-    "las 24 versiones de migración son únicas",
+    actualMigrationFiles.length,
+    "todas las versiones de migración son únicas",
   );
+  validatePostPerfMigrationOwnership(root);
 
   validateProfileSchema(read(root, schemaBaseline));
   validateAclMigration(root);
@@ -2042,12 +2221,14 @@ function validateGlobalTestRegistry(): void {
 
 function copyFixture(): string {
   const root = mkdtempSync(join(tmpdir(), "perf-06r-contract-"));
-  const paths = [
+  const paths = [...new Set([
     ...historicalMappings.map(([, newName]) => join(migrationsDirectory, newName)),
     ...protectedPerfMigrations.map(([file]) => join(migrationsDirectory, file)),
     join(migrationsDirectory, invariantFile(repositoryRoot)),
     join(migrationsDirectory, compensationFile(repositoryRoot)),
     join(migrationsDirectory, aclMigration),
+    ...postPerfMigrationFiles(repositoryRoot).map((file) => join(migrationsDirectory, file)),
+    ...discoverPostPerfMigrationOwnership(repositoryRoot).contractPaths,
     join(diagnosticsDirectory, diagnosticArtifact),
     join(diagnosticsDirectory, fingerprintArtifact),
     schemaBaseline,
@@ -2057,7 +2238,7 @@ function copyFixture(): string {
     cycleScopedRepository,
     lineageModel,
     "package.json",
-  ];
+  ])];
   for (const path of paths) {
     const destination = join(root, path);
     mkdirSync(dirname(destination), { recursive: true });
@@ -2080,12 +2261,14 @@ function fixtureSha(root: string): string {
 }
 
 function canonicalSourcesSha(): string {
-  const paths = [
+  const paths = [...new Set([
     ...historicalMappings.map(([, newName]) => join(migrationsDirectory, newName)),
     ...protectedPerfMigrations.map(([file]) => join(migrationsDirectory, file)),
     join(migrationsDirectory, invariantFile(repositoryRoot)),
     join(migrationsDirectory, compensationFile(repositoryRoot)),
     join(migrationsDirectory, aclMigration),
+    ...postPerfMigrationFiles(repositoryRoot).map((file) => join(migrationsDirectory, file)),
+    ...discoverPostPerfMigrationOwnership(repositoryRoot).contractPaths,
     join(diagnosticsDirectory, diagnosticArtifact),
     join(diagnosticsDirectory, fingerprintArtifact),
     schemaBaseline,
@@ -2095,7 +2278,7 @@ function canonicalSourcesSha(): string {
     cycleScopedRepository,
     lineageModel,
     "package.json",
-  ];
+  ])];
   return sha256(paths.map((path) => `${path}:${sha256(readFileSync(join(repositoryRoot, path)))}`).join("\n"));
 }
 
@@ -3074,6 +3257,26 @@ const mutationProbes: MutationProbe[] = [
       writeFileSync(path, `${readFileSync(path, "utf8")}\n-- mutation\n`);
     },
   })),
+  {
+    name: "agregar migración post-PERF-06 sin ownership contractual",
+    apply: (root) => {
+      writeFileSync(
+        join(root, migrationsDirectory, "20260816020744_unregistered_post_perf.sql"),
+        "select 1;\n",
+      );
+    },
+    expectedFailure: /\[PERF-06\.post-cutoff\.ownership-inventory\]/,
+  },
+  {
+    name: "alterar migración post-PERF-06 registrada",
+    apply: (root) => {
+      const [migration] = postPerfMigrationFiles(root);
+      assert.ok(migration, "probe requiere una migración post-PERF-06 registrada");
+      const path = join(root, migrationsDirectory, migration);
+      writeFileSync(path, `${readFileSync(path, "utf8")}\n-- mutation\n`);
+    },
+    expectedFailure: /\[PERF-06\.post-cutoff\.ownership-hash\]/,
+  },
   {
     name: "restaurar timestamp duplicado",
     apply: (root) => renameSync(

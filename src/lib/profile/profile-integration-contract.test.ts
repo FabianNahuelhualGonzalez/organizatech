@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 
 /*
  * Static integration source contract only.
@@ -20,6 +21,7 @@ const profileControllerStaticSource = readFileSync("src/features/profile/model/p
 const profileHookStaticSource = readFileSync("src/features/profile/hooks/useProfileController.ts", "utf8");
 const profileAvatarRepositoryStaticSource = readFileSync("src/lib/profile/profile-avatar-repository.ts", "utf8");
 const packageStaticSource = readFileSync("package.json", "utf8");
+const profileGlobalStylesStaticSource = readFileSync("src/app/globals.css", "utf8");
 
 function extractStaticSourceSection(source: string, startMarker: string, endMarker: string): string {
   const start = source.indexOf(startMarker);
@@ -824,5 +826,272 @@ for (const helperName of [
 }
 
 assert.match(packageStaticSource, /tsx src\/lib\/profile\/profile-integration-contract\.test\.ts/);
+
+// UI-NAV-01V: contrato AST de la jerarquía visual del Perfil Usuario. No depende del orden de
+// atributos, comentarios, formato ni nombres de variables locales, y no renderiza navegador.
+function parseProfileScreenForVisualContract(source: string) {
+  const sourceFile = ts.createSourceFile(
+    "ProfileScreen.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const diagnostics = (sourceFile as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? [];
+  assert.equal(diagnostics.length, 0, "UI-NAV-01V Perfil: ProfileScreen debe conservar TSX válido");
+  return sourceFile;
+}
+
+function readJsxLiteralText(sourceFile: ts.SourceFile) {
+  const values: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxText(node) && node.text.trim()) values.push(node.text.trim());
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return values;
+}
+
+function assertUserProfileVisualHierarchy(source: string) {
+  const sourceFile = parseProfileScreenForVisualContract(source);
+  const imports = sourceFile.statements.filter(ts.isImportDeclaration).map((declaration) => {
+    assert.ok(ts.isStringLiteral(declaration.moduleSpecifier));
+    return declaration.moduleSpecifier.text;
+  });
+  assert.ok(imports.includes("./UserAvatar"), "UI-NAV-01V Perfil: debe reutilizar UserAvatar existente");
+  assert.ok(
+    imports.includes("@/lib/profile/profile-view-model"),
+    "UI-NAV-01V Perfil: debe conservar ProfileViewModel como fuente",
+  );
+  for (const forbiddenImport of ["coach", "supabase", "repository", "@/lib/auth/"]) {
+    assert.ok(
+      imports.every((modulePath) => !modulePath.toLowerCase().includes(forbiddenImport)),
+      `UI-NAV-01V Perfil: ProfileScreen no puede importar ${forbiddenImport}`,
+    );
+  }
+
+  const userAvatars: ts.JsxSelfClosingElement[] = [];
+  let fetchCalls = 0;
+  let coachElements = 0;
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText() === "UserAvatar") userAvatars.push(node);
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "fetch"
+    ) fetchCalls += 1;
+    if (
+      (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) &&
+      node.getText().includes("CoachPortal")
+    ) coachElements += 1;
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  assert.equal(userAvatars.length, 1, "UI-NAV-01V Perfil: debe renderizar exactamente un UserAvatar");
+  const avatarAttributes = userAvatars[0].attributes.properties;
+  const profileAttribute = avatarAttributes.find((attribute): attribute is ts.JsxAttribute => (
+    ts.isJsxAttribute(attribute) && attribute.name.getText() === "profile"
+  ));
+  assert.ok(
+    profileAttribute?.initializer &&
+    ts.isJsxExpression(profileAttribute.initializer) &&
+    profileAttribute.initializer.expression &&
+    ts.isIdentifier(profileAttribute.initializer.expression) &&
+    profileAttribute.initializer.expression.text === "profile",
+    "UI-NAV-01V Perfil: UserAvatar debe seguir recibiendo el profileViewModel existente",
+  );
+  assert.equal(fetchCalls, 0, "UI-NAV-01V Perfil: ProfileScreen no puede agregar consultas fetch");
+  assert.equal(coachElements, 0, "UI-NAV-01V Perfil: Usuario no puede montar componentes Coach");
+
+  assert.ok(
+    readJsxLiteralText(sourceFile).includes("Datos personales"),
+    "UI-NAV-01V Perfil: debe conservar el bloque Datos personales",
+  );
+}
+
+function stripProfileCssComments(source: string) {
+  let result = "";
+  let quote = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (quote) {
+      result += character;
+      if (character === "\\") {
+        result += next ?? "";
+        index += 1;
+      } else if (character === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      result += character;
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      const closing = source.indexOf("*/", index + 2);
+      assert.ok(closing >= 0, "UI-NAV-01V Perfil CSS: comentario sin cierre");
+      result += " ".repeat(closing + 2 - index);
+      index = closing + 1;
+      continue;
+    }
+    result += character;
+  }
+  assert.equal(quote, "", "UI-NAV-01V Perfil CSS: string sin cierre");
+  return result;
+}
+
+function readProfileCssRuleBody(source: string, expectedSelector: string) {
+  const executable = stripProfileCssComments(source);
+  let cursor = 0;
+  let quote = "";
+  let matchedBody: string | null = null;
+  while (cursor < executable.length) {
+    let opening = -1;
+    for (let index = cursor; index < executable.length; index += 1) {
+      const character = executable[index];
+      if (quote) {
+        if (character === "\\") index += 1;
+        else if (character === quote) quote = "";
+        continue;
+      }
+      if (character === '"' || character === "'") quote = character;
+      else if (character === "{") {
+        opening = index;
+        break;
+      }
+    }
+    if (opening < 0) break;
+    const selectors = executable.slice(cursor, opening).trim().split(",").map((selector) => selector.trim());
+    let depth = 1;
+    quote = "";
+    let closing = -1;
+    for (let index = opening + 1; index < executable.length; index += 1) {
+      const character = executable[index];
+      if (quote) {
+        if (character === "\\") index += 1;
+        else if (character === quote) quote = "";
+        continue;
+      }
+      if (character === '"' || character === "'") quote = character;
+      else if (character === "{") depth += 1;
+      else if (character === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          closing = index;
+          break;
+        }
+      }
+    }
+    assert.ok(closing >= 0, `UI-NAV-01V Perfil CSS: regla sin cierre ${expectedSelector}`);
+    if (selectors.includes(expectedSelector)) matchedBody = executable.slice(opening + 1, closing);
+    cursor = closing + 1;
+  }
+  assert.ok(matchedBody !== null, `UI-NAV-01V Perfil CSS: falta la regla ${expectedSelector}`);
+  return matchedBody;
+}
+
+function readProfileCssContent(source: string, selector: string) {
+  const body = readProfileCssRuleBody(source, selector);
+  const declaration = body.match(/(?:^|;)\s*content\s*:\s*("(?:\\.|[^"\\])*")\s*;/);
+  assert.ok(declaration, `UI-NAV-01V Perfil CSS: ${selector} debe declarar content en su propio bloque`);
+  return JSON.parse(declaration[1]) as string;
+}
+
+function assertUserProfileVisualLabels(stylesSource: string) {
+  assert.equal(
+    readProfileCssContent(stylesSource, ".profile-hero-copy::before"),
+    "PERFIL USUARIO",
+    "UI-NAV-01V Perfil: falta la etiqueta visual PERFIL USUARIO",
+  );
+  assert.equal(
+    readProfileCssContent(
+      stylesSource,
+      '.profile-screen > .profile-section[data-section="personal-data"] > .profile-section-header > div::before',
+    ),
+    "INFORMACIÓN DE LA CUENTA",
+    "UI-NAV-01V Perfil: falta la etiqueta visual INFORMACIÓN DE LA CUENTA",
+  );
+}
+
+assertUserProfileVisualHierarchy(profileScreenStaticSource);
+assertUserProfileVisualLabels(profileGlobalStylesStaticSource);
+
+function replaceProfileVisualProbeOnce(source: string, search: string, replacement: string) {
+  assert.equal(source.split(search).length - 1, 1, `UI-NAV-01V Perfil probe ambiguo: ${search}`);
+  return source.replace(search, replacement);
+}
+
+const userProfileVisualMutationProbes = [
+  {
+    name: "eliminar UserAvatar",
+    target: "tsx" as const,
+    expectedFailure: "debe renderizar exactamente un UserAvatar",
+    mutate: (source: string) => replaceProfileVisualProbeOnce(
+      source,
+      '<UserAvatar profile={profile} size="large" onImageError={onAvatarImageError} resetKey={avatarResetKey} />',
+      '<div aria-hidden="true" />',
+    ),
+  },
+  {
+    name: "importar Perfil Coach",
+    target: "tsx" as const,
+    expectedFailure: "ProfileScreen no puede importar coach",
+    mutate: (source: string) => `import { CoachPortal } from "@/features/coach-portal/components/coach-portal";\n${source}`,
+  },
+  {
+    name: "agregar consulta Supabase",
+    target: "tsx" as const,
+    expectedFailure: "ProfileScreen no puede importar supabase",
+    mutate: (source: string) => `import { createClient } from "@/lib/supabase/client";\n${source}`,
+  },
+  {
+    name: "agregar consulta fetch",
+    target: "tsx" as const,
+    expectedFailure: "ProfileScreen no puede agregar consultas fetch",
+    mutate: (source: string) => `${source}\nvoid fetch("/api/profile");\n`,
+  },
+  {
+    name: "eliminar etiqueta Perfil Usuario",
+    target: "css" as const,
+    expectedFailure: "falta la etiqueta visual PERFIL USUARIO",
+    mutate: (source: string) => replaceProfileVisualProbeOnce(
+      source,
+      'content: "PERFIL USUARIO";',
+      'content: "USUARIO";',
+    ),
+  },
+  {
+    name: "eliminar etiqueta Información de la cuenta",
+    target: "css" as const,
+    expectedFailure: "falta la etiqueta visual INFORMACIÓN DE LA CUENTA",
+    mutate: (source: string) => replaceProfileVisualProbeOnce(
+      source,
+      'content: "INFORMACIÓN DE LA CUENTA";',
+      'content: "CUENTA";',
+    ),
+  },
+] as const;
+
+for (const probe of userProfileVisualMutationProbes) {
+  let failure: unknown;
+  try {
+    const mutatedTsx = probe.target === "tsx" ? probe.mutate(profileScreenStaticSource) : profileScreenStaticSource;
+    const mutatedCss = probe.target === "css" ? probe.mutate(profileGlobalStylesStaticSource) : profileGlobalStylesStaticSource;
+    assertUserProfileVisualHierarchy(mutatedTsx);
+    assertUserProfileVisualLabels(mutatedCss);
+  } catch (error) {
+    failure = error;
+  }
+  assert.ok(failure instanceof Error, `UI-NAV-01V Perfil: el mutante debe morir (${probe.name})`);
+  assert.ok(
+    failure.message.includes(probe.expectedFailure),
+    `UI-NAV-01V Perfil: el mutante debe morir por su barrera semántica (${probe.name})`,
+  );
+}
+
+console.log(`UI-NAV-01V Profile mutation probes passed (${userProfileVisualMutationProbes.length})`);
 
 console.log("profile static integration source contract tests passed");

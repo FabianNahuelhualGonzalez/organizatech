@@ -1,4 +1,4 @@
-import { ChevronLeft } from "lucide-react";
+import { AppBackButton } from "@/ui/navigation/app-back-button";
 
 export interface AppScreenHeaderProps {
   onBack: () => void;
@@ -7,10 +7,7 @@ export interface AppScreenHeaderProps {
 export function AppScreenHeader({ onBack }: AppScreenHeaderProps) {
   return (
     <div className="section-back-row">
-      <button className="button secondary section-back-button" type="button" onClick={onBack}>
-        <ChevronLeft size={17} />
-        Volver
-      </button>
+      <AppBackButton onBack={onBack} />
     </div>
   );
 }

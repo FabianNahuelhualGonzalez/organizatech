@@ -330,7 +330,7 @@ function testPackageRegistrationContract() {
     .split(" && ")
     .find((group) => group.includes("src/lib/training/workout-share-model.test.ts"));
 
-  assert.equal(testScript.split(" && ").length, 126);
+  assert.equal(testScript.split(" && ").length, 127);
   assert.equal(countOccurrences(testScript, "src/lib/training/workout-share-image.test.ts"), 1);
   assert.equal(countOccurrences(testScript, "src/lib/training/workout-share-image-action.test.ts"), 1);
   assert.match(workoutShareGroup ?? "", /workout-share-image\.test\.ts/);

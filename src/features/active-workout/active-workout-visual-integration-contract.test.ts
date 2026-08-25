@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 
 import {
   activeWorkoutControllerReducer,
@@ -14,6 +16,7 @@ import {
   type ActiveWorkoutControllerAction,
 } from "@/features/active-workout/model/active-workout-controller-state";
 import type { TrainingCompletionSummary } from "@/lib/training/training-completion-summary";
+import { isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
 import type { TrainingReadiness } from "@/lib/training/training-readiness-draft";
 import type { PendingWorkoutReadinessLink } from "@/lib/training/workout-draft-storage";
@@ -587,7 +590,50 @@ const files = {
   performancePanel: readSource("src/features/active-workout/components/ExerciseLastPerformancePanel.tsx"),
   seriesResult: readSource("src/features/active-workout/components/SeriesResult.tsx"),
   guided: readSource("src/features/active-workout/components/GuidedTrainingScreen.tsx"),
+  workoutStyles: readSource("src/features/active-workout/active-workout.module.css"),
+  exerciseDraft: readSource("src/lib/training/training-exercise-draft.ts"),
+  metricGrid: readSource("src/ui/data-display/metric-grid.tsx"),
+  workoutRegistration: readSource("src/lib/training/workout-registration.ts"),
+  trainingDayOrder: readSource("src/lib/training/training-day-order.ts"),
 };
+const globalStyles = readSource("src/app/globals.css");
+
+const protectedFileHashes = {
+  "AGENTS.md": "f0c3ef88979a0ab085551a656ebb1843bfa56138d948ca4236bce6fcd1fa9dd0",
+  "package.json": "d51aa85801147a83aef38c51a1bc7768b0468b3a12a4ef91405c8be3d6ca31c2",
+  "package-lock.json": "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5",
+  "src/components/organizatech-app.tsx": "4b29b71aacdbe5df9d057f967605c13a61976b136264b69cd5a34ba2780b1eb6",
+  "src/features/progress/components/comparison-screen-v2.tsx": "bff390e44cf5a04fe59b0f2a594fcb53fb2a50602c850362f1a88ca136765743",
+  "src/features/active-workout/model/active-workout-controller-state.ts": "37006210eabda3f99217bd98b6ebf876780ed5ecc33bb8fba936eda7fd085ea5",
+  "src/features/active-workout/hooks/useActiveWorkoutController.ts": "c7b475636a3b8731a9e8b9a46702584b9c2a4a06333b75139791bf3ef2ce25bf",
+  "src/features/active-workout/hooks/useActiveWorkoutBoundary.ts": "5ee8be6ccea0e751659c0d20b76184874f161be04a89ea3a4f41c640b8aef1e9",
+  "src/lib/progress/calculations.ts": "fb71a58d8dbb9481666ffe180d2014d060b76626bb8ff68bbd68cb538adba90a",
+  "src/lib/progress/types.ts": "aa4aa66f24f6eb65e9c5eef68d70f5e0e149fea1299623bae207ecc0a06f0cf2",
+  "src/lib/progress/weight-format.ts": "e9843337c3359a50799010eb1526c6867bea9af3295fd7495cf67b96938636ea",
+  "src/lib/training/active-workout-completion.ts": "3c48c1ef32c39522888c5b96fcc5fe9c322fa49adbb077587e17fe8f513f84b2",
+  "src/lib/training/active-workout-draft.ts": "2fb96884332583f7b9cb8f24afd78516df4e03492109f3c4184eba9f61a5ca33",
+  "src/lib/training/active-workout-history-load.ts": "b6f101adb982daea357369df0554cbd90f8039678fda3e6f823143417e96a478",
+  "src/lib/training/exercise-current-result-presentation.ts": "03ff9c71b89d4c025536d47818338032389d4131a4fd70bdea20c267da356ad1",
+  "src/lib/training/exercise-last-observation-presentation.ts": "69d8d7580b1d9fd151e4cfb327bfcfee5f4f09c1d5a7381c2d245a9945965299",
+  "src/lib/training/exercise-last-performance-presentation.ts": "00284459d5ceaf7eff3adb63c0bd10ac6609ea12767d94a756f7d22aeafc88e4",
+  "src/lib/training/training-completion-summary.ts": "60766dcaf47d95680cb93e3f9ad02f832d1f2efeebd02624b0ae315e4ae3a8c1",
+  "src/lib/training/training-exercise-draft.ts": "d394157cd8c093071cc9e5d5b52cf6185a1318032be446ba397669675bc70bd1",
+  "src/lib/training/workout-registration.ts": "432a2bad50ebd22f39ddb8ad1c3c3b2cf1dadcc059a6051b7a5fb7e5f9e08c60",
+  "src/lib/training/workout-draft-storage.ts": "9bc72346cceb27881bd0f5171a63967ebc78663613742bc8156f65dbb20d5c11",
+  "src/lib/training/exercise-last-observation-repository.ts": "073bdbeed5b95dfac9e2f43523cb8de6568b700673aac1a848d8013ca6b97f23",
+  "src/lib/training/exercise-last-performance-repository.ts": "292701936e74f3bcecb3e0b07eff5a8ba1408b9d9097a772157508ec394a5a3b",
+} as const;
+
+type ProtectedFilePath = keyof typeof protectedFileHashes;
+type ProtectedFileSources = Record<ProtectedFilePath, string>;
+
+const protectedFileSources = Object.fromEntries(
+  Object.keys(protectedFileHashes).map((path) => [path, readSource(path)]),
+) as ProtectedFileSources;
+
+function sha256(source: string) {
+  return createHash("sha256").update(source).digest("hex");
+}
 
 // =============================================================================================
 // ESTÁTICO: wiring productivo del hook. No renderiza React, no ejecuta el hook y no presenta estas
@@ -797,7 +843,8 @@ assert.match(files.start, /import \{ RoutineMetricGrid \} from "@\/ui\/data-disp
 assert.doesNotMatch(files.start, /^\s*function RoutineMetricGrid\b/m);
 assert.match(files.completion, /className="training-completion-table" role="table"/);
 assert.match(files.performancePanel, /className="exercise-observation-textarea"/);
-assert.match(files.seriesResult, /className={`series-result session-summary \$\{result\.tone\}`}/);
+assert.match(files.seriesResult, /buildExerciseCurrentResultPresentation\(\{/);
+assert.match(files.seriesResult, /className=\{styles\.objectives\} data-tone=\{result\.tone\}/);
 
 // =============================================================================================
 // ESTÁTICO/SOURCE-BASED HOTFIX: el resumen de cierre debe conservar una única presentación. La
@@ -835,13 +882,15 @@ assert.match(
   /<button className="button training-completion-button" type="button" onClick=\{onDashboard\}>\s*Ir al panel principal\s*<\/button>/,
   "el boton Dashboard conserva clase, tipo, handler y texto",
 );
-assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 126);
+assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 127);
 
-// GuidedTrainingScreen (P3-30): extraccion mecanica. Conserva el contrato de props, reutiliza el
-// normalizador canonico de P3-29 sin redeclararlo, y no introduce estado ni efectos propios.
+// GuidedTrainingScreen conserva el boundary de P3-30: TRAIN-UI-01 cambia su presentacion,
+// reutiliza el normalizador canonico de P3-29 y no introduce estado ni efectos propios.
 assert.match(files.guided, /export interface GuidedTrainingScreenProps \{/);
-assert.match(files.guided, /className="card wide mobile-series-card"/);
+assert.match(files.guided, /mobile-series-card \$\{styles\.workoutCard\}/);
 assert.match(files.guided, /import \{ RoutineMetricGrid \} from "@\/ui\/data-display\/metric-grid";/);
+assert.match(files.guided, /<RoutineMetricGrid targetSummary=\{targetSummary\} \/>/);
+assert.match(files.guided, /<div className=\{styles\.srOnly\} aria-hidden="true">\s*<RoutineMetricGrid targetSummary=\{targetSummary\} \/>/);
 assert.doesNotMatch(files.guided, /^\s*function RoutineMetricGrid\b/m);
 assert.match(
   files.guided,
@@ -858,6 +907,4701 @@ for (const prop of [
 ]) {
   assert.match(files.guided, new RegExp(`^\\s{2}${prop}[?]?:`, "m"), `GuidedTrainingScreenProps debe declarar ${prop}`);
 }
+
+// =============================================================================================
+// TRAIN-UI-01 — contrato ESTATICO/source-based del rediseño. Verifica wiring de presentacion y
+// accesibilidad sin afirmar render, interaccion real ni ausencia visual de overflow en navegador.
+// =============================================================================================
+
+// Estado A: selector y tabla consumen exclusivamente props productivas; el inicio conserva el
+// callback y el estado busy existentes.
+assert.match(files.start, /<select value=\{day\} onChange=\{\(event\) => switchDay\(event\.target\.value\)\}>/);
+assert.match(files.start, /\{routineDays\.map\(\(item\) => \(/);
+assert.match(files.start, /\{exercises\.map\(\(exercise\) => \(/);
+for (const field of ["exercise.name", "exercise.targetSets", "exercise.targetReps", "exercise.baseWeight"]) {
+  assert.match(files.start, new RegExp(field.replace(".", "\\.")), `la tabla inicial debe leer ${field}`);
+}
+assert.match(files.start, /role="table"/);
+assert.equal((files.start.match(/role="columnheader"/g) ?? []).length, 4);
+assert.match(files.start, /onClick=\{startTraining\}/);
+assert.match(files.start, /disabled=\{isStartingTraining\}/);
+assert.match(files.start, /aria-busy=\{isStartingTraining\}/);
+
+// Estado B: selector, lista de botones y estado activo conservan callbacks/identidad reales sin
+// simular un grid ARIA incompleto.
+assert.match(files.guided, /<select value=\{day\} onChange=\{\(event\) => switchDay\(event\.target\.value\)\}>/);
+assert.match(files.guided, /role="group"/);
+assert.match(files.guided, /\{exercises\.map\(\(exercise, index\) => \{/);
+assert.doesNotMatch(files.guided, /role="grid"|role="row"|role="rowgroup"|role="gridcell"/);
+assert.match(files.guided, /aria-pressed=\{isActive\}/);
+assert.match(files.guided, /onClick=\{\(\) => setActiveIndex\(index\)\}/);
+assert.match(files.workoutStyles, /\.selectableTableRow\[aria-pressed="true"\]/);
+assert.match(files.workoutStyles, /\.selectableTableRow:focus-visible/);
+
+// Drafts/inputs: cantidad de series deriva de targetSets mediante el normalizador canonico; el
+// JSX mapea ese draft, admite decimales y rechaza negativos/invalidos con parsers productivos.
+assert.match(files.exerciseDraft, /Array\.from\(\{ length: exercise\.targetSets \}/);
+assert.match(files.guided, /const draft = activeExercise \? normalizeExerciseDraft\(activeExercise, drafts\[activeExercise\.id\]\) : null;/);
+assert.match(files.guided, /\{draft\.reps\.map\(\(reps, index\) => \(/);
+assert.match(files.guided, /inputMode="decimal"/);
+assert.match(files.guided, /isDecimalWeightDraftInput\(value\)/);
+assert.match(files.guided, /parseDecimalWeightInput\(value\) \?\? ""/);
+assert.equal(isDecimalWeightDraftInput("5,"), true, "5, se conserva como draft decimal intermedio");
+assert.equal(isDecimalWeightDraftInput("5."), true, "5. se conserva como draft decimal intermedio");
+assert.equal(parseDecimalWeightInput("5,"), null, "el registro final sigue rechazando un decimal incompleto");
+assert.match(files.guided, /min=\{0\}/);
+assert.match(files.guided, /step=\{1\}/);
+
+// Historial y observacion: mantiene found/loading/empty/error de las presentaciones, acordeones
+// nativos, historial anterior, textarea controlada y borrador por ejercicio.
+assert.match(files.guided, /buildExerciseLastPerformancePresentation\(\{/);
+assert.match(files.guided, /latest: latestExercisePerformance/);
+assert.match(files.guided, /loading: latestExercisePerformanceLoading/);
+assert.match(files.guided, /error: latestExercisePerformanceError/);
+assert.match(files.performancePanel, /presentation\.status === "found"\s*\? presentation\.seriesDetailTitle\s*: presentation\.lastSummaryText/);
+assert.match(files.performancePanel, /presentation\.seriesRows\.length > 0/);
+assert.match(files.performancePanel, /presentation\.status === "loading"/);
+assert.match(files.performancePanel, /presentation\.status === "error" \? "alert" : "status"/);
+assert.match(files.performancePanel, /observationPresentation\.status === "loading"/);
+assert.match(files.performancePanel, /observationPresentation\.status === "error" \? "alert" : "status"/);
+assert.match(files.performancePanel, /value=\{observationValue\}/);
+assert.match(files.guided, /onObservationChange=\{\(value\) => updateDraft\(activeExercise, \{ observation: value \}\)\}/);
+
+// Objetivos: SeriesResult solo presenta calculos canonicos de reps/peso/series. Los tonos de
+// alcanzado/superado son verdes y el pendiente es rojo; el detalle canonico queda visible.
+for (const metric of [
+  "totalReps: entry.totalReps",
+  "targetTotalReps: entry.targetTotalReps",
+  "completedSets: entry.completedSets",
+  "targetSets: entry.targetSets",
+  "actualWeight: entry.weight",
+  "targetWeight: entry.previousWeight",
+]) {
+  assert.match(files.seriesResult, new RegExp(metric.replaceAll(".", "\\.")));
+}
+assert.match(files.seriesResult, /\{result\.headline\}/);
+assert.match(files.seriesResult, /\{result\.message\}/);
+assert.match(files.seriesResult, /\{item\.detail\}/);
+assert.match(files.seriesResult, /item\.tone === "partial" \? styles\.pendingGoal : styles\.reachedGoal/);
+assert.match(files.seriesResult, /item\.tone === "partial" \? <X size=\{20\} \/> : <Check size=\{20\} \/>/);
+assert.match(files.workoutStyles, /--workout-goal-success: color-mix\([^;]+var\(--green\)[^;]+\);/);
+assert.match(files.workoutStyles, /--workout-goal-pending: var\(--red\);/);
+assert.match(files.workoutStyles, /border: 1px solid var\(--primary\);/);
+
+// Registro/finalizacion: se conservan las tres ramas productivas sin introducir writes.
+assert.match(files.guided, /!allRegistered && !activeExerciseAlreadyRegistered/);
+assert.match(files.guided, /onClick=\{registerExercise\}/);
+assert.match(files.guided, /Ejercicio ya registrado/);
+assert.match(files.guided, /onClick=\{saveCompletedTraining\}/);
+assert.match(files.guided, /disabled=\{isBusy\}/);
+assert.match(files.guided, /isExerciseRegisteredInCurrentWorkout/);
+
+// Encapsulacion visual/responsive: consume el token global aprobado, evita scroll horizontal
+// propio y declara adaptaciones para movil pequeño, desktop y reduced motion.
+assert.match(globalStyles, /--background:\s*#07101a;/i);
+assert.match(files.workoutStyles, /background: var\(--background\);/);
+assert.doesNotMatch(files.workoutStyles, /#07101a/i);
+assert.doesNotMatch(files.workoutStyles, /overflow-x:\s*(?:auto|scroll)/);
+assert.match(files.workoutStyles, /@media \(max-width: 360px\)/);
+assert.match(files.workoutStyles, /@media \(min-width: 800px\)/);
+assert.match(files.workoutStyles, /@media \(prefers-reduced-motion: reduce\)/);
+
+// No se agregan hooks, repositories, requests, storage ni writes desde presentacion.
+for (const source of [files.start, files.guided, files.performancePanel, files.seriesResult]) {
+  assert.doesNotMatch(source, /\buseState\b|\buseEffect\b|\bfetch\s*\(|\blocalStorage\b|\bsessionStorage\b/);
+  assert.doesNotMatch(source, /-repository"|@\/lib\/(?:data|supabase|storage)\//);
+}
+
+interface TrainUi01AuditSources {
+  start: string;
+  guided: string;
+  performancePanel: string;
+  seriesResult: string;
+  workoutStyles: string;
+  metricGrid: string;
+  workoutRegistration: string;
+  trainingDayOrder: string;
+  globalStyles: string;
+}
+
+function readCssRule(source: string, selector: string) {
+  const marker = `${selector} {`;
+  const selectorIndex = source.indexOf(marker);
+  assert.ok(selectorIndex >= 0, `falta la regla CSS exacta ${selector}`);
+  const openingBraceIndex = source.indexOf("{", selectorIndex + selector.length);
+  let depth = 0;
+
+  for (let index = openingBraceIndex; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] !== "}") continue;
+    depth -= 1;
+    if (depth === 0) {
+      return {
+        body: source.slice(openingBraceIndex + 1, index),
+        end: index + 1,
+        start: selectorIndex,
+      };
+    }
+  }
+
+  assert.fail(`regla CSS sin cierre para ${selector}`);
+}
+
+function readCssProperty(ruleBody: string, property: string, missingMessage?: string) {
+  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = ruleBody.match(new RegExp(`(?:^|\\n)\\s*${escapedProperty}:\\s*([^;]+);`));
+  assert.ok(match, missingMessage ?? `falta ${property} en la regla CSS auditada`);
+  return match[1].trim();
+}
+
+interface CssDeclaration {
+  property: string;
+  value: string;
+  important: boolean;
+  declarationOrder: number;
+}
+
+type CssClassScope = "local" | "global";
+
+interface CssClassIdentity {
+  name: string;
+  scope: CssClassScope;
+}
+
+type CssSelectorCombinator = "descendant" | "child" | "adjacent" | "sibling";
+
+interface CssSelectorCompound {
+  encoded: string;
+  source: string;
+  classes: readonly CssClassIdentity[];
+}
+
+interface CssParsedSelector {
+  source: string;
+  compounds: readonly CssSelectorCompound[];
+  combinators: readonly CssSelectorCombinator[];
+}
+
+interface CssExecutableRule {
+  selectors: CssParsedSelector[];
+  declarations: CssDeclaration[];
+  minWidth: number;
+  maxWidth: number;
+  order: number;
+}
+
+interface CssAuditElement {
+  tag?: string;
+  classes?: readonly CssClassIdentity[];
+  attributes?: Readonly<Record<string, string>>;
+  states?: readonly string[];
+  pseudoElement?: string;
+  childIndex?: number;
+  adjacentPreviousSiblings?: readonly CssAuditElement[];
+  generalPreviousSiblings?: readonly CssAuditElement[];
+}
+
+interface CssAuditTarget extends CssAuditElement {
+  label: string;
+  ancestors?: readonly CssAuditElement[];
+  useStructuralSelectorMatcher?: boolean;
+}
+
+function cssClassIdentities(scope: CssClassScope, ...names: readonly string[]) {
+  return names.map((name): CssClassIdentity => ({ name, scope }));
+}
+
+function localCssClasses(...names: readonly string[]) {
+  return cssClassIdentities("local", ...names);
+}
+
+function globalCssClasses(...names: readonly string[]) {
+  return cssClassIdentities("global", ...names);
+}
+
+function mergeCssClasses(...groups: readonly (readonly CssClassIdentity[])[]) {
+  return groups.flat();
+}
+
+function stripExecutableCssComments(source: string) {
+  let result = "";
+  let quote = "";
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+
+    if (quote) {
+      result += character;
+      if (character === "\\") {
+        result += next ?? "";
+        index += 1;
+      } else if (character === quote) {
+        quote = "";
+      }
+      continue;
+    }
+
+    if (character === '"' || character === "'") {
+      quote = character;
+      result += character;
+      continue;
+    }
+
+    if (character === "/" && next === "*") {
+      const closing = source.indexOf("*/", index + 2);
+      assert.ok(closing >= 0, "CSS inválido: comentario sin cierre");
+      result += " ".repeat(closing + 2 - index);
+      index = closing + 1;
+      continue;
+    }
+
+    result += character;
+  }
+
+  assert.equal(quote, "", "CSS inválido: string sin cierre");
+  return result;
+}
+
+function findCssTokenOutsideGroups(source: string, start: number, expected: string) {
+  let quote = "";
+  let parentheses = 0;
+  let brackets = 0;
+
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (character === "\\") index += 1;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "(") parentheses += 1;
+    else if (character === ")") parentheses -= 1;
+    else if (character === "[") brackets += 1;
+    else if (character === "]") brackets -= 1;
+    else if (character === expected && parentheses === 0 && brackets === 0) return index;
+  }
+
+  return -1;
+}
+
+function findCssClosingBrace(source: string, openingBraceIndex: number) {
+  let quote = "";
+  let depth = 0;
+
+  for (let index = openingBraceIndex; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (character === "\\") index += 1;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "{") depth += 1;
+    else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+
+  assert.fail("CSS inválido: bloque sin cierre");
+}
+
+function splitCssOutsideGroups(source: string, delimiter: string) {
+  const parts: string[] = [];
+  let start = 0;
+  let quote = "";
+  let parentheses = 0;
+  let brackets = 0;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (character === "\\") index += 1;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "(") parentheses += 1;
+    else if (character === ")") parentheses -= 1;
+    else if (character === "[") brackets += 1;
+    else if (character === "]") brackets -= 1;
+    else if (character === delimiter && parentheses === 0 && brackets === 0) {
+      parts.push(source.slice(start, index));
+      start = index + 1;
+    }
+  }
+
+  parts.push(source.slice(start));
+  return parts;
+}
+
+function parseCssDeclarations(body: string) {
+  return splitCssOutsideGroups(body, ";")
+    .map((rawDeclaration) => rawDeclaration.trim())
+    .filter(Boolean)
+    .map((rawDeclaration, declarationOrder): CssDeclaration => {
+      const colonIndex = findCssTokenOutsideGroups(rawDeclaration, 0, ":");
+      assert.ok(colonIndex > 0, `CSS inválido: declaración sin dos puntos (${rawDeclaration})`);
+      const property = rawDeclaration.slice(0, colonIndex).trim().toLowerCase();
+      const rawValue = rawDeclaration.slice(colonIndex + 1).trim();
+      assert.match(property, /^--[a-z0-9-]+$|^-?[a-z][a-z0-9-]*$/i, `CSS inválido: propiedad ${property}`);
+      assert.ok(rawValue, `CSS inválido: ${property} sin valor`);
+      const important = /\s*!important\s*$/i.test(rawValue);
+      const value = rawValue.replace(/\s*!important\s*$/i, "").trim();
+      return { property, value, important, declarationOrder };
+    });
+}
+
+function parseExecutableCss(
+  source: string,
+  defaultClassScope: CssClassScope = "local",
+  initialOrder = 0,
+) {
+  const executableSource = stripExecutableCssComments(source);
+  const rules: CssExecutableRule[] = [];
+  let order = initialOrder;
+
+  const visit = (block: string, inheritedMinWidth: number, inheritedMaxWidth: number) => {
+    let cursor = 0;
+    while (cursor < block.length) {
+      const openingBraceIndex = findCssTokenOutsideGroups(block, cursor, "{");
+      if (openingBraceIndex < 0) {
+        assert.equal(block.slice(cursor).trim(), "", "CSS inválido: contenido fuera de una regla");
+        break;
+      }
+      const prelude = block.slice(cursor, openingBraceIndex).trim();
+      assert.ok(prelude, "CSS inválido: regla sin selector");
+      const closingBraceIndex = findCssClosingBrace(block, openingBraceIndex);
+      const body = block.slice(openingBraceIndex + 1, closingBraceIndex);
+
+      if (/^@media\b/i.test(prelude)) {
+        const minMatch = prelude.match(/min-width\s*:\s*(\d+(?:\.\d+)?)px/i);
+        const maxMatch = prelude.match(/max-width\s*:\s*(\d+(?:\.\d+)?)px/i);
+        const minWidth = Math.max(inheritedMinWidth, minMatch ? Number(minMatch[1]) : 0);
+        const maxWidth = Math.min(inheritedMaxWidth, maxMatch ? Number(maxMatch[1]) : Number.POSITIVE_INFINITY);
+        assert.ok(minWidth <= maxWidth, `CSS inválido: media query imposible (${prelude})`);
+        visit(body, minWidth, maxWidth);
+      } else if (!prelude.startsWith("@")) {
+        const rawSelectors = splitCssOutsideGroups(prelude, ",").map((selector) => selector.trim());
+        assert.ok(rawSelectors.every(Boolean), `CSS inválido: selector vacío (${prelude})`);
+        const selectors = rawSelectors.map((selector) => (
+          parseSelectorStructure(selector, defaultClassScope)
+        ));
+        rules.push({
+          selectors,
+          declarations: parseCssDeclarations(body),
+          minWidth: inheritedMinWidth,
+          maxWidth: inheritedMaxWidth,
+          order,
+        });
+        order += 1;
+      }
+
+      cursor = closingBraceIndex + 1;
+    }
+  };
+
+  visit(executableSource, 0, Number.POSITIVE_INFINITY);
+  return rules;
+}
+
+function parseExecutableCssSources(
+  sources: readonly { source: string; defaultClassScope: CssClassScope }[],
+) {
+  const rules: CssExecutableRule[] = [];
+  for (const input of sources) {
+    const parsed = parseExecutableCss(input.source, input.defaultClassScope, rules.length);
+    rules.push(...parsed);
+  }
+  return rules;
+}
+
+function cssDefaultClassScopeForPath(path: string): CssClassScope {
+  return path.endsWith(".module.css") ? "local" : "global";
+}
+
+function scopedClassMarkerPattern() {
+  return /\.__css_(local|global)__([_a-z][\w-]*)/gi;
+}
+
+function readScopedClassIdentities(encoded: string): CssClassIdentity[] {
+  return [...encoded.matchAll(scopedClassMarkerPattern())].map((match) => ({
+    name: match[2],
+    scope: match[1].toLowerCase() as CssClassScope,
+  }));
+}
+
+function decodeScopedClassMarkers(encoded: string) {
+  return encoded.replace(scopedClassMarkerPattern(), (_match, _scope, name: string) => `.${name}`);
+}
+
+function encodeCssModulesSelector(selector: string, defaultClassScope: CssClassScope) {
+  let encoded = "";
+  let quote = "";
+
+  for (let index = 0; index < selector.length; index += 1) {
+    const character = selector[index];
+    if (quote) {
+      encoded += character;
+      if (character === "\\") {
+        encoded += selector[index + 1] ?? "";
+        index += 1;
+      } else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      encoded += character;
+      continue;
+    }
+    if (
+      character === "." &&
+      /[_a-z]/i.test(selector[index + 1] ?? "")
+    ) {
+      const match = selector.slice(index + 1).match(/^[_a-z][\w-]*/i);
+      assert.ok(match, `selector CSS Modules inválido: clase sin nombre (${selector})`);
+      encoded += `.__css_${defaultClassScope}__${match[0]}`;
+      index += match[0].length;
+      continue;
+    }
+    if (!selector.startsWith(":global(", index)) {
+      encoded += character;
+      continue;
+    }
+
+    const contentStart = index + ":global(".length;
+    let depth = 1;
+    let globalQuote = "";
+    let closingIndex = -1;
+    for (let cursor = contentStart; cursor < selector.length; cursor += 1) {
+      const globalCharacter = selector[cursor];
+      if (globalQuote) {
+        if (globalCharacter === "\\") cursor += 1;
+        else if (globalCharacter === globalQuote) globalQuote = "";
+        continue;
+      }
+      if (globalCharacter === '"' || globalCharacter === "'") globalQuote = globalCharacter;
+      else if (globalCharacter === "(") depth += 1;
+      else if (globalCharacter === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          closingIndex = cursor;
+          break;
+        }
+      }
+    }
+
+    assert.ok(closingIndex >= 0, `selector CSS Modules inválido: :global sin cierre (${selector})`);
+    encoded += encodeCssModulesSelector(selector.slice(contentStart, closingIndex), "global");
+    index = closingIndex;
+  }
+
+  assert.equal(quote, "", `selector CSS Modules inválido: string sin cierre (${selector})`);
+  return encoded;
+}
+
+function parseSelectorCompound(encoded: string): CssSelectorCompound {
+  return {
+    encoded,
+    source: decodeScopedClassMarkers(encoded),
+    classes: readScopedClassIdentities(encoded),
+  };
+}
+
+function parseSelectorStructure(
+  selector: string,
+  defaultClassScope: CssClassScope = "local",
+): CssParsedSelector {
+  const encodedSelector = encodeCssModulesSelector(selector, defaultClassScope);
+  const compounds: CssSelectorCompound[] = [];
+  const combinators: CssSelectorCombinator[] = [];
+  let current = "";
+  let quote = "";
+  let parentheses = 0;
+  let brackets = 0;
+  let pendingWhitespace = false;
+
+  const pushCurrent = () => {
+    const compound = current.trim();
+    if (compound) compounds.push(parseSelectorCompound(compound));
+    current = "";
+  };
+
+  for (let index = 0; index < encodedSelector.length; index += 1) {
+    const character = encodedSelector[index];
+    if (quote) {
+      current += character;
+      if (character === "\\") {
+        current += encodedSelector[index + 1] ?? "";
+        index += 1;
+      } else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      current += character;
+    } else if (character === "(") {
+      parentheses += 1;
+      current += character;
+    } else if (character === ")") {
+      parentheses -= 1;
+      current += character;
+    } else if (character === "[") {
+      brackets += 1;
+      current += character;
+    } else if (character === "]") {
+      brackets -= 1;
+      current += character;
+    } else if (parentheses === 0 && brackets === 0 && /\s/.test(character)) {
+      pushCurrent();
+      pendingWhitespace = compounds.length > combinators.length;
+    } else if (parentheses === 0 && brackets === 0 && (character === ">" || character === "+" || character === "~")) {
+      pushCurrent();
+      assert.ok(compounds.length > combinators.length, `selector inválido: combinador sin lado izquierdo (${selector})`);
+      combinators.push(character === ">" ? "child" : character === "+" ? "adjacent" : "sibling");
+      pendingWhitespace = false;
+    } else {
+      if (pendingWhitespace) {
+        combinators.push("descendant");
+        pendingWhitespace = false;
+      }
+      current += character;
+    }
+  }
+  pushCurrent();
+  assert.equal(
+    combinators.length,
+    Math.max(0, compounds.length - 1),
+    `selector inválido: relación incompleta (${selector})`,
+  );
+  return {
+    source: decodeScopedClassMarkers(encodedSelector),
+    compounds,
+    combinators,
+  };
+}
+
+function compoundMatchesElement(compoundInput: CssSelectorCompound, element: CssAuditElement) {
+  let encodedCompound = compoundInput.encoded;
+  for (const match of [...encodedCompound.matchAll(/:not\(([^()]*)\)/g)]) {
+    if (compoundMatchesElement(parseSelectorCompound(match[1]), element)) return false;
+  }
+  encodedCompound = encodedCompound.replace(/:not\(([^()]*)\)/g, "");
+  let compound = decodeScopedClassMarkers(encodedCompound);
+
+  const pseudoElement = compound.match(/::([a-z-]+)/i)?.[1];
+  if ((pseudoElement ?? "") !== (element.pseudoElement ?? "")) return false;
+  compound = compound.replace(/::[a-z-]+/gi, "");
+
+  for (const match of [...compound.matchAll(/:nth-child\(\s*(\d+)\s*\)/gi)]) {
+    if (element.childIndex !== Number(match[1])) return false;
+  }
+  compound = compound.replace(/:nth-child\(\s*\d+\s*\)/gi, "");
+
+  const states = new Set(element.states ?? []);
+  const requiredStates = [...compound.matchAll(/:(hover|focus-visible|focus|active|disabled|checked|open|visited|target)\b/gi)]
+    .map((match) => match[1].toLowerCase());
+  if (requiredStates.some((state) => !states.has(state))) return false;
+  compound = compound.replace(/:(hover|focus-visible|focus|active|disabled|checked|open|visited|target)\b/gi, "");
+
+  const classes = element.classes ?? [];
+  for (const requiredClass of readScopedClassIdentities(encodedCompound)) {
+    if (!classes.some((candidate) => (
+      candidate.name === requiredClass.name && candidate.scope === requiredClass.scope
+    ))) return false;
+  }
+
+  const attributes = element.attributes ?? {};
+  for (const match of compound.matchAll(/\[([\w-]+)(?:\s*=\s*["']?([^"'\]]+)["']?)?\]/g)) {
+    const [, name, expectedValue] = match;
+    if (!(name in attributes)) return false;
+    if (expectedValue !== undefined && attributes[name] !== expectedValue.trim()) return false;
+  }
+
+  const withoutTokens = compound
+    .replace(/#[\w-]+/g, "")
+    .replace(/\.[\w-]+/g, "")
+    .replace(/\[[^\]]+\]/g, "")
+    .replace(/:[\w-]+(?:\([^)]*\))?/g, "")
+    .trim();
+  if (withoutTokens && withoutTokens !== "*" && withoutTokens.toLowerCase() !== element.tag?.toLowerCase()) {
+    return false;
+  }
+
+  return true;
+}
+
+interface CssProtectedSelectorState {
+  parentAncestorIndex: number;
+  adjacentPreviousSiblings: readonly CssAuditElement[];
+  generalPreviousSiblings: readonly CssAuditElement[];
+}
+
+function selectorMatchesProtectedTarget(
+  compounds: readonly CssSelectorCompound[],
+  combinators: readonly CssSelectorCombinator[],
+  target: CssAuditTarget,
+) {
+  const ancestors = target.ancestors ?? [];
+  let states: CssProtectedSelectorState[] = [{
+    parentAncestorIndex: 0,
+    adjacentPreviousSiblings: target.adjacentPreviousSiblings ?? [],
+    generalPreviousSiblings: target.generalPreviousSiblings ?? [],
+  }];
+
+  for (let index = compounds.length - 2; index >= 0; index -= 1) {
+    const combinator = combinators[index];
+    const nextStates: CssProtectedSelectorState[] = [];
+    for (const state of states) {
+      if (combinator === "child") {
+        const ancestor = ancestors[state.parentAncestorIndex];
+        if (ancestor && compoundMatchesElement(compounds[index], ancestor)) {
+          nextStates.push({
+            parentAncestorIndex: state.parentAncestorIndex + 1,
+            adjacentPreviousSiblings: ancestor.adjacentPreviousSiblings ?? [],
+            generalPreviousSiblings: ancestor.generalPreviousSiblings ?? [],
+          });
+        }
+        continue;
+      }
+      if (combinator === "descendant") {
+        for (let ancestorIndex = state.parentAncestorIndex; ancestorIndex < ancestors.length; ancestorIndex += 1) {
+          const ancestor = ancestors[ancestorIndex];
+          if (!compoundMatchesElement(compounds[index], ancestor)) continue;
+          nextStates.push({
+            parentAncestorIndex: ancestorIndex + 1,
+            adjacentPreviousSiblings: ancestor.adjacentPreviousSiblings ?? [],
+            generalPreviousSiblings: ancestor.generalPreviousSiblings ?? [],
+          });
+        }
+        continue;
+      }
+      const siblingCandidates = combinator === "adjacent"
+        ? state.adjacentPreviousSiblings
+        : state.generalPreviousSiblings;
+      for (const sibling of siblingCandidates) {
+        if (!compoundMatchesElement(compounds[index], sibling)) continue;
+        nextStates.push({
+          parentAncestorIndex: state.parentAncestorIndex,
+          adjacentPreviousSiblings: sibling.adjacentPreviousSiblings ?? [],
+          generalPreviousSiblings: sibling.generalPreviousSiblings ?? [],
+        });
+      }
+    }
+
+    if (nextStates.length > 0) {
+      states = nextStates;
+      continue;
+    }
+    return false;
+  }
+  return states.length > 0;
+}
+
+function selectorMatchesTarget(selector: CssParsedSelector, target: CssAuditTarget) {
+  if (/:has\(/.test(selector.source)) return false;
+  const { compounds, combinators } = selector;
+  if (compounds.length === 0 || !compoundMatchesElement(compounds.at(-1)!, target)) return false;
+  if (target.useStructuralSelectorMatcher) {
+    return selectorMatchesProtectedTarget(compounds, combinators, target);
+  }
+
+  const ancestors = target.ancestors ?? [];
+  let ancestorIndex = 0;
+  for (let index = compounds.length - 2; index >= 0; index -= 1) {
+    const combinator = combinators[index];
+    if (combinator === "descendant" || combinator === "child") {
+      let candidateIndex = ancestorIndex;
+      const maximumAncestorIndex = combinator === "child"
+        ? Math.min(ancestors.length, ancestorIndex + 1)
+        : ancestors.length;
+      while (candidateIndex < maximumAncestorIndex) {
+        if (compoundMatchesElement(compounds[index], ancestors[candidateIndex])) {
+          ancestorIndex = candidateIndex + 1;
+          break;
+        }
+        candidateIndex += 1;
+      }
+      if (candidateIndex < maximumAncestorIndex) continue;
+    }
+
+    // El extremo derecho y la cadena estructural conocida ya identifican el objetivo.
+    // Cualquier resto a la izquierda es un prefijo contextual potencial, no una allowlist
+    // de shells. Su especificidad completa sigue participando en la cascada.
+    const externalTag = compounds[index].source
+      .replace(/:[\w-]+(?:\([^)]*\))?/g, "")
+      .trim()
+      .toLowerCase();
+    if (
+      combinator === "descendant" &&
+      /^(?:html|body|main)$/.test(externalTag) &&
+      !/[.#\[]/.test(compounds[index].source)
+    ) {
+      ancestorIndex = ancestors.length;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+function cssSpecificity(selector: CssParsedSelector) {
+  const specificitySource = selector.source.replace(/:where\([^)]*\)/g, "");
+  const ids = (specificitySource.match(/#[\w-]+/g) ?? []).length;
+  const classes = (specificitySource.match(/\.[\w-]+/g) ?? []).length;
+  const attributes = (specificitySource.match(/\[[^\]]+\]/g) ?? []).length;
+  const pseudoElements = (specificitySource.match(/::[\w-]+/g) ?? []).length;
+  const withoutPseudoElements = specificitySource.replace(/::[\w-]+/g, "");
+  const pseudoClasses = (withoutPseudoElements.match(/:(?!:|global\b)[\w-]+/g) ?? [])
+    .filter((pseudoClass) => !/^:(?:not|is|where|has)$/.test(pseudoClass))
+    .length;
+  const types = selector.compounds.filter((compound) => (
+    /^[a-z][\w-]*/i.test(compound.source) && !/^:/.test(compound.source)
+  )).length;
+  return [ids, classes + attributes + pseudoClasses, types + pseudoElements] as const;
+}
+
+function compareSpecificity(left: readonly number[], right: readonly number[]) {
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return 0;
+}
+
+function resolveDeclarationValue(declaration: CssDeclaration, property: string) {
+  if (declaration.property === property) return declaration.value;
+  if (property === "background-color" && declaration.property === "background") {
+    return declaration.value;
+  }
+  if (property === "background-image" && declaration.property === "background") {
+    return /(?:gradient|url|image-set)\s*\(/i.test(declaration.value) ? declaration.value : "none";
+  }
+  if (
+    (property === "overflow-x" || property === "overflow-y") &&
+    declaration.property === "overflow"
+  ) return declaration.value;
+  if (/^margin-(?:top|right|bottom|left)$/.test(property) && declaration.property === "margin") {
+    const tokens = splitCssValueTokens(declaration.value);
+    if (tokens.length === 1) return tokens[0];
+    const side = property.slice("margin-".length);
+    if (tokens.length === 2) return side === "top" || side === "bottom" ? tokens[0] : tokens[1];
+    if (tokens.length === 3) {
+      if (side === "top") return tokens[0];
+      if (side === "bottom") return tokens[2];
+      return tokens[1];
+    }
+    return tokens[{ top: 0, right: 1, bottom: 2, left: 3 }[side as "top" | "right" | "bottom" | "left"]];
+  }
+  if (
+    (property === "margin-left" || property === "margin-right") &&
+    declaration.property === "margin-inline"
+  ) {
+    const tokens = splitCssValueTokens(declaration.value);
+    return property === "margin-left" ? tokens[0] : (tokens[1] ?? tokens[0]);
+  }
+  if (/^padding-(?:top|right|bottom|left)$/.test(property) && declaration.property === "padding") {
+    const tokens = splitCssValueTokens(declaration.value);
+    if (tokens.length === 1) return tokens[0];
+    const side = property.slice("padding-".length);
+    if (tokens.length === 2) return side === "top" || side === "bottom" ? tokens[0] : tokens[1];
+    if (tokens.length === 3) {
+      if (side === "top") return tokens[0];
+      if (side === "bottom") return tokens[2];
+      return tokens[1];
+    }
+    return tokens[{ top: 0, right: 1, bottom: 2, left: 3 }[side as "top" | "right" | "bottom" | "left"]];
+  }
+  if (
+    (property === "padding-left" || property === "padding-right") &&
+    declaration.property === "padding-inline"
+  ) {
+    const tokens = splitCssValueTokens(declaration.value);
+    return property === "padding-left" ? tokens[0] : (tokens[1] ?? tokens[0]);
+  }
+  if (
+    (property === "border-left-width" || property === "border-right-width") &&
+    declaration.property === "border"
+  ) {
+    return splitCssValueTokens(declaration.value)[0] ?? null;
+  }
+  return null;
+}
+
+function readEffectiveCssProperty(input: {
+  rules: readonly CssExecutableRule[];
+  target: CssAuditTarget;
+  property: string;
+  viewportWidth: number;
+  required?: boolean;
+}) {
+  let winner: {
+    value: string;
+    important: boolean;
+    specificity: readonly number[];
+    order: number;
+  } | null = null;
+
+  for (const rule of input.rules) {
+    if (input.viewportWidth < rule.minWidth || input.viewportWidth > rule.maxWidth) continue;
+    for (const selector of rule.selectors) {
+      if (!selectorMatchesTarget(selector, input.target)) continue;
+      const specificity = cssSpecificity(selector);
+      for (const declaration of rule.declarations) {
+        const value = resolveDeclarationValue(declaration, input.property);
+        if (value === null) continue;
+        const order = (rule.order * 1000) + declaration.declarationOrder;
+        const wins = !winner ||
+          Number(declaration.important) > Number(winner.important) ||
+          (
+            declaration.important === winner.important &&
+            (
+              compareSpecificity(specificity, winner.specificity) > 0 ||
+              (compareSpecificity(specificity, winner.specificity) === 0 && order > winner.order)
+            )
+          );
+        if (wins) winner = { value, important: declaration.important, specificity, order };
+      }
+    }
+  }
+
+  if (!winner) {
+    assert.equal(
+      input.required,
+      false,
+      `${input.target.label}: falta ${input.property} efectivo a ${input.viewportWidth}px`,
+    );
+    return null;
+  }
+  return winner.value;
+}
+
+function readEffectiveInheritedCssProperty(input: {
+  rules: readonly CssExecutableRule[];
+  target: CssAuditTarget;
+  property: string;
+  viewportWidth: number;
+}) {
+  const direct = readEffectiveCssProperty({ ...input, required: false });
+  if (direct !== null) return direct;
+
+  const ancestors = input.target.ancestors ?? [];
+  for (let index = 0; index < ancestors.length; index += 1) {
+    const value = readEffectiveCssProperty({
+      rules: input.rules,
+      target: {
+        ...ancestors[index],
+        label: `${input.target.label} (ancestro ${index + 1})`,
+        ancestors: ancestors.slice(index + 1),
+      },
+      property: input.property,
+      viewportWidth: input.viewportWidth,
+      required: false,
+    });
+    if (value !== null) return value;
+  }
+
+  return null;
+}
+
+function readHexToken(styles: string, token: string) {
+  const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = styles.match(new RegExp(`${escapedToken}:\\s*(#[0-9a-f]{6});`, "i"));
+  assert.ok(match, `falta el token hexadecimal ${token}`);
+  return match[1];
+}
+
+function relativeLuminance(hex: string) {
+  const channels = hex.slice(1).match(/.{2}/g);
+  assert.ok(channels && channels.length === 3, `color hexadecimal inválido: ${hex}`);
+  const [red, green, blue] = channels.map((channel) => {
+    const value = Number.parseInt(channel, 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
+}
+
+function contrastRatio(foreground: string, background: string) {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function assertAccessibleSmallTextContrast(input: {
+  globalStyles: string;
+  ruleBody: string;
+  label: string;
+}) {
+  const foregroundValue = readCssProperty(input.ruleBody, "color");
+  const backgroundValue = readCssProperty(input.ruleBody, "background");
+  const foregroundToken = foregroundValue.match(/^var\((--[a-z-]+)\)$/)?.[1];
+  const backgroundToken = backgroundValue.match(/^var\((--[a-z-]+)\)$/)?.[1];
+  assert.ok(foregroundToken, `${input.label}: el foreground debe usar un token global directo`);
+  assert.ok(backgroundToken, `${input.label}: el background debe usar un token global directo`);
+  const ratio = contrastRatio(
+    readHexToken(input.globalStyles, foregroundToken),
+    readHexToken(input.globalStyles, backgroundToken),
+  );
+  assert.ok(ratio >= 4.5, `${input.label}: contraste ${ratio.toFixed(2)} menor que WCAG AA 4.5:1`);
+}
+
+function assertMobileFontAtLeast16Px(ruleBody: string, label: string) {
+  const fontSize = readCssProperty(ruleBody, "font-size");
+  const match = fontSize.match(/^(\d*\.?\d+)(px|rem)$/);
+  assert.ok(match, `${label}: font-size móvil debe expresarse en px o rem`);
+  const sizeInPixels = Number(match[1]) * (match[2] === "rem" ? 16 : 1);
+  assert.ok(sizeInPixels >= 16, `${label}: ${sizeInPixels}px provoca autozoom en iOS`);
+}
+
+const mobileAuditWidths = [320, 360, 361, 375, 390, 393, 400, 401, 420, 421, 430] as const;
+
+interface RenderedJsxClassModel {
+  globalClasses: readonly string[];
+  localClasses: readonly string[];
+}
+
+interface RenderedSeriesDomModel {
+  target: CssAuditElement;
+  ancestors: readonly CssAuditElement[];
+  card: CssAuditElement;
+}
+
+function readRenderedJsxClassModel(
+  node: ts.JsxElement,
+  fileName: string,
+  label: string,
+): RenderedJsxClassModel {
+  const classNameAttributes = node.openingElement.attributes.properties.filter(
+    (property): property is ts.JsxAttribute => (
+      ts.isJsxAttribute(property) && property.name.getText() === "className"
+    ),
+  );
+  assert.ok(
+    classNameAttributes.length <= 1,
+    `UI-NAV-01V DOM: ${fileName} no puede duplicar className en ${label}`,
+  );
+  if (classNameAttributes.length === 0) return { globalClasses: [], localClasses: [] };
+
+  const globalClasses: string[] = [];
+  const localClasses: string[] = [];
+  const addGlobalClasses = (literal: string) => {
+    for (const className of literal.split(/\s+/).filter(Boolean)) {
+      assert.match(
+        className,
+        /^[_a-z][\w-]*$/i,
+        `UI-NAV-01V DOM: ${fileName} contiene una clase global no literal en ${label}`,
+      );
+      globalClasses.push(className);
+    }
+  };
+  const addExpression = (expression: ts.Expression) => {
+    const unwrapped = unwrapTypeScriptExpression(expression);
+    assert.ok(
+      ts.isPropertyAccessExpression(unwrapped) &&
+      ts.isIdentifier(unwrapped.expression) &&
+      unwrapped.expression.text === "styles",
+      `UI-NAV-01V DOM: ${fileName} debe expresar las clases locales de ${label} mediante styles.<clase>`,
+    );
+    localClasses.push(unwrapped.name.text);
+  };
+
+  const initializer = classNameAttributes[0].initializer;
+  assert.ok(initializer, `UI-NAV-01V DOM: ${fileName} debe inicializar className en ${label}`);
+  if (ts.isStringLiteral(initializer)) {
+    addGlobalClasses(initializer.text);
+  } else {
+    assert.ok(
+      ts.isJsxExpression(initializer) && initializer.expression,
+      `UI-NAV-01V DOM: ${fileName} debe usar un className estructural en ${label}`,
+    );
+    const expression = unwrapTypeScriptExpression(initializer.expression);
+    if (ts.isNoSubstitutionTemplateLiteral(expression) || ts.isStringLiteral(expression)) {
+      addGlobalClasses(expression.text);
+    } else if (ts.isTemplateExpression(expression)) {
+      addGlobalClasses(expression.head.text);
+      for (const span of expression.templateSpans) {
+        addExpression(span.expression);
+        addGlobalClasses(span.literal.text);
+      }
+    } else {
+      addExpression(expression);
+    }
+  }
+
+  assert.equal(
+    new Set(globalClasses).size,
+    globalClasses.length,
+    `UI-NAV-01V DOM: ${fileName} no puede duplicar clases globales en ${label}`,
+  );
+  assert.equal(
+    new Set(localClasses).size,
+    localClasses.length,
+    `UI-NAV-01V DOM: ${fileName} no puede duplicar clases locales en ${label}`,
+  );
+  return { globalClasses, localClasses };
+}
+
+function assertRenderedClassModel(
+  actual: RenderedJsxClassModel,
+  expected: RenderedJsxClassModel,
+  fileName: string,
+  label: string,
+) {
+  assert.deepEqual(
+    [...actual.globalClasses].sort(),
+    [...expected.globalClasses].sort(),
+    `UI-NAV-01V DOM: ${fileName} debe conservar las clases globales reales de ${label}`,
+  );
+  assert.deepEqual(
+    [...actual.localClasses].sort(),
+    [...expected.localClasses].sort(),
+    `UI-NAV-01V DOM: ${fileName} debe conservar las clases CSS Module reales de ${label}`,
+  );
+}
+
+function toCssAuditElement(node: ts.JsxElement, classes: RenderedJsxClassModel): CssAuditElement {
+  return {
+    tag: node.openingElement.tagName.getText(),
+    classes: mergeCssClasses(
+      localCssClasses(...classes.localClasses),
+      globalCssClasses(...classes.globalClasses),
+    ),
+  };
+}
+
+function readRenderedSeriesDomModel(input: {
+  source: string;
+  fileName: string;
+  expectedCardGlobalClasses: readonly string[];
+}) {
+  const sourceFile = ts.createSourceFile(
+    input.fileName,
+    input.source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  assert.equal(
+    readTypeScriptParseDiagnostics(sourceFile).length,
+    0,
+    `UI-NAV-01V DOM: ${input.fileName} debe conservar sintaxis TSX válida`,
+  );
+
+  const seriesCells: ts.JsxElement[] = [];
+  const collectSeriesCells = (node: ts.Node) => {
+    if (
+      ts.isJsxElement(node) &&
+      node.openingElement.tagName.getText() === "span" &&
+      node.children.some((child) => ts.isJsxText(child) && child.text.trim() === "Series")
+    ) {
+      seriesCells.push(node);
+    }
+    ts.forEachChild(node, collectSeriesCells);
+  };
+  collectSeriesCells(sourceFile);
+  assert.equal(
+    seriesCells.length,
+    1,
+    `UI-NAV-01V DOM: ${input.fileName} debe renderizar una única celda Series`,
+  );
+
+  const seriesCell = seriesCells[0];
+  const renderedAncestors: ts.JsxElement[] = [];
+  for (let parent: ts.Node | undefined = seriesCell.parent; parent; parent = parent.parent) {
+    if (ts.isJsxElement(parent)) renderedAncestors.push(parent);
+  }
+  const expectedAncestorTags = ["div", "div", "section", "article", "section"];
+  assert.deepEqual(
+    renderedAncestors.slice(0, expectedAncestorTags.length).map((node) => node.openingElement.tagName.getText()),
+    expectedAncestorTags,
+    `UI-NAV-01V DOM: ${input.fileName} debe conservar la cadena Series→tabla→sección→card→screen`,
+  );
+
+  const expectedClassModels: readonly RenderedJsxClassModel[] = [
+    { globalClasses: [], localClasses: ["tableHeader"] },
+    { globalClasses: [], localClasses: ["exerciseTable"] },
+    { globalClasses: [], localClasses: ["planSection"] },
+    { globalClasses: input.expectedCardGlobalClasses, localClasses: ["workoutCard"] },
+    { globalClasses: ["screen"], localClasses: ["screen"] },
+  ];
+  const ancestors = renderedAncestors.slice(0, expectedClassModels.length).map((node, index) => {
+    const classModel = readRenderedJsxClassModel(
+      node,
+      input.fileName,
+      `${expectedAncestorTags[index]} ancestro ${index + 1} de Series`,
+    );
+    assertRenderedClassModel(
+      classModel,
+      expectedClassModels[index],
+      input.fileName,
+      `${expectedAncestorTags[index]} ancestro ${index + 1} de Series`,
+    );
+    return toCssAuditElement(node, classModel);
+  });
+
+  const tableHeader = renderedAncestors[0];
+  const renderedCells = tableHeader.children.filter((child): child is ts.JsxElement => (
+    ts.isJsxElement(child) && child.openingElement.tagName.getText() === "span"
+  ));
+  const seriesCellIndex = renderedCells.indexOf(seriesCell);
+  assert.equal(
+    seriesCellIndex,
+    1,
+    `UI-NAV-01V DOM: ${input.fileName} debe mantener Series después de Ejercicios`,
+  );
+  const previousSiblings = renderedCells.slice(0, seriesCellIndex).map((sibling) => (
+    toCssAuditElement(
+      sibling,
+      readRenderedJsxClassModel(sibling, input.fileName, "hermano anterior de Series"),
+    )
+  ));
+  const cardIndex = ancestors.findIndex((ancestor) => ancestor.tag === "article");
+  assert.equal(cardIndex, 3, `UI-NAV-01V DOM: ${input.fileName} debe conservar la card como cuarto ancestro`);
+
+  return {
+    target: {
+      tag: "span",
+      adjacentPreviousSiblings: previousSiblings.slice(-1),
+      generalPreviousSiblings: previousSiblings,
+    },
+    ancestors,
+    card: ancestors[cardIndex],
+  } satisfies RenderedSeriesDomModel;
+}
+
+const startSeriesDomModel = readRenderedSeriesDomModel({
+  source: files.start,
+  fileName: "TrainingStartScreen.tsx",
+  expectedCardGlobalClasses: ["card", "wide", "training-start-card"],
+});
+const guidedSeriesDomModel = readRenderedSeriesDomModel({
+  source: files.guided,
+  fileName: "GuidedTrainingScreen.tsx",
+  expectedCardGlobalClasses: ["card", "wide", "routine-summary-card", "mobile-series-card"],
+});
+const activeWorkoutScreenClasses = mergeCssClasses(
+  localCssClasses("screen"),
+  globalCssClasses("screen"),
+);
+const activeWorkoutCardClasses = mergeCssClasses(
+  localCssClasses("workoutCard"),
+  globalCssClasses("card"),
+);
+const userPortalSeriesAncestors: readonly CssAuditElement[] = [
+  { tag: "div" },
+  { tag: "div" },
+  { tag: "main", classes: globalCssClasses("app-shell") },
+  { tag: "body" },
+  { tag: "html" },
+];
+
+const cssAuditTargets = {
+  body: { label: "viewport", tag: "body" },
+  shell: { label: "app shell", classes: globalCssClasses("app-shell") },
+  topbar: {
+    label: "topbar",
+    classes: globalCssClasses("topbar"),
+    ancestors: [{ classes: globalCssClasses("app-shell") }],
+  },
+  backRow: {
+    label: "zona Back",
+    classes: globalCssClasses("section-back-row"),
+    ancestors: [{ classes: globalCssClasses("app-shell") }],
+  },
+  screen: { label: "canvas TRAIN-UI-01", classes: activeWorkoutScreenClasses },
+  startCard: {
+    label: "tarjeta inicial",
+    ...startSeriesDomModel.card,
+    ancestors: [{ classes: activeWorkoutScreenClasses }],
+  },
+  guidedCard: {
+    label: "tarjeta guiada",
+    ...guidedSeriesDomModel.card,
+    ancestors: [{ classes: activeWorkoutScreenClasses }],
+  },
+  referencePanel: {
+    label: "panel de referencia",
+    tag: "div",
+    classes: mergeCssClasses(
+      localCssClasses("referencePanel"),
+      globalCssClasses("exercise-reference-card"),
+    ),
+    ancestors: [
+      { classes: activeWorkoutCardClasses },
+      { classes: activeWorkoutScreenClasses },
+    ],
+  },
+  startIntro: {
+    label: "introducción de Entrenemos",
+    tag: "header",
+    classes: mergeCssClasses(localCssClasses("startIntro"), globalCssClasses("wide")),
+    ancestors: [{ classes: activeWorkoutScreenClasses }],
+  },
+  startHeading: {
+    label: "título inicial",
+    tag: "h2",
+    ancestors: [
+      { classes: localCssClasses("startIntro") },
+      { classes: activeWorkoutScreenClasses },
+    ],
+  },
+  routineHeading: {
+    label: "título de rutina",
+    tag: "h2",
+    ancestors: [
+      { classes: localCssClasses("routineTitle") },
+      { classes: localCssClasses("routineHeader") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  routineSubheading: {
+    label: "subtítulo de rutina",
+    tag: "p",
+    ancestors: [
+      { classes: localCssClasses("routineTitle") },
+      { classes: localCssClasses("routineHeader") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  sectionHeading: {
+    label: "título de sección",
+    tag: "h3",
+    ancestors: [
+      { classes: localCssClasses("sectionHeading") },
+      { classes: localCssClasses("planSection") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  newRecordHeading: {
+    label: "título de nuevo registro",
+    tag: "h3",
+    ancestors: [
+      { classes: localCssClasses("newRecord") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  objectivesHeading: {
+    label: "título de objetivos",
+    tag: "h3",
+    ancestors: [
+      { classes: localCssClasses("objectives") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  metricGrid: {
+    label: "grilla de métricas",
+    tag: "div",
+    classes: globalCssClasses("metric-grid", "wide", "dashboard-metric-grid", "routine-metric-grid"),
+    ancestors: [
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  firstMetricCard: {
+    label: "primera tarjeta métrica",
+    tag: "div",
+    classes: globalCssClasses("metric"),
+    childIndex: 1,
+    ancestors: [
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  secondMetricCard: {
+    label: "segunda tarjeta métrica",
+    tag: "div",
+    classes: globalCssClasses("metric"),
+    childIndex: 2,
+    ancestors: [
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  thirdMetricCard: {
+    label: "tercera tarjeta métrica",
+    tag: "div",
+    classes: globalCssClasses("metric"),
+    childIndex: 3,
+    ancestors: [
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  firstMetricLabel: {
+    label: "primera etiqueta métrica",
+    tag: "span",
+    ancestors: [
+      { classes: globalCssClasses("metric-title-row") },
+      { classes: globalCssClasses("metric"), childIndex: 1 },
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  secondMetricLabel: {
+    label: "segunda etiqueta métrica",
+    tag: "span",
+    ancestors: [
+      { classes: globalCssClasses("metric-title-row") },
+      { classes: globalCssClasses("metric"), childIndex: 2 },
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  thirdMetricLabel: {
+    label: "tercera etiqueta métrica",
+    tag: "span",
+    ancestors: [
+      { classes: globalCssClasses("metric-title-row") },
+      { classes: globalCssClasses("metric"), childIndex: 3 },
+      { classes: globalCssClasses("metric-grid", "dashboard-metric-grid", "routine-metric-grid") },
+      { classes: localCssClasses("metricScope") },
+      { classes: activeWorkoutCardClasses },
+    ],
+  },
+  routineHeader: {
+    label: "cabecera de rutina",
+    classes: localCssClasses("routineHeader"),
+    ancestors: [{ classes: activeWorkoutCardClasses }],
+  },
+  routineTitle: {
+    label: "contenedor del título de rutina",
+    classes: localCssClasses("routineTitle"),
+    ancestors: [{ classes: localCssClasses("routineHeader") }, { classes: activeWorkoutCardClasses }],
+  },
+  routineControls: {
+    label: "controles de rutina",
+    classes: localCssClasses("routineControls"),
+    ancestors: [{ classes: localCssClasses("routineHeader") }, { classes: activeWorkoutCardClasses }],
+  },
+  daySelector: {
+    label: "wrapper táctil del selector de día",
+    tag: "label",
+    classes: localCssClasses("daySelector"),
+    ancestors: [{ classes: localCssClasses("routineControls") }, { classes: localCssClasses("routineHeader") }],
+  },
+  daySelect: {
+    label: "selector de día",
+    tag: "select",
+    ancestors: [
+      { tag: "label", classes: localCssClasses("daySelector") },
+      { classes: localCssClasses("routineControls") },
+    ],
+  },
+  editButton: {
+    label: "botón Editar",
+    tag: "button",
+    classes: mergeCssClasses(localCssClasses("editRoutineButton"), globalCssClasses("icon-button")),
+    ancestors: [{ classes: localCssClasses("routineControls") }, { classes: localCssClasses("routineHeader") }],
+  },
+  editButtonBefore: {
+    label: "caja visual del botón Editar",
+    tag: "button",
+    classes: mergeCssClasses(localCssClasses("editRoutineButton"), globalCssClasses("icon-button")),
+    pseudoElement: "before",
+    ancestors: [{ classes: localCssClasses("routineControls") }, { classes: localCssClasses("routineHeader") }],
+  },
+  editButtonIcon: {
+    label: "ícono del botón Editar",
+    tag: "svg",
+    ancestors: [
+      {
+        tag: "button",
+        classes: mergeCssClasses(localCssClasses("editRoutineButton"), globalCssClasses("icon-button")),
+      },
+      { classes: localCssClasses("routineControls") },
+    ],
+  },
+  exerciseTable: {
+    label: "tabla de ejercicios",
+    classes: localCssClasses("exerciseTable"),
+    ancestors: [{ classes: localCssClasses("planSection") }, { classes: activeWorkoutCardClasses }],
+  },
+  tableHeader: {
+    label: "cabecera de tabla de ejercicios",
+    classes: localCssClasses("tableHeader"),
+    ancestors: [{ classes: localCssClasses("exerciseTable") }, { classes: localCssClasses("planSection") }],
+  },
+  tableHeaderCell: {
+    label: "celda de cabecera de tabla de ejercicios",
+    ...startSeriesDomModel.target,
+    ancestors: startSeriesDomModel.ancestors.slice(0, 2),
+    useStructuralSelectorMatcher: true,
+  },
+  startTableHeaderCell: {
+    label: "celda Series de Entrenemos inicial",
+    ...startSeriesDomModel.target,
+    ancestors: [
+      ...startSeriesDomModel.ancestors,
+      ...userPortalSeriesAncestors,
+    ],
+    useStructuralSelectorMatcher: true,
+  },
+  guidedTableHeaderCell: {
+    label: "celda Series del entrenamiento guiado",
+    ...guidedSeriesDomModel.target,
+    ancestors: [
+      ...guidedSeriesDomModel.ancestors,
+      ...userPortalSeriesAncestors,
+    ],
+    useStructuralSelectorMatcher: true,
+  },
+  tableRow: {
+    label: "fila de ejercicios",
+    classes: localCssClasses("tableRow"),
+    ancestors: [{ classes: localCssClasses("exerciseTable") }, { classes: localCssClasses("planSection") }],
+  },
+  selectableRow: {
+    label: "fila seleccionable",
+    tag: "button",
+    classes: localCssClasses("selectableTableRow"),
+    attributes: { "aria-pressed": "true" },
+    ancestors: [{ classes: localCssClasses("exerciseRows") }, { classes: localCssClasses("exerciseTable") }],
+  },
+  tableCell: {
+    label: "celda de ejercicios",
+    tag: "span",
+    ancestors: [{ classes: localCssClasses("tableRow") }, { classes: localCssClasses("exerciseTable") }],
+  },
+  disclosureContent: {
+    label: "contenido desplegable",
+    classes: localCssClasses("disclosureContent"),
+    ancestors: [{
+      classes: mergeCssClasses(
+        localCssClasses("referencePanel"),
+        globalCssClasses("exercise-reference-card"),
+      ),
+    }],
+  },
+  seriesDetailList: {
+    label: "detalle de series",
+    tag: "div",
+    classes: globalCssClasses("exercise-series-detail-list"),
+    ancestors: [
+      { classes: localCssClasses("disclosureContent") },
+      { classes: localCssClasses("referencePanel") },
+    ],
+  },
+  loadingHistory: {
+    label: "estado loading del historial",
+    tag: "div",
+    classes: localCssClasses("loadingState"),
+    ancestors: [
+      { classes: localCssClasses("disclosureContent") },
+      { classes: localCssClasses("referencePanel") },
+    ],
+  },
+  historyStatus: {
+    label: "estado textual del historial",
+    tag: "p",
+    classes: localCssClasses("historyStatus"),
+    ancestors: [
+      { classes: localCssClasses("disclosureContent") },
+      { classes: localCssClasses("referencePanel") },
+    ],
+  },
+  todayGoal: {
+    label: "objetivo de hoy",
+    tag: "p",
+    classes: localCssClasses("todayGoal"),
+    ancestors: [
+      { classes: localCssClasses("disclosureContent") },
+      { classes: localCssClasses("referencePanel") },
+    ],
+  },
+} satisfies Record<string, CssAuditTarget>;
+
+function assertProtectedFileIntegrity(sources: ProtectedFileSources) {
+  for (const [path, expectedHash] of Object.entries(protectedFileHashes) as Array<[
+    ProtectedFilePath,
+    string,
+  ]>) {
+    assert.equal(
+      sha256(sources[path]),
+      expectedHash,
+      `integridad byte a byte: cambió el archivo protegido ${path}`,
+    );
+  }
+}
+
+function readTypeScriptParseDiagnostics(sourceFile: ts.SourceFile) {
+  return (sourceFile as ts.SourceFile & {
+    parseDiagnostics?: readonly ts.Diagnostic[];
+  }).parseDiagnostics ?? [];
+}
+
+function assertValidTypeScriptMutation(source: string, fileName: string, scriptKind: ts.ScriptKind) {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, scriptKind);
+  assert.equal(
+    readTypeScriptParseDiagnostics(sourceFile).length,
+    0,
+    `${fileName}: el probe debe conservar sintaxis TypeScript válida`,
+  );
+}
+
+function readJsxStylesClassName(node: ts.JsxElement, className: string) {
+  const attribute = node.openingElement.attributes.properties.find((property): property is ts.JsxAttribute => (
+    ts.isJsxAttribute(property) && property.name.getText() === "className"
+  ));
+  if (!attribute?.initializer || !ts.isJsxExpression(attribute.initializer)) return false;
+  const expression = attribute.initializer.expression;
+  return Boolean(
+    expression &&
+    ts.isPropertyAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "styles" &&
+    expression.name.text === className
+  );
+}
+
+const approvedRoutineHeaderDays = [
+  "Lunes",
+  "Martes",
+  "Miércoles",
+  "Jueves",
+  "Viernes",
+  "Sábado",
+  "Domingo",
+] as const;
+
+const approvedRoutineTextPixels = 15;
+const approvedDaySelectPixels = 116;
+const approvedDaySelectUsefulInlinePixels = 82;
+// Roboto Mono avanza nominalmente ~0.60em. El contrato usa 0.64em y redondea hacia arriba para
+// absorber rasterización/subpíxeles sin fingir una medición de navegador.
+const conservativeMonospaceAdvanceEm = 0.64;
+const nominalMonospaceAdvanceEm = 0.6;
+
+function countWordWrappedLines(copy: string, maxCharacters: number, label = "etiqueta métrica") {
+  let lines = 1;
+  let currentCharacters = 0;
+  for (const word of copy.split(" ")) {
+    assert.ok(
+      word.length <= maxCharacters,
+      `${label}: “${word}” excede por sí sola el ancho efectivo de ${maxCharacters}ch`,
+    );
+    const nextCharacters = currentCharacters === 0
+      ? word.length
+      : currentCharacters + 1 + word.length;
+    if (nextCharacters <= maxCharacters) {
+      currentCharacters = nextCharacters;
+    } else {
+      lines += 1;
+      currentCharacters = word.length;
+    }
+  }
+  return lines;
+}
+
+const metricLabelProtectionPolicies = [
+  {
+    target: cssAuditTargets.firstMetricLabel,
+    copy: "Total de KG de la rutina",
+    expectedMaxWidth: "13ch",
+    expectedLines: 2,
+  },
+  {
+    target: cssAuditTargets.secondMetricLabel,
+    copy: "Total Reps",
+    expectedMaxWidth: "7ch",
+    expectedLines: 2,
+  },
+  {
+    target: cssAuditTargets.thirdMetricLabel,
+    copy: "Total ejercicios registrados",
+    expectedMaxWidth: "12ch",
+    expectedLines: 3,
+  },
+] as const;
+
+interface RoutineHeaderGeometryResult {
+  viewportWidth: number;
+  layout: "stacked" | "side-by-side";
+  headerInlineWidth: number;
+  titleTrackWidth: number;
+  controlsWidth: number;
+  headingFontSize: number;
+  headingLetterSpacing: number;
+  criticalDay: string;
+  criticalTextWidth: number;
+  minimumSlack: number;
+}
+
+function unwrapTypeScriptExpression(expression: ts.Expression): ts.Expression {
+  if (
+    ts.isAsExpression(expression) ||
+    ts.isTypeAssertionExpression(expression) ||
+    ts.isParenthesizedExpression(expression) ||
+    ts.isSatisfiesExpression(expression)
+  ) {
+    return unwrapTypeScriptExpression(expression.expression);
+  }
+  return expression;
+}
+
+function readTrainingDayLabels(source: string) {
+  const sourceFile = ts.createSourceFile(
+    "training-day-order.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  assert.equal(
+    readTypeScriptParseDiagnostics(sourceFile).length,
+    0,
+    "copy geométrico: training-day-order debe conservar sintaxis válida",
+  );
+  let initializer: ts.Expression | null = null;
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === "TRAINING_DAY_LABELS" &&
+      node.initializer
+    ) {
+      assert.equal(initializer, null, "copy geométrico: TRAINING_DAY_LABELS debe declararse una vez");
+      initializer = node.initializer;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  assert.ok(initializer, "copy geométrico: falta TRAINING_DAY_LABELS canónico");
+  const unwrapped = unwrapTypeScriptExpression(initializer);
+  assert.ok(ts.isArrayLiteralExpression(unwrapped), "copy geométrico: TRAINING_DAY_LABELS debe ser un array literal");
+  const labels = unwrapped.elements.map((element) => {
+    assert.ok(ts.isStringLiteral(element), "copy geométrico: cada día debe ser un string literal");
+    return element.text;
+  });
+  assert.deepEqual(
+    labels,
+    approvedRoutineHeaderDays,
+    "copy geométrico: no se permite abreviar ni alterar los días admitidos",
+  );
+  return labels;
+}
+
+function readRoutineHeaderCopyAndAssertDom(source: string, fileName: string) {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  assert.equal(
+    readTypeScriptParseDiagnostics(sourceFile).length,
+    0,
+    `geometría del header: ${fileName} debe conservar sintaxis TSX válida`,
+  );
+  const headers: ts.JsxElement[] = [];
+  const collect = (node: ts.Node) => {
+    if (
+      ts.isJsxElement(node) &&
+      node.openingElement.tagName.getText() === "header" &&
+      readJsxStylesClassName(node, "routineHeader")
+    ) {
+      headers.push(node);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(sourceFile);
+  assert.equal(headers.length, 1, `geometría del header: ${fileName} debe tener un routineHeader ejecutable`);
+  const children = headers[0].children.filter((child) => !ts.isJsxText(child) || child.text.trim().length > 0);
+  assert.equal(children.length, 2, `orden semántico: ${fileName} debe conservar título y controles directos`);
+  assert.ok(
+    ts.isJsxElement(children[0]) && readJsxStylesClassName(children[0], "routineTitle"),
+    `orden semántico: ${fileName} debe mantener el título antes de los controles`,
+  );
+  assert.ok(
+    ts.isJsxElement(children[1]) && readJsxStylesClassName(children[1], "routineControls"),
+    `orden semántico: ${fileName} debe mantener los controles como segundo hijo`,
+  );
+
+  const heading = children[0].children.find((child): child is ts.JsxElement => (
+    ts.isJsxElement(child) && /h[23]/.test(child.openingElement.tagName.getText())
+  ));
+  assert.ok(heading, `copy geométrico: ${fileName} debe conservar el heading de rutina`);
+  const headingChildren = heading.children.filter((child) => !ts.isJsxText(child) || child.text.length > 0);
+  assert.equal(headingChildren.length, 2, `copy geométrico: ${fileName} debe componer prefijo y day sin sustitutos`);
+  assert.ok(ts.isJsxText(headingChildren[0]), `copy geométrico: ${fileName} debe conservar el prefijo literal`);
+  assert.ok(
+    ts.isJsxExpression(headingChildren[1]) &&
+    headingChildren[1].expression &&
+    ts.isIdentifier(headingChildren[1].expression) &&
+    headingChildren[1].expression.text === "day",
+    `copy geométrico: ${fileName} debe conservar el día completo`,
+  );
+  assert.equal(
+    headingChildren[0].text,
+    "Rutina registrada ",
+    `copy geométrico: ${fileName} no puede abreviar el título`,
+  );
+  return headingChildren[0].text;
+}
+
+function assertExerciseTableColumnHeaders(source: string, fileName: string) {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  assert.equal(
+    readTypeScriptParseDiagnostics(sourceFile).length,
+    0,
+    `UI-NAV-01V: ${fileName} debe conservar sintaxis TSX válida`,
+  );
+  const headers: ts.JsxElement[] = [];
+  const collect = (node: ts.Node) => {
+    if (ts.isJsxElement(node) && readJsxStylesClassName(node, "tableHeader")) headers.push(node);
+    ts.forEachChild(node, collect);
+  };
+  collect(sourceFile);
+  assert.equal(headers.length, 1, `UI-NAV-01V: ${fileName} debe conservar una cabecera de ejercicios`);
+  const labels = headers[0].children.flatMap((child) => {
+    if (!ts.isJsxElement(child) || child.openingElement.tagName.getText() !== "span") return [];
+    const textChildren = child.children.filter((item): item is ts.JsxText => ts.isJsxText(item));
+    return [textChildren.map((item) => item.text).join("").trim()];
+  });
+  assert.deepEqual(
+    labels,
+    ["Ejercicios", "Series", "Reps", "KG"],
+    `UI-NAV-01V: ${fileName} debe conservar Series completo y sin abreviaciones`,
+  );
+}
+
+function normalizeCssValue(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/\s*,\s*/g, ",")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    .trim();
+}
+
+const activeWorkoutSeriesViewportWidths = [320, 360, 393, 430] as const;
+const minimumLegibleSeriesHeaderPixels = 9;
+
+function readEffectiveInheritedFontSizePixels(input: {
+  rules: readonly CssExecutableRule[];
+  target: CssAuditTarget;
+  viewportWidth: number;
+}) {
+  const candidates: CssAuditTarget[] = [
+    input.target,
+    ...(input.target.ancestors ?? []).map((ancestor, index) => ({
+      ...ancestor,
+      label: `${input.target.label} (ancestro ${index + 1})`,
+      ancestors: input.target.ancestors?.slice(index + 1),
+    })),
+  ];
+
+  for (const candidate of candidates) {
+    const value = readEffectiveCssProperty({
+      rules: input.rules,
+      target: candidate,
+      property: "font-size",
+      viewportWidth: input.viewportWidth,
+      required: false,
+    });
+    if (value === null) continue;
+    const normalized = normalizeCssValue(value).toLowerCase();
+    if (["inherit", "unset", "revert", "revert-layer"].includes(normalized)) continue;
+    if (normalized === "initial" || normalized === "medium") return 16;
+    return evaluateCssLength(normalized, input.viewportWidth, 16);
+  }
+
+  assert.fail(
+    `UI-NAV-01V: ${input.target.label} debe resolver una fuente efectiva legible a ${input.viewportWidth}px`,
+  );
+}
+
+function assertActiveWorkoutSeriesSurface(
+  rules: readonly CssExecutableRule[],
+  target: CssAuditTarget,
+  surface: "pantalla inicial" | "entrenamiento guiado",
+) {
+  for (const viewportWidth of activeWorkoutSeriesViewportWidths) {
+    assert.equal(
+      readEffectiveInheritedCssProperty({
+        rules,
+        target,
+        property: "white-space",
+        viewportWidth,
+      }),
+      "nowrap",
+      `UI-NAV-01V: Series en ${surface} debe permanecer en una línea a ${viewportWidth}px`,
+    );
+    assert.equal(
+      readEffectiveInheritedCssProperty({
+        rules,
+        target,
+        property: "overflow-wrap",
+        viewportWidth,
+      }),
+      "normal",
+      `UI-NAV-01V: Series en ${surface} no puede partirse internamente a ${viewportWidth}px`,
+    );
+    const fontSizePixels = readEffectiveInheritedFontSizePixels({ rules, target, viewportWidth });
+    if (fontSizePixels < minimumLegibleSeriesHeaderPixels) {
+      assert.fail(
+        `UI-NAV-01V: Series en ${surface} debe conservar una fuente legible a ${viewportWidth}px; fuente efectiva ${fontSizePixels}px`,
+      );
+    }
+  }
+}
+
+function assertActiveWorkoutSeriesHeader(rules: readonly CssExecutableRule[]) {
+  for (const viewportWidth of activeWorkoutSeriesViewportWidths) {
+    const expectedGrid = viewportWidth <= 360
+      ? "minmax(0,1.7fr) minmax(50px,0.66fr) repeat(2,minmax(31px,0.66fr))"
+      : viewportWidth <= 420
+        ? "minmax(0,1.9fr) minmax(50px,0.68fr) repeat(2,minmax(34px,0.68fr))"
+        : "minmax(0,2.25fr) minmax(50px,0.72fr) repeat(2,minmax(38px,0.72fr))";
+    const columns = readEffectiveCssProperty({
+      rules,
+      target: cssAuditTargets.tableHeader,
+      property: "grid-template-columns",
+      viewportWidth,
+    });
+    assert.equal(
+      normalizeCssValue(columns ?? ""),
+      expectedGrid,
+      `UI-NAV-01V: grilla de Entrenemos debe reservar 50px para Series a ${viewportWidth}px`,
+    );
+    assert.equal(
+      readEffectiveInheritedCssProperty({
+        rules,
+        target: cssAuditTargets.tableHeaderCell,
+        property: "white-space",
+        viewportWidth,
+      }),
+      "nowrap",
+      `UI-NAV-01V: Series debe permanecer en una línea en Entrenemos a ${viewportWidth}px`,
+    );
+    assert.equal(
+      readEffectiveInheritedCssProperty({
+        rules,
+        target: cssAuditTargets.tableHeaderCell,
+        property: "overflow-wrap",
+        viewportWidth,
+      }),
+      "normal",
+      `UI-NAV-01V: Series no puede forzar quiebres internos en Entrenemos a ${viewportWidth}px`,
+    );
+  }
+
+  assertActiveWorkoutSeriesSurface(
+    rules,
+    cssAuditTargets.startTableHeaderCell,
+    "pantalla inicial",
+  );
+  assertActiveWorkoutSeriesSurface(
+    rules,
+    cssAuditTargets.guidedTableHeaderCell,
+    "entrenamiento guiado",
+  );
+}
+
+function evaluateCssLength(valueInput: string, viewportWidth: number, percentageBase: number): number {
+  const value = valueInput.trim();
+  const numeric = value.match(/^(-?\d*\.?\d+)(px|rem|vw|%)$/i);
+  if (numeric) {
+    const amount = Number(numeric[1]);
+    if (numeric[2] === "px") return amount;
+    if (numeric[2] === "rem") return amount * 16;
+    if (numeric[2] === "vw") return (amount / 100) * viewportWidth;
+    return (amount / 100) * percentageBase;
+  }
+  for (const functionName of ["min", "max", "clamp"] as const) {
+    const prefix = `${functionName}(`;
+    if (!value.startsWith(prefix) || !value.endsWith(")")) continue;
+    const parts = splitCssOutsideGroups(value.slice(prefix.length, -1), ",")
+      .map((part) => evaluateCssLength(part, viewportWidth, percentageBase));
+    if (functionName === "min") return Math.min(...parts);
+    if (functionName === "max") return Math.max(...parts);
+    assert.equal(parts.length, 3, `geometría del header: clamp inválido ${value}`);
+    return Math.max(parts[0], Math.min(parts[1], parts[2]));
+  }
+  assert.fail(`geometría del header: longitud CSS no soportada ${value}`);
+}
+
+function readEffectiveLength(input: {
+  rules: readonly CssExecutableRule[];
+  target: CssAuditTarget;
+  property: string;
+  viewportWidth: number;
+  percentageBase: number;
+}) {
+  const value = readEffectiveCssProperty(input);
+  assert.ok(value !== null);
+  return evaluateCssLength(value, input.viewportWidth, input.percentageBase);
+}
+
+function readEffectiveLetterSpacing(input: {
+  rules: readonly CssExecutableRule[];
+  target: CssAuditTarget;
+  viewportWidth: number;
+  percentageBase: number;
+}) {
+  const value = readEffectiveCssProperty({
+    ...input,
+    property: "letter-spacing",
+    required: false,
+  });
+  return value === null || value === "normal"
+    ? 0
+    : evaluateCssLength(value, input.viewportWidth, input.percentageBase);
+}
+
+function assertRoutineHeaderGeometry(
+  sources: TrainUi01AuditSources,
+  rules: readonly CssExecutableRule[],
+) {
+  const days = readTrainingDayLabels(sources.trainingDayOrder);
+  const startPrefix = readRoutineHeaderCopyAndAssertDom(sources.start, "TrainingStartScreen.tsx");
+  const guidedPrefix = readRoutineHeaderCopyAndAssertDom(sources.guided, "GuidedTrainingScreen.tsx");
+  assert.equal(startPrefix, guidedPrefix, "copy geométrico: inicio y entrenamiento deben usar el mismo título");
+  const headingTargets = [
+    cssAuditTargets.routineHeading,
+    { ...cssAuditTargets.routineHeading, label: "título de rutina h3", tag: "h3" },
+  ];
+  const results: RoutineHeaderGeometryResult[] = [];
+
+  for (const viewportWidth of mobileAuditWidths) {
+    const shellWidth = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.shell,
+      property: "width",
+      viewportWidth,
+      percentageBase: viewportWidth,
+    });
+    const shellPaddingLeft = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.shell,
+      property: "padding-left",
+      viewportWidth,
+      percentageBase: shellWidth,
+    });
+    const shellPaddingRight = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.shell,
+      property: "padding-right",
+      viewportWidth,
+      percentageBase: shellWidth,
+    });
+    const cardOuterWidth = shellWidth - shellPaddingLeft - shellPaddingRight;
+    assertEffectiveCssValue({
+      rules,
+      target: cssAuditTargets.startCard,
+      property: "width",
+      expected: "100%",
+      viewportWidth,
+      message: "geometría del header: la tarjeta debe ocupar el ancho reducible del screen",
+    });
+    assertEffectiveCssValue({
+      rules,
+      target: cssAuditTargets.startCard,
+      property: "box-sizing",
+      expected: "border-box",
+      viewportWidth,
+      message: "geometría del header: padding y border deben permanecer dentro de la tarjeta",
+    });
+    const cardPaddingLeft = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.startCard,
+      property: "padding-left",
+      viewportWidth,
+      percentageBase: cardOuterWidth,
+    });
+    const cardPaddingRight = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.startCard,
+      property: "padding-right",
+      viewportWidth,
+      percentageBase: cardOuterWidth,
+    });
+    const cardBorderLeft = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.startCard,
+      property: "border-left-width",
+      viewportWidth,
+      percentageBase: cardOuterWidth,
+    });
+    const cardBorderRight = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.startCard,
+      property: "border-right-width",
+      viewportWidth,
+      percentageBase: cardOuterWidth,
+    });
+    const headerInlineWidth = cardOuterWidth - cardPaddingLeft - cardPaddingRight - cardBorderLeft - cardBorderRight;
+
+    const headerColumns = readEffectiveCssProperty({
+      rules,
+      target: cssAuditTargets.routineHeader,
+      property: "grid-template-columns",
+      viewportWidth,
+    });
+    assert.ok(headerColumns !== null);
+    const layout = headerColumns === "minmax(0, 1fr)" ? "stacked" : "side-by-side";
+    const shouldStack = viewportWidth <= 400;
+    assert.equal(
+      layout === "stacked",
+      shouldStack,
+      `breakpoint adaptativo: ${viewportWidth}px debe usar layout ${shouldStack ? "apilado" : "lado a lado"} con corte real en 400px`,
+    );
+    const selectorWidth = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "width",
+      viewportWidth,
+      percentageBase: headerInlineWidth,
+    });
+    const selectorPaddingLeft = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "padding-left",
+      viewportWidth,
+      percentageBase: selectorWidth,
+    });
+    const selectorPaddingRight = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "padding-right",
+      viewportWidth,
+      percentageBase: selectorWidth,
+    });
+    const selectorBorderLeft = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "border-left-width",
+      viewportWidth,
+      percentageBase: selectorWidth,
+    });
+    const selectorBorderRight = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "border-right-width",
+      viewportWidth,
+      percentageBase: selectorWidth,
+    });
+    assert.ok(
+      selectorWidth >= selectorPaddingLeft + selectorPaddingRight,
+      `geometría del header: padding del selector excede su ancho a ${viewportWidth}px`,
+    );
+    const selectorUsefulInlineWidth = selectorWidth - selectorPaddingLeft - selectorPaddingRight -
+      selectorBorderLeft - selectorBorderRight;
+    assert.equal(
+      selectorUsefulInlineWidth,
+      approvedDaySelectUsefulInlinePixels,
+      `geometría del selector: debe conservar ${approvedDaySelectUsefulInlinePixels}px útiles a ${viewportWidth}px`,
+    );
+    const selectorFontSize = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "font-size",
+      viewportWidth,
+      percentageBase: selectorUsefulInlineWidth,
+    });
+    assert.ok(
+      selectorFontSize >= 16,
+      `tipografía del selector: ${selectorFontSize}px queda bajo 16px a ${viewportWidth}px`,
+    );
+    const selectorLetterSpacing = readEffectiveLetterSpacing({
+      rules,
+      target: cssAuditTargets.daySelect,
+      viewportWidth,
+      percentageBase: selectorUsefulInlineWidth,
+    });
+    for (const day of days) {
+      const glyphCount = [...day].length;
+      const dayTextWidth = Math.ceil(
+        (glyphCount * selectorFontSize * nominalMonospaceAdvanceEm) +
+        (Math.max(0, glyphCount - 1) * selectorLetterSpacing),
+      );
+      assert.ok(
+        dayTextWidth <= selectorUsefulInlineWidth,
+        `geometría del selector: “${day}” no cabe completo a ${viewportWidth}px (${dayTextWidth}px > ${selectorUsefulInlineWidth}px)`,
+      );
+    }
+    const editWidth = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.editButton,
+      property: "width",
+      viewportWidth,
+      percentageBase: headerInlineWidth,
+    });
+    const controlsGap = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.routineControls,
+      property: "gap",
+      viewportWidth,
+      percentageBase: headerInlineWidth,
+    });
+    const controlsWidth = selectorWidth + controlsGap + editWidth;
+    const headerGap = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.routineHeader,
+      property: "gap",
+      viewportWidth,
+      percentageBase: headerInlineWidth,
+    });
+    const titleTrackWidth = layout === "stacked"
+      ? headerInlineWidth
+      : headerInlineWidth - controlsWidth - headerGap;
+
+    const headingFontSize = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.routineHeading,
+      property: "font-size",
+      viewportWidth,
+      percentageBase: titleTrackWidth,
+    });
+    assert.equal(
+      headingFontSize,
+      approvedRoutineTextPixels,
+      `tipografía geométrica: el título debe medir exactamente ${approvedRoutineTextPixels}px a ${viewportWidth}px`,
+    );
+    const headingLetterSpacing = readEffectiveLetterSpacing({
+      rules,
+      target: cssAuditTargets.routineHeading,
+      viewportWidth,
+      percentageBase: titleTrackWidth,
+    });
+    const routineNameFontSize = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.routineSubheading,
+      property: "font-size",
+      viewportWidth,
+      percentageBase: titleTrackWidth,
+    });
+    assert.equal(
+      routineNameFontSize,
+      approvedRoutineTextPixels,
+      `tipografía geométrica: el nombre de rutina debe medir exactamente ${approvedRoutineTextPixels}px a ${viewportWidth}px`,
+    );
+
+    let minimumSlack = Number.POSITIVE_INFINITY;
+    let criticalDay = "";
+    let criticalTextWidth = 0;
+    for (const day of days) {
+      const text = `${startPrefix}${day}`;
+      const glyphCount = [...text].length;
+      const textWidth = Math.ceil(
+        (glyphCount * headingFontSize * conservativeMonospaceAdvanceEm) +
+        (Math.max(0, glyphCount - 1) * headingLetterSpacing),
+      );
+      const slack = titleTrackWidth - textWidth;
+      if (slack < minimumSlack) {
+        minimumSlack = slack;
+        criticalDay = day;
+        criticalTextWidth = textWidth;
+      }
+      assert.ok(
+        slack >= 0,
+        `geometría del header: colisión a ${viewportWidth}px con “${text}” (pista ${titleTrackWidth.toFixed(2)}px, texto ${textWidth.toFixed(2)}px, holgura ${slack.toFixed(2)}px)`,
+      );
+    }
+
+    if (layout === "stacked") {
+      assertEffectiveCssValue({
+        rules,
+        target: cssAuditTargets.routineTitle,
+        property: "width",
+        expected: "100%",
+        viewportWidth,
+        message: "geometría del header: título y categoría deben ocupar todo el ancho apilado",
+      });
+      assertEffectiveCssValue({
+        rules,
+        target: cssAuditTargets.routineControls,
+        property: "width",
+        expected: "100%",
+        viewportWidth,
+        message: "geometría del header: controles deben ocupar su segunda fila",
+      });
+      assertEffectiveCssValue({
+        rules,
+        target: cssAuditTargets.routineControls,
+        property: "justify-content",
+        expected: "flex-end",
+        viewportWidth,
+        message: "alineación apilada: selector y Editar deben permanecer juntos a la derecha",
+      });
+    } else {
+      assert.equal(
+        headerColumns,
+        "minmax(0, 1fr) auto",
+        `geometría del header: ${viewportWidth}px debe conservar pistas reducibles lado a lado`,
+      );
+    }
+
+    for (const headingTarget of headingTargets) {
+      assertEffectiveCssValue({
+        rules,
+        target: headingTarget,
+        property: "white-space",
+        expected: "nowrap",
+        viewportWidth,
+        message: `texto completo: ${headingTarget.label} debe permanecer nowrap`,
+      });
+      const overflow = readEffectiveCssProperty({
+        rules,
+        target: headingTarget,
+        property: "overflow-x",
+        viewportWidth,
+        required: false,
+      });
+      const textOverflow = readEffectiveCssProperty({
+        rules,
+        target: headingTarget,
+        property: "text-overflow",
+        viewportWidth,
+        required: false,
+      });
+      assert.notEqual(
+        overflow,
+        "hidden",
+        `texto completo: ${headingTarget.label} no puede ocultar overflow a ${viewportWidth}px`,
+      );
+      assert.notEqual(
+        textOverflow,
+        "ellipsis",
+        `texto completo: ${headingTarget.label} no puede usar ellipsis a ${viewportWidth}px`,
+      );
+    }
+
+    results.push({
+      viewportWidth,
+      layout,
+      headerInlineWidth,
+      titleTrackWidth,
+      controlsWidth,
+      headingFontSize,
+      headingLetterSpacing,
+      criticalDay,
+      criticalTextWidth,
+      minimumSlack,
+    });
+  }
+
+  return results;
+}
+
+function assertStartHeadingGeometry(rules: readonly CssExecutableRule[]) {
+  const copy = "Selecciona el día de entrenamiento para comenzar";
+  for (const viewportWidth of mobileAuditWidths) {
+    const shellOuterWidth = Math.min(viewportWidth, 560);
+    const shellPaddingLeft = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.shell,
+      property: "padding-left",
+      viewportWidth,
+      percentageBase: shellOuterWidth,
+    });
+    const shellPaddingRight = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.shell,
+      property: "padding-right",
+      viewportWidth,
+      percentageBase: shellOuterWidth,
+    });
+    const introOuterWidth = shellOuterWidth - shellPaddingLeft - shellPaddingRight;
+    const introPaddingLeft = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.startIntro,
+      property: "padding-left",
+      viewportWidth,
+      percentageBase: introOuterWidth,
+    });
+    const introPaddingRight = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.startIntro,
+      property: "padding-right",
+      viewportWidth,
+      percentageBase: introOuterWidth,
+    });
+    const availableWidth = introOuterWidth - introPaddingLeft - introPaddingRight;
+    const fontSize = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.startHeading,
+      property: "font-size",
+      viewportWidth,
+      percentageBase: availableWidth,
+    });
+    const letterSpacing = readEffectiveLetterSpacing({
+      rules,
+      target: cssAuditTargets.startHeading,
+      viewportWidth,
+      percentageBase: availableWidth,
+    });
+    const glyphCount = [...copy].length;
+    const textWidth = Math.ceil(
+      (glyphCount * fontSize * conservativeMonospaceAdvanceEm) +
+      (Math.max(0, glyphCount - 1) * letterSpacing),
+    );
+    assert.ok(
+      textWidth <= availableWidth,
+      `texto introductorio: debe permanecer en una línea a ${viewportWidth}px (${textWidth}px > ${availableWidth.toFixed(2)}px)`,
+    );
+  }
+}
+
+function assertDirectPerformanceHistoryFlow(component: ts.FunctionDeclaration) {
+  assert.ok(component.body);
+  const disclosureContents: ts.JsxElement[] = [];
+  const collect = (node: ts.Node) => {
+    if (
+      ts.isJsxElement(node) &&
+      node.openingElement.tagName.getText() === "div" &&
+      readJsxStylesClassName(node, "disclosureContent")
+    ) {
+      disclosureContents.push(node);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(component.body);
+  assert.equal(
+    disclosureContents.length,
+    1,
+    "flujo DOM directo: el historial debe tener un único contenedor disclosureContent auditable",
+  );
+
+  const children = disclosureContents[0].children.filter((child) => (
+    !ts.isJsxText(child) || child.text.trim().length > 0
+  ));
+  assert.equal(
+    children.length,
+    3,
+    "flujo DOM directo: no se permite wrapper, placeholder, texto ni reserva visual entre series y objetivo",
+  );
+  assert.ok(
+    ts.isJsxElement(children[0]) && readJsxStylesClassName(children[0], "historyTitle"),
+    "flujo DOM directo: el historial debe comenzar con su título canónico",
+  );
+  assert.ok(
+    ts.isJsxExpression(children[1]) && children[1].expression && ts.isConditionalExpression(children[1].expression),
+    "flujo DOM directo: el detalle/estado de series debe permanecer como segundo hijo directo",
+  );
+  assert.ok(
+    ts.isJsxElement(children[2]) && readJsxStylesClassName(children[2], "todayGoal"),
+    "flujo DOM directo: el objetivo debe seguir inmediatamente al detalle de series",
+  );
+}
+
+function assertNoReservedComparisonSpace(rules: readonly CssExecutableRule[]) {
+  const transitionTargets = [
+    cssAuditTargets.seriesDetailList,
+    cssAuditTargets.loadingHistory,
+    cssAuditTargets.historyStatus,
+    cssAuditTargets.todayGoal,
+  ];
+
+  for (const viewportWidth of mobileAuditWidths) {
+    for (const pseudoElement of ["before", "after"] as const) {
+      for (const target of transitionTargets) {
+        const pseudoTarget = { ...target, pseudoElement };
+        const content = readEffectiveCssProperty({
+          rules,
+          target: pseudoTarget,
+          property: "content",
+          viewportWidth,
+          required: false,
+        });
+        assert.ok(
+          content === null || /^(?:none|normal)$/.test(content),
+          `flujo DOM directo: ${target.label} no puede generar texto ni placeholder con ::${pseudoElement}`,
+        );
+      }
+    }
+
+    for (const property of ["height", "min-height", "margin-top", "margin-bottom", "padding-top", "padding-bottom"] as const) {
+      const value = readEffectiveCssProperty({
+        rules,
+        target: cssAuditTargets.todayGoal,
+        property,
+        viewportWidth,
+        required: false,
+      });
+      assert.ok(
+        value === null || /^0(?:[a-z%]+)?$/i.test(value),
+        `flujo DOM directo: el objetivo no puede reservar el espacio eliminado mediante ${property} ${value}`,
+      );
+    }
+  }
+}
+
+function assertEffectiveCssValue(input: {
+  rules: readonly CssExecutableRule[];
+  target: CssAuditTarget;
+  property: string;
+  expected: string | readonly string[];
+  viewportWidth: number;
+  message: string;
+}) {
+  const actual = readEffectiveCssProperty(input);
+  const expectedValues = typeof input.expected === "string" ? [input.expected] : input.expected;
+  assert.ok(
+    actual !== null && expectedValues.includes(actual),
+    `${input.message}; valor efectivo: ${actual ?? "ausente"}`,
+  );
+}
+
+function assertNoProtectedTextClipping(rules: readonly CssExecutableRule[]) {
+  const protectedTargets = [
+    ...[
+      cssAuditTargets.startHeading,
+      cssAuditTargets.routineHeading,
+      cssAuditTargets.routineSubheading,
+      cssAuditTargets.sectionHeading,
+      cssAuditTargets.newRecordHeading,
+      cssAuditTargets.objectivesHeading,
+    ].map((target) => ({ target, kind: "single-line" as const })),
+    ...metricLabelProtectionPolicies.map((policy) => ({
+      ...policy,
+      kind: "bounded-metric" as const,
+    })),
+  ];
+
+  for (const viewportWidth of mobileAuditWidths) {
+    for (const protectedTarget of protectedTargets) {
+      const { target } = protectedTarget;
+      const textOverflow = readEffectiveCssProperty({
+        rules,
+        target,
+        property: "text-overflow",
+        viewportWidth,
+        required: false,
+      });
+      if (protectedTarget.kind === "bounded-metric") {
+        assert.ok(
+          textOverflow === null || !/\b(?:ellipsis|clip)\b/i.test(textOverflow),
+          `${target.label}: no puede usar text-overflow: ${textOverflow}`,
+        );
+      } else {
+        assert.notEqual(
+          textOverflow,
+          "ellipsis",
+          `texto protegido con ellipsis efectivo: ${target.label} a ${viewportWidth}px`,
+        );
+      }
+
+      for (const property of ["overflow-x", "overflow-y"] as const) {
+        const overflow = readEffectiveCssProperty({
+          rules,
+          target,
+          property,
+          viewportWidth,
+          required: false,
+        });
+        assert.ok(
+          overflow === null || !/\b(?:hidden|clip)\b/i.test(overflow),
+          protectedTarget.kind === "bounded-metric"
+            ? `${target.label}: no puede usar overflow: hidden ni clip`
+            : `texto protegido con recorte efectivo: ${target.label} usa ${property} ${overflow} a ${viewportWidth}px`,
+        );
+      }
+
+      for (const property of ["clip", "clip-path", "line-clamp", "-webkit-line-clamp"] as const) {
+        const clipping = readEffectiveCssProperty({
+          rules,
+          target,
+          property,
+          viewportWidth,
+          required: false,
+        });
+        assert.ok(
+          clipping === null || /^(?:auto|none|unset|initial)$/i.test(clipping),
+          protectedTarget.kind === "bounded-metric"
+            ? `${target.label}: no puede usar clipping ni line-clamp`
+            : `texto protegido con recorte efectivo: ${target.label} usa ${property} ${clipping} a ${viewportWidth}px`,
+        );
+      }
+
+      const whiteSpace = readEffectiveInheritedCssProperty({
+        rules,
+        target,
+        property: "white-space",
+        viewportWidth,
+      });
+      if (protectedTarget.kind === "single-line") {
+        assert.equal(
+          whiteSpace,
+          "nowrap",
+          `${target.label}: white-space debe permanecer nowrap`,
+        );
+        continue;
+      }
+
+      assert.ok(
+        whiteSpace === null || !/(?:\bnowrap\b|^pre$)/i.test(whiteSpace),
+        `${target.label}: white-space nowrap contradice el límite aprobado de ${protectedTarget.expectedLines} líneas`,
+      );
+      const maxWidth = readEffectiveCssProperty({
+        rules,
+        target,
+        property: "max-width",
+        viewportWidth,
+        required: false,
+      });
+      const maxWidthMatch = maxWidth?.match(/^(\d+)ch$/);
+      const maxWidthFailure = `${target.label}: max-width debe conservar ${protectedTarget.expectedMaxWidth} para el límite aprobado de ${protectedTarget.expectedLines} líneas`;
+      assert.ok(maxWidthMatch, maxWidthFailure);
+      const maxCharacters = Number(maxWidthMatch[1]);
+      const overflowWrap = readEffectiveInheritedCssProperty({
+        rules,
+        target,
+        property: "overflow-wrap",
+        viewportWidth,
+      });
+      const wordBreak = readEffectiveInheritedCssProperty({
+        rules,
+        target,
+        property: "word-break",
+        viewportWidth,
+      });
+      const breaksAnywhere = /^(?:anywhere|break-word)$/i.test(overflowWrap ?? "normal") ||
+        /^(?:break-all|break-word)$/i.test(wordBreak ?? "normal");
+      const calculatedLines = breaksAnywhere
+        ? Math.ceil([...protectedTarget.copy].length / maxCharacters)
+        : countWordWrappedLines(protectedTarget.copy, maxCharacters, target.label);
+      assert.ok(
+        calculatedLines <= protectedTarget.expectedLines,
+        `${target.label}: “${protectedTarget.copy}” excede el límite aprobado de ${protectedTarget.expectedLines} líneas (${calculatedLines} líneas calculadas)`,
+      );
+      assert.equal(
+        calculatedLines,
+        protectedTarget.expectedLines,
+        `${target.label}: “${protectedTarget.copy}” debe conservar exactamente ${protectedTarget.expectedLines} líneas`,
+      );
+      assert.equal(maxWidth, protectedTarget.expectedMaxWidth, maxWidthFailure);
+      assert.equal(
+        overflowWrap ?? "normal",
+        "normal",
+        `${target.label}: overflow-wrap efectivo debe permanecer normal`,
+      );
+      assert.equal(
+        wordBreak ?? "normal",
+        "normal",
+        `${target.label}: word-break efectivo debe permanecer normal`,
+      );
+    }
+  }
+}
+
+function assertMetricGridStructure(rules: readonly CssExecutableRule[]) {
+  const metricCards = [
+    cssAuditTargets.firstMetricCard,
+    cssAuditTargets.secondMetricCard,
+    cssAuditTargets.thirdMetricCard,
+  ];
+  const widthProperties = ["width", "min-width", "max-width", "grid-column", "justify-self"] as const;
+  const heightProperties = ["height", "min-height", "max-height", "grid-row", "align-self"] as const;
+
+  for (const viewportWidth of mobileAuditWidths) {
+    const columns = readEffectiveCssProperty({
+      rules,
+      target: cssAuditTargets.metricGrid,
+      property: "grid-template-columns",
+      viewportWidth,
+    });
+    assert.equal(
+      columns,
+      "repeat(3, minmax(0, 1fr))",
+      "grilla métrica: debe conservar tres columnas iguales",
+    );
+
+    const readSignatures = (properties: readonly string[]) => metricCards.map((target) => (
+      properties.map((property) => readEffectiveCssProperty({
+        rules,
+        target,
+        property,
+        viewportWidth,
+        required: false,
+      })).join("|")
+    ));
+    assert.equal(
+      new Set(readSignatures(widthProperties)).size,
+      1,
+      `tarjetas métricas: ancho uniforme de las tres tarjetas a ${viewportWidth}px`,
+    );
+    assert.equal(
+      new Set(readSignatures(heightProperties)).size,
+      1,
+      `tarjetas métricas: altura uniforme de las tres tarjetas a ${viewportWidth}px`,
+    );
+  }
+}
+
+function numericCssValues(value: string) {
+  return [...value.matchAll(/(-?\d*\.?\d+)\s*(%)?/g)].map((match) => (
+    match[2] ? Number(match[1]) / 100 : Number(match[1])
+  ));
+}
+
+function declarationReducesTouchTarget(declaration: CssDeclaration) {
+  if (declaration.property === "zoom" || declaration.property === "scale") {
+    if (/^(?:none|normal)$/i.test(declaration.value)) return false;
+    const values = numericCssValues(declaration.value);
+    return values.length === 0 || values.some((value) => value < 1);
+  }
+  if (declaration.property !== "transform") return false;
+  if (/matrix(?:3d)?\(/i.test(declaration.value)) return true;
+  const scaleFunctions = [...declaration.value.matchAll(/scale(?:3d|x|y)?\(([^)]*)\)/gi)];
+  if (scaleFunctions.length === 0) return false;
+  return scaleFunctions.some((match) => {
+    const values = numericCssValues(match[1]);
+    return values.length === 0 || values.some((value) => value < 1);
+  });
+}
+
+function assertNoTouchTargetReduction(rules: readonly CssExecutableRule[]) {
+  const baseTargets = [
+    cssAuditTargets.routineControls,
+    cssAuditTargets.daySelector,
+    cssAuditTargets.daySelect,
+    cssAuditTargets.editButton,
+    cssAuditTargets.editButtonBefore,
+    cssAuditTargets.editButtonIcon,
+  ];
+  const states = [[], ["hover"], ["focus"], ["focus-visible"], ["active"]] as const;
+  const targets = baseTargets.flatMap((target) => states.map((targetStates) => ({
+    ...target,
+    states: targetStates,
+  })));
+
+  for (const viewportWidth of mobileAuditWidths) {
+    for (const target of targets) {
+      for (const property of ["transform", "scale", "zoom"] as const) {
+        const value = readEffectiveCssProperty({
+          rules,
+          target,
+          property,
+          viewportWidth,
+          required: false,
+        });
+        if (value === null) continue;
+        assert.equal(
+          declarationReducesTouchTarget({
+            property,
+            value,
+            important: false,
+            declarationOrder: 0,
+          }),
+          false,
+          `target táctil reducido por ${property} efectivo en ${target.label} a ${viewportWidth}px`,
+        );
+      }
+    }
+  }
+}
+
+function splitCssValueTokens(value: string) {
+  const tokens: string[] = [];
+  let start = 0;
+  let parentheses = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === "(") parentheses += 1;
+    else if (value[index] === ")") parentheses -= 1;
+    else if (/\s/.test(value[index]) && parentheses === 0) {
+      const token = value.slice(start, index).trim();
+      if (token) tokens.push(token);
+      start = index + 1;
+    }
+  }
+  const finalToken = value.slice(start).trim();
+  if (finalToken) tokens.push(finalToken);
+  return tokens;
+}
+
+function hasNegativeHorizontalMargin(property: string, value: string) {
+  if (/^margin-(?:left|right|inline|inline-start|inline-end)$/.test(property)) {
+    return /(^|\s)-\d/.test(value);
+  }
+  if (property !== "margin") return false;
+  const tokens = splitCssValueTokens(value);
+  const horizontal = tokens.length === 1
+    ? [tokens[0]]
+    : tokens.length === 2
+      ? [tokens[1]]
+      : tokens.length === 3
+        ? [tokens[1]]
+        : [tokens[1], tokens[3]];
+  return horizontal.some((token) => /^-\d/.test(token));
+}
+
+function minimumGridTrackWidth(value: string): number {
+  if (/\b(?:min-content|max-content)\b/.test(value)) return Number.POSITIVE_INFINITY;
+  let expanded = value;
+  let previous = "";
+  while (expanded !== previous) {
+    previous = expanded;
+    expanded = expanded.replace(/repeat\(\s*(\d+)\s*,\s*([^()]+|minmax\([^()]+\))\s*\)/g, (_match, count, track) => (
+      Array.from({ length: Number(count) }, () => track).join(" ")
+    ));
+  }
+  return splitCssValueTokens(expanded).reduce((total, track) => {
+    const minmax = track.match(/^minmax\(\s*(-?\d*\.?\d+)px\s*,/i);
+    if (minmax) return total + Number(minmax[1]);
+    const fixed = track.match(/^(-?\d*\.?\d+)px$/i);
+    return fixed ? total + Number(fixed[1]) : total;
+  }, 0);
+}
+
+function dimensionExceedsViewport(property: string, value: string, viewportWidth: number) {
+  if (/calc\([^)]*100%\s*\+/i.test(value)) return true;
+  const percentage = value.match(/^(\d*\.?\d+)%$/);
+  if (percentage && Number(percentage[1]) > 100) return true;
+  const viewportUnits = value.match(/(\d*\.?\d+)vw\b/i);
+  if (viewportUnits) {
+    if (property !== "width" && Number(viewportUnits[1]) > 0) return true;
+    if (Number(viewportUnits[1]) >= 100) return true;
+  }
+  const fixedPixels = value.match(/^(\d*\.?\d+)px$/i);
+  if (fixedPixels) return Number(fixedPixels[1]) > viewportWidth;
+  const fixedRem = value.match(/^(\d*\.?\d+)rem$/i);
+  return Boolean(fixedRem && (Number(fixedRem[1]) * 16) > viewportWidth);
+}
+
+function hasHorizontalTranslation(property: string, value: string) {
+  const isZero = (token: string) => /^0(?:[a-z%]+)?$/i.test(token.trim());
+  if (property === "translate") {
+    return !isZero(splitCssValueTokens(value)[0] ?? "");
+  }
+  if (property !== "transform") return false;
+  for (const match of value.matchAll(/translate(?:x|3d)?\(([^,)]*)/gi)) {
+    if (!isZero(match[1])) return true;
+  }
+  return false;
+}
+
+function assertNoEffectiveHorizontalOverflow(rules: readonly CssExecutableRule[]) {
+  const layoutTargets = [
+    cssAuditTargets.screen,
+    cssAuditTargets.startCard,
+    cssAuditTargets.guidedCard,
+    cssAuditTargets.routineHeader,
+    cssAuditTargets.routineTitle,
+    cssAuditTargets.routineControls,
+    cssAuditTargets.daySelector,
+    cssAuditTargets.daySelect,
+    cssAuditTargets.exerciseTable,
+    cssAuditTargets.tableRow,
+    cssAuditTargets.selectableRow,
+    cssAuditTargets.tableCell,
+    cssAuditTargets.referencePanel,
+    cssAuditTargets.disclosureContent,
+  ];
+  const mustShrinkTargets = [
+    cssAuditTargets.screen,
+    cssAuditTargets.startCard,
+    cssAuditTargets.guidedCard,
+    cssAuditTargets.routineHeader,
+    cssAuditTargets.routineTitle,
+    cssAuditTargets.routineControls,
+    cssAuditTargets.daySelector,
+    cssAuditTargets.daySelect,
+    cssAuditTargets.exerciseTable,
+    cssAuditTargets.tableRow,
+    cssAuditTargets.selectableRow,
+    cssAuditTargets.tableCell,
+    cssAuditTargets.referencePanel,
+    cssAuditTargets.disclosureContent,
+  ];
+
+  for (const viewportWidth of mobileAuditWidths) {
+    for (const target of mustShrinkTargets) {
+      assertEffectiveCssValue({
+        rules,
+        target,
+        property: "min-width",
+        expected: "0",
+        viewportWidth,
+        message: `overflow horizontal efectivo: ${target.label} debe conservar min-width 0 a ${viewportWidth}px`,
+      });
+      const overflowX = readEffectiveCssProperty({
+        rules,
+        target,
+        property: "overflow-x",
+        viewportWidth,
+        required: false,
+      });
+      assert.doesNotMatch(
+        overflowX ?? "",
+        /^(?:auto|scroll)$/,
+        `overflow horizontal efectivo: ${target.label} no puede crear scroll a ${viewportWidth}px`,
+      );
+    }
+
+    for (const target of layoutTargets) {
+      for (const property of ["width", "min-width", "min-inline-size"] as const) {
+        const value = readEffectiveCssProperty({
+          rules,
+          target,
+          property,
+          viewportWidth,
+          required: false,
+        });
+        if (value === null) continue;
+        assert.equal(
+          dimensionExceedsViewport(property, value, viewportWidth),
+          false,
+          `overflow horizontal efectivo: ${target.label} usa ${property} ${value} a ${viewportWidth}px`,
+        );
+      }
+      for (const property of ["margin-left", "margin-right"] as const) {
+        const value = readEffectiveCssProperty({
+          rules,
+          target,
+          property,
+          viewportWidth,
+          required: false,
+        });
+        if (value === null) continue;
+        assert.equal(
+          hasNegativeHorizontalMargin(property, value),
+          false,
+          `overflow horizontal efectivo: ${target.label} expande el canvas con ${property} ${value}`,
+        );
+      }
+      for (const property of ["transform", "translate"] as const) {
+        const value = readEffectiveCssProperty({
+          rules,
+          target,
+          property,
+          viewportWidth,
+          required: false,
+        });
+        if (value === null) continue;
+        assert.equal(
+          hasHorizontalTranslation(property, value),
+          false,
+          `overflow horizontal efectivo: ${target.label} desplaza contenido con ${property} ${value}`,
+        );
+      }
+      const columns = readEffectiveCssProperty({
+        rules,
+        target,
+        property: "grid-template-columns",
+        viewportWidth,
+        required: false,
+      });
+      if (columns !== null) {
+        assert.ok(
+          minimumGridTrackWidth(columns) <= viewportWidth,
+          `overflow horizontal efectivo: columnas rígidas de ${target.label} no caben a ${viewportWidth}px`,
+        );
+      }
+    }
+  }
+}
+
+function assertEffectiveVisualCascade(rules: readonly CssExecutableRule[]) {
+  for (const viewportWidth of mobileAuditWidths) {
+    for (const [target, backgroundColor] of [
+      [cssAuditTargets.body, "var(--background)"],
+      [cssAuditTargets.shell, "var(--background)"],
+      [cssAuditTargets.topbar, "var(--background)"],
+      [cssAuditTargets.backRow, "var(--background)"],
+      [cssAuditTargets.screen, "var(--background)"],
+      [cssAuditTargets.startCard, "var(--background)"],
+      [cssAuditTargets.guidedCard, "var(--background)"],
+      [cssAuditTargets.referencePanel, "transparent"],
+    ] as const) {
+      assertEffectiveCssValue({
+        rules,
+        target,
+        property: "background-color",
+        expected: backgroundColor,
+        viewportWidth,
+        message: `fondo efectivo incorrecto en ${target.label} a ${viewportWidth}px`,
+      });
+    }
+
+    for (const target of [
+      cssAuditTargets.body,
+      cssAuditTargets.shell,
+      cssAuditTargets.topbar,
+      cssAuditTargets.backRow,
+      cssAuditTargets.screen,
+      cssAuditTargets.startCard,
+      cssAuditTargets.guidedCard,
+      cssAuditTargets.referencePanel,
+    ]) {
+      assertEffectiveCssValue({
+        rules,
+        target,
+        property: "background-image",
+        expected: "none",
+        viewportWidth,
+        message: `fondo efectivo con imagen o gradiente en ${target.label} a ${viewportWidth}px`,
+      });
+    }
+
+    for (const target of [cssAuditTargets.startCard, cssAuditTargets.guidedCard]) {
+      assertEffectiveCssValue({
+        rules,
+        target,
+        property: "overflow-x",
+        expected: "visible",
+        viewportWidth,
+        message: `overflow efectivo incorrecto en ${target.label} a ${viewportWidth}px`,
+      });
+    }
+
+    assertEffectiveCssValue({
+      rules,
+      target: cssAuditTargets.daySelector,
+      property: "min-height",
+      expected: "44px",
+      viewportWidth,
+      message: `target táctil efectivo incorrecto en ${cssAuditTargets.daySelector.label}`,
+    });
+    assertEffectiveCssValue({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "min-height",
+      expected: "36px",
+      viewportWidth,
+      message: "altura visible efectiva incorrecta en selector de día",
+    });
+    assertEffectiveCssValue({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "height",
+      expected: "36px",
+      viewportWidth,
+      message: "altura explícita efectiva incorrecta en selector de día",
+    });
+    assertEffectiveCssValue({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "width",
+      expected: `${approvedDaySelectPixels}px`,
+      viewportWidth,
+      message: `ancho aprobado incorrecto en selector de día; debe medir ${approvedDaySelectPixels}px`,
+    });
+    for (const property of ["width", "height"] as const) {
+      assertEffectiveCssValue({
+        rules,
+        target: cssAuditTargets.editButton,
+        property,
+        expected: "44px",
+        viewportWidth,
+        message: `target táctil efectivo incorrecto en botón Editar (${property})`,
+      });
+    }
+    assertEffectiveCssValue({
+      rules,
+      target: cssAuditTargets.editButtonBefore,
+      property: "inset",
+      expected: "4px 0",
+      viewportWidth,
+      message: "la caja visual Editar debe medir los mismos 36px de alto que el selector",
+    });
+  }
+
+  for (const viewportWidth of [...mobileAuditWidths, 800]) {
+    const selectorFontSize = readEffectiveLength({
+      rules,
+      target: cssAuditTargets.daySelect,
+      property: "font-size",
+      viewportWidth,
+      percentageBase: approvedDaySelectUsefulInlinePixels,
+    });
+    assert.ok(
+      selectorFontSize >= 16,
+      `fuente efectiva del selector: ${selectorFontSize}px queda bajo 16px a ${viewportWidth}px`,
+    );
+  }
+
+  assertEffectiveCssValue({
+    rules,
+    target: cssAuditTargets.topbar,
+    property: "box-shadow",
+    expected: "none",
+    viewportWidth: 390,
+    message: "fondo efectivo: topbar debe permanecer sin sombra",
+  });
+  assertEffectiveCssValue({
+    rules,
+    target: cssAuditTargets.topbar,
+    property: "backdrop-filter",
+    expected: "none",
+    viewportWidth: 390,
+    message: "fondo efectivo: topbar debe permanecer sin blur",
+  });
+  assertEffectiveCssValue({
+    rules,
+    target: cssAuditTargets.backRow,
+    property: "box-shadow",
+    expected: "none",
+    viewportWidth: 390,
+    message: "fondo efectivo: zona Back debe permanecer sin sombra",
+  });
+  assertEffectiveCssValue({
+    rules,
+    target: cssAuditTargets.referencePanel,
+    property: "box-shadow",
+    expected: "none",
+    viewportWidth: 390,
+    message: "fondo efectivo: panel de referencia debe permanecer plano",
+  });
+
+  const compactFonts = [
+    [cssAuditTargets.startHeading, "clamp(0.7rem, 3.2vw, 1.1rem)"],
+    [cssAuditTargets.routineHeading, "15px"],
+    [cssAuditTargets.routineSubheading, "15px"],
+    [cssAuditTargets.sectionHeading, "clamp(0.72rem, 3.2vw, 1.1rem)"],
+    [cssAuditTargets.newRecordHeading, "clamp(0.72rem, 3.2vw, 1.1rem)"],
+    [cssAuditTargets.objectivesHeading, "clamp(0.72rem, 3.2vw, 1.1rem)"],
+  ] as const;
+  for (const [target, expected] of compactFonts) {
+    assertEffectiveCssValue({
+      rules,
+      target,
+      property: "font-size",
+      expected,
+      viewportWidth: 390,
+      message: `tamaño compacto efectivo incorrecto en ${target.label}`,
+    });
+  }
+
+  assertNoReservedComparisonSpace(rules);
+  assertStartHeadingGeometry(rules);
+  assertMetricGridStructure(rules);
+  assertNoProtectedTextClipping(rules);
+  assertNoTouchTargetReduction(rules);
+  assertNoEffectiveHorizontalOverflow(rules);
+}
+
+function assertNoUnauthorizedPerformanceComparison(source: string) {
+  const sourceFile = ts.createSourceFile(
+    "ExerciseLastPerformancePanel.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  assert.equal(
+    readTypeScriptParseDiagnostics(sourceFile).length,
+    0,
+    "flujo DOM directo: ExerciseLastPerformancePanel debe conservar sintaxis TSX válida",
+  );
+  const components = sourceFile.statements.filter((statement): statement is ts.FunctionDeclaration => (
+    ts.isFunctionDeclaration(statement) && statement.name?.text === "ExerciseLastPerformancePanel"
+  ));
+  assert.equal(components.length, 1, "el panel de historial debe tener una única implementación ejecutable");
+  const component = components[0];
+  assert.ok(component.body, "el panel de historial debe conservar un cuerpo ejecutable");
+  const parameter = component.parameters[0];
+  assert.ok(parameter && ts.isObjectBindingPattern(parameter.name));
+  const presentationBindings = parameter.name.elements.filter((element) => (
+    !element.propertyName && ts.isIdentifier(element.name) && element.name.text === "presentation"
+  ));
+  assert.equal(
+    presentationBindings.length,
+    1,
+    "presentation debe conservarse como binding directo para poder auditar todos sus usos",
+  );
+
+  const authorizedPresentationFields = new Set([
+    "lastHeaderText",
+    "lastSummaryText",
+    "seriesDetailTitle",
+    "seriesRows",
+    "status",
+    "todayGoalText",
+  ]);
+  const renderedPresentationFields = new Set<string>();
+  const forbiddenDifferenceField = /^(?:comparisonText|comparisonTone|comparisonStatus|weightDifference|repsDifference)$/;
+
+  const visit = (node: ts.Node) => {
+    if (
+      (ts.isIdentifier(node) || ts.isStringLiteral(node)) &&
+      forbiddenDifferenceField.test(node.text)
+    ) {
+      assert.fail(`el JSX ejecutable no puede consumir ${node.text}`);
+    }
+
+    if (ts.isIdentifier(node) && node.text === "presentation") {
+      const parent = node.parent;
+      assert.ok(
+        ts.isPropertyAccessExpression(parent) && parent.expression === node,
+        "presentation no puede ocultarse mediante alias, destructuring ni acceso dinámico",
+      );
+      assert.ok(
+        authorizedPresentationFields.has(parent.name.text),
+        `campo visual de presentation no autorizado: ${parent.name.text}`,
+      );
+      renderedPresentationFields.add(parent.name.text);
+    }
+
+    ts.forEachChild(node, visit);
+  };
+  visit(component.body);
+
+  assert.deepEqual(
+    [...renderedPresentationFields].sort(),
+    [...authorizedPresentationFields].sort(),
+    "el panel sólo puede renderizar historial, estados y objetivo aprobados",
+  );
+  assertDirectPerformanceHistoryFlow(component);
+}
+
+function assertTrainUi01AuditContracts(
+  sources: TrainUi01AuditSources,
+  protectedSources: ProtectedFileSources = protectedFileSources,
+) {
+  assertProtectedFileIntegrity(protectedSources);
+  assert.doesNotMatch(
+    sources.workoutStyles,
+    /:has\(/,
+    "la uniformidad visual no puede depender de :has() en el CSS activo",
+  );
+  const effectiveCssRules = parseExecutableCssSources([
+    { source: sources.globalStyles, defaultClassScope: "global" },
+    { source: sources.workoutStyles, defaultClassScope: "local" },
+  ]);
+  assertExerciseTableColumnHeaders(sources.start, "TrainingStartScreen.tsx");
+  assertExerciseTableColumnHeaders(sources.guided, "GuidedTrainingScreen.tsx");
+  assertActiveWorkoutSeriesHeader(effectiveCssRules);
+
+  // El h1 pertenece al topbar; estas pantallas comienzan en h2 y sus secciones usan h3.
+  assert.doesNotMatch(sources.start, /<h1\b/);
+  assert.doesNotMatch(
+    sources.guided,
+    /<h1\b/,
+    "jerarquía de títulos: GuidedTrainingScreen no puede introducir un h1",
+  );
+  assert.match(sources.start, /<h2 id="training-start-title">/);
+  assert.match(sources.guided, /<h2 id="guided-routine-title">/);
+  assert.match(sources.guided, /<h3 id="guided-plan-title">/);
+  assert.match(sources.seriesResult, /<h3 id="exercise-objectives-title">Objetivos<\/h3>/);
+
+  // El summary cerrado usa la presentación canónica con fecha cuando existe y estados legibles
+  // para loading/empty/error; no conserva un título estático alternativo.
+  const firstSummaryStart = sources.performancePanel.indexOf("<summary>");
+  const firstSummaryEnd = sources.performancePanel.indexOf("</summary>", firstSummaryStart);
+  assert.ok(firstSummaryStart >= 0 && firstSummaryEnd > firstSummaryStart);
+  const firstSummary = sources.performancePanel.slice(firstSummaryStart, firstSummaryEnd);
+  assert.match(firstSummary, /presentation\.status === "found"/);
+  assert.match(
+    firstSummary,
+    /presentation\.seriesDetailTitle/,
+    "historial: el summary debe usar presentation.seriesDetailTitle cuando existe rendimiento",
+  );
+  assert.match(firstSummary, /presentation\.lastSummaryText/);
+  assert.doesNotMatch(firstSummary, /Rendimiento anterior/);
+
+  // El contrato recorre el AST del cuerpo ejecutable, no comentarios ni strings señuelo. Sólo se
+  // autorizan los campos necesarios para historial/estado/objetivo; diferencias de peso/reps,
+  // comparaciones, aliases y accesos dinámicos quedan fuera de la UI sin tocar el dominio.
+  assertNoUnauthorizedPerformanceComparison(sources.performancePanel);
+  assert.doesNotMatch(
+    sources.workoutStyles,
+    /\.historyComparison\b/,
+    "flujo DOM directo: no debe sobrevivir un selector reservado para comparación",
+  );
+
+  // Las tarjetas presentan el detalle/estado canónico y derivan icono/tono del mismo item.
+  assert.match(sources.seriesResult, /import \{ Check, X \} from "lucide-react";/);
+  assert.match(sources.seriesResult, /data-tone=\{item\.tone\}/);
+  assert.match(
+    sources.seriesResult,
+    /\{item\.detail\}/,
+    "objetivos: cada tarjeta debe mostrar item.detail, no un label genérico",
+  );
+  assert.match(sources.seriesResult, /item\.tone === "partial" \? <X size=\{20\} \/> : <Check size=\{20\} \/>/);
+
+  // La API local de labels preserva los defaults del resto del producto y sólo la pantalla
+  // inicial solicita el copy de las referencias.
+  assert.match(sources.metricGrid, /weightLabel\?: string;/);
+  assert.match(sources.metricGrid, /repsLabel\?: string;/);
+  assert.match(sources.metricGrid, /weightLabel = "KG totales de la rutina"/);
+  assert.match(sources.metricGrid, /repsLabel = "Total reps"/);
+  assert.match(
+    sources.start,
+    /weightLabel="Total de KG de la rutina"\s*repsLabel="Total Reps"\s*exerciseLabel="Total ejercicios registrados"/,
+  );
+
+  // La unidad ya está en el encabezado KG: las celdas visibles usan sólo el número localizado.
+  assert.match(sources.start, /import \{ formatDecimalEs \} from "@\/lib\/progress\/weight-format";/);
+  assert.match(sources.start, /<span role="cell">\{formatDecimalEs\(exercise\.baseWeight\)\}<\/span>/);
+  assert.doesNotMatch(sources.start, /formatKg\(exercise\.baseWeight\)/);
+  assert.match(sources.guided, /<span>\{formatDecimalEs\(exercise\.baseWeight\)\}<\/span>/);
+  assert.match(sources.guided, /aria-label=\{`\$\{exercise\.name\}:[^`]*\$\{formatKg\(exercise\.baseWeight\)\}/);
+  assert.match(sources.guided, /placeholder=\{formatKg\(activeExercise\.baseWeight\)\}/);
+
+  // La selección conserva botones nativos: no hay grid/row ARIA simulado, y aria-pressed comunica
+  // el estado manteniendo activación Tab/Enter/Space propia de button.
+  assert.match(
+    sources.guided,
+    /<button\s*className=\{styles\.selectableTableRow\}\s*type="button"\s*aria-pressed=\{isActive\}/,
+    "selección de ejercicios: debe conservar button nativo con aria-pressed",
+  );
+  assert.doesNotMatch(sources.guided, /role="grid"|role="row"|role="rowgroup"|role="gridcell"/);
+  assert.match(
+    sources.guided,
+    /data-complete=\{isDone \? "true" : undefined\}/,
+    "estado completado: data-complete debe derivarse de isDone",
+  );
+
+  // El status vacío está fuera del rowgroup de la tabla estática.
+  assert.match(
+    sources.start,
+    /<div role="rowgroup">[\s\S]*<\/div>\s*<\/div>\s*\{exercises\.length === 0 \? \(\s*<p className=\{styles\.emptyTableMessage\} role="status">/,
+  );
+
+  // La grilla de métricas conservada por compatibilidad queda fuera del árbol accesible; el texto
+  // único de progreso permanece disponible para tecnologías asistivas.
+  assert.match(
+    sources.guided,
+    /<div className=\{styles\.srOnly\} aria-hidden="true">\s*<RoutineMetricGrid targetSummary=\{targetSummary\} \/>\s*<\/div>\s*<p className=\{styles\.srOnly\}>\s*Ejercicio/,
+  );
+
+  // La alerta de peso sólo aparece después del intento de registro canónico; 5, y 5. siguen siendo
+  // drafts permitidos durante escritura. El boundary de registro mantiene el rechazo final.
+  assert.match(
+    sources.guided,
+    /function isIntermediateDecimalWeightInput\(value: string\) \{[\s\S]*isDecimalWeightDraftInput\(value\)[\s\S]*normalized\.endsWith\(","\) \|\| normalized\.endsWith\("\."\)[\s\S]*const hasSubmittedInvalidWeight = draft\s*\? notice === incompleteCurrentExerciseMessage && \(\s*parseDecimalWeightInput\(draft\.weight\) === null &&\s*!isIntermediateDecimalWeightInput\(draft\.weight\)\s*\)\s*: false;/,
+    "peso decimal intermedio: 5, y 5. no pueden activar alert antes del intento de registro",
+  );
+  assert.match(sources.guided, /\{hasSubmittedInvalidWeight \? \(\s*<p className=\{styles\.fieldError\} id="exercise-weight-error" role="alert">/);
+  assert.doesNotMatch(sources.guided, /\bhasInvalidWeight\b/);
+  assert.match(sources.workoutRegistration, /parseDecimalWeightInput\(draft\.weight\) === null/);
+  assert.match(sources.workoutRegistration, /kind: "invalid_draft"/);
+
+  const selectedRule = readCssRule(sources.workoutStyles, '.selectableTableRow[aria-pressed="true"]');
+  const completedRule = readCssRule(
+    sources.workoutStyles,
+    '.selectableTableRow[data-complete="true"]:not([aria-pressed="true"])',
+  );
+  const primaryActionRule = readCssRule(
+    sources.workoutStyles,
+    ".primaryAction.primaryAction.primaryAction",
+  );
+  const screenRule = readCssRule(sources.workoutStyles, ".screen");
+  const workoutCardRule = readCssRule(sources.workoutStyles, ".workoutCard.workoutCard");
+  const referencePanelRule = readCssRule(
+    sources.workoutStyles,
+    ".referencePanel.referencePanel",
+  );
+  const metricTitleRule = readCssRule(
+    sources.workoutStyles,
+    ".metricScope.metricScope :global(.metric-title-row span)",
+  );
+  const firstMetricTitleRule = readCssRule(
+    sources.workoutStyles,
+    ".metricScope.metricScope :global(.metric:nth-child(1) .metric-title-row span)",
+  );
+  const secondMetricTitleRule = readCssRule(
+    sources.workoutStyles,
+    ".metricScope.metricScope :global(.metric:nth-child(2) .metric-title-row span)",
+  );
+  const thirdMetricTitleRule = readCssRule(
+    sources.workoutStyles,
+    ".metricScope.metricScope :global(.metric:nth-child(3) .metric-title-row span)",
+  );
+  const disclosureSummaryRule = readCssRule(
+    sources.workoutStyles,
+    ".referencePanel [data-disclosure] > summary",
+  );
+  const selectedExerciseValueRule = readCssRule(
+    sources.workoutStyles,
+    ".selectedExerciseHeading.selectedExerciseHeading strong",
+  );
+  const startHeadingRule = readCssRule(sources.workoutStyles, ".startIntro h2");
+  const globalBodyRule = readCssRule(sources.globalStyles, "body");
+  const globalShellRule = readCssRule(sources.globalStyles, ".app-shell");
+  const globalTopbarRule = readCssRule(sources.globalStyles, ".topbar");
+  const globalBackRule = readCssRule(sources.globalStyles, ".section-back-row");
+  assert.equal(
+    readCssProperty(selectedRule.body, "background"),
+    "var(--primary-strong)",
+    "fila seleccionada: el fondo debe permanecer var(--primary-strong)",
+  );
+  assert.equal(
+    readCssProperty(completedRule.body, "color"),
+    "var(--workout-row-complete)",
+    "estado completado: el color debe permanecer var(--workout-row-complete)",
+  );
+  assert.equal(readCssProperty(screenRule.body, "--workout-row-complete"), "var(--green)");
+  assert.equal(readCssProperty(globalBodyRule.body, "background-color"), "var(--background)");
+  assert.equal(readCssProperty(globalShellRule.body, "background-color"), "var(--background)");
+  assert.equal(readCssProperty(globalTopbarRule.body, "background"), "var(--background)");
+  assert.equal(
+    readCssProperty(globalBackRule.body, "background"),
+    "var(--background)",
+    "zona Back: el fondo debe permanecer var(--background)",
+  );
+  assert.equal(readCssProperty(screenRule.body, "background"), "var(--background)");
+  assert.equal(
+    readCssProperty(
+      workoutCardRule.body,
+      "background",
+      "tarjeta TRAIN-UI-01: el fondo debe conservar la especificidad local .workoutCard.workoutCard",
+    ),
+    "var(--background)",
+    "tarjeta TRAIN-UI-01: el fondo debe conservar la especificidad local .workoutCard.workoutCard",
+  );
+  for (const [label, rule] of [
+    ["viewport", globalBodyRule],
+    ["app shell", globalShellRule],
+    ["topbar", globalTopbarRule],
+    ["zona Back", globalBackRule],
+  ] as const) {
+    assert.equal(readCssProperty(rule.body, "background-image"), "none", `${label}: sin banda ni gradiente`);
+  }
+  assert.equal(readCssProperty(globalTopbarRule.body, "box-shadow"), "none");
+  assert.equal(readCssProperty(globalTopbarRule.body, "backdrop-filter"), "none");
+  assert.equal(readCssProperty(globalBackRule.body, "box-shadow"), "none");
+  assert.equal(readCssProperty(referencePanelRule.body, "background"), "transparent");
+  assert.equal(readCssProperty(referencePanelRule.body, "box-shadow"), "none");
+  assert.equal(
+    readCssProperty(metricTitleRule.body, "font-size"),
+    "clamp(0.625rem, 2.4vw, 0.75rem)",
+    "etiquetas métricas: font-size debe conservar clamp(0.625rem, 2.4vw, 0.75rem)",
+  );
+  assert.equal(
+    readCssProperty(metricTitleRule.body, "overflow-wrap"),
+    "normal",
+    "etiquetas métricas: overflow-wrap debe permanecer normal",
+  );
+  assert.equal(
+    readCssProperty(metricTitleRule.body, "word-break"),
+    "normal",
+    "etiquetas métricas: word-break debe permanecer normal",
+  );
+  assert.equal(
+    readCssProperty(firstMetricTitleRule.body, "max-width"),
+    "13ch",
+    "primera etiqueta métrica: max-width debe conservar 13ch para el límite aprobado de 2 líneas",
+  );
+  assert.equal(
+    readCssProperty(secondMetricTitleRule.body, "max-width"),
+    "7ch",
+    "segunda etiqueta métrica: max-width debe conservar 7ch para el límite aprobado de 2 líneas",
+  );
+  assert.equal(
+    readCssProperty(thirdMetricTitleRule.body, "max-width"),
+    "12ch",
+    "tercera etiqueta métrica: max-width debe conservar 12ch para el límite aprobado de 3 líneas",
+  );
+  for (const [copy, maxCharacters, expectedLines] of [
+    ["Total de KG de la rutina", 13, 2],
+    ["Total Reps", 7, 2],
+    ["Total ejercicios registrados", 12, 3],
+  ] as const) {
+    assert.equal(
+      countWordWrappedLines(copy, maxCharacters),
+      expectedLines,
+      `etiqueta métrica: “${copy}” debe conservar ${expectedLines} líneas`,
+    );
+  }
+  assert.equal(
+    readCssProperty(disclosureSummaryRule.body, "background"),
+    "var(--primary-strong)",
+    "historial y comentario: el fondo debe permanecer var(--primary-strong)",
+  );
+  assert.equal(readCssProperty(disclosureSummaryRule.body, "color"), "var(--text)");
+  assert.equal(readCssProperty(selectedExerciseValueRule.body, "min-width"), "max-content");
+  assert.equal(readCssProperty(selectedExerciseValueRule.body, "overflow-wrap"), "normal");
+  assert.equal(
+    readCssProperty(selectedExerciseValueRule.body, "white-space"),
+    "nowrap",
+    "peso del ejercicio seleccionado: la unidad kg debe permanecer en una línea",
+  );
+  assert.equal(
+    readCssProperty(startHeadingRule.body, "font-size"),
+    "clamp(0.7rem, 3.2vw, 1.1rem)",
+    "texto introductorio: la tipografía debe conservar clamp(0.7rem, 3.2vw, 1.1rem)",
+  );
+  assert.equal(
+    readCssProperty(startHeadingRule.body, "letter-spacing"),
+    "-1.2px",
+    "texto introductorio: letter-spacing debe conservar -1.2px",
+  );
+  assertAccessibleSmallTextContrast({
+    globalStyles: sources.globalStyles,
+    ruleBody: selectedRule.body,
+    label: "fila seleccionada",
+  });
+  assertAccessibleSmallTextContrast({
+    globalStyles: sources.globalStyles,
+    ruleBody: primaryActionRule.body,
+    label: "botón primario",
+  });
+  assertAccessibleSmallTextContrast({
+    globalStyles: sources.globalStyles,
+    ruleBody: disclosureSummaryRule.body,
+    label: "casillas de historial y comentario",
+  });
+
+  const mobileInputSelector = `.newRecord :global(.series-weight-field input),
+.newRecord :global(.series-rep-box input)`;
+  assertMobileFontAtLeast16Px(
+    readCssRule(sources.workoutStyles, mobileInputSelector).body,
+    "inputs de peso/repeticiones",
+  );
+  assertMobileFontAtLeast16Px(
+    readCssRule(sources.workoutStyles, ".daySelector select").body,
+    "selector de día",
+  );
+  assertMobileFontAtLeast16Px(
+    readCssRule(sources.workoutStyles, ".referencePanel :global(.exercise-observation-textarea)").body,
+    "textarea de observación",
+  );
+
+  // Las líneas aprobadas permanecen completas. Selector y edición comparten una caja visible de
+  // 44 px, además de preservar el mismo target para touch/teclado.
+  for (const [selector, label] of [
+    [".startIntro h2", "título inicial"],
+    [`.routineTitle h2,
+.routineTitle h3`, "título de rutina"],
+    [`.sectionHeading h3,
+.newRecord h3,
+.objectives h3`, "título de sección"],
+  ] as const) {
+    const headingRule = readCssRule(sources.workoutStyles, selector);
+    assert.equal(
+      readCssProperty(headingRule.body, "white-space"),
+      "nowrap",
+      `${label}: white-space debe permanecer nowrap`,
+    );
+    assert.doesNotMatch(headingRule.body, /overflow-wrap:\s*anywhere/);
+  }
+  const daySelectorRule = readCssRule(sources.workoutStyles, ".daySelector");
+  const daySelectRule = readCssRule(sources.workoutStyles, ".daySelector select");
+  const routineHeadingRule = readCssRule(
+    sources.workoutStyles,
+    `.routineTitle h2,
+.routineTitle h3`,
+  );
+  const routineNameRule = readCssRule(sources.workoutStyles, ".routineTitle.routineTitle p");
+  const editButtonRule = readCssRule(sources.workoutStyles, ".editRoutineButton.editRoutineButton");
+  const editButtonVisualRule = readCssRule(
+    sources.workoutStyles,
+    ".editRoutineButton.editRoutineButton::before",
+  );
+  assert.equal(
+    readCssProperty(daySelectorRule.body, "min-height"),
+    "44px",
+    "selector de día: el target táctil estructural debe medir al menos 44px",
+  );
+  assert.equal(
+    readCssProperty(daySelectRule.body, "min-height"),
+    "36px",
+    "selector de día: la altura visual estructural debe permanecer en 36px",
+  );
+  assert.equal(
+    readCssProperty(daySelectRule.body, "height"),
+    "36px",
+    "selector de día: la altura explícita debe permanecer en 36px para Safari",
+  );
+  assert.equal(
+    readCssProperty(daySelectRule.body, "width"),
+    `${approvedDaySelectPixels}px`,
+    `selector de día: el ancho estructural debe medir exactamente ${approvedDaySelectPixels}px`,
+  );
+  assert.equal(readCssProperty(daySelectRule.body, "padding"), "0 24px 0 8px");
+  assert.equal(
+    readCssProperty(routineHeadingRule.body, "font-size"),
+    `${approvedRoutineTextPixels}px`,
+    `título de rutina: el tamaño estructural debe medir exactamente ${approvedRoutineTextPixels}px`,
+  );
+  assert.equal(
+    readCssProperty(routineNameRule.body, "font-size"),
+    `${approvedRoutineTextPixels}px`,
+    `nombre de rutina: el tamaño estructural debe medir exactamente ${approvedRoutineTextPixels}px`,
+  );
+  assert.equal(readCssProperty(editButtonRule.body, "width"), "44px");
+  assert.equal(readCssProperty(editButtonRule.body, "height"), "44px");
+  assert.equal(
+    readCssProperty(editButtonVisualRule.body, "inset"),
+    "4px 0",
+    "botón Editar: la caja visual debe medir los mismos 36px de alto que el selector",
+  );
+  assert.equal(readCssProperty(editButtonVisualRule.body, "border-radius"), "8px");
+  assert.equal((sources.start.match(/<Pencil size=\{15\}/g) ?? []).length, 1);
+  assert.equal((sources.guided.match(/<Pencil size=\{15\}/g) ?? []).length, 1);
+
+  // Los colores con token global no pueden reaparecer hardcodeados en el CSS local.
+  assert.doesNotMatch(
+    sources.workoutStyles,
+    /#[0-9a-f]{3,8}\b|rgba?\(/i,
+    "CSS TRAIN-UI-01: los colores locales deben usar tokens, no valores hardcodeados",
+  );
+  assert.doesNotMatch(sources.workoutStyles, /(?:linear|radial|conic)-gradient\s*\(/i);
+
+  // La cascada completa se evalúa en el orden real de compilación (globals antes del módulo),
+  // incluyendo media queries, especificidad y reglas tardías; no se asume que gana la primera.
+  const headerGeometryResults = assertRoutineHeaderGeometry(sources, effectiveCssRules);
+  assertEffectiveVisualCascade(effectiveCssRules);
+  return headerGeometryResults;
+}
+
+function replaceAuditOnce(source: string, search: string, replacement: string) {
+  assert.equal(source.split(search).length - 1, 1, `marcador de probe ambiguo: ${search}`);
+  return source.replace(search, replacement);
+}
+
+function mutateCssRule(
+  source: string,
+  selector: string,
+  search: string,
+  replacement: string,
+) {
+  const rule = readCssRule(source, selector);
+  const mutatedBody = replaceAuditOnce(rule.body, search, replacement);
+  return `${source.slice(0, rule.start)}${selector} {${mutatedBody}}${source.slice(rule.end)}`;
+}
+
+const trainUi01AuditSources: TrainUi01AuditSources = {
+  start: files.start,
+  guided: files.guided,
+  performancePanel: files.performancePanel,
+  seriesResult: files.seriesResult,
+  workoutStyles: files.workoutStyles,
+  metricGrid: files.metricGrid,
+  workoutRegistration: files.workoutRegistration,
+  trainingDayOrder: files.trainingDayOrder,
+  globalStyles,
+};
+const trainUi01AuditSourceFiles = {
+  start: { diskPath: "src/features/active-workout/components/TrainingStartScreen.tsx", syntax: "tsx" },
+  guided: { diskPath: "src/features/active-workout/components/GuidedTrainingScreen.tsx", syntax: "tsx" },
+  performancePanel: {
+    diskPath: "src/features/active-workout/components/ExerciseLastPerformancePanel.tsx",
+    syntax: "tsx",
+  },
+  seriesResult: { diskPath: "src/features/active-workout/components/SeriesResult.tsx", syntax: "tsx" },
+  workoutStyles: { diskPath: "src/features/active-workout/active-workout.module.css", syntax: "css" },
+  metricGrid: { diskPath: "src/ui/data-display/metric-grid.tsx", syntax: "tsx" },
+  workoutRegistration: { diskPath: "src/lib/training/workout-registration.ts", syntax: "ts" },
+  trainingDayOrder: { diskPath: "src/lib/training/training-day-order.ts", syntax: "ts" },
+  globalStyles: { diskPath: "src/app/globals.css", syntax: "css" },
+} as const satisfies Record<
+  keyof TrainUi01AuditSources,
+  { diskPath: string; syntax: "css" | "tsx" | "ts" }
+>;
+const trainUi01HeaderGeometryResults = assertTrainUi01AuditContracts(trainUi01AuditSources);
+
+console.log(
+  `TRAIN-UI-01 header geometry passed (${trainUi01HeaderGeometryResults.length} widths): ${trainUi01HeaderGeometryResults.map((result) => (
+    `${result.viewportWidth}px=${result.layout},track:${result.titleTrackWidth.toFixed(2)},text:${result.criticalTextWidth.toFixed(2)},slack:${result.minimumSlack.toFixed(2)},day:${result.criticalDay}`
+  )).join(" | ")}`,
+);
+
+type TrainUi01VisualMutationProbe = {
+  name: string;
+  target: keyof TrainUi01AuditSources;
+  expectedFailure: string;
+  mutate(source: string): string;
+};
+
+const trainUi01MutationProbes: TrainUi01VisualMutationProbe[] = [
+  {
+    name: "eliminar título dinámico del historial",
+    expectedFailure: "historial: el summary debe usar presentation.seriesDetailTitle cuando existe rendimiento",
+    target: "performancePanel",
+    mutate: (source) => replaceAuditOnce(
+      source,
+      "presentation.seriesDetailTitle",
+      '"Rendimiento anterior"',
+    ),
+  },
+  {
+    name: "reconstruir comparación dinámica de peso y reps",
+    expectedFailure: "presentation no puede ocultarse mediante alias, destructuring ni acceso dinámico",
+    target: "performancePanel",
+    mutate: (source) => replaceAuditOnce(
+      source,
+      '          <p className={styles.todayGoal}>{presentation.todayGoalText}</p>',
+      '          <p>{String(presentation["weightDifference"]) + " kg · " + String(presentation["repsDifference"]) + " reps"}</p>\n          <p className={styles.todayGoal}>{presentation.todayGoalText}</p>',
+    ),
+  },
+  {
+    name: "sustituir estado de objetivos por label genérico",
+    expectedFailure: "objetivos: cada tarjeta debe mostrar item.detail, no un label genérico",
+    target: "seriesResult",
+    mutate: (source) => replaceAuditOnce(source, "{item.detail}", "{item.label}"),
+  },
+  {
+    name: "reintroducir segundo h1",
+    expectedFailure: "jerarquía de títulos: GuidedTrainingScreen no puede introducir un h1",
+    target: "guided",
+    mutate: (source) => replaceAuditOnce(
+      replaceAuditOnce(source, '<h2 id="guided-routine-title">', '<h1 id="guided-routine-title">'),
+      "</h2>",
+      "</h1>",
+    ),
+  },
+  {
+    name: "aplicar role row al botón seleccionable",
+    expectedFailure: "selección de ejercicios: debe conservar button nativo con aria-pressed",
+    target: "guided",
+    mutate: (source) => replaceAuditOnce(
+      source,
+      'type="button"\n                    aria-pressed={isActive}',
+      'type="button"\n                    role="row"\n                    aria-pressed={isActive}',
+    ),
+  },
+  {
+    name: "emitir alert durante el draft 5,",
+    expectedFailure: "peso decimal intermedio: 5, y 5. no pueden activar alert antes del intento de registro",
+    target: "guided",
+    mutate: (source) => replaceAuditOnce(
+      source,
+      "!isIntermediateDecimalWeightInput(draft.weight)",
+      "true",
+    ),
+  },
+  {
+    name: "reducir inputs móviles bajo 16px",
+    expectedFailure: "inputs de peso/repeticiones: 14px provoca autozoom en iOS",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      `.newRecord :global(.series-weight-field input),
+.newRecord :global(.series-rep-box input)`,
+      "font-size: 1rem;",
+      "font-size: 0.875rem;",
+    ),
+  },
+  {
+    name: "degradar contraste de fila seleccionada",
+    expectedFailure: "fila seleccionada: el fondo debe permanecer var(--primary-strong)",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      '.selectableTableRow[aria-pressed="true"]',
+      "background: var(--primary-strong);",
+      "background: var(--primary);",
+    ),
+  },
+  {
+    name: "mover el estilo seleccionado a un bloque señuelo",
+    expectedFailure: "fila seleccionada: el fondo debe permanecer var(--primary-strong)",
+    target: "workoutStyles",
+    mutate: (source) => `${mutateCssRule(
+      source,
+      '.selectableTableRow[aria-pressed="true"]',
+      "background: var(--primary-strong);",
+      "background: transparent;",
+    )}\n.decoy-selected { background: var(--primary-strong); }\n`,
+  },
+  {
+    name: "convertir data-complete en literal no ejecutable",
+    expectedFailure: "estado completado: data-complete debe derivarse de isDone",
+    target: "guided",
+    mutate: (source) => replaceAuditOnce(
+      source,
+      'data-complete={isDone ? "true" : undefined}',
+      'data-complete="true"',
+    ),
+  },
+  {
+    name: "eliminar verde del estado completado",
+    expectedFailure: "estado completado: el color debe permanecer var(--workout-row-complete)",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      '.selectableTableRow[data-complete="true"]:not([aria-pressed="true"])',
+      "color: var(--workout-row-complete);",
+      "color: var(--muted);",
+    ),
+  },
+  {
+    name: "hardcodear fondo TRAIN-UI-01",
+    expectedFailure: "CSS TRAIN-UI-01: los colores locales deben usar tokens, no valores hardcodeados",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "background: var(--background);",
+      "background: #07101a;",
+    ),
+  },
+  {
+    name: "reintroducir banda distinta en zona Back",
+    expectedFailure: "zona Back: el fondo debe permanecer var(--background)",
+    target: "globalStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".section-back-row",
+      "background: var(--background);",
+      "background: var(--panel);",
+    ),
+  },
+  {
+    name: "degradar especificidad de tarjeta frente al CSS global",
+    expectedFailure: "tarjeta TRAIN-UI-01: el fondo debe conservar la especificidad local .workoutCard.workoutCard",
+    target: "workoutStyles",
+    mutate: (source) => source.replace(
+      ".workoutCard.workoutCard {",
+      ":where(.workoutCard) {",
+    ),
+  },
+  {
+    name: "reintroducir gradiente en topbar",
+    expectedFailure: "topbar: sin banda ni gradiente",
+    target: "globalStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".topbar",
+      "background-image: none;",
+      "background-image: linear-gradient(var(--background), var(--panel));",
+    ),
+  },
+  {
+    name: "permitir wrap del título de rutina",
+    expectedFailure: "título de rutina: white-space debe permanecer nowrap",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      `.routineTitle h2,
+.routineTitle h3`,
+      "white-space: nowrap;",
+      "white-space: normal;",
+    ),
+  },
+  {
+    name: "agrandar visualmente el selector de día",
+    expectedFailure: "selector de día: la altura visual estructural debe permanecer en 36px",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "min-height: 36px;",
+      "min-height: 44px;",
+    ),
+  },
+  {
+    name: "agrandar visualmente el botón Editar",
+    expectedFailure: "botón Editar: la caja visual debe medir los mismos 36px de alto que el selector",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".editRoutineButton.editRoutineButton::before",
+      "inset: 4px 0;",
+      "inset: 0;",
+    ),
+  },
+  {
+    name: "eliminar altura explícita del selector en Safari",
+    expectedFailure: "selector de día: la altura explícita debe permanecer en 36px para Safari",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "\n  height: 36px;",
+      "\n  height: auto;",
+    ),
+  },
+  {
+    name: "restaurar tipografía pequeña del texto introductorio",
+    expectedFailure: "texto introductorio: la tipografía debe conservar clamp(0.7rem, 3.2vw, 1.1rem)",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".startIntro h2",
+      "font-size: clamp(0.7rem, 3.2vw, 1.1rem);",
+      "font-size: clamp(0.58rem, 2.7vw, 1.1rem);",
+    ),
+  },
+  {
+    name: "eliminar compactación del texto introductorio",
+    expectedFailure: "texto introductorio: letter-spacing debe conservar -1.2px",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".startIntro h2",
+      "letter-spacing: -1.2px;",
+      "letter-spacing: normal;",
+    ),
+  },
+  {
+    name: "restaurar tipografía pequeña de métricas",
+    expectedFailure: "etiquetas métricas: font-size debe conservar clamp(0.625rem, 2.4vw, 0.75rem)",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".metricScope.metricScope :global(.metric-title-row span)",
+      "font-size: clamp(0.625rem, 2.4vw, 0.75rem);",
+      "font-size: clamp(0.5rem, 2vw, 0.7rem);",
+    ),
+  },
+  {
+    name: "permitir corte arbitrario en etiquetas métricas",
+    expectedFailure: "etiquetas métricas: overflow-wrap debe permanecer normal",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".metricScope.metricScope :global(.metric-title-row span)",
+      "overflow-wrap: normal;",
+      "overflow-wrap: anywhere;",
+    ),
+  },
+  {
+    name: "eliminar límite de dos líneas de la primera métrica",
+    expectedFailure: "primera etiqueta métrica: max-width debe conservar 13ch para el límite aprobado de 2 líneas",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".metricScope.metricScope :global(.metric:nth-child(1) .metric-title-row span)",
+      "max-width: 13ch;",
+      "max-width: none;",
+    ),
+  },
+  {
+    name: "eliminar límite de dos líneas de la segunda métrica",
+    expectedFailure: "segunda etiqueta métrica: max-width debe conservar 7ch para el límite aprobado de 2 líneas",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".metricScope.metricScope :global(.metric:nth-child(2) .metric-title-row span)",
+      "max-width: 7ch;",
+      "max-width: none;",
+    ),
+  },
+  {
+    name: "eliminar límite de tres líneas de la tercera métrica",
+    expectedFailure: "tercera etiqueta métrica: max-width debe conservar 12ch para el límite aprobado de 3 líneas",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".metricScope.metricScope :global(.metric:nth-child(3) .metric-title-row span)",
+      "max-width: 12ch;",
+      "max-width: none;",
+    ),
+  },
+  {
+    name: "volver transparentes las casillas de historial y comentario",
+    expectedFailure: "historial y comentario: el fondo debe permanecer var(--primary-strong)",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".referencePanel [data-disclosure] > summary",
+      "background: var(--primary-strong);",
+      "background: transparent;",
+    ),
+  },
+  {
+    name: "permitir que kg salte a otra línea",
+    expectedFailure: "peso del ejercicio seleccionado: la unidad kg debe permanecer en una línea",
+    target: "workoutStyles",
+    mutate: (source) => mutateCssRule(
+      source,
+      ".selectedExerciseHeading.selectedExerciseHeading strong",
+      "white-space: nowrap;",
+      "white-space: normal;",
+    ),
+  },
+];
+
+const trainUi01MetricProtectionMutationProbes: TrainUi01VisualMutationProbe[] = [
+  {
+    name: "M1 · degradar primera etiqueta a más de 2 líneas",
+    target: "workoutStyles",
+    expectedFailure: "primera etiqueta métrica: “Total de KG de la rutina” excede el límite aprobado de 2 líneas (3 líneas calculadas)",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(1) :global(.metric-title-row) span {\n  max-width: 10ch;\n}\n`,
+  },
+  {
+    name: "M2 · degradar segunda etiqueta a más de 2 líneas",
+    target: "workoutStyles",
+    expectedFailure: "segunda etiqueta métrica: “Total Reps” excede el límite aprobado de 2 líneas (3 líneas calculadas)",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(2) :global(.metric-title-row) span {\n  max-width: 4ch;\n  overflow-wrap: anywhere;\n}\n`,
+  },
+  {
+    name: "M3 · degradar tercera etiqueta a más de 3 líneas",
+    target: "workoutStyles",
+    expectedFailure: "tercera etiqueta métrica: “Total ejercicios registrados” excede el límite aprobado de 3 líneas (4 líneas calculadas)",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(3) :global(.metric-title-row) span {\n  max-width: 8ch;\n  overflow-wrap: anywhere;\n}\n`,
+  },
+  {
+    name: "M4 · aplicar ellipsis efectivo a la segunda etiqueta",
+    target: "workoutStyles",
+    expectedFailure: "segunda etiqueta métrica: no puede usar text-overflow: ellipsis",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(2) :global(.metric-title-row) span {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n`,
+  },
+  {
+    name: "M5 · ocultar overflow de la tercera etiqueta",
+    target: "workoutStyles",
+    expectedFailure: "tercera etiqueta métrica: no puede usar overflow: hidden ni clip",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(3) :global(.metric-title-row) span {\n  overflow: hidden;\n}\n`,
+  },
+  {
+    name: "M6 · convertir la grilla en columnas desiguales",
+    target: "workoutStyles",
+    expectedFailure: "grilla métrica: debe conservar tres columnas iguales",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.routine-metric-grid) {\n  grid-template-columns: 1fr 2fr 1fr;\n}\n`,
+  },
+  {
+    name: "M7 · dar altura diferente a la segunda tarjeta",
+    target: "workoutStyles",
+    expectedFailure: "tarjetas métricas: altura uniforme de las tres tarjetas a 320px",
+    mutate: (source) => `${source}\n.metricScope.metricScope :global(.metric):nth-child(2) {\n  min-height: 160px;\n}\n`,
+  },
+  {
+    name: "M8 · añadir override tardío señuelo sólo a la primera tarjeta",
+    target: "workoutStyles",
+    expectedFailure: "tarjetas métricas: ancho uniforme de las tres tarjetas a 390px",
+    mutate: (source) => `${source}\n@media (min-width: 390px) and (max-width: 390px) {\n  .metricScope.metricScope :global(.metric):nth-child(1) {\n    width: calc(100% - 1px);\n  }\n}\n`,
+  },
+];
+
+const expectedTrainUi01FocalMutationProbeCount = 28;
+const expectedTrainUi01MetricProtectionProbeCount = 8;
+const expectedTrainUi01VisualMutationProbeCount = 36;
+assert.equal(
+  trainUi01MutationProbes.length,
+  expectedTrainUi01FocalMutationProbeCount,
+  "TRAIN-UI-01: deben existir exactamente 28 probes visuales focales",
+);
+assert.equal(
+  trainUi01MetricProtectionMutationProbes.length,
+  expectedTrainUi01MetricProtectionProbeCount,
+  "TRAIN-UI-01: deben existir exactamente 8 probes métricos estructurales",
+);
+assert.equal(
+  trainUi01MutationProbes.length + trainUi01MetricProtectionMutationProbes.length,
+  expectedTrainUi01VisualMutationProbeCount,
+  "TRAIN-UI-01: deben ejecutarse exactamente 36 probes visuales endurecidos",
+);
+
+function runTrainUi01VisualMutationProbe(probe: TrainUi01VisualMutationProbe) {
+  const metadata = trainUi01AuditSourceFiles[probe.target];
+  const original = trainUi01AuditSources[probe.target];
+  const originalDiskHash = sha256(readSource(metadata.diskPath));
+  assert.equal(
+    originalDiskHash,
+    sha256(original),
+    `restauración byte a byte: el source base de ${probe.name} debe coincidir con disco`,
+  );
+
+  try {
+    const mutated = probe.mutate(original);
+    assert.notEqual(mutated, original, `probe sin mutación efectiva: ${probe.name}`);
+    assert.notEqual(
+      sha256(mutated),
+      originalDiskHash,
+      `probe sin cambio byte a byte: ${probe.name}`,
+    );
+    if (metadata.syntax === "css") {
+      parseExecutableCss(mutated, cssDefaultClassScopeForPath(metadata.diskPath));
+    }
+    else assertValidTypeScriptMutation(
+      mutated,
+      metadata.diskPath,
+      metadata.syntax === "tsx" ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+
+    let semanticFailure: unknown;
+    try {
+      assertTrainUi01AuditContracts({
+        ...trainUi01AuditSources,
+        [probe.target]: mutated,
+      });
+    } catch (error) {
+      semanticFailure = error;
+    }
+    assert.ok(semanticFailure instanceof Error, `el contrato debe matar la mutación: ${probe.name}`);
+    assert.ok(
+      semanticFailure.message.includes(probe.expectedFailure),
+      `el mensaje debe contener exactamente el expectedFailure: ${probe.name}`,
+    );
+    assert.equal(
+      semanticFailure.message.split("\n", 1)[0],
+      probe.expectedFailure,
+      `el probe debe morir exclusivamente por su expectedFailure: ${probe.name}`,
+    );
+  } finally {
+    assert.equal(
+      sha256(readSource(metadata.diskPath)),
+      originalDiskHash,
+      `restauración byte a byte fallida después de ${probe.name}`,
+    );
+  }
+}
+
+for (const probe of trainUi01MutationProbes) runTrainUi01VisualMutationProbe(probe);
+for (const probe of trainUi01MetricProtectionMutationProbes) {
+  runTrainUi01VisualMutationProbe(probe);
+}
+
+console.log(
+  `TRAIN-UI-01 focal mutation probes passed (${expectedTrainUi01FocalMutationProbeCount}): ${trainUi01MutationProbes.map((probe) => `${probe.name} => ${probe.expectedFailure}`).join(" | ")}`,
+);
+console.log(
+  `TRAIN-UI-01 metric protection mutation probes passed (${expectedTrainUi01MetricProtectionProbeCount}): ${trainUi01MetricProtectionMutationProbes.map((probe) => `${probe.name} => ${probe.expectedFailure}`).join(" | ")}`,
+);
+
+type TrainUi01ReauditProbe = {
+  name: string;
+  diskPath: string;
+  syntax: "css" | "tsx" | "ts";
+  expectedFailure: RegExp;
+  target:
+    | { kind: "audit"; key: keyof TrainUi01AuditSources }
+    | { kind: "protected"; path: ProtectedFilePath };
+  mutate(source: string): string;
+};
+
+const trainUi01ReauditProbes: TrainUi01ReauditProbe[] = [
+  {
+    name: "A · aplicar ellipsis por override tardío efectivo",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /texto protegido con (?:recorte|ellipsis) efectivo/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.routineTitle.routineTitle p {\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n`,
+  },
+  {
+    name: "B · reducir target Editar desde pseudoestado",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /target táctil reducido por transform/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.editRoutineButton:hover {\n  transform: scale(0.5);\n}\n`,
+  },
+  {
+    name: "C · reservar espacio entre series y objetivo",
+    diskPath: "src/features/active-workout/components/ExerciseLastPerformancePanel.tsx",
+    syntax: "tsx",
+    expectedFailure: /flujo DOM directo: no se permite wrapper, placeholder, texto ni reserva visual/,
+    target: { kind: "audit", key: "performancePanel" },
+    mutate: (source) => replaceAuditOnce(
+      source,
+      '          <p className={styles.todayGoal}>{presentation.todayGoalText}</p>',
+      '          <div aria-hidden="true" style={{ minHeight: 24 }} />\n          <p className={styles.todayGoal}>{presentation.todayGoalText}</p>',
+    ),
+  },
+  {
+    name: "D · sobrescribir fondo con igual especificidad",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /fondo efectivo incorrecto en tarjeta/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.workoutCard.workoutCard {\n  background: var(--panel);\n}\n`,
+  },
+  {
+    name: "E · expandir canvas a 200vw",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /overflow horizontal efectivo: .*200vw/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.screen {\n  width: 200vw;\n}\n`,
+  },
+  {
+    name: "F · mutar payload productivo protegido",
+    diskPath: "src/lib/training/workout-registration.ts",
+    syntax: "ts",
+    expectedFailure: /integridad byte a byte: cambió el archivo protegido .*workout-registration\.ts/,
+    target: { kind: "protected", path: "src/lib/training/workout-registration.ts" },
+    mutate: (source) => `${source}\nexport const trainUi01MutationProbe = true;\n`,
+  },
+  {
+    name: "G · modificar accidentalmente Progreso",
+    diskPath: "src/features/progress/components/comparison-screen-v2.tsx",
+    syntax: "tsx",
+    expectedFailure: /integridad byte a byte: cambió el archivo protegido .*comparison-screen-v2\.tsx/,
+    target: { kind: "protected", path: "src/features/progress/components/comparison-screen-v2.tsx" },
+    mutate: (source) => `${source}\nexport const trainUi01ProgressMutationProbe = true;\n`,
+  },
+];
+
+function runTrainUi01IsolatedProbe(probe: TrainUi01ReauditProbe) {
+  const original = probe.target.kind === "audit"
+    ? trainUi01AuditSources[probe.target.key]
+    : protectedFileSources[probe.target.path];
+  const originalDiskSource = readSource(probe.diskPath);
+  const originalDiskHash = sha256(originalDiskSource);
+  assert.equal(
+    originalDiskHash,
+    sha256(original),
+    `restauración byte a byte: el source base de ${probe.name} debe coincidir con disco`,
+  );
+
+  const mutated = probe.mutate(original);
+  assert.notEqual(mutated, original, `probe sin mutación efectiva: ${probe.name}`);
+  assert.notEqual(sha256(mutated), originalDiskHash, `probe sin cambio byte a byte: ${probe.name}`);
+  if (probe.syntax === "css") {
+    parseExecutableCss(mutated, cssDefaultClassScopeForPath(probe.diskPath));
+  }
+  else assertValidTypeScriptMutation(
+    mutated,
+    probe.diskPath,
+    probe.syntax === "tsx" ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+
+  const mutatedAuditSources = probe.target.kind === "audit"
+    ? { ...trainUi01AuditSources, [probe.target.key]: mutated }
+    : trainUi01AuditSources;
+  const mutatedProtectedSources = probe.target.kind === "protected"
+    ? { ...protectedFileSources, [probe.target.path]: mutated }
+    : protectedFileSources;
+
+  let semanticFailure: unknown;
+  try {
+    assertTrainUi01AuditContracts(mutatedAuditSources, mutatedProtectedSources);
+  } catch (error) {
+    semanticFailure = error;
+  } finally {
+    const restoredDiskSource = readSource(probe.diskPath);
+    assert.equal(
+      restoredDiskSource,
+      originalDiskSource,
+      `restauración byte a byte fallida después de ${probe.name}`,
+    );
+    assert.equal(
+      sha256(restoredDiskSource),
+      originalDiskHash,
+      `restauración SHA fallida después de ${probe.name}`,
+    );
+  }
+  assert.ok(semanticFailure instanceof Error, `el contrato debe matar la mutación: ${probe.name}`);
+  assert.match(
+    semanticFailure.message,
+    probe.expectedFailure,
+    `el probe debe morir por su aserción semántica específica: ${probe.name}`,
+  );
+}
+
+for (const probe of trainUi01ReauditProbes) runTrainUi01IsolatedProbe(probe);
+
+console.log(
+  `TRAIN-UI-01 survivor reaudit mutation probes passed (${trainUi01ReauditProbes.length}): ${trainUi01ReauditProbes.map((probe) => probe.name).join(" | ")}`,
+);
+
+const trainUi01HeaderGeometryProbes: TrainUi01ReauditProbe[] = [
+  {
+    name: "G1 · devolver breakpoint apilado a 360px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /breakpoint adaptativo: 361px debe usar layout apilado/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => replaceAuditOnce(
+      source,
+      "@media (max-width: 400px) {",
+      "@media (max-width: 360px) {",
+    ),
+  },
+  {
+    name: "G2 · reducir breakpoint apilado a 393px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /breakpoint adaptativo: 400px debe usar layout apilado/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => replaceAuditOnce(
+      source,
+      "@media (max-width: 400px) {",
+      "@media (max-width: 393px) {",
+    ),
+  },
+  {
+    name: "G3 · mantener controles en la misma fila a 390px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /breakpoint adaptativo: 390px debe usar layout apilado/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n@media (min-width: 390px) and (max-width: 390px) {\n  .routineHeader {\n    grid-template-columns: minmax(0, 1fr) auto;\n  }\n}\n`,
+  },
+  {
+    name: "G4 · aumentar selector hasta provocar colisión",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /geometría del selector: debe conservar 82px útiles a 401px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n@media (min-width: 401px) and (max-width: 401px) {\n  .daySelector select {\n    width: 140px;\n  }\n}\n`,
+  },
+  {
+    name: "G5 · aumentar gap hasta provocar colisión",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /geometría del header: colisión a 401px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n@media (min-width: 401px) and (max-width: 401px) {\n  .routineControls {\n    gap: 16px;\n  }\n}\n`,
+  },
+  {
+    name: "G6 · introducir ellipsis en el título",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /texto completo: título de rutina no puede usar ellipsis a 320px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.routineTitle h2,\n.routineTitle h3 {\n  text-overflow: ellipsis;\n}\n`,
+  },
+  {
+    name: "G7 · ocultar overflow del título",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /texto completo: título de rutina no puede ocultar overflow a 320px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.routineTitle h2,\n.routineTitle h3 {\n  overflow: hidden;\n}\n`,
+  },
+  {
+    name: "G8 · abreviar Miércoles",
+    diskPath: "src/lib/training/training-day-order.ts",
+    syntax: "ts",
+    expectedFailure: /copy geométrico: no se permite abreviar ni alterar los días admitidos/,
+    target: { kind: "audit", key: "trainingDayOrder" },
+    mutate: (source) => replaceAuditOnce(source, '  "Miércoles",', '  "Mié.",'),
+  },
+  {
+    name: "G9 · reducir tipografía bajo el mínimo aprobado",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /tipografía geométrica: el título debe medir exactamente 15px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.routineTitle h2,\n.routineTitle h3 {\n  font-size: 0.6rem;\n}\n`,
+  },
+  {
+    name: "G10 · centrar controles en layout apilado",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /alineación apilada: selector y Editar deben permanecer juntos a la derecha/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n@media (max-width: 400px) {\n  .routineControls {\n    justify-content: center;\n  }\n}\n`,
+  },
+  {
+    name: "G11 · aumentar título sobre 15px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /tipografía geométrica: el título debe medir exactamente 15px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.routineTitle h2,\n.routineTitle h3 {\n  font-size: 16px;\n}\n`,
+  },
+  {
+    name: "G12 · aumentar nombre de rutina sobre 15px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /nombre de rutina: el tamaño estructural debe medir exactamente 15px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".routineTitle.routineTitle p",
+      "font-size: 15px;",
+      "font-size: 16px;",
+    ),
+  },
+  {
+    name: "G13 · reducir selector bajo 116px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /selector de día: el ancho estructural debe medir exactamente 116px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "width: 116px;",
+      "width: 115px;",
+    ),
+  },
+  {
+    name: "G14 · aumentar selector sobre 116px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /selector de día: el ancho estructural debe medir exactamente 116px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "width: 116px;",
+      "width: 117px;",
+    ),
+  },
+  {
+    name: "G15 · reducir fuente del selector bajo 16px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /selector de día: 15px provoca autozoom en iOS/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector select",
+      "font-size: 1rem;",
+      "font-size: 15px;",
+    ),
+  },
+  {
+    name: "G16 · reducir target táctil del selector bajo 44px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /selector de día: el target táctil estructural debe medir al menos 44px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".daySelector",
+      "min-height: 44px;",
+      "min-height: 43px;",
+    ),
+  },
+  {
+    name: "G17 · reducir fuente efectiva del selector en viewport amplio",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /fuente efectiva del selector: 15px queda bajo 16px a 800px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n@media (min-width: 800px) {\n  .daySelector select {\n    font-size: 15px;\n  }\n}\n`,
+  },
+];
+
+for (const probe of trainUi01HeaderGeometryProbes) runTrainUi01IsolatedProbe(probe);
+
+console.log(
+  `TRAIN-UI-01 header geometry mutation probes passed (${trainUi01HeaderGeometryProbes.length}): ${trainUi01HeaderGeometryProbes.map((probe) => probe.name).join(" | ")}`,
+);
+
+const uiNav01vSeriesProbes: TrainUi01ReauditProbe[] = [
+  {
+    name: "UI-NAV-01V · relación hijo real reduce Series inicial a 1px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\nmain:global(.app-shell) :global(.training-start-card).workoutCard .exerciseTable > .tableHeader > span {\n  font-size: 1px !important;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · relación hijo real reduce Series guiado a 1px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en entrenamiento guiado debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\nmain:global(.app-shell) :global(.routine-summary-card).workoutCard .exerciseTable > .tableHeader > span {\n  font-size: 1px !important;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · hermano adyacente real alcanza Series inicial",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n:global(.training-start-card).workoutCard .tableHeader span + span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · ancestro main.app-shell reduce Series inicial a 1px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\nmain:global(.app-shell) :global(.training-start-card) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · ancestro body reduce Series inicial a 1px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\nbody :global(.training-start-card) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · mobile-series-card real reduce Series guiado a 1px",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en entrenamiento guiado debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\nmain :global(.mobile-series-card).workoutCard .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · clase local workoutCard alcanza Series inicial",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.workoutCard .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · lista combina rama global imposible y rama real",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en entrenamiento guiado debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n:global(.guided-training-card) :global(.tableHeader) span,\n:global(.mobile-series-card) .tableHeader span {\n  font-size: 1px !important;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · media query conserva procedencia real guiada",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en entrenamiento guiado debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n@media (max-width: 430px) {\n  :global(.routine-summary-card) .tableHeader span {\n    font-size: 1px !important;\n  }\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · hermano general real alcanza Series inicial",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n:global(.training-start-card).workoutCard .tableHeader span ~ span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · reducir Series a 1px en Entrenemos",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /^UI-NAV-01V: Series en pantalla inicial debe conservar una fuente legible a 320px; fuente efectiva 1px$/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · permitir wrap de Series en Entrenemos",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /Series debe permanecer en una línea en Entrenemos a 320px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.tableHeader span {\n  white-space: normal;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · permitir quiebre interno de Series",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /Series no puede forzar quiebres internos en Entrenemos a 320px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => `${source}\n.tableHeader span {\n  overflow-wrap: anywhere;\n}\n`,
+  },
+  {
+    name: "UI-NAV-01V · estrechar la columna Series base",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /grilla de Entrenemos debe reservar 50px para Series a 430px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => mutateCssRule(
+      source,
+      ".tableHeader,\n.tableRow,\n.selectableTableRow",
+      "minmax(50px, 0.72fr)",
+      "minmax(38px, 0.72fr)",
+    ),
+  },
+  {
+    name: "UI-NAV-01V · estrechar la columna Series intermedia",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /grilla de Entrenemos debe reservar 50px para Series a 393px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => replaceAuditOnce(source, "minmax(50px, 0.68fr)", "minmax(34px, 0.68fr)"),
+  },
+  {
+    name: "UI-NAV-01V · estrechar la columna Series mínima",
+    diskPath: "src/features/active-workout/active-workout.module.css",
+    syntax: "css",
+    expectedFailure: /grilla de Entrenemos debe reservar 50px para Series a 320px/,
+    target: { kind: "audit", key: "workoutStyles" },
+    mutate: (source) => replaceAuditOnce(source, "minmax(50px, 0.66fr)", "minmax(31px, 0.66fr)"),
+  },
+  {
+    name: "UI-NAV-01V · abreviar Series en pantalla inicial",
+    diskPath: "src/features/active-workout/components/TrainingStartScreen.tsx",
+    syntax: "tsx",
+    expectedFailure: /TrainingStartScreen\.tsx debe conservar Series completo y sin abreviaciones/,
+    target: { kind: "audit", key: "start" },
+    mutate: (source) => replaceAuditOnce(source, ">Series</span>", ">Serie</span>"),
+  },
+  {
+    name: "UI-NAV-01V · abreviar Series en entrenamiento guiado",
+    diskPath: "src/features/active-workout/components/GuidedTrainingScreen.tsx",
+    syntax: "tsx",
+    expectedFailure: /GuidedTrainingScreen\.tsx debe conservar Series completo y sin abreviaciones/,
+    target: { kind: "audit", key: "guided" },
+    mutate: (source) => replaceAuditOnce(source, ">Series</span>", ">Serie</span>"),
+  },
+];
+
+for (const probe of uiNav01vSeriesProbes) runTrainUi01IsolatedProbe(probe);
+
+const uiNav01vActiveWorkoutInnocentControls = [
+  {
+    name: "comentario CSS",
+    mutate: (source: string) => `${source}\n/* UI-NAV-01V: comentario inocente con Series visible */\n`,
+  },
+  {
+    name: "reformateo",
+    mutate: (source: string) => replaceAuditOnce(
+      source,
+      ".tableHeader span {\n  overflow-wrap: normal;\n  white-space: nowrap;\n}",
+      ".tableHeader   span\n{\n  overflow-wrap: normal;\n  white-space: nowrap;\n}",
+    ),
+  },
+  {
+    name: "reordenamiento inocente de declaraciones",
+    mutate: (source: string) => replaceAuditOnce(
+      source,
+      ".tableHeader span {\n  overflow-wrap: normal;\n  white-space: nowrap;\n}",
+      ".tableHeader span {\n  white-space: nowrap;\n  overflow-wrap: normal;\n}",
+    ),
+  },
+  {
+    name: "fuente local equivalente y legible",
+    mutate: (source: string) => `${source}\n.tableHeader span {\n  font-size: 1rem;\n}\n`,
+  },
+  {
+    name: "ancestros adicionales con fuente legible",
+    mutate: (source: string) => `${source}\nbody :global(.app-shell) :global(.training-start-card).workoutCard .tableHeader span {\n  font-size: 1rem;\n}\nmain:global(.app-shell) :global(.routine-summary-card).workoutCard .tableHeader span {\n  font-size: 1rem;\n}\n`,
+  },
+  {
+    name: "selector no relacionado con fuente de 1px",
+    mutate: (source: string) => `${source}\n.unrelated-card .unrelated-table-header span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "hijo directo incorrecto en Entrenemos inicial",
+    mutate: (source: string) => `${source}\n:global(.training-start-card) > .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "hijo directo incorrecto en entrenamiento guiado",
+    mutate: (source: string) => `${source}\n:global(.routine-summary-card) > .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "hermano adyacente incorrecto en Active Workout",
+    mutate: (source: string) => `${source}\n.tableHeader + span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "hermano general incorrecto en Active Workout",
+    mutate: (source: string) => `${source}\n.tableHeader ~ span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "clase global guided-training-card inexistente",
+    mutate: (source: string) => `${source}\n:global(.guided-training-card) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "clase global guided-workout-card inexistente",
+    mutate: (source: string) => `${source}\n:global(.guided-workout-card) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "clase global training-overview-card inexistente",
+    mutate: (source: string) => `${source}\n:global(.training-overview-card) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "training-start-card declarada falsamente local",
+    mutate: (source: string) => `${source}\n.training-start-card .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "routine-summary-card declarada falsamente local",
+    mutate: (source: string) => `${source}\n.routine-summary-card .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "workoutCard declarada falsamente global",
+    mutate: (source: string) => `${source}\n:global(.workoutCard) .tableHeader span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "tableHeader declarada falsamente global",
+    mutate: (source: string) => `${source}\n:global(.tableHeader) span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "mezcla de scope y relación de hijo directo imposible",
+    mutate: (source: string) => `${source}\n:global(.training-start-card) > :global(.tableHeader) span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "mezcla de scope y hermano adyacente imposible",
+    mutate: (source: string) => `${source}\n:global(.training-start-card) :global(.tableHeader) span + span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "mezcla de scope y hermano general imposible",
+    mutate: (source: string) => `${source}\n:global(.routine-summary-card) :global(.tableHeader) span ~ span {\n  font-size: 1px;\n}\n`,
+  },
+  {
+    name: "scope global imposible dentro de media query",
+    mutate: (source: string) => `${source}\n@media (max-width: 430px) {\n  :global(.routine-summary-card) :global(.tableHeader) span {\n    font-size: 1px !important;\n  }\n}\n`,
+  },
+  {
+    name: "override real seguro de mayor prioridad",
+    mutate: (source: string) => `${source}\n.tableHeader span {\n  font-size: 1px;\n}\n.workoutCard .tableHeader span {\n  font-size: 1rem;\n}\n`,
+  },
+] as const;
+
+for (const control of uiNav01vActiveWorkoutInnocentControls) {
+  const workoutStylesPath = trainUi01AuditSourceFiles.workoutStyles.diskPath;
+  const originalDiskSource = readSource(workoutStylesPath);
+  const originalDiskHash = sha256(originalDiskSource);
+  assert.equal(
+    originalDiskSource,
+    trainUi01AuditSources.workoutStyles,
+    `UI-NAV-01V: el control debe partir del CSS productivo (${control.name})`,
+  );
+  try {
+    const controlledCss = control.mutate(trainUi01AuditSources.workoutStyles);
+    assert.notEqual(
+      controlledCss,
+      trainUi01AuditSources.workoutStyles,
+      `UI-NAV-01V: control inocente sin cambio de bytes (${control.name})`,
+    );
+    assert.notEqual(
+      sha256(controlledCss),
+      originalDiskHash,
+      `UI-NAV-01V: control inocente sin cambio de SHA (${control.name})`,
+    );
+    parseExecutableCss(controlledCss, "local");
+    assertActiveWorkoutSeriesHeader(
+      parseExecutableCssSources([
+        { source: trainUi01AuditSources.globalStyles, defaultClassScope: "global" },
+        { source: controlledCss, defaultClassScope: "local" },
+      ]),
+    );
+  } finally {
+    const restoredDiskSource = readSource(workoutStylesPath);
+    assert.equal(
+      restoredDiskSource,
+      originalDiskSource,
+      `UI-NAV-01V: restauración byte a byte fallida (${control.name})`,
+    );
+    assert.equal(
+      sha256(restoredDiskSource),
+      originalDiskHash,
+      `UI-NAV-01V: restauración SHA fallida (${control.name})`,
+    );
+  }
+}
+
+function renameContractIdentifierForControl(source: string, from: string, to: string) {
+  const sourceFile = ts.createSourceFile(
+    "active-workout-visual-integration-contract.test.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const ranges: Array<{ start: number; end: number }> = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isIdentifier(node) && node.text === from) {
+      ranges.push({ start: node.getStart(sourceFile), end: node.getEnd() });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  assert.ok(ranges.length >= 2, `UI-NAV-01V: falta variable local renombrable ${from}`);
+  return ranges
+    .sort((left, right) => right.start - left.start)
+    .reduce(
+      (mutated, range) => `${mutated.slice(0, range.start)}${to}${mutated.slice(range.end)}`,
+      source,
+    );
+}
+
+const activeWorkoutContractPath =
+  "src/features/active-workout/active-workout-visual-integration-contract.test.ts";
+const activeWorkoutContractSource = readSource(activeWorkoutContractPath);
+const uiNav01vContractSourceControls = [
+  {
+    name: "comentario en el contrato",
+    source: `${activeWorkoutContractSource}\n// UI-NAV-01V: comentario contractual inocente.\n`,
+  },
+  {
+    name: "renombre de variable local del contrato",
+    source: renameContractIdentifierForControl(
+      activeWorkoutContractSource,
+      "activeWorkoutSeriesViewportWidths",
+      "auditedSeriesViewportWidths",
+    ),
+  },
+] as const;
+
+for (const control of uiNav01vContractSourceControls) {
+  assert.notEqual(
+    sha256(control.source),
+    sha256(activeWorkoutContractSource),
+    `UI-NAV-01V: control contractual sin cambio real (${control.name})`,
+  );
+  assertValidTypeScriptMutation(control.source, activeWorkoutContractPath, ts.ScriptKind.TS);
+}
+
+console.log(`UI-NAV-01V Active Workout mutation probes passed (${uiNav01vSeriesProbes.length})`);
+console.log(
+  `UI-NAV-01V Active Workout innocent controls passed (${uiNav01vActiveWorkoutInnocentControls.length + uiNav01vContractSourceControls.length})`,
+);
 
 const registration = "tsx src/features/active-workout/active-workout-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);

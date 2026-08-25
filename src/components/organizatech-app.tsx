@@ -3,15 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
-  Dumbbell,
-  Eye,
-  EyeOff,
-  Lock,
-  Mail,
-  Save,
-  UserPlus,
-} from "lucide-react";
-import {
   deactivateActiveCycle,
   deleteExercise,
   replaceLocalData,
@@ -47,11 +38,76 @@ import {
 import { TrainingCompletionSummaryScreen } from "@/features/active-workout/components/TrainingCompletionSummaryScreen";
 import { TrainingReadinessScreen } from "@/features/active-workout/components/TrainingReadinessScreen";
 import { TrainingStartScreen } from "@/features/active-workout/components/TrainingStartScreen";
+import {
+  AuthLoadingScreen,
+  AuthScreen,
+  NewPasswordScreen,
+  PasswordRecoveryScreen,
+  RecoveryExpiredScreen,
+  type AuthStatusTone,
+} from "@/features/auth/components/auth-screen";
+import { useAuthRouteController } from "@/features/auth/hooks/use-auth-route-controller";
+import {
+  PASSWORD_RECOVERY_FLOW,
+  SIGNUP_CONFIRMATION_FLOW,
+  getBrowserAuthCallbackUrl,
+  isCrossedSignupConfirmationCallback,
+  parseAuthCallbackEvidence,
+  resolveSignupConfirmationRouteState,
+  resolveSignupConfirmationSessionDecision,
+  type AuthCallbackEvidence,
+  type SignupConfirmationRouteState,
+} from "@/features/auth/model/auth-callback";
+import {
+  useMultiportalAuthBoundary,
+  type CoachRegistrationOwner,
+  type PortalResolutionOwner,
+  type UserRegistrationOwner,
+} from "@/features/auth/hooks/use-multiportal-auth-boundary";
+import {
+  buildCoachRegistrationPayload,
+  buildLoginPayload,
+  buildUserSignupPayload,
+  type AuthFieldErrors,
+  type AuthFieldName,
+} from "@/features/auth/model/auth-form";
+import {
+  DEFAULT_AUTH_ROUTE,
+  type AuthAccountType,
+  type AuthRouteState,
+} from "@/features/auth/model/auth-route";
+import {
+  MULTIPORTAL_AUTH_ERROR_MESSAGE,
+  SIGNUP_CONFIRMATION_INVALID_MESSAGE,
+  type AuthorizedPortalAccess,
+  type SignupConfirmationResult,
+} from "@/features/auth/model/multiportal-auth-controller";
+import {
+  createUserPortalAuthorizationProof,
+  hasCurrentUserPortalAuthorization,
+  shouldMountAuthorizedUserPortal,
+  type UserPortalAuthorizationProof,
+} from "@/features/auth/model/user-portal-authorization-proof";
+import {
+  FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
+  resolveUserPortalSessionRevalidation,
+  type UserPortalSessionRevalidation,
+} from "@/features/auth/model/user-portal-session-revalidation";
+import { CoachPortalBoundary } from "@/features/coach-portal/components/coach-portal";
+import {
+  createCoachPortalSession,
+  type CoachPortalSession,
+} from "@/features/coach-portal/model/coach-portal";
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
 import { useNotificationsController } from "@/features/notifications/hooks/useNotificationsController";
 import { useProfileController } from "@/features/profile/hooks/useProfileController";
+import { UserPortalShell } from "@/features/user-portal-shell/components/user-portal-shell";
+import {
+  createUserPortalNavigationModel,
+  isUserPortalRenderableScreen,
+} from "@/features/user-portal-shell/model/user-portal-navigation";
 import { useLegacyCycleHistoryController } from "@/features/cycle-history/hooks/useLegacyCycleHistoryController";
 import {
   coordinateAuthenticatedSessionEvent,
@@ -126,6 +182,7 @@ import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode,
 import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
 import {
   executePasswordRecoveryUpdate,
+  getPasswordRecoveryClearedHref,
   hasPasswordRecoveryCallbackError,
   resolvePasswordRecoverySessionDecision,
 } from "@/lib/auth/password-recovery-session";
@@ -370,18 +427,30 @@ interface OrganizatechAppProps {
   trainingCyclesRepositoryEnabled?: boolean;
   trainingCyclesSnapshotSource?: "ui-main-production" | "ui-main-qa";
   trainingWorkoutReadinessV2Enabled?: boolean;
+  initialAuthRoute?: AuthRouteState;
 }
 
 export function OrganizatechApp({
   trainingCyclesRepositoryEnabled = false,
   trainingCyclesSnapshotSource = "ui-main-qa",
   trainingWorkoutReadinessV2Enabled = false,
+  initialAuthRoute = DEFAULT_AUTH_ROUTE,
 }: OrganizatechAppProps) {
+  const initialSignupConfirmationRef = useRef<SignupConfirmationSnapshot | null>(null);
+  const initialSignupConfirmation = initialSignupConfirmationRef.current
+    ?? getSignupConfirmationSnapshot();
+  initialSignupConfirmationRef.current = initialSignupConfirmation;
   const initialPasswordRecoveryRouteStateRef = useRef<ReturnType<typeof getPasswordRecoveryRouteState> | null>(null);
   const initialPasswordRecoveryRouteState = initialPasswordRecoveryRouteStateRef.current
     ?? getPasswordRecoveryRouteState();
   initialPasswordRecoveryRouteStateRef.current = initialPasswordRecoveryRouteState;
-  const initialAuthState = resolveInitialAuthState(initialPasswordRecoveryRouteState);
+  const initialAuthState = resolveInitialAuthState(initialPasswordRecoveryRouteState, initialAuthRoute.mode);
+  const authRouteController = useAuthRouteController(initialAuthRoute);
+  const multiportalAuth = useMultiportalAuthBoundary({
+    initialRoute: initialAuthRoute,
+    currentRoute: authRouteController.route,
+    initialPasswordRecoveryActive: initialPasswordRecoveryRouteState === "active",
+  });
   const [sessionName, setSessionName] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -393,9 +462,17 @@ export function OrganizatechApp({
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
   const [statusMessage, setStatusMessage] = useState(initialAuthState.statusMessage);
+  const [authStatusTone, setAuthStatusTone] = useState<AuthStatusTone>("info");
+  const [authFieldErrors, setAuthFieldErrors] = useState<AuthFieldErrors>({});
   const [dataMode, setDataMode] = useState<DataMode>("demo");
   const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
+  const [coachPortalSession, setCoachPortalSession] = useState<CoachPortalSession | null>(null);
+  const coachPortalSessionRef = useRef<CoachPortalSession | null>(null);
+  const [userPortalAuthorizationProof, setUserPortalAuthorizationProof] =
+    useState<UserPortalAuthorizationProof | null>(null);
+  const userPortalAuthorizationProofRef = useRef<UserPortalAuthorizationProof | null>(null);
+  const [coachIdentitySwitchRequired, setCoachIdentitySwitchRequired] = useState(false);
   const [isSupabaseConfiguredState, setIsSupabaseConfiguredState] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(initialAuthState.isAuthLoading);
   const [isBusy, setIsBusy] = useState(false);
@@ -403,6 +480,11 @@ export function OrganizatechApp({
   const passwordRecoveryUserIdRef = useRef<string | null>(null);
   const passwordRecoveryUpdateOwnerRef = useRef<SessionOperationOwner | null>(null);
   const passwordRecoveryStateRef = useRef<"none" | "pending" | "confirmed" | "invalid">("none");
+  const signupConfirmationStateRef = useRef<"none" | "pending" | "completed" | "invalid">(
+    initialSignupConfirmation.routeState === "active"
+      ? "pending"
+      : initialSignupConfirmation.routeState === "invalid" ? "invalid" : "none",
+  );
   const [isPasswordRecoveryConfirmed, setIsPasswordRecoveryConfirmed] = useState(false);
   const [dashboardDayOverride, setDashboardDayOverride] = useState("");
   // P3-32: el estado data/loading/error, las request-key refs y los effects de historial del
@@ -413,6 +495,7 @@ export function OrganizatechApp({
   const authenticatedSessionCoordinatorRef = useRef(createAuthenticatedSessionCoordinator());
   const interactiveAuthAttemptRef = useRef(false);
   const loginSubmitOwnerRef = useRef<LoginSubmitOwnerController | null>(null);
+  const logoutInFlightRef = useRef(false);
 
   const captureSessionDataRequestToken = useCallback((): SessionDataRequestToken => {
     return createSessionDataRequestToken(sessionDataEpochRef.current);
@@ -559,6 +642,11 @@ export function OrganizatechApp({
   const hasSupabaseSession = Boolean(
     supabaseSession && supabaseUser && supabaseSession.user.id === supabaseUser.id,
   );
+  const hasCurrentUserPortalAuthorizationProof = hasCurrentUserPortalAuthorization({
+    authorizationProof: userPortalAuthorizationProof,
+    sessionUserId: supabaseSession?.user.id,
+    authenticatedUserId: supabaseUser?.id,
+  });
   const canEditProfilePersonalData = Boolean(hasSupabaseSession && getSupabaseBrowserClient());
   const activeFeatureStorageScope = getBrowserStorageScope(dataMode, supabaseUser?.id);
   const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);
@@ -672,7 +760,95 @@ export function OrganizatechApp({
     };
   }, []);
 
+  function setAuthStatus(message: string, tone: AuthStatusTone) {
+    setStatusMessage(message);
+    setAuthStatusTone(tone);
+  }
+
+  function setAuthFieldError(field: AuthFieldName, message: string) {
+    setAuthFieldErrors({ [field]: message });
+    setAuthStatus("", "info");
+  }
+
+  function clearAuthFieldError(field: AuthFieldName) {
+    setAuthFieldErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  }
+
+  function invalidateSignupConfirmation() {
+    signupConfirmationStateRef.current = "invalid";
+    clearSignupConfirmationUrl();
+    setIsBusy(false);
+    setIsAuthLoading(false);
+    authRouteController.replace({ mode: "login", accountType: "usuario" });
+    navigation.transition(createAuthNavigationReset("login", "signup-confirmation-completed"));
+    setAuthStatus(
+      SIGNUP_CONFIRMATION_INVALID_MESSAGE,
+      "error",
+    );
+  }
+
+  function publishSignupConfirmationResult(
+    result: Exclude<SignupConfirmationResult, { state: "stale" }>,
+    storageScope: BrowserStorageScope | null,
+  ) {
+    signupConfirmationStateRef.current = result.state === "confirmed" ? "completed" : "invalid";
+    clearSignupConfirmationUrl();
+    clearUserSessionState("", storageScope, { navigate: false });
+    clearAuthForms();
+    authRouteController.replace({
+      mode: "login",
+      accountType: result.requestedPortal,
+    });
+    navigation.transition(createAuthNavigationReset("login", "signup-confirmation-completed"));
+    setIsBusy(false);
+    setIsAuthLoading(false);
+    setAuthStatus(result.message, result.state === "confirmed" ? "success" : "error");
+  }
+
+  function completeSignupConfirmationSession(
+    authState: SupabaseSessionState,
+    forceInvalid = false,
+  ) {
+    clearSignupConfirmationUrl();
+    void multiportalAuth.completeSignupConfirmation(authState, forceInvalid)
+      .then((result) => {
+        if (
+          result === "stale"
+          && signupConfirmationStateRef.current === "pending"
+        ) {
+          invalidateSignupConfirmation();
+        }
+      })
+      .catch(() => {
+        invalidateSignupConfirmation();
+      });
+  }
+
+  function beginPasswordRecoveryPortalSession() {
+    replaceUserPortalAuthorizationProof(null);
+    const becameActive = multiportalAuth.beginPasswordRecoveryPortalGuard();
+    authenticatedSessionCoordinatorRef.current.reset();
+    replaceCoachPortalSession(null);
+    if (!becameActive) return false;
+
+    loginSubmitOwnerRef.current?.invalidate();
+    interactiveAuthAttemptRef.current = false;
+    resetUserScopedTransientState();
+    setSupabaseSession(null);
+    setSupabaseUser(null);
+    setSessionName("");
+    setDataMode("demo");
+    return true;
+  }
+
   function confirmPasswordRecoverySession(session: SupabaseSessionState["session"]) {
+    beginPasswordRecoveryPortalSession();
+    clearPasswordRecoveryUrl();
     const recoveryUserId = normalizePasswordRecoveryUserId(session?.user.id);
     if (!recoveryUserId) {
       invalidatePasswordRecoverySession();
@@ -682,13 +858,14 @@ export function OrganizatechApp({
     passwordRecoveryUserIdRef.current = recoveryUserId;
     passwordRecoveryStateRef.current = "confirmed";
     setIsPasswordRecoveryConfirmed(true);
-    confirmPasswordRecoveryFlow(recoveryUserId);
+    confirmPasswordRecoveryFlow();
     setIsAuthLoading(false);
-    setStatusMessage(resolveInitialAuthStatusMessage("active"));
+    setAuthStatus(resolveInitialAuthStatusMessage("active"), "info");
     navigation.transition(resolvePasswordRecoveryRouteTransition("active"));
   }
 
   function invalidatePasswordRecoverySession() {
+    beginPasswordRecoveryPortalSession();
     passwordRecoveryUserIdRef.current = null;
     passwordRecoveryUpdateOwnerRef.current = null;
     passwordRecoveryStateRef.current = "invalid";
@@ -697,8 +874,48 @@ export function OrganizatechApp({
     clearPasswordRecoveryUrl();
     setIsBusy(false);
     setIsAuthLoading(false);
-    setStatusMessage(resolveInitialAuthStatusMessage("expired"));
+    setAuthStatus(resolveInitialAuthStatusMessage("expired"), "error");
     navigation.transition(resolvePasswordRecoveryRouteTransition("expired"));
+  }
+
+  function finalizePasswordRecoveryToLogin(
+    message: string,
+    statusTone: AuthStatusTone,
+    storageScope: BrowserStorageScope | null,
+  ) {
+    multiportalAuth.releasePasswordRecoveryPortalGuard();
+    clearPasswordRecoveryUrl();
+    const clearedSession = clearUserSessionState(message, storageScope, { statusTone });
+    if (clearedSession) return;
+
+    passwordRecoveryUserIdRef.current = null;
+    passwordRecoveryUpdateOwnerRef.current = null;
+    passwordRecoveryStateRef.current = "none";
+    setIsPasswordRecoveryConfirmed(false);
+    clearPasswordRecoveryFlow();
+    clearAuthForms();
+    setIsBusy(false);
+    setIsAuthLoading(false);
+    authRouteController.replace({ mode: "login", accountType: "usuario" });
+    navigation.reset("login");
+    setAuthStatus(message, statusTone);
+  }
+
+  async function closePasswordRecoverySessionLocally(
+    message: string,
+    statusTone: AuthStatusTone,
+    storageScope = activeBrowserStorageScopeRef.current,
+  ): Promise<boolean> {
+    clearPasswordRecoveryUrl();
+    const { error } = await multiportalAuth.signOutPasswordRecoveryLocally();
+    if (error) {
+      setIsBusy(false);
+      setIsAuthLoading(false);
+      setAuthStatus(translateAuthError(error), "error");
+      return false;
+    }
+    finalizePasswordRecoveryToLogin(message, statusTone, storageScope);
+    return true;
   }
 
   function completePasswordRecoveryUpdate(storageScope: BrowserStorageScope | null): boolean {
@@ -707,11 +924,63 @@ export function OrganizatechApp({
     passwordUpdateSuccessRef.current = false;
     setNewPassword("");
     setNewPasswordConfirm("");
-    clearPasswordRecoveryUrl();
-    clearUserSessionState(
+    finalizePasswordRecoveryToLogin(
       "Contraseña actualizada correctamente. Ya puedes iniciar sesión.",
+      "success",
       storageScope,
     );
+    return true;
+  }
+
+  function holdPasswordRecoverySessionEvent(
+    event: string,
+    session: SupabaseSessionState["session"],
+    recoveryCallbackAccessToken: string | null,
+  ): boolean {
+    if (event === "PASSWORD_RECOVERY") {
+      markPasswordRecoveryFlow();
+      beginPasswordRecoveryPortalSession();
+    }
+    if (!multiportalAuth.isPasswordRecoveryPortalBlocked() || event === "SIGNED_OUT") {
+      return false;
+    }
+
+    const recoveryState = getPasswordRecoveryRouteState();
+    const storedRecovery = loadPasswordRecoveryFlow();
+    const recoveryEvent =
+      event === "PASSWORD_RECOVERY"
+      || event === "INITIAL_SESSION"
+      || event === "SIGNED_IN"
+      || event === "TOKEN_REFRESHED"
+        ? event
+        : null;
+    const recoveryDecision = resolvePasswordRecoverySessionDecision({
+      routeState: recoveryState,
+      event: recoveryEvent,
+      sessionLookup: "success",
+      sessionUserId: session?.user.id ?? null,
+      hasCallbackEvidence: Boolean(recoveryCallbackAccessToken),
+      callbackMatchesSession: Boolean(
+        recoveryCallbackAccessToken
+        && session?.access_token === recoveryCallbackAccessToken
+      ),
+      storedRecoveryStatus: storedRecovery?.status ?? null,
+      confirmedRecoveryUserId: passwordRecoveryUserIdRef.current,
+    });
+    if (recoveryDecision === "invalid") {
+      invalidatePasswordRecoverySession();
+      return true;
+    }
+    if (recoveryDecision === "confirmed") {
+      confirmPasswordRecoverySession(session);
+      return true;
+    }
+
+    passwordRecoveryStateRef.current = "pending";
+    setIsPasswordRecoveryConfirmed(false);
+    setIsAuthLoading(true);
+    setAuthStatus(resolveInitialAuthStatusMessage("none"), "info");
+    navigation.transition(resolvePasswordRecoveryRouteTransition("active"));
     return true;
   }
 
@@ -723,27 +992,54 @@ export function OrganizatechApp({
     async function bootstrapSession() {
       let requestToken = captureSessionDataRequestToken();
       const recoveryState = initialPasswordRecoveryRouteState;
-      if (recoveryState === "expired") {
-        invalidatePasswordRecoverySession();
+      const signupConfirmationRouteState = initialSignupConfirmation.routeState;
+      if (signupConfirmationRouteState === "invalid") {
+        invalidateSignupConfirmation();
         return;
       }
-      if (recoveryState === "active") {
+      if (signupConfirmationRouteState === "active") {
+        signupConfirmationStateRef.current = "pending";
+        setIsAuthLoading(true);
+        setAuthStatus("Confirmando tu correo...", "info");
+      } else if (recoveryState === "expired") {
+        invalidatePasswordRecoverySession();
+        return;
+      } else if (recoveryState === "active") {
+        beginPasswordRecoveryPortalSession();
         markPasswordRecoveryFlow();
         passwordRecoveryUserIdRef.current = null;
         passwordRecoveryStateRef.current = "pending";
         setIsPasswordRecoveryConfirmed(false);
         setIsAuthLoading(true);
-        setStatusMessage(resolveInitialAuthStatusMessage("none"));
+        setAuthStatus(resolveInitialAuthStatusMessage("none"), "info");
       } else {
         setIsAuthLoading(true);
-        setStatusMessage(resolveInitialAuthStatusMessage("none"));
+        setAuthStatus(resolveInitialAuthStatusMessage("none"), "info");
       }
       try {
         const authState = await getInitialSupabaseSession();
         if (!isMounted || !isSessionDataRequestCurrent(requestToken)) return;
 
-        applySessionState(authState);
-        requestToken = captureSessionDataRequestToken();
+        if (signupConfirmationRouteState === "active") {
+          const signupDecision = resolveSignupConfirmationSessionDecision({
+            routeState: signupConfirmationRouteState,
+            event: "bootstrap",
+            callbackAccessToken: initialSignupConfirmation.evidence.accessToken,
+            sessionAccessToken: authState.session?.access_token ?? null,
+            sessionUserId: authState.session?.user.id ?? null,
+          });
+          if (signupDecision === "invalid") {
+            invalidateSignupConfirmation();
+            return;
+          }
+          if (signupDecision === "complete") {
+            applySessionState(authState);
+            requestToken = captureSessionDataRequestToken();
+            completeSignupConfirmationSession(authState);
+            return;
+          }
+        }
+
         const storedRecovery = loadPasswordRecoveryFlow();
         const recoveryDecision = resolvePasswordRecoverySessionDecision({
           routeState: recoveryState,
@@ -756,7 +1052,7 @@ export function OrganizatechApp({
             && authState.session?.access_token === recoveryCallbackAccessToken
           ),
           storedRecoveryStatus: storedRecovery?.status ?? null,
-          storedRecoveryUserId: storedRecovery?.userId ?? null,
+          confirmedRecoveryUserId: passwordRecoveryUserIdRef.current,
         });
         if (recoveryDecision === "invalid") {
           invalidatePasswordRecoverySession();
@@ -766,14 +1062,55 @@ export function OrganizatechApp({
           confirmPasswordRecoverySession(authState.session);
           return;
         }
+        if (recoveryDecision === "pending") {
+          beginPasswordRecoveryPortalSession();
+          passwordRecoveryStateRef.current = "pending";
+          setIsPasswordRecoveryConfirmed(false);
+          setIsAuthLoading(true);
+          return;
+        }
+
+        applySessionState(authState);
+        requestToken = captureSessionDataRequestToken();
         if (authState.session) {
+          const portalDecision = multiportalAuth.resolveInitialSessionDecision(authState.session.user.id);
+          if (
+            portalDecision === "hold_user_registration"
+            || portalDecision === "hold_coach_registration"
+          ) {
+            multiportalAuth.completeInitialResolution();
+            setIsAuthLoading(false);
+            setAuthStatus("", "info");
+            return;
+          }
+          if (portalDecision === "authorize_user" || portalDecision === "authorize_coach") {
+            const requestedPortal = portalDecision === "authorize_coach" ? "coach" : "usuario";
+            const resolutionOwner = multiportalAuth.beginPortalResolution(authState.session.user.id);
+            try {
+              await authorizeAndContinuePortalSession(
+                authState,
+                requestedPortal,
+                "restore-active-flow",
+                resolutionOwner,
+                FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
+              );
+            } finally {
+              multiportalAuth.endPortalResolution(resolutionOwner);
+              multiportalAuth.completeInitialResolution();
+            }
+            return;
+          }
           await continueAuthenticatedSession(authState, "restore-active-flow");
         } else {
-          setStatusMessage(authState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
+          setAuthStatus(authState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage(), "info");
         }
       } catch (error) {
         if (isMounted && isSessionDataRequestCurrent(requestToken)) {
-          if (recoveryState === "active") {
+          if (signupConfirmationRouteState === "active") {
+            signupConfirmationStateRef.current = "invalid";
+            setIsAuthLoading(false);
+            setAuthStatus(translateAuthError(error), "error");
+          } else if (recoveryState === "active") {
             const storedRecovery = loadPasswordRecoveryFlow();
             const recoveryDecision = resolvePasswordRecoverySessionDecision({
               routeState: recoveryState,
@@ -783,19 +1120,23 @@ export function OrganizatechApp({
               hasCallbackEvidence: Boolean(recoveryCallbackAccessToken),
               callbackMatchesSession: false,
               storedRecoveryStatus: storedRecovery?.status ?? null,
-              storedRecoveryUserId: storedRecovery?.userId ?? null,
+              confirmedRecoveryUserId: passwordRecoveryUserIdRef.current,
             });
             passwordRecoveryStateRef.current = recoveryDecision;
             setIsPasswordRecoveryConfirmed(false);
             setIsAuthLoading(true);
-            setStatusMessage(resolveInitialAuthStatusMessage("none"));
+            setAuthStatus(resolveInitialAuthStatusMessage("none"), "info");
           } else {
-            setStatusMessage(translateAuthError(error));
+            setAuthStatus(translateAuthError(error), "error");
           }
         }
       } finally {
+        multiportalAuth.completeInitialResolution();
         if (isMounted && isSessionDataRequestCurrent(requestToken)) {
-          setIsAuthLoading(passwordRecoveryStateRef.current === "pending");
+          setIsAuthLoading(
+            passwordRecoveryStateRef.current === "pending"
+            || signupConfirmationStateRef.current === "pending",
+          );
         }
       }
     }
@@ -811,16 +1152,170 @@ export function OrganizatechApp({
         session,
         user: session?.user ?? null,
       };
-
       const previousStorageScope = activeBrowserStorageScopeRef.current;
+
+      const portalEventDecision = multiportalAuth.resolveSessionEventDecision(
+        event,
+        session?.user.id ?? null,
+        interactiveAuthAttemptRef.current,
+      );
+      if (portalEventDecision === "complete_signup_confirmation") {
+        const confirmation = multiportalAuth.consumeSignupConfirmationResult();
+        if (confirmation) {
+          publishSignupConfirmationResult(confirmation, previousStorageScope);
+        } else {
+          invalidateSignupConfirmation();
+        }
+        return;
+      }
+
+      if (
+        initialSignupConfirmation.routeState === "invalid"
+        && isCrossedSignupConfirmationCallback(initialSignupConfirmation.evidence)
+        && (
+          event === "SIGNED_IN"
+          || event === "INITIAL_SESSION"
+          || event === "PASSWORD_RECOVERY"
+        )
+      ) {
+        const callbackMatchesSession = Boolean(
+          initialSignupConfirmation.evidence.accessToken
+          && initialSignupConfirmation.evidence.accessToken === session?.access_token,
+        );
+        if (session && callbackMatchesSession) {
+          holdSignupConfirmationSession(event, nextState, true);
+        } else {
+          invalidateSignupConfirmation();
+        }
+        return;
+      }
+
+      const signupConfirmationRouteState = signupConfirmationStateRef.current === "pending"
+        ? initialSignupConfirmation.routeState
+        : "none";
+      if (signupConfirmationRouteState !== "none") {
+        if (
+          event === "SIGNED_IN"
+          || event === "INITIAL_SESSION"
+          || event === "PASSWORD_RECOVERY"
+        ) {
+          const signupDecision = resolveSignupConfirmationSessionDecision({
+            routeState: signupConfirmationRouteState,
+            event,
+            callbackAccessToken: initialSignupConfirmation.evidence.accessToken,
+            sessionAccessToken: session?.access_token ?? null,
+            sessionUserId: session?.user.id ?? null,
+          });
+          if (signupDecision === "complete") {
+            holdSignupConfirmationSession(event, nextState);
+            return;
+          }
+          if (signupDecision === "invalid") {
+            const callbackMatchesSession = Boolean(
+              initialSignupConfirmation.evidence.accessToken
+              && initialSignupConfirmation.evidence.accessToken === session?.access_token,
+            );
+            if (event === "PASSWORD_RECOVERY" && session && callbackMatchesSession) {
+              holdSignupConfirmationSession(event, nextState, true);
+            } else {
+              invalidateSignupConfirmation();
+            }
+            return;
+          }
+        }
+        if (event !== "SIGNED_OUT") return;
+      }
+      if (holdPasswordRecoverySessionEvent(event, session, recoveryCallbackAccessToken)) {
+        return;
+      }
+      if (portalEventDecision === "defer") return;
+      if (
+        portalEventDecision === "hold_user_registration" ||
+        portalEventDecision === "hold_coach_registration" ||
+        portalEventDecision === "authorize_user" ||
+        portalEventDecision === "authorize_coach"
+      ) {
+        setIsAuthLoading(false);
+        if (
+          portalEventDecision === "hold_user_registration"
+          || portalEventDecision === "hold_coach_registration"
+        ) {
+          holdAuthenticatedSessionWithoutContinuation(event, nextState);
+          setAuthStatus("", "info");
+          return;
+        }
+
+        const requestedPortal = portalEventDecision === "authorize_coach" ? "coach" : "usuario";
+        const userPortalSessionRevalidation = resolveUserPortalSessionRevalidation({
+          event,
+          authorizationProof: userPortalAuthorizationProofRef.current,
+          nextSessionUserId: nextState.session?.user.id,
+          nextAuthenticatedUserId: resolveEffectiveAuthenticatedUser(
+            nextState.session,
+            nextState.user,
+          )?.id,
+          requestedPortal,
+          isInteractiveAuthAttempt: interactiveAuthAttemptRef.current,
+          isPasswordRecoveryBlocked: multiportalAuth.isPasswordRecoveryPortalBlocked(),
+          isLogoutInFlight: logoutInFlightRef.current,
+          hasCoachPortalSession: Boolean(coachPortalSessionRef.current),
+        });
+        replaceUserPortalAuthorizationProof(userPortalSessionRevalidation.authorizationProof);
+        const resolutionOwner = multiportalAuth.beginPortalResolution(session!.user.id);
+        queueMicrotask(() => {
+          void authorizeAndContinuePortalSession(
+            nextState,
+            requestedPortal,
+            "dashboard",
+            resolutionOwner,
+            userPortalSessionRevalidation,
+          )
+            .finally(() => {
+              multiportalAuth.endPortalResolution(resolutionOwner);
+            });
+        });
+        return;
+      }
+
       if (event === "SIGNED_OUT") {
         loginSubmitOwnerRef.current?.invalidate();
+        interactiveAuthAttemptRef.current = false;
+        if (portalEventDecision === "complete_coach_identity_switch") {
+          clearUserSessionState("", previousStorageScope, {
+            navigate: false,
+            preserveAuthForms: true,
+          });
+          setCoachIdentitySwitchRequired(false);
+          setIsBusy(false);
+          setIsAuthLoading(false);
+          setAuthStatus("", "info");
+          return;
+        }
+        const portalSignOutMessage = multiportalAuth.consumePortalSignOutMessage();
+        if (portalSignOutMessage) {
+          clearUserSessionState(portalSignOutMessage, previousStorageScope, {
+            navigate: false,
+            statusTone: "error",
+          });
+          setIsBusy(false);
+          setIsAuthLoading(false);
+          setAuthStatus(portalSignOutMessage, "error");
+          return;
+        }
         if (passwordUpdateSuccessRef.current) {
           completePasswordRecoveryUpdate(previousStorageScope);
           return;
         }
+        if (multiportalAuth.isPasswordRecoveryPortalBlocked()) {
+          finalizePasswordRecoveryToLogin(
+            "Sesión cerrada correctamente.",
+            "success",
+            previousStorageScope,
+          );
+          return;
+        }
         passwordRecoveryUpdateOwnerRef.current = null;
-        clearUserSessionState("Sesión cerrada correctamente.", previousStorageScope);
+        clearUserSessionState("Sesión cerrada correctamente.", previousStorageScope, { statusTone: "success" });
         return;
       }
 
@@ -841,39 +1336,7 @@ export function OrganizatechApp({
           interactiveAuthAttemptRef.current = false;
           applySessionState(state);
         },
-        canContinueAfterSessionApplied: () => {
-          if (passwordRecoveryStateRef.current === "invalid" && event !== "PASSWORD_RECOVERY") {
-            return false;
-          }
-          const recoveryState = getPasswordRecoveryRouteState();
-          const storedRecovery = loadPasswordRecoveryFlow();
-          const recoveryEvent =
-            event === "PASSWORD_RECOVERY" || event === "INITIAL_SESSION" || event === "SIGNED_IN"
-              ? event
-              : null;
-          const recoveryDecision = resolvePasswordRecoverySessionDecision({
-            routeState: recoveryState,
-            event: recoveryEvent,
-            sessionLookup: "success",
-            sessionUserId: session?.user.id ?? null,
-            hasCallbackEvidence: Boolean(recoveryCallbackAccessToken),
-            callbackMatchesSession: Boolean(
-              recoveryCallbackAccessToken
-              && session?.access_token === recoveryCallbackAccessToken
-            ),
-            storedRecoveryStatus: storedRecovery?.status ?? null,
-            storedRecoveryUserId: storedRecovery?.userId ?? null,
-          });
-          if (recoveryDecision === "invalid") {
-            invalidatePasswordRecoverySession();
-            return false;
-          }
-          if (recoveryDecision === "confirmed") {
-            confirmPasswordRecoverySession(session);
-            return false;
-          }
-          return true;
-        },
+        canContinueAfterSessionApplied: () => !multiportalAuth.isPasswordRecoveryPortalBlocked(),
         continueSession: (state, intent) => {
           passwordRecoveryUpdateOwnerRef.current = null;
           return continueAuthenticatedSession(state, intent);
@@ -882,9 +1345,15 @@ export function OrganizatechApp({
       if (!authEventResult.proceedAfterSessionApplied) return;
       if (event === "INITIAL_SESSION" && !session) {
         setIsAuthLoading(false);
-        setStatusMessage(nextState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage());
+        setAuthStatus(nextState.isConfigured ? "Continúa con tu progreso." : getMissingSupabaseMessage(), "info");
       }
     }).data.subscription;
+
+    const handlePasswordRecoveryHistoryExit = () => {
+      if (!multiportalAuth.isPasswordRecoveryPortalBlocked()) return;
+      void closePasswordRecoverySessionLocally("", "info");
+    };
+    window.addEventListener("popstate", handlePasswordRecoveryHistoryExit);
 
     if ("serviceWorker" in navigator) {
       const hostname = window.location.hostname;
@@ -909,6 +1378,7 @@ export function OrganizatechApp({
     return () => {
       isMounted = false;
       authSubscription?.unsubscribe();
+      window.removeEventListener("popstate", handlePasswordRecoveryHistoryExit);
     };
     // This effect owns the auth subscription lifecycle and must run once. The
     // local orchestration callbacks are intentionally captured at bootstrap.
@@ -1136,12 +1606,155 @@ export function OrganizatechApp({
   }, [activeWorkoutBoundary, resetExerciseHistory]);
 
   function resetUserScopedTransientState() {
+    resetUserScopedTransientStateWithoutAuthForms();
+    clearAuthForms();
+  }
+
+  function resetUserScopedTransientStatePreservingAuthForms() {
+    resetUserScopedTransientStateWithoutAuthForms();
+  }
+
+  function resetUserScopedTransientStateWithoutAuthForms() {
     appShell.closeAll();
     routineBuilder.resetTransient();
     setDashboardDayOverride("");
     progressController.resetSelection();
-    clearAuthForms();
     setStatusMessage("");
+  }
+
+  function replaceCoachPortalSession(session: CoachPortalSession | null) {
+    if (session) replaceUserPortalAuthorizationProof(null);
+    coachPortalSessionRef.current = session;
+    setCoachPortalSession(session);
+  }
+
+  function replaceUserPortalAuthorizationProof(proof: UserPortalAuthorizationProof | null) {
+    userPortalAuthorizationProofRef.current = proof;
+    setUserPortalAuthorizationProof(proof);
+  }
+
+  function holdAuthenticatedSessionWithoutContinuation(
+    event: string,
+    authState: SupabaseSessionState,
+  ) {
+    replaceUserPortalAuthorizationProof(null);
+    coordinateAuthenticatedSessionEvent({
+      event,
+      state: authState,
+      currentIdentity: sessionDataEpochRef.current,
+      nextIdentity: {
+        userId: authState.session?.user.id ?? null,
+        scope: getBrowserStorageScope(authState.dataMode, authState.session?.user.id),
+      },
+      intent: "restore-active-flow",
+      hasAuthenticatedSession: Boolean(authState.session),
+    }, {
+      applySameIdentitySession: applySessionState,
+      applyNewIdentitySession: (state) => {
+        loginSubmitOwnerRef.current?.invalidate();
+        interactiveAuthAttemptRef.current = false;
+        applySessionState(state);
+      },
+      canContinueAfterSessionApplied: () => false,
+      continueSession: continueAuthenticatedSession,
+    });
+  }
+
+  function holdSignupConfirmationSession(
+    event: string,
+    authState: SupabaseSessionState,
+    forceInvalid = false,
+  ) {
+    holdAuthenticatedSessionWithoutContinuation(event, authState);
+    queueMicrotask(() => completeSignupConfirmationSession(authState, forceInvalid));
+  }
+
+  async function authorizeAndContinuePortalSession(
+    authState: SupabaseSessionState,
+    requestedPortal: AuthAccountType,
+    intent: AuthenticatedSessionIntent,
+    resolutionOwner: PortalResolutionOwner,
+    sessionRevalidation: UserPortalSessionRevalidation,
+  ): Promise<AuthorizedPortalAccess | null> {
+    const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);
+    if (access.state === "stale" || !multiportalAuth.isPortalResolutionCurrent(resolutionOwner)) {
+      return null;
+    }
+    if (
+      access.state === "user_registration_required"
+      || access.state === "coach_registration_required"
+      || access.state === "error"
+    ) {
+      replaceUserPortalAuthorizationProof(null);
+      const rejectionMessage = multiportalAuth.settlePortalSignOutMessage(access.message);
+      setIsAuthLoading(false);
+      if (rejectionMessage) setAuthStatus(rejectionMessage, "error");
+      return null;
+    }
+    applySessionState(authState);
+    await continueAuthorizedPortalAccess(
+      access,
+      authState,
+      intent,
+      () => multiportalAuth.isPortalResolutionCurrent(resolutionOwner),
+      sessionRevalidation,
+    );
+    return access;
+  }
+
+  async function continueAuthorizedPortalAccess(
+    access: AuthorizedPortalAccess,
+    authState: SupabaseSessionState,
+    intent: AuthenticatedSessionIntent,
+    isAuthorizationCurrent: () => boolean,
+    sessionRevalidation: UserPortalSessionRevalidation,
+  ): Promise<void> {
+    switch (access.state) {
+      case "user_authorized": {
+        const authorizationProof = createUserPortalAuthorizationProof({
+          access,
+          sessionUserId: authState.session?.user.id,
+          authenticatedUserId: authState.user?.id,
+        });
+        if (!authorizationProof) {
+          replaceUserPortalAuthorizationProof(null);
+          authenticatedSessionCoordinatorRef.current.reset();
+          setIsAuthLoading(false);
+          setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+          return;
+        }
+        if (!isAuthorizationCurrent()) return;
+        replaceCoachPortalSession(null);
+        if (sessionRevalidation.kind === "silent_revalidation") {
+          replaceUserPortalAuthorizationProof(authorizationProof);
+          return;
+        }
+        const continuation = await continueAuthenticatedSession(authState, intent);
+        if (continuation.kind === "stale" || !isAuthorizationCurrent()) return;
+        replaceUserPortalAuthorizationProof(authorizationProof);
+        return;
+      }
+      case "coach_authorized": {
+        const nextCoachPortalSession = createCoachPortalSession({
+          authorizedUserId: access.userId,
+          authenticatedUser: authState.user,
+          registration: access.coach,
+        });
+        if (!nextCoachPortalSession) {
+          replaceCoachPortalSession(null);
+          setIsAuthLoading(false);
+          setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+          return;
+        }
+
+        authenticatedSessionCoordinatorRef.current.reset();
+        replaceCoachPortalSession(nextCoachPortalSession);
+        setIsAuthLoading(false);
+        clearAuthForms();
+        setAuthStatus("", "info");
+        return;
+      }
+    }
   }
 
   function continueAuthenticatedSession(
@@ -1174,6 +1787,12 @@ export function OrganizatechApp({
 
   function applySessionState(authState: SupabaseSessionState) {
     const authenticatedUser = resolveEffectiveAuthenticatedUser(authState.session, authState.user);
+    if (userPortalAuthorizationProofRef.current?.userId !== authenticatedUser?.id) {
+      replaceUserPortalAuthorizationProof(null);
+    }
+    if (coachPortalSessionRef.current?.userId !== authenticatedUser?.id) {
+      replaceCoachPortalSession(null);
+    }
     const effectiveSession = authenticatedUser ? authState.session : null;
     const effectiveDataMode: DataMode = effectiveSession ? authState.dataMode : "demo";
     const nextStorageScope = getBrowserStorageScope(effectiveDataMode, authenticatedUser?.id);
@@ -1230,8 +1849,14 @@ export function OrganizatechApp({
   function clearUserSessionState(
     message: string,
     storageScope = activeBrowserStorageScopeRef.current,
-    options: { navigate?: boolean } = {},
+    options: {
+      navigate?: boolean;
+      preserveAuthForms?: boolean;
+      statusTone?: AuthStatusTone;
+    } = {},
   ) {
+    replaceUserPortalAuthorizationProof(null);
+    replaceCoachPortalSession(null);
     if (
       activeBrowserStorageScopeRef.current === null &&
       sessionDataEpochRef.current.userId === null &&
@@ -1256,7 +1881,8 @@ export function OrganizatechApp({
     if (sessionBoundary.resetActiveWorkoutMemory) {
       resetActiveWorkoutSessionState(null);
     }
-    resetUserScopedTransientState();
+    if (options.preserveAuthForms) resetUserScopedTransientStatePreservingAuthForms();
+    else resetUserScopedTransientState();
     if (sessionBoundary.clearClosingStorageScope) {
       clearBrowserStorageScope(storageScope);
     }
@@ -1267,13 +1893,15 @@ export function OrganizatechApp({
     activeBrowserStorageScopeRef.current = null;
     setSupabaseSession(null);
     setSupabaseUser(null);
+    setSessionName("");
     setDataMode("demo");
     setIsBusy(false);
     routineBuilder.replaceIdentityScope(null);
     if (options.navigate !== false) {
+      authRouteController.replace({ mode: "login", accountType: "usuario" });
       navigation.reset("login");
     }
-    setStatusMessage(message);
+    setAuthStatus(message, options.statusTone ?? "info");
     return true;
   }
 
@@ -1521,68 +2149,72 @@ export function OrganizatechApp({
       dataMode === "supabase" &&
       (isSessionExpiredError(error) || message.includes("iniciar sesión"))
     ) {
-      clearUserSessionState(message);
+      clearUserSessionState(message, activeBrowserStorageScopeRef.current, { statusTone: "error" });
     }
     return message;
   }
 
+  async function handleCoachIdentitySwitch() {
+    if (!coachIdentitySwitchRequired) return;
+    replaceUserPortalAuthorizationProof(null);
+    interactiveAuthAttemptRef.current = false;
+    setIsBusy(true);
+    try {
+      const result = await multiportalAuth.signOutForCoachIdentitySwitch(registerEmail);
+      if (result === "stale") {
+        setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+      }
+    } catch (error) {
+      setAuthStatus(translateAuthError(error), "error");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function handleAuth(mode: "login" | "registro", formData: FormData) {
-    const name = String(formData.get("register-name") || "").trim();
-    const rawEmail = String(formData.get(mode === "registro" ? "register-email" : "login-email") || "");
-    const email = rawEmail.trim().toLowerCase();
-    const password = String(formData.get(mode === "registro" ? "register-password" : "login-password") || "");
-    const confirm = String(formData.get("register-confirm-password") || "");
+    replaceUserPortalAuthorizationProof(null);
+    const requestedPortal = authRouteController.route.accountType;
+    const isCoachRegistration = mode === "registro" && requestedPortal === "coach";
+    const coachRegistrationPreparation = isCoachRegistration
+      ? buildCoachRegistrationPayload(formData)
+      : null;
+    const signupPreparation = mode === "registro" && !isCoachRegistration
+      ? buildUserSignupPayload(formData)
+      : null;
+    const loginPreparation = mode === "login" ? buildLoginPayload(formData) : null;
+    const preparation = coachRegistrationPreparation ?? signupPreparation ?? loginPreparation;
+    if (!preparation) return;
+    if (!preparation.ok) {
+      setAuthFieldError(preparation.field, preparation.message);
+      return;
+    }
+
+    setAuthFieldErrors({});
+    setAuthStatus("", "info");
+
+    const authPayload = "auth" in preparation.payload
+      ? preparation.payload.auth
+      : preparation.payload;
+    const { email, password } = authPayload;
+    const coachRegistrationPayload = coachRegistrationPreparation?.ok
+      ? coachRegistrationPreparation.payload
+      : null;
+    const signupPayload = signupPreparation?.ok ? signupPreparation.payload : null;
+    const name = coachRegistrationPayload?.auth.options.data.display_name
+      ?? signupPayload?.options.data.display_name
+      ?? "";
     const supabase = getSupabaseBrowserClient();
     let appliedIdentityToken: SessionDataRequestToken | null = null;
     let loginSubmitOwner: LoginSubmitOwner | null = null;
-    if (mode === "registro" && !name) {
-      setStatusMessage("Ingresa tu nombre.");
-      return;
-    }
-
-    const signupEmailValidation = mode === "registro" ? validateSignupEmail(rawEmail) : null;
-
-    if (!email) {
-      setStatusMessage("Ingresa tu correo electr\u00f3nico.");
-      return;
-    }
-
-    if (signupEmailValidation) {
-      setStatusMessage(signupEmailValidation);
-      return;
-    }
-
-    if (mode === "login" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setStatusMessage("Ingresa un correo electr\u00f3nico v\u00e1lido.");
-      return;
-    }
-
-    if (!password) {
-      setStatusMessage(mode === "registro" ? "Crea una contrase\u00f1a." : "Ingresa tu contrase\u00f1a.");
-      return;
-    }
-
-    if (mode === "registro" && password.length < 8) {
-      setStatusMessage("La contrase\u00f1a debe tener al menos 8 caracteres.");
-      return;
-    }
-
-    if (mode === "registro" && (!/[a-zA-Z]/.test(password) || !/\d/.test(password))) {
-      setStatusMessage("La contrase\u00f1a debe incluir letras y n\u00fameros.");
-      return;
-    }
-
-    if (mode === "registro" && !confirm) {
-      setStatusMessage("Confirma tu contrase\u00f1a.");
-      return;
-    }
-
-    if (mode === "registro" && password !== confirm) {
-      setStatusMessage("Las contraseñas no coinciden.");
-      return;
-    }
+    let coachRegistrationSubmitOwner: CoachRegistrationOwner | null = null;
+    let userRegistrationSubmitOwner: UserRegistrationOwner | null = null;
+    let portalResolutionOwner: PortalResolutionOwner | null = null;
 
     if (!supabase) {
+      if (requestedPortal === "coach") {
+        setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+        return;
+      }
       setSessionName(name || email.split("@")[0] || "Usuario");
       applySessionState({
         isConfigured: false,
@@ -1591,14 +2223,25 @@ export function OrganizatechApp({
         user: null,
       });
       appliedIdentityToken = captureSessionDataRequestToken();
-      setStatusMessage(getMissingSupabaseMessage());
+      setAuthStatus(getMissingSupabaseMessage(), "info");
       const refreshResult = await refreshTrainingDataForSession("demo");
       if (refreshResult.kind !== "success") return;
       if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
-      setStatusMessage(getMissingSupabaseMessage());
+      setAuthStatus(getMissingSupabaseMessage(), "info");
       clearAuthForms();
       navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
       return;
+    }
+
+    if (coachRegistrationPayload) {
+      coachRegistrationSubmitOwner = multiportalAuth.beginCoachRegistrationSubmit();
+    } else {
+      multiportalAuth.invalidateCoachRegistrationSubmits();
+    }
+    if (signupPayload) {
+      userRegistrationSubmitOwner = multiportalAuth.beginUserRegistrationSubmit();
+    } else {
+      multiportalAuth.invalidateUserRegistrationSubmits();
     }
 
     const loginSubmitOwnerController = mode === "login" ? loginSubmitOwnerRef.current : null;
@@ -1611,30 +2254,104 @@ export function OrganizatechApp({
     interactiveAuthAttemptRef.current = true;
     setIsBusy(true);
     try {
-      let result:
-        | Awaited<ReturnType<typeof supabase.auth.signUp>>
-        | Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
-      if (mode === "registro") {
-        result = await supabase.auth.signUp({ email, password, options: { data: { display_name: name } } });
-      } else {
-        const settlement = await loginSubmitOwnerController!.settle(
-          loginSubmitOwner!,
-          supabase.auth.signInWithPassword({ email, password }),
+      if (coachRegistrationPayload) {
+        const registration = await multiportalAuth.registerCoach(
+          coachRegistrationPayload,
+          coachRegistrationSubmitOwner!,
         );
-        if (settlement.kind === "stale") return;
-        if (settlement.kind === "error") throw settlement.error;
-        result = settlement.value;
-      }
+        if (
+          !coachRegistrationSubmitOwner
+          || !multiportalAuth.isCoachRegistrationSubmitCurrent(coachRegistrationSubmitOwner)
+        ) return;
+        if (registration.state === "busy" || registration.state === "stale") return;
+        if (registration.state === "identity_switch_required") {
+          replaceCoachPortalSession(null);
+          setCoachIdentitySwitchRequired(true);
+          setAuthStatus(registration.message, "error");
+          return;
+        }
+        if (registration.state === "coach_confirmation_required") {
+          clearAuthForms();
+          setAuthStatus(registration.message, "success");
+          authRouteController.replace({ mode: "login", accountType: "coach" });
+          navigation.transition(createAuthNavigationReset("login", "signup-confirmation-pending"));
+          return;
+        }
+        if (registration.state === "error") {
+          if (registration.field) {
+            setAuthFieldError(registration.field, registration.message);
+          } else {
+            setAuthStatus(registration.message, "error");
+          }
+          return;
+        }
 
-      if (result.error) {
-        setStatusMessage(translateAuthError(result.error));
+        portalResolutionOwner = multiportalAuth.beginPortalResolution(registration.userId);
+        if (!multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner)) return;
+        applySessionState(registration.authState);
+        appliedIdentityToken = captureSessionDataRequestToken();
+        await continueAuthorizedPortalAccess({
+          state: "coach_authorized",
+          requestedPortal: "coach",
+          userId: registration.userId,
+          coach: registration.coach,
+        }, registration.authState, "dashboard", () => (
+          multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner!)
+        ), FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION);
         return;
       }
 
-      const existingRegisteredUser =
-        mode === "registro" && Array.isArray(result.data.user?.identities) && result.data.user.identities.length === 0;
-      if (existingRegisteredUser) {
-        setStatusMessage("Este correo ya está registrado. Intenta iniciar sesión.");
+      if (signupPayload) {
+        const registration = await multiportalAuth.registerUser(
+          signupPayload,
+          userRegistrationSubmitOwner!,
+        );
+        if (
+          !userRegistrationSubmitOwner
+          || !multiportalAuth.isUserRegistrationSubmitCurrent(userRegistrationSubmitOwner)
+        ) return;
+        if (registration.state === "busy" || registration.state === "stale") return;
+        if (registration.state === "user_confirmation_required") {
+          clearAuthForms();
+          setAuthStatus(registration.message, "success");
+          authRouteController.replace({ mode: "login", accountType: "usuario" });
+          navigation.transition(createAuthNavigationReset("login", "signup-confirmation-pending"));
+          return;
+        }
+        if (registration.state === "error") {
+          if (registration.field) {
+            setAuthFieldError(registration.field, registration.message);
+          } else {
+            setAuthStatus(registration.message, "error");
+          }
+          return;
+        }
+
+        portalResolutionOwner = multiportalAuth.beginPortalResolution(registration.userId);
+        if (!multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner)) return;
+        applySessionState(registration.authState);
+        appliedIdentityToken = captureSessionDataRequestToken();
+        await continueAuthorizedPortalAccess({
+          state: "user_authorized",
+          requestedPortal: "usuario",
+          userId: registration.userId,
+        }, registration.authState, "dashboard", () => (
+          multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner!)
+        ), FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION);
+        return;
+      }
+
+      if (mode !== "login") return;
+      const settlement = await loginSubmitOwnerController!.settle(
+        loginSubmitOwner!,
+        supabase.auth.signInWithPassword({ email, password }),
+      );
+      if (settlement.kind === "stale") return;
+      if (settlement.kind === "error") throw settlement.error;
+      const result = settlement.value;
+
+      if (result.error) {
+        setAuthStatus(translateAuthError(result.error), "error");
         return;
       }
 
@@ -1645,25 +2362,64 @@ export function OrganizatechApp({
         session,
         user: session?.user ?? null,
       };
-      applySessionState(authenticatedState);
-      appliedIdentityToken = captureSessionDataRequestToken();
 
-      if (!session && mode === "registro") {
-        setStatusMessage("Cuenta creada. Revisa tu correo para confirmar el registro.");
-        clearAuthForms();
-        navigation.transition(createAuthNavigationReset("login", "signup-confirmation-pending"));
+      if (!session) {
+        setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
         return;
       }
 
-      await continueAuthenticatedSession(authenticatedState, "dashboard");
+      portalResolutionOwner = multiportalAuth.beginPortalResolution(session.user.id);
+      if (!multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner)) return;
+
+      const access = await authorizeAndContinuePortalSession(
+        authenticatedState,
+        requestedPortal,
+        "dashboard",
+        portalResolutionOwner,
+        FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
+      );
+      if (access) appliedIdentityToken = captureSessionDataRequestToken();
     } catch (error) {
+      if (
+        portalResolutionOwner
+        && !multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner)
+      ) return;
+      if (
+        coachRegistrationSubmitOwner
+        && !multiportalAuth.isCoachRegistrationSubmitCurrent(coachRegistrationSubmitOwner)
+      ) return;
+      if (
+        userRegistrationSubmitOwner
+        && !multiportalAuth.isUserRegistrationSubmitCurrent(userRegistrationSubmitOwner)
+      ) return;
       if (appliedIdentityToken && !isSessionDataRequestCurrent(appliedIdentityToken)) return;
-      setStatusMessage(translateAuthError(error));
+      setAuthStatus(translateAuthError(error), "error");
     } finally {
       const canFinalizeAuthAttempt = loginSubmitOwner && loginSubmitOwnerController
         ? loginSubmitOwnerController.finalize(loginSubmitOwner)
         : true;
-      if (canFinalizeAuthAttempt) {
+      const canFinalizePortalResolution = portalResolutionOwner
+        ? multiportalAuth.isPortalResolutionCurrent(portalResolutionOwner)
+        : true;
+      const canFinalizeCoachRegistration = coachRegistrationSubmitOwner
+        ? multiportalAuth.isCoachRegistrationSubmitCurrent(coachRegistrationSubmitOwner)
+        : true;
+      const canFinalizeUserRegistration = userRegistrationSubmitOwner
+        ? multiportalAuth.isUserRegistrationSubmitCurrent(userRegistrationSubmitOwner)
+        : true;
+      if (portalResolutionOwner) multiportalAuth.endPortalResolution(portalResolutionOwner);
+      if (coachRegistrationSubmitOwner) {
+        multiportalAuth.endCoachRegistrationSubmit(coachRegistrationSubmitOwner);
+      }
+      if (userRegistrationSubmitOwner) {
+        multiportalAuth.endUserRegistrationSubmit(userRegistrationSubmitOwner);
+      }
+      if (
+        canFinalizeAuthAttempt
+        && canFinalizePortalResolution
+        && canFinalizeCoachRegistration
+        && canFinalizeUserRegistration
+      ) {
         interactiveAuthAttemptRef.current = false;
         if (!appliedIdentityToken || isSessionDataRequestCurrent(appliedIdentityToken)) {
           setIsBusy(false);
@@ -1679,32 +2435,34 @@ export function OrganizatechApp({
     const supabase = getSupabaseBrowserClient();
 
     if (!email) {
-      setStatusMessage("Ingresa tu correo electr\u00f3nico.");
+      setAuthFieldError("recovery-email", "Ingresa tu correo electr\u00f3nico.");
       return;
     }
 
     if (emailValidation) {
-      setStatusMessage(emailValidation);
+      setAuthFieldError("recovery-email", emailValidation);
       return;
     }
 
     if (!supabase) {
-      setStatusMessage("No pudimos completar la acci\u00f3n. Intenta nuevamente.");
+      setAuthStatus("No pudimos completar la acci\u00f3n. Intenta nuevamente.", "error");
       return;
     }
 
+    setAuthFieldErrors({});
+    setAuthStatus("", "info");
     setIsBusy(true);
     try {
       const redirectTo = getPasswordRecoveryRedirectUrl();
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       if (error) {
-        setStatusMessage(translateAuthError(error));
+        setAuthStatus(translateAuthError(error), "error");
         return;
       }
       setRecoveryEmail("");
-      setStatusMessage("Si el correo est\u00e1 registrado, enviaremos un enlace para restablecer tu contrase\u00f1a.");
+      setAuthStatus("Si el correo est\u00e1 registrado, enviaremos un enlace para restablecer tu contrase\u00f1a.", "success");
     } catch (error) {
-      setStatusMessage(translateAuthError(error));
+      setAuthStatus(translateAuthError(error), "error");
     } finally {
       setIsBusy(false);
     }
@@ -1716,34 +2474,37 @@ export function OrganizatechApp({
     const supabase = getSupabaseBrowserClient();
 
     if (!password) {
-      setStatusMessage("Crea una contrase\u00f1a.");
+      setAuthFieldError("new-password", "Crea una contrase\u00f1a.");
       return;
     }
 
     if (password.length < 8) {
-      setStatusMessage("La contrase\u00f1a debe tener al menos 8 caracteres.");
+      setAuthFieldError("new-password", "La contrase\u00f1a debe tener al menos 8 caracteres.");
       return;
     }
 
     if (!/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
-      setStatusMessage("La contrase\u00f1a debe incluir letras y n\u00fameros.");
+      setAuthFieldError("new-password", "La contrase\u00f1a debe incluir letras y n\u00fameros.");
       return;
     }
 
     if (!confirm) {
-      setStatusMessage("Confirma tu contrase\u00f1a.");
+      setAuthFieldError("new-password-confirm", "Confirma tu contrase\u00f1a.");
       return;
     }
 
     if (password !== confirm) {
-      setStatusMessage("Las contrase\u00f1as no coinciden.");
+      setAuthFieldError("new-password-confirm", "Las contrase\u00f1as no coinciden.");
       return;
     }
 
     if (!supabase) {
-      setStatusMessage("No pudimos completar la acci\u00f3n. Intenta nuevamente.");
+      setAuthStatus("No pudimos completar la acci\u00f3n. Intenta nuevamente.", "error");
       return;
     }
+
+    setAuthFieldErrors({});
+    setAuthStatus("", "info");
 
     const confirmedUserId = passwordRecoveryUserIdRef.current;
     if (
@@ -1766,11 +2527,7 @@ export function OrganizatechApp({
         auth: {
           getSession: () => supabase.auth.getSession(),
           updateUser: (attributes) => supabase.auth.updateUser(attributes),
-          signOut: async () => {
-            const { error: signOutError } = await supabase.auth.signOut();
-            if (signOutError) return { error: signOutError };
-            return { error: null };
-          },
+          signOut: () => multiportalAuth.signOutPasswordRecoveryLocally(),
         },
         isRecoveryCurrent: (userId) => (
           passwordRecoveryStateRef.current === "confirmed"
@@ -1794,12 +2551,25 @@ export function OrganizatechApp({
         return;
       }
       if (result.kind === "invalid-recovery") {
-        invalidatePasswordRecoverySession();
+        await closePasswordRecoverySessionLocally(
+          resolveInitialAuthStatusMessage("expired"),
+          "error",
+          recoveryStorageScope,
+        );
         return;
       }
-      if (result.kind === "update-error" || result.kind === "sign-out-error") {
+      if (result.kind === "update-error") {
         passwordUpdateSuccessRef.current = false;
-        setStatusMessage(translateAuthError(result.error));
+        await closePasswordRecoverySessionLocally(
+          translateAuthError(result.error),
+          "error",
+          recoveryStorageScope,
+        );
+        return;
+      }
+      if (result.kind === "sign-out-error") {
+        passwordUpdateSuccessRef.current = false;
+        setAuthStatus(translateAuthError(result.error), "error");
         return;
       }
 
@@ -1809,7 +2579,11 @@ export function OrganizatechApp({
       if (
         !isActiveWorkoutOperationCurrent(passwordRecoveryUpdateOwnerRef, operationOwner)
       ) return;
-      setStatusMessage(translateAuthError(error));
+      await closePasswordRecoverySessionLocally(
+        translateAuthError(error),
+        "error",
+        recoveryStorageScope,
+      );
     } finally {
       const operationStillAuthorized = isActiveWorkoutOperationCurrent(
         passwordRecoveryUpdateOwnerRef,
@@ -2338,22 +3112,27 @@ export function OrganizatechApp({
   }
 
   async function handleLogout() {
+    if (logoutInFlightRef.current) return;
+    logoutInFlightRef.current = true;
+    replaceUserPortalAuthorizationProof(null);
+    multiportalAuth.invalidatePortalOperations();
     setIsBusy(true);
     const requestToken = captureSessionDataRequestToken();
     const currentStorageScope = activeBrowserStorageScopeRef.current;
     try {
       const supabase = getSupabaseBrowserClient();
       if (supabase) {
-        const { error } = await supabase.auth.signOut();
+        const { error } = await supabase.auth.signOut({ scope: "local" });
         if (error) throw error;
       }
       if (isSessionDataRequestCurrent(requestToken)) {
-        clearUserSessionState("Sesión cerrada correctamente.", currentStorageScope);
+        clearUserSessionState("Sesión cerrada correctamente.", currentStorageScope, { statusTone: "success" });
       }
     } catch (error) {
       if (isSessionDataRequestCurrent(requestToken)) setStatusMessage(translateAuthError(error));
     } finally {
       if (isSessionDataRequestCurrent(requestToken)) setIsBusy(false);
+      logoutInFlightRef.current = false;
     }
   }
 
@@ -2567,7 +3346,7 @@ export function OrganizatechApp({
         if (error instanceof TrainingCycleRepositoryError) {
           setStatusMessage(translateTrainingCycleRepositoryError(error));
         } else if (isSessionExpiredError(error)) {
-          clearUserSessionState("Tu sesión expiró. Inicia sesión nuevamente.");
+          clearUserSessionState("Tu sesión expiró. Inicia sesión nuevamente.", activeBrowserStorageScopeRef.current, { statusTone: "error" });
         } else {
           setStatusMessage(translatePersistenceError(error));
         }
@@ -3348,6 +4127,15 @@ export function OrganizatechApp({
     setRecoveryEmail("");
     setNewPassword("");
     setNewPasswordConfirm("");
+    setAuthFieldErrors({});
+    setCoachIdentitySwitchRequired(false);
+  }
+
+  function handleRegisterEmailChange(value: string) {
+    setRegisterEmail(value);
+    if (!coachIdentitySwitchRequired) return;
+    setCoachIdentitySwitchRequired(false);
+    setAuthStatus("", "info");
   }
 
   function switchAuthScreen(nextScreen: "login" | "registro" | "recuperar-password") {
@@ -3358,8 +4146,30 @@ export function OrganizatechApp({
     clearPasswordRecoveryFlow();
     clearPasswordRecoveryUrl();
     clearAuthForms();
-    setStatusMessage("");
+    setAuthStatus("", "info");
+    if (nextScreen === "login" || nextScreen === "registro") {
+      authRouteController.replace({
+        mode: nextScreen,
+        accountType: authRouteController.route.accountType,
+      });
+    }
     navigation.transition(createAuthNavigationReset(nextScreen, "auth-screen-switch"));
+  }
+
+  async function handleRequestNewRecoveryLink() {
+    if (multiportalAuth.isPasswordRecoveryPortalBlocked()) {
+      const closed = await closePasswordRecoverySessionLocally("", "info");
+      if (!closed) return;
+    }
+    switchAuthScreen("recuperar-password");
+  }
+
+  function switchAuthAccountType(accountType: AuthAccountType) {
+    if (screen !== "login" && screen !== "registro") return;
+    setAuthFieldErrors({});
+    setCoachIdentitySwitchRequired(false);
+    setAuthStatus("", "info");
+    authRouteController.replace({ mode: screen, accountType });
   }
 
   if (screen === "recovery-expired") {
@@ -3367,24 +4177,35 @@ export function OrganizatechApp({
       <main className="app-shell">
         <RecoveryExpiredScreen
           message={statusMessage}
-          onRequestNewLink={() => switchAuthScreen("recuperar-password")}
+          onRequestNewLink={handleRequestNewRecoveryLink}
         />
       </main>
     );
   }
 
-  if (screen === "nueva-password" && isPasswordRecoveryConfirmed) {
+  if (multiportalAuth.isPasswordRecoveryPortalBlocked() && isPasswordRecoveryConfirmed) {
     return (
       <main className="app-shell">
         <NewPasswordScreen
           password={newPassword}
           confirmPassword={newPasswordConfirm}
           message={statusMessage}
+          statusTone={authStatusTone}
+          fieldErrors={authFieldErrors}
           isBusy={isBusy}
           onPasswordChange={setNewPassword}
           onConfirmPasswordChange={setNewPasswordConfirm}
           onSubmit={handleUpdatePassword}
+          onFieldErrorClear={clearAuthFieldError}
         />
+      </main>
+    );
+  }
+
+  if (multiportalAuth.isPasswordRecoveryPortalBlocked()) {
+    return (
+      <main className="app-shell">
+        <AuthLoadingScreen />
       </main>
     );
   }
@@ -3392,32 +4213,34 @@ export function OrganizatechApp({
   if (isAuthLoading) {
     return (
       <main className="app-shell">
-        <section className="login-shell">
-          <div className="login-logo">
-            <div className="brand-mark">
-              <Dumbbell size={28} />
-            </div>
-            <div>
-              <h1>Organizatech</h1>
-              <p className="eyebrow">Validando sesión...</p>
-            </div>
-          </div>
-          <div className="card wide">
-            <h2>Validando sesión...</h2>
-            <p className="eyebrow">Estamos revisando si ya tienes una sesión activa.</p>
-          </div>
-        </section>
+        <AuthLoadingScreen />
       </main>
     );
   }
 
-  if (screen === "login") {
+  if (coachPortalSession) {
+    return (
+      <CoachPortalBoundary
+        key={`${coachPortalSession.userId}:${coachPortalSession.registration.createdAt}`}
+        session={coachPortalSession}
+        isLoggingOut={isBusy}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  if (screen === "login" || screen === "registro") {
     return (
       <main className="app-shell">
         <AuthScreen
-          mode="login"
+          key={screen}
+          mode={screen}
+          accountType={authRouteController.route.accountType}
           message={statusMessage}
+          statusTone={authStatusTone}
+          fieldErrors={authFieldErrors}
           isBusy={isBusy}
+          coachIdentitySwitchRequired={coachIdentitySwitchRequired}
           loginEmail={loginEmail}
           loginPassword={loginPassword}
           registerName={registerName}
@@ -3427,39 +4250,15 @@ export function OrganizatechApp({
           onLoginEmailChange={setLoginEmail}
           onLoginPasswordChange={setLoginPassword}
           onRegisterNameChange={setRegisterName}
-          onRegisterEmailChange={setRegisterEmail}
+          onRegisterEmailChange={handleRegisterEmailChange}
           onRegisterPasswordChange={setRegisterPassword}
           onRegisterConfirmPasswordChange={setRegisterConfirmPassword}
-          onSubmit={(data) => handleAuth("login", data)}
+          onSubmit={(data) => handleAuth(screen, data)}
+          onCoachIdentitySwitch={handleCoachIdentitySwitch}
           onForgotPassword={() => switchAuthScreen("recuperar-password")}
-          onSwitch={() => switchAuthScreen("registro")}
-        />
-      </main>
-    );
-  }
-
-  if (screen === "registro") {
-    return (
-      <main className="app-shell">
-        <AuthScreen
-          mode="registro"
-          message={statusMessage}
-          isBusy={isBusy}
-          loginEmail={loginEmail}
-          loginPassword={loginPassword}
-          registerName={registerName}
-          registerEmail={registerEmail}
-          registerPassword={registerPassword}
-          registerConfirmPassword={registerConfirmPassword}
-          onLoginEmailChange={setLoginEmail}
-          onLoginPasswordChange={setLoginPassword}
-          onRegisterNameChange={setRegisterName}
-          onRegisterEmailChange={setRegisterEmail}
-          onRegisterPasswordChange={setRegisterPassword}
-          onRegisterConfirmPasswordChange={setRegisterConfirmPassword}
-          onSubmit={(data) => handleAuth("registro", data)}
-          onForgotPassword={() => switchAuthScreen("recuperar-password")}
-          onSwitch={() => switchAuthScreen("login")}
+          onModeChange={switchAuthScreen}
+          onAccountTypeChange={switchAuthAccountType}
+          onFieldErrorClear={clearAuthFieldError}
         />
       </main>
     );
@@ -3471,11 +4270,26 @@ export function OrganizatechApp({
         <PasswordRecoveryScreen
           email={recoveryEmail}
           message={statusMessage}
+          statusTone={authStatusTone}
+          fieldErrors={authFieldErrors}
           isBusy={isBusy}
           onEmailChange={setRecoveryEmail}
           onSubmit={handlePasswordRecovery}
           onBack={() => switchAuthScreen("login")}
+          onFieldErrorClear={clearAuthFieldError}
         />
+      </main>
+    );
+  }
+
+  if (
+    hasSupabaseSession
+    && isUserPortalRenderableScreen(screen)
+    && !hasCurrentUserPortalAuthorizationProof
+  ) {
+    return (
+      <main className="app-shell">
+        <AuthLoadingScreen />
       </main>
     );
   }
@@ -3514,6 +4328,19 @@ export function OrganizatechApp({
   }
 
   const menuScreens = resolveMenuScreens(primaryScreens, hasTrainingEntries, visibleCycleHistoryCount);
+  const userPortalNavigation = createUserPortalNavigationModel({
+    currentScreen: screen,
+    visibleScreens: menuScreens,
+  });
+  const useUserPortalShell = shouldMountAuthorizedUserPortal({
+    authorizationProof: userPortalAuthorizationProof,
+    sessionUserId: supabaseSession?.user.id,
+    authenticatedUserId: supabaseUser?.id,
+    hasCoachPortalSession: Boolean(coachPortalSession),
+    isAuthLoading,
+    isPasswordRecoveryBlocked: multiportalAuth.isPasswordRecoveryPortalBlocked(),
+    isRenderableScreen: isUserPortalRenderableScreen(screen),
+  });
 
   const dashboardScreenVariant = resolveDashboardScreenVariant(isCycleScopedPlanBlocked);
   const comparisonScreenVariant = resolveComparisonScreenVariant(isCycleScopedPlanBlocked);
@@ -3536,53 +4363,24 @@ export function OrganizatechApp({
     });
   }
 
-  return (
-    <AppShellLayout
-      topbar={
-        <AppTopbar
-          isHidden={isTopbarHidden}
-          isMenuOpen={isMenuOpen}
-          onMenuToggle={toggleMenu}
-          trainingMeta={trainingTopbarMeta}
-          fallbackText={hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}
-          isNotificationPanelOpen={isNotificationPanelOpen}
-          notificationBadgeText={notificationBadgeText}
-          notificationBadgeAriaLabel={notificationBadgeAriaLabel}
-          onToggleNotifications={toggleNotifications}
-        />
-      }
-      notificationOverlay={
-        <NotificationPanel
-          isOpen={isNotificationPanelOpen}
-          subtitle={notificationPanelSubtitle}
-          totalNotificationsCount={appNotifications.length}
-          newNotifications={newNotifications}
-          historyNotifications={historyNotifications}
-          seenNotificationRecordsById={seenNotificationRecordsById}
-          emptyMessage={NOTIFICATION_EMPTY_MESSAGE}
-          onClose={appShell.closeNotifications}
-          onOpenNotification={openNotificationTarget}
-        />
-      }
-      navigationOverlay={
-        <AppNavigationDrawer
-          isOpen={isMenuOpen}
-          profileHeader={
-            <ProfileMenuHeader
-              profile={profileViewModel}
-              onAvatarImageError={handleProfileAvatarImageError}
-              avatarResetKey={profileAvatarResetKey}
-            />
-          }
-          items={menuScreens.map((item) => ({ id: item, label: screenLabel(item), isActive: screen === item }))}
-          isLogoutDisabled={isBusy}
-          onClose={appShell.closeMenu}
-          onNavigate={navigateTo}
-          onLogout={handleLogout}
-        />
-      }
-      screenHeader={canGoBackFromScreen(screen) ? <AppScreenHeader onBack={goBack} /> : null}
-    >
+  const notificationOverlay = (
+    <NotificationPanel
+      isOpen={isNotificationPanelOpen}
+      subtitle={notificationPanelSubtitle}
+      totalNotificationsCount={appNotifications.length}
+      newNotifications={newNotifications}
+      historyNotifications={historyNotifications}
+      seenNotificationRecordsById={seenNotificationRecordsById}
+      emptyMessage={NOTIFICATION_EMPTY_MESSAGE}
+      onClose={appShell.closeNotifications}
+      onOpenNotification={openNotificationTarget}
+    />
+  );
+  const screenHeader = canGoBackFromScreen(screen)
+    ? <AppScreenHeader onBack={goBack} />
+    : null;
+  const portalScreenContent = (
+    <>
       {screen === "dashboard" && (
         dashboardScreenVariant === "blocked" ? (
           <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
@@ -3776,263 +4574,72 @@ export function OrganizatechApp({
           onConfirm={() => void saveInitialRoutine("confirmed_routine_update")}
         />
       )}
-    </AppShellLayout>
+    </>
   );
-}
 
-function AuthScreen({
-  mode,
-  message,
-  isBusy,
-  loginEmail,
-  loginPassword,
-  registerName,
-  registerEmail,
-  registerPassword,
-  registerConfirmPassword,
-  onLoginEmailChange,
-  onLoginPasswordChange,
-  onRegisterNameChange,
-  onRegisterEmailChange,
-  onRegisterPasswordChange,
-  onRegisterConfirmPasswordChange,
-  onSubmit,
-  onForgotPassword,
-  onSwitch,
-}: {
-  mode: "login" | "registro";
-  message: string;
-  isBusy: boolean;
-  loginEmail: string;
-  loginPassword: string;
-  registerName: string;
-  registerEmail: string;
-  registerPassword: string;
-  registerConfirmPassword: string;
-  onLoginEmailChange: (value: string) => void;
-  onLoginPasswordChange: (value: string) => void;
-  onRegisterNameChange: (value: string) => void;
-  onRegisterEmailChange: (value: string) => void;
-  onRegisterPasswordChange: (value: string) => void;
-  onRegisterConfirmPasswordChange: (value: string) => void;
-  onSubmit: (data: FormData) => void;
-  onForgotPassword: () => void;
-  onSwitch: () => void;
-}) {
-  const isRegister = mode === "registro";
-  const [showLoginPassword, setShowLoginPassword] = useState(false);
-  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
-  const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] = useState(false);
+  if (useUserPortalShell) {
+    return (
+      <UserPortalShell
+        profile={profileViewModel}
+        navigation={userPortalNavigation}
+        isDrawerOpen={isMenuOpen}
+        isTopbarHidden={isTopbarHidden}
+        isLogoutDisabled={isBusy}
+        isNotificationPanelOpen={isNotificationPanelOpen}
+        notificationBadgeText={notificationBadgeText}
+        notificationBadgeAriaLabel={notificationBadgeAriaLabel}
+        notificationOverlay={notificationOverlay}
+        screenHeader={screenHeader}
+        avatarResetKey={profileAvatarResetKey}
+        onAvatarImageError={handleProfileAvatarImageError}
+        onOpen={toggleMenu}
+        onClose={appShell.closeMenu}
+        onNavigate={navigateTo}
+        onToggleNotifications={toggleNotifications}
+        onLogout={handleLogout}
+      >
+        {portalScreenContent}
+      </UserPortalShell>
+    );
+  }
 
   return (
-    <section className="login-shell">
-      <div className="login-logo">
-        <div className="brand-mark">
-          <Dumbbell size={28} />
-        </div>
-        <div>
-          <h1>Organizatech</h1>
-          <p className="eyebrow">Evoluciona tu rendimiento.</p>
-        </div>
-      </div>
-      <form className="card form-grid" action={onSubmit} autoComplete={isRegister ? "off" : "on"} key={mode}>
-        <h2>{isRegister ? "Crea tu cuenta" : "Iniciar sesión"}</h2>
-        {isRegister ? (
-          <>
-            <TextField name="register-name" label="Nombre" placeholder="Ej: Fabian" autoComplete="name" value={registerName} onChange={onRegisterNameChange} required />
-            <TextField name="register-email" label="Correo electrónico" placeholder="tu@email.com" type="email" autoComplete="email" value={registerEmail} onChange={onRegisterEmailChange} required />
-            <PasswordField name="register-password" label="Contraseña" placeholder="Crea una contraseña" autoComplete="new-password" value={registerPassword} onChange={onRegisterPasswordChange} visible={showRegisterPassword} onToggle={() => setShowRegisterPassword((current) => !current)} required />
-            <PasswordField name="register-confirm-password" label="Confirmar contraseña" placeholder="Repite tu contraseña" autoComplete="new-password" value={registerConfirmPassword} onChange={onRegisterConfirmPasswordChange} visible={showRegisterConfirmPassword} onToggle={() => setShowRegisterConfirmPassword((current) => !current)} required />
-          </>
-        ) : (
-          <>
-            <TextField name="login-email" label="Correo electrónico" placeholder="tu@email.com" type="email" autoComplete="username" value={loginEmail} onChange={onLoginEmailChange} required />
-            <PasswordField name="login-password" label="Contraseña" placeholder="Ingresa tu contraseña" autoComplete="current-password" value={loginPassword} onChange={onLoginPasswordChange} visible={showLoginPassword} onToggle={() => setShowLoginPassword((current) => !current)} required />
-          </>
-        )}
-        <p className="eyebrow">{message}</p>
-        <button className="button" type="submit" disabled={isBusy}>
-          {isRegister ? <UserPlus size={17} /> : <Lock size={17} />}
-          {isBusy ? (isRegister ? "Creando cuenta..." : "Iniciando sesión...") : isRegister ? "Crear cuenta" : "Iniciar sesión"}
-        </button>
-        {!isRegister ? (
-          <button className="tab" type="button" onClick={onForgotPassword}>
-            ¿Olvidaste tu contraseña?
-          </button>
-        ) : null}
-        <div className="socials">
-          <button className="button secondary" type="button" aria-label="Google">G</button>
-          <button className="button secondary" type="button" aria-label="Apple">A</button>
-          <button className="button secondary" type="button" aria-label="Correo"><Mail size={17} /></button>
-        </div>
-        <button className="tab" type="button" onClick={onSwitch}>
-          {isRegister ? "¿Ya tienes cuenta? Iniciar sesión" : "¿No tienes cuenta? Crear cuenta"}
-        </button>
-      </form>
-    </section>
-  );
-}
-
-function PasswordRecoveryScreen({
-  email,
-  message,
-  isBusy,
-  onEmailChange,
-  onSubmit,
-  onBack,
-}: {
-  email: string;
-  message: string;
-  isBusy: boolean;
-  onEmailChange: (value: string) => void;
-  onSubmit: (data: FormData) => void;
-  onBack: () => void;
-}) {
-  return (
-    <section className="login-shell">
-      <div className="login-logo">
-        <div className="brand-mark">
-          <Dumbbell size={28} />
-        </div>
-        <div>
-          <h1>Organizatech</h1>
-          <p className="eyebrow">Recupera el acceso a tu cuenta.</p>
-        </div>
-      </div>
-      <form className="card form-grid" action={onSubmit} autoComplete="on">
-        <h2>Recuperar contraseña</h2>
-        <p className="eyebrow">Ingresa tu correo y enviaremos las instrucciones si la cuenta existe.</p>
-        <TextField name="recovery-email" label="Correo electrónico" placeholder="tu@email.com" type="email" autoComplete="username" value={email} onChange={onEmailChange} required />
-        <p className="eyebrow">{message}</p>
-        <button className="button" type="submit" disabled={isBusy}>
-          <Mail size={17} />
-          {isBusy ? "Enviando enlace..." : "Enviar enlace"}
-        </button>
-        <button className="tab" type="button" onClick={onBack}>
-          Volver a iniciar sesión
-        </button>
-      </form>
-    </section>
-  );
-}
-
-function RecoveryExpiredScreen({
-  message,
-  onRequestNewLink,
-}: {
-  message: string;
-  onRequestNewLink: () => void;
-}) {
-  return (
-    <section className="login-shell">
-      <div className="login-logo">
-        <div className="brand-mark">
-          <Dumbbell size={28} />
-        </div>
-        <div>
-          <h1>Organizatech</h1>
-          <p className="eyebrow">Recupera el acceso a tu cuenta.</p>
-        </div>
-      </div>
-      <div className="card form-grid">
-        <h2>Enlace expirado</h2>
-        <p className="eyebrow">{message || "El enlace de recuperación expiró o ya fue utilizado."}</p>
-        <p className="eyebrow">Solicita un nuevo enlace para restablecer tu contraseña.</p>
-        <button className="button" type="button" onClick={onRequestNewLink}>
-          <Mail size={17} />
-          Solicitar nuevo enlace
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function NewPasswordScreen({
-  password,
-  confirmPassword,
-  message,
-  isBusy,
-  onPasswordChange,
-  onConfirmPasswordChange,
-  onSubmit,
-}: {
-  password: string;
-  confirmPassword: string;
-  message: string;
-  isBusy: boolean;
-  onPasswordChange: (value: string) => void;
-  onConfirmPasswordChange: (value: string) => void;
-  onSubmit: (data: FormData) => void;
-}) {
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  return (
-    <section className="login-shell">
-      <div className="login-logo">
-        <div className="brand-mark">
-          <Dumbbell size={28} />
-        </div>
-        <div>
-          <h1>Organizatech</h1>
-          <p className="eyebrow">Define una nueva contraseña.</p>
-        </div>
-      </div>
-      <form className="card form-grid" action={onSubmit} autoComplete="off">
-        <h2>Crear nueva contraseña</h2>
-        <PasswordField name="new-password" label="Nueva contraseña" placeholder="Crea una contraseña" autoComplete="new-password" value={password} onChange={onPasswordChange} visible={showPassword} onToggle={() => setShowPassword((current) => !current)} required />
-        <PasswordField name="new-password-confirm" label="Confirmar nueva contraseña" placeholder="Repite tu contraseña" autoComplete="new-password" value={confirmPassword} onChange={onConfirmPasswordChange} visible={showConfirmPassword} onToggle={() => setShowConfirmPassword((current) => !current)} required />
-        <p className="eyebrow">{message}</p>
-        <button className="button" type="submit" disabled={isBusy}>
-          <Save size={17} />
-          {isBusy ? "Actualizando..." : "Cambiar contraseña"}
-        </button>
-      </form>
-    </section>
-  );
-}
-
-function PasswordField({
-  name,
-  label,
-  value,
-  onChange,
-  placeholder = "",
-  autoComplete,
-  visible,
-  onToggle,
-  required = false,
-}: {
-  name: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  autoComplete?: string;
-  visible: boolean;
-  onToggle: () => void;
-  required?: boolean;
-}) {
-  const toggleLabel = visible ? "Ocultar contraseña" : "Mostrar contraseña";
-
-  return (
-    <label className="field password-field">
-      <span>{label}</span>
-      <div className="password-input-wrap">
-        <input
-          name={name}
-          type={visible ? "text" : "password"}
-          value={value}
-          placeholder={placeholder}
-          autoComplete={autoComplete}
-          required={required}
-          onChange={(event) => onChange(event.target.value)}
+    <AppShellLayout
+      topbar={
+        <AppTopbar
+          isHidden={isTopbarHidden}
+          isMenuOpen={isMenuOpen}
+          onMenuToggle={toggleMenu}
+          trainingMeta={trainingTopbarMeta}
+          fallbackText={hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}
+          isNotificationPanelOpen={isNotificationPanelOpen}
+          notificationBadgeText={notificationBadgeText}
+          notificationBadgeAriaLabel={notificationBadgeAriaLabel}
+          onToggleNotifications={toggleNotifications}
         />
-        <button className="password-toggle" type="button" aria-label={toggleLabel} title={toggleLabel} onClick={onToggle}>
-          {visible ? <EyeOff size={17} /> : <Eye size={17} />}
-        </button>
-      </div>
-    </label>
+      }
+      notificationOverlay={notificationOverlay}
+      navigationOverlay={
+        <AppNavigationDrawer
+          isOpen={isMenuOpen}
+          profileHeader={
+            <ProfileMenuHeader
+              profile={profileViewModel}
+              onAvatarImageError={handleProfileAvatarImageError}
+              avatarResetKey={profileAvatarResetKey}
+            />
+          }
+          items={menuScreens.map((item) => ({ id: item, label: screenLabel(item), isActive: screen === item }))}
+          isLogoutDisabled={isBusy}
+          onClose={appShell.closeMenu}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      }
+      screenHeader={screenHeader}
+    >
+      {portalScreenContent}
+    </AppShellLayout>
   );
 }
 
@@ -4138,41 +4745,6 @@ function InitialTrainingScreen({
         onSave={saveRoutine}
       />
     </section>
-  );
-}
-
-function TextField({
-  name,
-  label,
-  value,
-  onChange,
-  placeholder = "",
-  type = "text",
-  autoComplete,
-  required = false,
-}: {
-  name: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  type?: string;
-  autoComplete?: string;
-  required?: boolean;
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <input
-        name={name}
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        autoComplete={autoComplete}
-        required={required}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
   );
 }
 
@@ -4518,10 +5090,7 @@ function getLegacyWeekNumberForTrainingDate(sessions: TrainingSession[], entries
 }
 
 function getPasswordRecoveryRedirectUrl() {
-  if (typeof window === "undefined") return "https://organizatech.cl?flow=password-recovery";
-  const url = new URL(window.location.origin);
-  url.searchParams.set("flow", "password-recovery");
-  return url.toString();
+  return getBrowserAuthCallbackUrl(PASSWORD_RECOVERY_FLOW);
 }
 
 function getPasswordRecoveryCallbackAccessToken(): string | null {
@@ -4542,16 +5111,32 @@ function getPasswordRecoveryRouteState(): "none" | "active" | "expired" {
   const errorCode = searchParams.get("error_code") ?? hashParams.get("error_code");
   const error = searchParams.get("error") ?? hashParams.get("error");
   const errorDescription = searchParams.get("error_description") ?? hashParams.get("error_description");
-  if (hasPasswordRecoveryCallbackError({ error, errorCode, errorDescription })) return "expired";
 
   const hadStoredRecovery = hasStoredPasswordRecoveryFlow();
   const storedRecovery = loadPasswordRecoveryFlow();
   if (hadStoredRecovery && !storedRecovery) return "expired";
 
+  const requestedFlow = searchParams.get("flow");
+  const callbackType = searchParams.get("type") ?? hashParams.get("type");
   const hasRecoveryRoute =
-    searchParams.get("flow") === "password-recovery" ||
-    searchParams.get("type") === "recovery" ||
-    hashParams.get("type") === "recovery";
+    requestedFlow === PASSWORD_RECOVERY_FLOW || callbackType === "recovery";
+  const isCrossedCallback = (
+    requestedFlow === PASSWORD_RECOVERY_FLOW
+    && callbackType !== null
+    && callbackType !== "recovery"
+  ) || (
+    requestedFlow === SIGNUP_CONFIRMATION_FLOW
+    && callbackType !== null
+    && callbackType !== "signup"
+  );
+  const hasCallbackError = hasPasswordRecoveryCallbackError({
+    error,
+    errorCode,
+    errorDescription,
+  });
+  if (isCrossedCallback || ((hasRecoveryRoute || storedRecovery) && hasCallbackError)) {
+    return "expired";
+  }
   if (hasRecoveryRoute) {
     if (!storedRecovery) startPasswordRecoveryFlow();
     return "active";
@@ -4560,6 +5145,31 @@ function getPasswordRecoveryRouteState(): "none" | "active" | "expired" {
   if (storedRecovery) return "active";
 
   return "none";
+}
+
+interface SignupConfirmationSnapshot {
+  routeState: SignupConfirmationRouteState;
+  evidence: AuthCallbackEvidence;
+}
+
+function getSignupConfirmationSnapshot(): SignupConfirmationSnapshot {
+  if (typeof window === "undefined") {
+    return {
+      routeState: "none",
+      evidence: parseAuthCallbackEvidence({ search: "", hash: "" }),
+    };
+  }
+  const evidence = parseAuthCallbackEvidence({
+    search: window.location.search,
+    hash: window.location.hash,
+  });
+  return {
+    routeState: resolveSignupConfirmationRouteState({
+      pathname: window.location.pathname,
+      evidence,
+    }),
+    evidence,
+  };
 }
 
 function markPasswordRecoveryFlow() {
@@ -4573,6 +5183,11 @@ function clearPasswordRecoveryFlow() {
 }
 
 function clearPasswordRecoveryUrl() {
+  if (typeof window === "undefined") return;
+  window.history.replaceState({}, "", getPasswordRecoveryClearedHref(window.location.href));
+}
+
+function clearSignupConfirmationUrl() {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
   url.searchParams.delete("flow");

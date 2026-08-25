@@ -1,5 +1,5 @@
 :root {
-  --background: #07101a;
+  --background: #07101A;
   --panel: #101b27;
   --line: rgba(220, 231, 255, 0.12);
   --text: #ffffff;
@@ -27,9 +27,8 @@ body {
   min-height: 100vh;
   margin: 0;
   color: var(--text);
-  background:
-    radial-gradient(circle at 50% 0%, rgba(60, 122, 255, 0.2), transparent 34rem),
-    linear-gradient(180deg, #0b121b 0%, #07101a 48%, #050b12 100%);
+  background-color: var(--background);
+  background-image: none;
   font-family: "Roboto Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
@@ -57,6 +56,8 @@ a {
     calc(14px + env(safe-area-inset-top))
     clamp(10px, 3.6vw, 16px)
     calc(28px + env(safe-area-inset-bottom));
+  background-color: var(--background);
+  background-image: none;
 }
 
 .topbar {
@@ -70,8 +71,10 @@ a {
   width: calc(100% + clamp(10px, 3.6vw, 16px) * 2);
   margin-inline: calc(clamp(10px, 3.6vw, 16px) * -1);
   padding: 10px clamp(10px, 3.6vw, 16px) 12px;
-  background: linear-gradient(180deg, rgba(7, 16, 26, 0.96), rgba(7, 16, 26, 0.72));
-  backdrop-filter: blur(16px);
+  background: var(--background);
+  background-image: none;
+  box-shadow: none;
+  backdrop-filter: none;
   transition: transform 180ms ease, opacity 180ms ease;
 }
 
@@ -172,9 +175,10 @@ h3 {
   min-width: 0;
 }
 
-.profile-screen {
-  gap: 26px;
-  padding: 0 10px 30px;
+.profile-screen.profile-screen {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+  padding: 4px 0 24px;
 }
 
 .profile-hero,
@@ -190,37 +194,58 @@ h3 {
 }
 
 .profile-hero {
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: clamp(26px, 8vw, 62px);
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 18px;
   border: 0;
-  border-bottom: 2px solid rgba(255, 255, 255, 0.78);
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  padding: 0 6px 30px;
+  padding: 8px 4px 4px;
+  text-align: center;
 }
 
 .profile-hero-copy {
   display: grid;
   min-width: 0;
-  gap: 10px;
+  justify-items: center;
+  gap: 0;
 }
 
 .profile-hero-copy h2 {
-  margin: 0;
+  margin: 0 0 10px;
   overflow-wrap: anywhere;
   color: #fff;
-  font-size: clamp(19px, 5.4vw, 26px);
+  font-size: clamp(22px, 7vw, 30px);
   font-weight: 900;
   line-height: 1.14;
 }
 
 .profile-hero-copy p:not(.eyebrow) {
-  margin: 0;
-  color: var(--blue-soft);
-  font-size: clamp(12px, 3.2vw, 15px);
-  line-height: 1.35;
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.profile-hero-copy::before,
+.profile-screen > .profile-section[data-section="personal-data"] > .profile-section-header > div::before {
+  display: block;
+  margin: 0 0 7px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.profile-hero-copy::before {
+  content: "PERFIL USUARIO";
+}
+
+.profile-screen > .profile-section[data-section="personal-data"] > .profile-section-header > div::before {
+  content: "INFORMACIÓN DE LA CUENTA";
 }
 
 .profile-avatar-stack {
@@ -238,6 +263,11 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.profile-hero .user-avatar-large {
+  width: 112px;
+  height: 112px;
 }
 
 .profile-avatar-controls {
@@ -474,8 +504,11 @@ h3 {
 }
 
 .profile-screen > .profile-section[data-section="personal-data"] {
-  border: 0;
-  background: transparent;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
   padding: 0;
 }
 
@@ -485,6 +518,12 @@ h3 {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.profile-screen > .profile-section[data-section="personal-data"] > .profile-section-header {
+  align-items: center;
+  padding: 18px 16px 15px;
+  border-bottom: 1px solid var(--line);
 }
 
 .profile-section-header h3,
@@ -534,6 +573,15 @@ h3 {
   padding: 9px 0 8px;
 }
 
+.profile-screen > .profile-section[data-section="personal-data"] .profile-info-row {
+  border-bottom: 1px solid var(--line);
+  padding: 14px 16px;
+}
+
+.profile-screen > .profile-section[data-section="personal-data"] .profile-info-row:last-child {
+  border-bottom: 0;
+}
+
 .profile-info-row dt,
 .profile-info-row dd {
   min-width: 0;
@@ -578,9 +626,9 @@ h3 {
   display: grid;
   min-width: 0;
   gap: 0;
-  border: 2px solid #1d5cff;
-  border-radius: 8px;
-  padding: 28px 10px 18px;
+  border: 0;
+  border-radius: 0;
+  padding: 12px 16px 18px;
 }
 
 .profile-field {
@@ -649,7 +697,7 @@ h3 {
 
 .profile-readonly-row {
   border: 0;
-  border-bottom: 2px solid rgba(255, 255, 255, 0.78);
+  border-bottom: 1px solid var(--line);
   border-radius: 0;
   padding: 9px 0;
 }
@@ -926,6 +974,7 @@ h3 {
   align-content: center;
   justify-items: center;
   gap: 68px;
+  background-color: var(--background);
 }
 
 .empty-hero {
@@ -1646,13 +1695,19 @@ h3 {
 }
 
 .weekly-comparison-screen {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding-bottom: 22px;
 }
 
 .weekly-comparison-shell {
   display: grid;
+  width: 100%;
   gap: 24px;
   min-width: 0;
+  max-width: 100%;
   border: 2px solid var(--primary);
   border-radius: 8px;
   background: var(--panel);
@@ -1725,6 +1780,7 @@ h3 {
 .weekly-plan-table {
   display: grid;
   min-width: 0;
+  max-width: 100%;
   padding-inline: clamp(8px, 3vw, 18px);
 }
 
@@ -1734,6 +1790,7 @@ h3 {
   gap: clamp(10px, 3.4vw, 18px);
   align-items: center;
   min-width: 0;
+  max-width: 100%;
   border: 0;
   border-bottom: 1px solid rgba(220, 231, 255, 0.44);
   color: #fff;
@@ -1746,6 +1803,12 @@ h3 {
 .weekly-plan-row.heading {
   color: var(--muted);
   font-size: clamp(11px, 3.3vw, 16px);
+}
+
+.weekly-plan-row.heading span {
+  min-width: 0;
+  overflow-wrap: normal;
+  white-space: nowrap;
 }
 
 .weekly-plan-row:not(.heading) {
@@ -1787,6 +1850,7 @@ h3 {
   display: grid;
   gap: 13px;
   min-width: 0;
+  max-width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.82);
   border-radius: 8px;
   padding: clamp(12px, 4vw, 16px);
@@ -1829,11 +1893,14 @@ h3 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 22px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .weekly-results-grid::before {
   content: "";
   position: absolute;
+  display: block;
   top: 52px;
   bottom: 8px;
   left: 50%;
@@ -1847,6 +1914,7 @@ h3 {
   display: grid;
   gap: 5px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .weekly-series-column > span {
@@ -1862,7 +1930,9 @@ h3 {
 
 .weekly-series-pill {
   display: grid;
-  grid-template-columns: minmax(26px, 0.24fr) minmax(0, 1fr);
+  width: 100%;
+  max-width: 100%;
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 4px;
   align-items: center;
   min-width: 0;
@@ -1882,7 +1952,40 @@ h3 {
   min-width: 0;
   color: #fff;
   text-align: right;
-  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: normal;
+}
+
+@media (max-width: 520px) {
+  .weekly-results-card {
+    padding: 8px 5px;
+  }
+
+  .weekly-results-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .weekly-series-pill {
+    gap: 2px;
+    padding: 4px 2px;
+  }
+}
+
+@media (max-width: 340px) {
+  .weekly-results-card {
+    padding: 8px 3px;
+  }
+
+  .weekly-results-grid {
+    gap: 2px;
+  }
+
+  .weekly-series-pill {
+    gap: 1px;
+    padding: 4px 1px;
+  }
 }
 
 .weekly-results-note {
@@ -2000,6 +2103,23 @@ h3 {
 .weekly-comparison-empty.compact {
   padding: 8px;
   font-size: 12px;
+}
+
+@media (max-width: 430px) {
+  .weekly-comparison-shell {
+    padding: 12px;
+  }
+
+  .weekly-plan-table {
+    padding-inline: 0;
+  }
+
+  .weekly-plan-row {
+    gap: 4px;
+    padding-right: 2px;
+    padding-left: 2px;
+  }
+
 }
 
 .exercise-week-card {
@@ -4379,6 +4499,9 @@ h3 {
 .section-back-row {
   display: flex;
   margin-bottom: 12px;
+  background: var(--background);
+  background-image: none;
+  box-shadow: none;
 }
 
 .section-back-button {
@@ -4979,6 +5102,7 @@ h3 {
   min-height: calc(100vh - 120px);
   align-content: center;
   gap: 18px;
+  background-color: var(--background);
 }
 
 .login-logo {
@@ -5133,17 +5257,27 @@ h3 {
   }
 
   .profile-hero {
-    gap: 20px;
-    padding-bottom: 28px;
+    gap: 18px;
+    padding: 8px 4px 4px;
   }
 
-  .profile-info-row {
-    grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
-    gap: 8px;
+  .profile-screen > .profile-section[data-section="personal-data"] > .profile-section-header {
+    padding: 16px 14px 13px;
+  }
+
+  .profile-screen > .profile-section[data-section="personal-data"] .profile-info-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+    padding: 13px 14px;
+  }
+
+  .profile-screen > .profile-section[data-section="personal-data"] .profile-info-row dd {
+    justify-self: start;
+    text-align: left;
   }
 
   .profile-field {
-    grid-template-columns: minmax(0, 0.72fr) minmax(132px, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
 
@@ -5151,6 +5285,7 @@ h3 {
   .profile-field select {
     padding-right: 10px;
     padding-left: 10px;
+    text-align: left;
   }
 }
 

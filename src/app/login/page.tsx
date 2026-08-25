@@ -1,4 +1,7 @@
-import { OrganizatechApp } from "@/components/organizatech-app";
+import { Suspense } from "react";
+
+import { AuthEntryClient } from "@/features/auth/components/auth-entry-client";
+import { AuthLoadingScreen } from "@/features/auth/components/auth-screen";
 
 const qaTrainingCyclesRepositoryEnabled =
   process.env.VERCEL_ENV === "preview" &&
@@ -18,12 +21,15 @@ const trainingCyclesSnapshotSource = productionTrainingCyclesRepositoryEnabled
 
 const trainingWorkoutReadinessV2Enabled =
   process.env.ENABLE_TRAINING_WORKOUT_READINESS_V2 === "true";
+
 export default function Home() {
   return (
-    <OrganizatechApp
-      trainingCyclesRepositoryEnabled={trainingCyclesRepositoryEnabled}
-      trainingCyclesSnapshotSource={trainingCyclesSnapshotSource}
-      trainingWorkoutReadinessV2Enabled={trainingWorkoutReadinessV2Enabled}
-    />
+    <Suspense fallback={<main className="app-shell"><AuthLoadingScreen /></main>}>
+      <AuthEntryClient
+        trainingCyclesRepositoryEnabled={trainingCyclesRepositoryEnabled}
+        trainingCyclesSnapshotSource={trainingCyclesSnapshotSource}
+        trainingWorkoutReadinessV2Enabled={trainingWorkoutReadinessV2Enabled}
+      />
+    </Suspense>
   );
 }
