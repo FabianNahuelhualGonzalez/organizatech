@@ -6,6 +6,10 @@ const EXPANDABLE_SLOTS = new Set([
   "portalScreenContent",
 ]);
 
+export interface LegacyAppShellLayoutAstOptions {
+  readonly ignoredAttributesByElement?: Readonly<Record<string, readonly string[]>>;
+}
+
 function unwrapExpression(expression: ts.Expression): ts.Expression {
   if (
     ts.isParenthesizedExpression(expression)
@@ -34,7 +38,11 @@ function parseRoot(path: string, source: string) {
  * AST original para poder comparar atributos, overlays, children, callbacks y orden de pantalla
  * contra el baseline sin depender de espacios, comentarios o impresión de TypeScript.
  */
-export function legacyAppShellLayoutAst(path: string, source: string): string {
+export function legacyAppShellLayoutAst(
+  path: string,
+  source: string,
+  options: LegacyAppShellLayoutAstOptions = {},
+): string {
   const sourceFile = parseRoot(path, source);
   const root = sourceFile.statements.find((statement): statement is ts.FunctionDeclaration => (
     ts.isFunctionDeclaration(statement) && statement.name?.text === "OrganizatechApp"
@@ -61,11 +69,14 @@ export function legacyAppShellLayoutAst(path: string, source: string): string {
     throw new Error(`${path}: debe existir exactamente un AppShellLayout legacy, existen ${layouts.length}`);
   }
 
-  const syntaxAst = (node: ts.Node): unknown => {
+  const syntaxAst = (node: ts.Node, resolving = new Set<string>()): unknown => {
+    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
+      return jsxAst(node, resolving);
+    }
     const children = node.getChildren(sourceFile);
     return children.length === 0
       ? [node.kind, node.getText(sourceFile)]
-      : [node.kind, children.map(syntaxAst)];
+      : [node.kind, children.map((child) => syntaxAst(child, resolving))];
   };
 
   const expressionAst = (expression: ts.Expression, resolving = new Set<string>()): unknown => {
@@ -78,11 +89,19 @@ export function legacyAppShellLayoutAst(path: string, source: string): string {
     if (ts.isJsxElement(candidate) || ts.isJsxSelfClosingElement(candidate) || ts.isJsxFragment(candidate)) {
       return jsxAst(candidate, resolving);
     }
-    return syntaxAst(candidate);
+    return syntaxAst(candidate, resolving);
   };
 
-  const attributesAst = (attributes: ts.JsxAttributes, resolving: Set<string>) => (
-    attributes.properties.map((attribute, index) => {
+  const attributesAst = (
+    elementName: string,
+    attributes: ts.JsxAttributes,
+    resolving: Set<string>,
+  ) => {
+    const ignoredAttributes = new Set(options.ignoredAttributesByElement?.[elementName] ?? []);
+    return attributes.properties.filter((attribute) => (
+      ts.isJsxSpreadAttribute(attribute)
+      || !ignoredAttributes.has(attribute.name.getText(sourceFile))
+    )).map((attribute, index) => {
       if (ts.isJsxSpreadAttribute(attribute)) {
         return [`...${index}`, expressionAst(attribute.expression, resolving)] as const;
       }
@@ -98,8 +117,8 @@ export function legacyAppShellLayoutAst(path: string, source: string): string {
           ? expressionAst(attribute.initializer.expression, resolving)
           : null,
       ] as const;
-    }).sort(([left], [right]) => left.localeCompare(right))
-  );
+    }).sort(([left], [right]) => left.localeCompare(right));
+  };
 
   const childrenAst = (children: readonly ts.JsxChild[], resolving: Set<string>): unknown[] => (
     children.flatMap((child) => {
@@ -134,17 +153,19 @@ export function legacyAppShellLayoutAst(path: string, source: string): string {
   ): unknown {
     if (ts.isJsxFragment(node)) return ["fragment", childrenAst(node.children, resolving)];
     if (ts.isJsxSelfClosingElement(node)) {
+      const elementName = node.tagName.getText(sourceFile);
       return [
         "element",
-        node.tagName.getText(sourceFile),
-        attributesAst(node.attributes, resolving),
+        elementName,
+        attributesAst(elementName, node.attributes, resolving),
         [],
       ];
     }
+    const elementName = node.openingElement.tagName.getText(sourceFile);
     return [
       "element",
-      node.openingElement.tagName.getText(sourceFile),
-      attributesAst(node.openingElement.attributes, resolving),
+      elementName,
+      attributesAst(elementName, node.openingElement.attributes, resolving),
       childrenAst(node.children, resolving),
     ];
   }

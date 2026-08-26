@@ -1,17 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useActiveWorkoutController } from "@/features/active-workout/hooks/useActiveWorkoutController";
-import type {
-  ActiveWorkoutActionResult,
-  ActiveWorkoutBoundary,
-  ActiveWorkoutCommandPorts,
-  ActiveWorkoutIdentityPort,
-  ActiveWorkoutIdentityReset,
-  ActiveWorkoutOperation,
-  ActiveWorkoutOperationContext,
-  ActiveWorkoutRuntimeSnapshot,
+import {
+  beginActiveWorkoutCompletion,
+  canRetryActiveWorkoutCompletion,
+  INITIAL_ACTIVE_WORKOUT_COMPLETION_PUBLICATION,
+  invalidateActiveWorkoutCompletion,
+  settleActiveWorkoutCompletion,
+  type ActiveWorkoutActionResult,
+  type ActiveWorkoutBoundary,
+  type ActiveWorkoutCommandPorts,
+  type ActiveWorkoutCompletionPublication,
+  type ActiveWorkoutIdentityPort,
+  type ActiveWorkoutIdentityReset,
+  type ActiveWorkoutOperation,
+  type ActiveWorkoutOperationContext,
+  type ActiveWorkoutRuntimeSnapshot,
 } from "@/features/active-workout/model/active-workout-boundary-contract";
 import {
   invalidateSessionOperationOwners,
@@ -47,6 +53,15 @@ export function useActiveWorkoutBoundary(
   const pendingReadinessLinkRef = useRef<ActiveWorkoutRuntimeSnapshot["pendingReadinessLink"]>(null);
   const readinessContextRef = useRef<ActiveWorkoutRuntimeSnapshot["readinessContext"]>(null);
   const incomingRecoveryScopeRef = useRef<BrowserStorageScope | null>(null);
+  const completionPublicationRef = useRef<ActiveWorkoutCompletionPublication>(
+    INITIAL_ACTIVE_WORKOUT_COMPLETION_PUBLICATION,
+  );
+  const [completionStatus, setCompletionStatus] = useState<ActiveWorkoutBoundary["completionStatus"]>("idle");
+
+  const publishCompletion = useCallback((publication: ActiveWorkoutCompletionPublication) => {
+    completionPublicationRef.current = publication;
+    setCompletionStatus(publication.status);
+  }, []);
 
   const getRuntimeSnapshot = useCallback((): ActiveWorkoutRuntimeSnapshot => ({
     attemptId: attemptIdRef.current,
@@ -66,7 +81,8 @@ export function useActiveWorkoutBoundary(
       readinessOwnerRef,
       completionOwnerRef,
     ]);
-  }, []);
+    publishCompletion(invalidateActiveWorkoutCompletion(completionPublicationRef.current));
+  }, [publishCompletion]);
 
   const run = useCallback(async (
     operation: ActiveWorkoutOperation,
@@ -111,10 +127,26 @@ export function useActiveWorkoutBoundary(
   const skipReadiness = useCallback(async () => {
     await persistReadiness({ skipped: true });
   }, [persistReadiness]);
-  const complete = useCallback(
-    () => run("completion", commandsRef.current.complete),
-    [run],
-  );
+  const complete = useCallback(async () => {
+    if (completionPublicationRef.current.status === "saving") {
+      return "ignored";
+    }
+    const publication = beginActiveWorkoutCompletion(completionPublicationRef.current);
+    publishCompletion(publication);
+    const result = await run("completion", commandsRef.current.complete);
+    publishCompletion(settleActiveWorkoutCompletion(
+      completionPublicationRef.current,
+      publication.revision,
+      result,
+    ));
+    return result;
+  }, [publishCompletion, run]);
+  const retryCompletion = useCallback(() => {
+    if (!canRetryActiveWorkoutCompletion(completionPublicationRef.current.status)) {
+      return Promise.resolve<ActiveWorkoutActionResult>("ignored");
+    }
+    return complete();
+  }, [complete]);
   // La pausa conserva reducer/refs: Dashboard representa el estado pausado y permite reentry
   // desde memoria. Cancelar un start usa markTrainingStopped mediante un port separado.
   const pause = useCallback(() => undefined, []);
@@ -152,12 +184,14 @@ export function useActiveWorkoutBoundary(
   return useMemo(() => ({
     state: controller.state,
     controllerActions: controller.actions,
+    completionStatus,
     start,
     submitReadiness,
     skipReadiness,
     pause,
     resumeOrRestore,
     complete,
+    retryCompletion,
     discard,
     resetForIdentity,
     invalidateOperations,
@@ -169,6 +203,7 @@ export function useActiveWorkoutBoundary(
   }), [
     abortStart,
     complete,
+    completionStatus,
     consumeIncomingRecoveryScope,
     controller.actions,
     controller.state,
@@ -180,6 +215,7 @@ export function useActiveWorkoutBoundary(
     resumeOrRestore,
     replaceRuntimeSnapshot,
     resetForIdentity,
+    retryCompletion,
     skipReadiness,
     start,
     submitReadiness,
