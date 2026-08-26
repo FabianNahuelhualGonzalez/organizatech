@@ -29,7 +29,14 @@ import type {
 
 const USER_REGISTRATION_COLUMNS = "user_id";
 const COACH_REGISTRATION_COLUMNS =
-  "user_id,created_at,first_name,last_name,birth_date,gender,phone_number,professional_title";
+  "user_id,created_at,first_name,last_name,birth_date,gender,phone_number,professional_title,contact_email";
+const EXISTING_IDENTITY_SIGNUP_ERROR_CODES = new Set([
+  "user_already_exists",
+  "email_exists",
+]);
+const EXISTING_IDENTITY_SIGNUP_ERROR_MESSAGES = new Set([
+  "user already registered",
+]);
 
 interface CoachRegistrationRow {
   user_id: string;
@@ -40,6 +47,7 @@ interface CoachRegistrationRow {
   gender: string;
   phone_number: string;
   professional_title: string;
+  contact_email: string;
 }
 
 interface UserRegistrationRow {
@@ -48,8 +56,14 @@ interface UserRegistrationRow {
 
 export interface SupabaseMultiportalAuthGatewayOptions {
   createRegistrationClient?(): SupabaseClient;
-  onBeforeSignOut?(reason: PortalSignOutReason, owner: PortalResolutionOwner): void;
-  onSignOutError?(reason: PortalSignOutReason, owner: PortalResolutionOwner): void;
+  onBeforeSignOut?(
+    reason: PortalSignOutReason,
+    owner: PortalResolutionOwner | CoachRegistrationOwner,
+  ): void;
+  onSignOutError?(
+    reason: PortalSignOutReason,
+    owner: PortalResolutionOwner | CoachRegistrationOwner,
+  ): void;
 }
 
 export class MultiportalAuthRepositoryError extends Error {
@@ -82,29 +96,6 @@ export function createSupabaseMultiportalAuthGateway(
       return getAuthoritativeIdentity(supabase, expectedUserId, owner);
     },
 
-    async signInForCoachRegistration(credentials: LoginPayload, owner) {
-      if (!owner.isCurrent()) return { kind: "stale" };
-      const isolatedClient = getRegistrationClient();
-      const { data, error } = await isolatedClient.auth.signInWithPassword({
-        email: credentials.email,
-        password: credentials.password,
-      });
-      if (!owner.isCurrent()) return { kind: "stale" };
-      if (error) {
-        if (isInvalidCredentialsError(error)) return { kind: "invalid_credentials" };
-        return { kind: "error", message: translateAuthError(error) };
-      }
-
-      const identity = data.user
-        ? await getAuthoritativeIdentity(isolatedClient, data.user.id, owner)
-        : null;
-      if (!owner.isCurrent()) return { kind: "stale" };
-      if (identity) registrationIdentityUserId = identity.userId;
-      return identity
-        ? { kind: "authenticated", identity }
-        : { kind: "error", message: translateAuthError(new Error("auth session missing")) };
-    },
-
     async signUpForCoachRegistration(payload: CoachRegistrationPreparationPayload, owner) {
       if (!owner.isCurrent()) return { kind: "stale" };
       const isolatedClient = getRegistrationClient();
@@ -113,12 +104,16 @@ export function createSupabaseMultiportalAuthGateway(
         {
           portal: "coach",
           professionalTitle: payload.registration.professional_title,
+          contactEmail: payload.registration.contact_email,
         },
         getBrowserAuthCallbackUrl(SIGNUP_CONFIRMATION_FLOW),
       );
       const { data, error } = await isolatedClient.auth.signUp(signupPayload);
       if (!owner.isCurrent()) return { kind: "stale" };
-      if (error) return { kind: "error", message: translateAuthError(error) };
+      if (error) {
+        if (isExistingIdentitySignupError(error)) return { kind: "existing_identity" };
+        return { kind: "error", message: translateAuthError(error) };
+      }
       if (Array.isArray(data.user?.identities) && data.user.identities.length === 0) {
         return { kind: "existing_identity" };
       }
@@ -132,6 +127,36 @@ export function createSupabaseMultiportalAuthGateway(
       return identity
         ? { kind: "authenticated", identity }
         : { kind: "error", message: translateAuthError(new Error("auth session missing")) };
+    },
+
+    async createSharedCoachRegistration(
+      payload: CoachRegistrationWritePayload,
+      expectedUserId,
+      owner,
+    ) {
+      if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
+      await requireAuthoritativeIdentity(supabase, expectedUserId, owner);
+      if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
+      const { data, error } = await supabase.rpc("register_own_coach", {
+        p_first_name: payload.first_name,
+        p_last_name: payload.last_name,
+        p_birth_date: payload.birth_date,
+        p_gender: payload.gender,
+        p_phone_number: payload.phone_number,
+        p_professional_title: payload.professional_title,
+        p_contact_email: payload.contact_email,
+      });
+      if (error) {
+        throw new MultiportalAuthRepositoryError("No pudimos activar el acceso Coach.", error);
+      }
+      if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
+      const row = mapCoachRegistrationRow(data);
+      if (!row || row.userId !== expectedUserId) {
+        throw new MultiportalAuthRepositoryError("No pudimos confirmar el registro Coach.");
+      }
+      await requireAuthoritativeIdentity(supabase, expectedUserId, owner);
+      if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
+      return row;
     },
 
     async signInForUserRegistration(credentials: LoginPayload, owner) {
@@ -167,7 +192,10 @@ export function createSupabaseMultiportalAuthGateway(
       );
       const { data, error } = await isolatedClient.auth.signUp(signupPayload);
       if (!owner.isCurrent()) return { kind: "stale" };
-      if (error) return { kind: "error", message: translateAuthError(error) };
+      if (error) {
+        if (isExistingIdentitySignupError(error)) return { kind: "existing_identity" };
+        return { kind: "error", message: translateAuthError(error) };
+      }
       if (Array.isArray(data.user?.identities) && data.user.identities.length === 0) {
         return { kind: "existing_identity" };
       }
@@ -227,24 +255,6 @@ export function createSupabaseMultiportalAuthGateway(
       return row;
     },
 
-    async createCoachRegistration(payload, expectedUserId, owner) {
-      if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
-      const client = dataClientFor(expectedUserId);
-      const rpcPayload = toCoachRegistrationRpcPayload(payload, expectedUserId);
-      const { data, error } = await client.rpc("register_own_coach", rpcPayload);
-      if (error) {
-        throw new MultiportalAuthRepositoryError("No pudimos registrar el acceso Coach.", error);
-      }
-      if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
-      const row = mapCoachRegistrationRow(data);
-      if (!row || row.userId !== expectedUserId) {
-        throw new MultiportalAuthRepositoryError("No pudimos confirmar el registro Coach.");
-      }
-      await requireAuthoritativeIdentity(client, expectedUserId, owner);
-      if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
-      return row;
-    },
-
     async createUserRegistration(expectedUserId, owner) {
       if (!ownsRegistration(owner, expectedUserId)) throw staleRegistrationError();
       const client = dataClientFor(expectedUserId);
@@ -288,12 +298,14 @@ export function createSupabaseMultiportalAuthGateway(
       return getAuthoritativeIdentity(supabase, identity.userId, owner);
     },
 
-    async signOut(reason, owner) {
-      if (!owner.isCurrent()) return "stale";
-      const identity = await getAuthoritativeIdentity(supabase, owner.expectedUserId, owner);
+    async signOut(reason, owner: PortalResolutionOwner | CoachRegistrationOwner) {
+      const expectedUserId = owner.expectedUserId;
+      if (!expectedUserId || !owner.isCurrent()) return "stale";
+      const identity = await getAuthoritativeIdentity(supabase, expectedUserId, owner);
       if (
         !identity
-        || identity.userId !== owner.expectedUserId
+        || identity.userId !== expectedUserId
+        || owner.expectedUserId !== expectedUserId
         || !owner.isCurrent()
       ) {
         return "stale";
@@ -308,54 +320,19 @@ export function createSupabaseMultiportalAuthGateway(
       return "signed_out";
     },
 
-    async signOutForCoachIdentitySwitch(requestedEmail, owner) {
-      if (!owner.isCurrent()) return "stale";
-      const identity = await getAuthoritativeIdentity(supabase, owner.expectedUserId, owner);
-      if (
-        !identity
-        || identity.userId !== owner.expectedUserId
-        || sameEmail(identity.email, requestedEmail)
-        || !owner.isCurrent()
-      ) {
-        return "stale";
-      }
-
-      const { error } = await supabase.auth.signOut({ scope: "local" });
-      if (error) {
-        throw new MultiportalAuthRepositoryError("No pudimos cerrar la sesión.", error);
-      }
-      return "signed_out";
-    },
   };
 }
 
-export function toCoachRegistrationInsertPayload(
-  input: CoachRegistrationWritePayload,
-): CoachRegistrationWritePayload {
-  return {
-    first_name: input.first_name,
-    last_name: input.last_name,
-    birth_date: input.birth_date,
-    gender: input.gender,
-    phone_number: input.phone_number,
-    professional_title: input.professional_title,
-  };
-}
-
-export function toCoachRegistrationRpcPayload(
-  input: CoachRegistrationWritePayload,
-  expectedUserId: string,
-) {
-  const payload = toCoachRegistrationInsertPayload(input);
-  return {
-    p_expected_user_id: expectedUserId,
-    p_first_name: payload.first_name,
-    p_last_name: payload.last_name,
-    p_birth_date: payload.birth_date,
-    p_gender: payload.gender,
-    p_phone_number: payload.phone_number,
-    p_professional_title: payload.professional_title,
-  };
+function isExistingIdentitySignupError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error && typeof error.code === "string"
+    ? error.code.trim().toLowerCase()
+    : "";
+  if (EXISTING_IDENTITY_SIGNUP_ERROR_CODES.has(code)) return true;
+  const message = "message" in error && typeof error.message === "string"
+    ? error.message.trim().toLowerCase().replace(/\.$/, "")
+    : "";
+  return EXISTING_IDENTITY_SIGNUP_ERROR_MESSAGES.has(message);
 }
 
 async function getAuthoritativeIdentity(
@@ -481,10 +458,6 @@ function ownsRegistration(
   return owner.isCurrent() && owner.expectedUserId === expectedUserId;
 }
 
-function sameEmail(left: string | null, right: string): boolean {
-  return typeof left === "string" && left.trim().toLowerCase() === right.trim().toLowerCase();
-}
-
 function staleRegistrationError() {
   return new MultiportalAuthRepositoryError("La operación de registro ya no está vigente.");
 }
@@ -532,7 +505,8 @@ function mapCoachRegistrationRow(value: unknown): CoachRegistrationRecord | null
     typeof row.birth_date !== "string" ||
     typeof row.gender !== "string" ||
     typeof row.phone_number !== "string" ||
-    typeof row.professional_title !== "string"
+    typeof row.professional_title !== "string" ||
+    typeof row.contact_email !== "string"
   ) {
     throw new MultiportalAuthRepositoryError("La respuesta de autorización Coach no es válida.");
   }
@@ -545,6 +519,7 @@ function mapCoachRegistrationRow(value: unknown): CoachRegistrationRecord | null
     gender: row.gender,
     phoneNumber: row.phone_number,
     professionalTitle: row.professional_title,
+    contactEmail: row.contact_email,
   };
 }
 

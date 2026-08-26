@@ -77,6 +77,7 @@
 }
 
 .segmentedControl button:focus-visible,
+.coachRegistrationChoice input:focus-visible,
 .primaryButton:focus-visible,
 .textButton:focus-visible,
 .googleButton:focus-visible,
@@ -111,6 +112,45 @@
 
 .registrationCard {
   gap: 26px;
+}
+
+.coachRegistrationChoice {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.coachRegistrationChoice label {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  min-height: 48px;
+  align-items: center;
+  border: 1px solid rgba(220, 231, 255, 0.2);
+  border-radius: 8px;
+  color: #fff;
+  background: #27313d;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.coachRegistrationChoice input {
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
+  accent-color: var(--primary);
+}
+
+.coachRegistrationChoice label:has(input:checked) {
+  border-color: rgba(255, 255, 255, 0.92);
+  background: color-mix(in srgb, var(--primary) 28%, #27313d);
+}
+
+.coachRegistrationChoice span {
+  padding: 12px 12px 12px 0;
 }
 
 .fields {

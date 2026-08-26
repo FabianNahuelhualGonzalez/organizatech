@@ -1,5 +1,6 @@
 import type {
   CoachRegistrationPreparationPayload,
+  CoachRegistrationSubmission,
   CoachRegistrationWritePayload,
   LoginPayload,
   UserSignupPayload,
@@ -16,25 +17,17 @@ export const USER_REGISTRATION_REQUIRED_MESSAGE =
 export const COACH_REGISTRATION_REQUIRED_MESSAGE =
   "Cuenta Coach no registrada. Crea una cuenta Coach para iniciar sesión.";
 export const USER_REGISTRATION_CONFIRMATION_MESSAGE =
-  "Muchas gracias por crear tu cuenta en Organizatech. Revisa tu correo y haz clic en el enlace de confirmación para activar tu cuenta. Después podrás iniciar sesión.";
+  "Si corresponde, completa la confirmación desde tu correo. También puedes iniciar sesión, recuperar tu contraseña o usar otro correo de acceso.";
 export const COACH_REGISTRATION_CONFIRMATION_MESSAGE =
-  "Muchas gracias por crear tu cuenta Coach en Organizatech. Revisa tu correo y haz clic en el enlace de confirmación para activar tu cuenta. Después podrás iniciar sesión como Coach.";
-export const REGISTRATION_EXISTING_IDENTITY_MESSAGE =
-  "Revisa tu correo para continuar. Si no recibes un mensaje, inicia sesión o recupera tu contraseña.";
+  USER_REGISTRATION_CONFIRMATION_MESSAGE;
 export const USER_REGISTRATION_CONFIRMED_MESSAGE =
   "Correo confirmado correctamente. Tu cuenta Usuario está lista. Ya puedes iniciar sesión.";
 export const COACH_REGISTRATION_CONFIRMED_MESSAGE =
   "Correo confirmado correctamente. Tu cuenta Coach está lista. Ya puedes iniciar sesión.";
 export const SIGNUP_CONFIRMATION_INVALID_MESSAGE =
   "El enlace de confirmación es inválido, venció o ya fue utilizado.";
-export const COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE =
-  "Este correo ya se encuentra registrado como Coach. Intente con otro correo.";
 export const MULTIPORTAL_AUTH_ERROR_MESSAGE =
   "No pudimos completar la acción. Intenta nuevamente.";
-export const COACH_REGISTRATION_IDENTITY_MISMATCH_MESSAGE =
-  "El correo debe coincidir con la sesión activa.";
-export const COACH_REGISTRATION_IDENTITY_SWITCH_MESSAGE =
-  "Hay una sesión activa con otro correo. Cierra sesión para registrar esta cuenta Coach.";
 export const USER_REGISTRATION_IDENTITY_MISMATCH_MESSAGE =
   "El correo debe coincidir con la sesión activa.";
 
@@ -60,6 +53,7 @@ export interface CoachRegistrationRecord {
   gender: string;
   phoneNumber: string;
   professionalTitle: string;
+  contactEmail: string;
 }
 
 export interface UserRegistrationRecord {
@@ -111,14 +105,15 @@ export interface MultiportalAuthGateway<TAuthState> {
     expectedUserId?: string,
     owner?: CoachRegistrationOwner | UserRegistrationOwner | PortalResolutionOwner,
   ): Promise<AuthenticatedPortalIdentity<TAuthState> | null>;
-  signInForCoachRegistration(
-    credentials: LoginPayload,
-    owner: CoachRegistrationOwner,
-  ): Promise<RegistrationPasswordSignInResult<TAuthState>>;
   signUpForCoachRegistration(
     payload: CoachRegistrationPreparationPayload,
     owner: CoachRegistrationOwner,
   ): Promise<RegistrationSignupResult<TAuthState>>;
+  createSharedCoachRegistration(
+    payload: CoachRegistrationWritePayload,
+    expectedUserId: string,
+    owner: CoachRegistrationOwner,
+  ): Promise<CoachRegistrationRecord>;
   signInForUserRegistration(
     credentials: LoginPayload,
     owner: UserRegistrationOwner,
@@ -143,11 +138,6 @@ export interface MultiportalAuthGateway<TAuthState> {
     expectedUserId: string,
     owner?: PortalResolutionOwner | CoachRegistrationOwner,
   ): Promise<CoachRegistrationRecord | null>;
-  createCoachRegistration(
-    payload: CoachRegistrationWritePayload,
-    expectedUserId: string,
-    owner: CoachRegistrationOwner,
-  ): Promise<CoachRegistrationRecord>;
   createUserRegistration(
     expectedUserId: string,
     owner: UserRegistrationOwner,
@@ -162,11 +152,7 @@ export interface MultiportalAuthGateway<TAuthState> {
   ): Promise<AuthenticatedPortalIdentity<TAuthState> | null>;
   signOut(
     reason: PortalSignOutReason,
-    owner: PortalResolutionOwner,
-  ): Promise<PortalSignOutResult>;
-  signOutForCoachIdentitySwitch(
-    requestedEmail: string,
-    owner: PortalResolutionOwner,
+    owner: PortalResolutionOwner | CoachRegistrationOwner,
   ): Promise<PortalSignOutResult>;
 }
 
@@ -221,11 +207,6 @@ export type CoachRegistrationResult<TAuthState> =
     message: typeof COACH_REGISTRATION_CONFIRMATION_MESSAGE;
   }
   | {
-    state: "identity_switch_required";
-    requestedPortal: "coach";
-    message: typeof COACH_REGISTRATION_IDENTITY_SWITCH_MESSAGE;
-  }
-  | {
     state: "error";
     requestedPortal: "coach";
     message: string;
@@ -239,6 +220,28 @@ export type CoachRegistrationResult<TAuthState> =
     state: "stale";
     requestedPortal: "coach";
   };
+
+export type SharedCoachRegistrationPreparationResult<TAuthState> =
+  | {
+    state: "authorized";
+    userId: string;
+    authState: TAuthState;
+  }
+  | { state: "sign_in_required" }
+  | { state: "error" }
+  | { state: "stale" };
+
+export type SharedCoachLoginCompletionResult<TAuthState> =
+  | Extract<SharedCoachRegistrationPreparationResult<TAuthState>, { state: "authorized" }>
+  | {
+    state: "rejected";
+    message: typeof MULTIPORTAL_AUTH_ERROR_MESSAGE;
+  }
+  | {
+    state: "error";
+    message: typeof MULTIPORTAL_AUTH_ERROR_MESSAGE;
+  }
+  | { state: "busy" | "stale" };
 
 export type UserRegistrationResult<TAuthState> =
   | {
@@ -277,10 +280,20 @@ export interface MultiportalAuthController<TAuthState> {
     gateway: MultiportalAuthGateway<TAuthState>,
   ): Promise<PortalAccessResult>;
   registerCoach(
-    input: CoachRegistrationPreparationPayload,
+    input: CoachRegistrationSubmission,
     owner: CoachRegistrationOwner,
     gateway: MultiportalAuthGateway<TAuthState>,
   ): Promise<CoachRegistrationResult<TAuthState>>;
+  prepareSharedCoachRegistration(
+    expectedUserId: string | undefined,
+    owner: CoachRegistrationOwner,
+    gateway: MultiportalAuthGateway<TAuthState>,
+  ): Promise<SharedCoachRegistrationPreparationResult<TAuthState>>;
+  completeSharedCoachLogin(
+    expectedUserId: string,
+    owner: CoachRegistrationOwner,
+    gateway: MultiportalAuthGateway<TAuthState>,
+  ): Promise<SharedCoachLoginCompletionResult<TAuthState>>;
   registerUser(
     input: UserSignupPayload,
     owner: UserRegistrationOwner,
@@ -298,6 +311,7 @@ export interface MultiportalAuthController<TAuthState> {
 
 export function createMultiportalAuthController<TAuthState>(): MultiportalAuthController<TAuthState> {
   const registrationOwners = new Set<symbol>();
+  const sharedCoachLoginOwners = new Set<symbol>();
   const userRegistrationOwners = new Set<symbol>();
   let disposed = false;
 
@@ -317,6 +331,27 @@ export function createMultiportalAuthController<TAuthState>(): MultiportalAuthCo
       registrationOwners.add(owner.id);
       return registerCoach(input, owner, gateway).finally(() => {
         registrationOwners.delete(owner.id);
+      });
+    },
+
+    prepareSharedCoachRegistration(expectedUserId, owner, gateway) {
+      if (disposed || !owner.isCurrent()) {
+        return Promise.resolve({ state: "stale" });
+      }
+      return prepareSharedCoachRegistration(expectedUserId, owner, gateway);
+    },
+
+    completeSharedCoachLogin(expectedUserId, owner, gateway) {
+      if (disposed || !ownsSharedCoachLogin(owner, expectedUserId)) {
+        return Promise.resolve({ state: "stale" });
+      }
+      if (sharedCoachLoginOwners.has(owner.id)) {
+        return Promise.resolve({ state: "busy" });
+      }
+
+      sharedCoachLoginOwners.add(owner.id);
+      return completeSharedCoachLogin(expectedUserId, owner, gateway).finally(() => {
+        sharedCoachLoginOwners.delete(owner.id);
       });
     },
 
@@ -347,6 +382,7 @@ export function createMultiportalAuthController<TAuthState>(): MultiportalAuthCo
     dispose() {
       disposed = true;
       registrationOwners.clear();
+      sharedCoachLoginOwners.clear();
       userRegistrationOwners.clear();
     },
   };
@@ -501,91 +537,154 @@ function stalePortalResolution(requestedPortal: AuthAccountType): PortalAccessRe
 }
 
 async function registerCoach<TAuthState>(
-  input: CoachRegistrationPreparationPayload,
+  input: CoachRegistrationSubmission,
+  owner: CoachRegistrationOwner,
+  gateway: MultiportalAuthGateway<TAuthState>,
+): Promise<CoachRegistrationResult<TAuthState>> {
+  return input.flow === "shared"
+    ? registerSharedCoach(input.registration, owner, gateway)
+    : registerSeparateCoach(input, owner, gateway);
+}
+
+async function prepareSharedCoachRegistration<TAuthState>(
+  expectedUserId: string | undefined,
+  owner: CoachRegistrationOwner,
+  gateway: MultiportalAuthGateway<TAuthState>,
+): Promise<SharedCoachRegistrationPreparationResult<TAuthState>> {
+  if (!owner.isCurrent()) return { state: "stale" };
+  try {
+    const identity = await gateway.getCurrentIdentity(expectedUserId, owner);
+    if (!owner.isCurrent()) return { state: "stale" };
+    if (!identity || (expectedUserId && identity.userId !== expectedUserId)) {
+      return { state: "sign_in_required" };
+    }
+    if (!owner.bindExpectedUserId(identity.userId)) return { state: "stale" };
+    const hasUserRegistration = await gateway.hasUserRegistration(identity.userId, owner);
+    if (!owner.isCurrent()) return { state: "stale" };
+    if (!hasUserRegistration) return { state: "sign_in_required" };
+    return {
+      state: "authorized",
+      userId: identity.userId,
+      authState: identity.authState,
+    };
+  } catch {
+    return owner.isCurrent() ? { state: "error" } : { state: "stale" };
+  }
+}
+
+async function completeSharedCoachLogin<TAuthState>(
+  expectedUserId: string,
+  owner: CoachRegistrationOwner,
+  gateway: MultiportalAuthGateway<TAuthState>,
+): Promise<SharedCoachLoginCompletionResult<TAuthState>> {
+  if (!ownsSharedCoachLogin(owner, expectedUserId)) return { state: "stale" };
+
+  const preparation = await prepareSharedCoachRegistration(expectedUserId, owner, gateway);
+  if (!ownsSharedCoachLogin(owner, expectedUserId)) return { state: "stale" };
+  if (preparation.state === "authorized") {
+    return preparation.userId === expectedUserId ? preparation : { state: "stale" };
+  }
+  if (preparation.state === "stale") return preparation;
+
+  try {
+    const signOutResult = await gateway.signOut("authorization_error", owner);
+    if (signOutResult === "stale") return { state: "stale" };
+    return {
+      state: "rejected",
+      message: MULTIPORTAL_AUTH_ERROR_MESSAGE,
+    };
+  } catch {
+    return ownsSharedCoachLogin(owner, expectedUserId)
+      ? { state: "error", message: MULTIPORTAL_AUTH_ERROR_MESSAGE }
+      : { state: "stale" };
+  }
+}
+
+function ownsSharedCoachLogin(
+  owner: CoachRegistrationOwner,
+  expectedUserId: string,
+) {
+  return owner.isCurrent() && owner.expectedUserId === expectedUserId;
+}
+
+async function registerSharedCoach<TAuthState>(
+  registration: CoachRegistrationWritePayload,
   owner: CoachRegistrationOwner,
   gateway: MultiportalAuthGateway<TAuthState>,
 ): Promise<CoachRegistrationResult<TAuthState>> {
   if (!owner.isCurrent()) return staleCoachRegistration();
   try {
-    let identity = await gateway.getCurrentIdentity(owner.expectedUserId ?? undefined, owner);
+    const currentIdentity = await gateway.getCurrentIdentity(owner.expectedUserId ?? undefined, owner);
     if (!owner.isCurrent()) return staleCoachRegistration();
-    if (identity && !owner.bindExpectedUserId(identity.userId)) return staleCoachRegistration();
-    if (identity && !sameEmail(identity.email, input.auth.email)) {
+    if (!currentIdentity || !owner.bindExpectedUserId(currentIdentity.userId)) {
+      return controlledCoachRegistrationError();
+    }
+    const hasUserRegistration = await gateway.hasUserRegistration(currentIdentity.userId, owner);
+    if (!owner.isCurrent()) return staleCoachRegistration();
+    if (!hasUserRegistration) return controlledCoachRegistrationError();
+
+    const coachRegistration = await gateway.createSharedCoachRegistration(
+      registration,
+      currentIdentity.userId,
+      owner,
+    );
+    if (!owner.isCurrent()) return staleCoachRegistration();
+    if (coachRegistration.userId !== currentIdentity.userId) {
+      return controlledCoachRegistrationError();
+    }
+    return {
+      state: "coach_authorized",
+      requestedPortal: "coach",
+      userId: currentIdentity.userId,
+      coach: coachRegistration,
+      authState: currentIdentity.authState,
+    };
+  } catch {
+    if (!owner.isCurrent()) return staleCoachRegistration();
+    return controlledCoachRegistrationError();
+  }
+}
+
+async function registerSeparateCoach<TAuthState>(
+  input: CoachRegistrationPreparationPayload & { flow: "separate" },
+  owner: CoachRegistrationOwner,
+  gateway: MultiportalAuthGateway<TAuthState>,
+): Promise<CoachRegistrationResult<TAuthState>> {
+  if (!owner.isCurrent()) return staleCoachRegistration();
+  try {
+
+    const signup = await gateway.signUpForCoachRegistration(input, owner);
+    if (!owner.isCurrent() || signup.kind === "stale") return staleCoachRegistration();
+    if (signup.kind === "confirmation_required" || signup.kind === "existing_identity") {
       return {
-        state: "identity_switch_required",
+        state: "coach_confirmation_required",
         requestedPortal: "coach",
-        message: COACH_REGISTRATION_IDENTITY_SWITCH_MESSAGE,
+        message: COACH_REGISTRATION_CONFIRMATION_MESSAGE,
       };
     }
-
-    if (!identity) {
-      const signIn = await gateway.signInForCoachRegistration({
-        email: input.auth.email,
-        password: input.auth.password,
-      }, owner);
-      if (!owner.isCurrent() || signIn.kind === "stale") return staleCoachRegistration();
-      if (signIn.kind === "authenticated") {
-        identity = signIn.identity;
-      } else if (signIn.kind === "invalid_credentials") {
-        if (!owner.isCurrent()) return staleCoachRegistration();
-        const signup = await gateway.signUpForCoachRegistration(input, owner);
-        if (!owner.isCurrent() || signup.kind === "stale") return staleCoachRegistration();
-        if (signup.kind === "authenticated") {
-          identity = signup.identity;
-        } else if (signup.kind === "confirmation_required") {
-          return {
-            state: "coach_confirmation_required",
-            requestedPortal: "coach",
-            message: COACH_REGISTRATION_CONFIRMATION_MESSAGE,
-          };
-        } else if (signup.kind === "existing_identity") {
-          return {
-            state: "error",
-            requestedPortal: "coach",
-            message: REGISTRATION_EXISTING_IDENTITY_MESSAGE,
-          };
-        } else {
-          return controlledCoachRegistrationError(signup.message);
-        }
-      } else {
-        return controlledCoachRegistrationError(signIn.message);
-      }
+    if (signup.kind === "error") {
+      return controlledCoachRegistrationError();
     }
+    const identity = signup.identity;
 
     if (!owner.isCurrent() || !owner.bindExpectedUserId(identity.userId)) {
       return staleCoachRegistration();
     }
-    if (!sameEmail(identity.email, input.auth.email)) {
-      return {
-        state: "error",
-        requestedPortal: "coach",
-        field: "register-email",
-        message: COACH_REGISTRATION_IDENTITY_MISMATCH_MESSAGE,
-      };
-    }
 
-    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);
+    const coachRegistration = await gateway.getCoachRegistration(identity.userId, owner);
     if (!owner.isCurrent()) return staleCoachRegistration();
-    if (existingCoachRegistration) {
-      if (existingCoachRegistration.userId !== identity.userId) {
-        return controlledCoachRegistrationError();
-      }
-      return {
-        state: "error",
-        requestedPortal: "coach",
-        field: "register-email",
-        message: COACH_REGISTRATION_ALREADY_EXISTS_MESSAGE,
-      };
-    }
-
-    const coachRegistration = existingCoachRegistration ?? await gateway.createCoachRegistration(
-      input.registration,
-      identity.userId,
-      owner,
-    );
-    if (!owner.isCurrent()) return staleCoachRegistration();
-    if (coachRegistration.userId !== identity.userId) {
+    if (!coachRegistration || coachRegistration.userId !== identity.userId) {
       return controlledCoachRegistrationError();
+    }
+
+    const activeIdentity = await gateway.getCurrentIdentity(undefined, owner);
+    if (!owner.isCurrent()) return staleCoachRegistration();
+    if (activeIdentity && activeIdentity.userId !== identity.userId) {
+      return {
+        state: "coach_confirmation_required",
+        requestedPortal: "coach",
+        message: COACH_REGISTRATION_CONFIRMATION_MESSAGE,
+      };
     }
 
     const activatedIdentity = await gateway.activateCoachRegistrationIdentity(identity, owner);
@@ -639,17 +738,14 @@ async function registerUser<TAuthState>(
         if (!owner.isCurrent() || signup.kind === "stale") return staleUserRegistration();
         if (signup.kind === "authenticated") {
           identity = signup.identity;
-        } else if (signup.kind === "confirmation_required") {
+        } else if (
+          signup.kind === "confirmation_required"
+          || signup.kind === "existing_identity"
+        ) {
           return {
             state: "user_confirmation_required",
             requestedPortal: "usuario",
             message: USER_REGISTRATION_CONFIRMATION_MESSAGE,
-          };
-        } else if (signup.kind === "existing_identity") {
-          return {
-            state: "error",
-            requestedPortal: "usuario",
-            message: REGISTRATION_EXISTING_IDENTITY_MESSAGE,
           };
         } else {
           return controlledUserRegistrationError(signup.message);

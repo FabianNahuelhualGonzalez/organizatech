@@ -1,8 +1,8 @@
 # Contrato de producto AUTH-COACH
 
 - Estado: aprobado por el dueño de producto
-- Versión: 1.1
-- Fecha de consolidación: 2026-08-16
+- Versión: 1.2
+- Fecha de consolidación: 2026-08-25
 - Fuente de verdad: este documento
 - Alcance actual: registro Coach, autorización multipportal y portal Coach provisional
 - Alcance futuro documentado: correos Coach, vinculación Coach-alumno, funciones Coach, chat y documentos
@@ -14,16 +14,24 @@ del dueño de producto.
 
 ## 1. Identidad, membresías y portales
 
-### AC-001 — Una identidad por persona
+### AC-001 — Modelo híbrido de identidad Auth
 
-Una persona utiliza una sola identidad de Supabase Auth. No se crean dos cuentas
-Auth para separar su actividad como Usuario y como Coach.
+Una identidad de Supabase Auth con membresía Usuario puede activar también su
+membresía Coach. En esa modalidad comparte correo, contraseña y sesión entre
+ambos portales. Alternativamente, la persona puede crear una identidad Coach
+separada con otro correo de acceso y una contraseña independiente.
+
+El mismo correo de acceso no puede representar dos identidades ni dos contraseñas
+distintas. Las identidades duales históricas se preservan sin dividirlas ni
+reconfigurarlas automáticamente.
 
 ### AC-002 — Membresías independientes
 
-La misma identidad puede tener membresía Usuario, membresía Coach o ambas. Las
-membresías son autorizaciones de negocio independientes y no se infieren desde
-la pestaña seleccionada, parámetros de URL, metadata editable ni estado cliente.
+Cada membresía se autoriza desde su identidad backend y no se infiere desde la
+pestaña seleccionada, parámetros de URL, metadata editable ni estado cliente. El
+`contact_email` profesional Coach puede coincidir con cualquier correo Usuario,
+incluido el de la identidad compartida, pero nunca participa en login, ownership
+ni autorización.
 
 ### AC-003 — Acceso al portal Usuario
 
@@ -38,8 +46,11 @@ aprobado: `Cuenta Coach no registrada. Crea una cuenta Coach para iniciar sesió
 
 ### AC-005 — Google fuera del alcance actual
 
-Google Login/Registro se implementará en una etapa independiente. No se simula ni
-se habilita parcialmente dentro de AUTH-COACH-01.
+Google Login/Registro se implementará en `AUTH-GOOGLE-01`. Conceptualmente, la
+misma cuenta Google usará una identidad compartida para Usuario y Coach; otra
+cuenta Google podrá crear una identidad Coach independiente. En este ciclo el
+botón permanece deshabilitado y no se implementan OAuth, callbacks, providers,
+variables ni configuración remota.
 
 ## 2. Registro y perfil Coach
 
@@ -68,10 +79,10 @@ La unicidad activa debe imponerse en PostgreSQL y no solamente en el frontend.
 
 ### AC-009 — Autosupervisión
 
-Una persona con ambas membresías puede vincular su perfil Coach con su propio
-perfil Usuario. Esta autosupervisión es una relación Coach-alumno normal y ocupa
-el único cupo activo. Mientras exista, el Usuario no puede vincularse con otro
-Coach.
+Una persona con cuentas Usuario y Coach puede vincular su perfil Coach con su
+propio perfil Usuario. Esta autosupervisión es una relación Coach-alumno normal y
+ocupa el único cupo activo. Mientras exista, el Usuario no puede vincularse con
+otro Coach.
 
 ### AC-010 — Historia sin eliminación
 
@@ -231,8 +242,8 @@ suspendido mientras esté desvinculado.
 
 Una autorización `coach_authorized` abre un portal Coach propio y no continúa al
 portal Usuario. Una autorización `user_authorized` conserva el portal Usuario.
-Si una identidad tiene ambas membresías, se respeta el portal seleccionado de
-forma explícita y no existe fallback cruzado.
+Las identidades duales históricas respetan el portal seleccionado de forma
+explícita y no existe fallback cruzado.
 
 ### AC-034 — Inicio provisional aprobado
 
@@ -282,9 +293,14 @@ AUTH-COACH-02 implementará entrega exactamente una vez desde un evento backend
 idempotente. Los reintentos no duplicarán el correo y una falla de entrega no
 revertirá la membresía ya creada.
 
-### AC-037 — Identidad existente agrega Coach
+### AC-037 — Identidades duales históricas
 
-Asunto: `Ahora también eres Coach en Organizatech`
+Las identidades Auth históricas con membresías Usuario y Coach se preservan. La
+activación compartida nueva agrega Coach únicamente a la identidad Usuario
+autenticada y nunca crea otra credencial.
+
+Un correo futuro para una activación compartida usaría el asunto
+`Ahora también eres Coach en Organizatech` y el siguiente cuerpo aprobado:
 
 ```text
 Hola, {nombre}:
@@ -312,27 +328,45 @@ Muchas gracias por confiar en nosotros. Esperamos acompañarte y ayudarte a segu
 Equipo Organizatech
 ```
 
-### AC-039 — Crear cuenta Coach rechaza una membresía Coach existente
+### AC-039 — Respuesta pública anti-enumeración
 
-`Crear cuenta Coach` autentica primero de forma autoritativa el correo solicitado y
-consulta después la membresía Coach own-only ligada exclusivamente al `user_id` de
-esa identidad. Si la fila ya existe, el flujo termina sobre `register-email` con el
-mensaje exacto: `Este correo ya se encuentra registrado como Coach. Intente con otro correo.`
+En el flujo Coach separado, cuando Supabase Auth devuelve una confirmación
+pendiente o una respuesta ofuscada para un correo de acceso ya usado, ambos
+caminos publican exactamente el mismo estado, copy y efectos visibles. El copy no
+afirma que exista una cuenta ni que se haya enviado un correo.
 
-La regla se limita al registro: `Iniciar sesión Coach` continúa autorizando una fila
-Coach propia y una identidad Usuario-only autenticada puede agregar su primera
-membresía Coach. Una contraseña incorrecta no permite consultar ni revelar la
-membresía y conserva el mensaje genérico aprobado para una identidad ya registrada.
+Ninguno de esos caminos consulta membresías, crea o actualiza filas, activa o
+aplica sesiones, navega ni monta un portal. `Crear cuenta Coach` mantiene el flujo
+de identidad Auth independiente y falla cerrado ante cualquier resultado distinto
+de una identidad autenticada propia o de esos dos resultados terminales. Nunca
+prueba ni reutiliza silenciosamente una contraseña Usuario existente.
 
-El rechazo no crea ni actualiza filas, no activa ni aplica sesiones, no navega ni
-monta el portal, no envía correos y no ejecuta `signOut` local o global. Los campos
-del nuevo intento, incluido `professional_title`, se descartan y la fila anterior
-permanece lógica y materialmente intacta.
+### AC-040 — Selección explícita del registro Coach híbrido
 
-En el incidente observado no se creó una segunda cuenta Coach y la fila existente
-no fue sobrescrita. La idempotencia de `register_own_coach` permanece como defensa
-backend ante concurrencia, pero la UI de registro no puede convertir esa defensa en
-autorización, activación o navegación.
+Registro > Coach presenta, inmediatamente bajo `Crear cuenta Coach`, una selección
+accesible de una sola opción: `Usar mi cuenta Usuario` o
+`Crear una cuenta Coach separada`. No existe modalidad predeterminada.
+
+La modalidad compartida exige sesión y membresía Usuario autoritativa. No solicita
+otro correo ni contraseña y finaliza con `Activar cuenta Coach`; sin sesión conduce
+al login existente con intención Coach mediante `Iniciar sesión y continuar`. La
+modalidad separada solicita otro correo de acceso y una contraseña nueva, usa
+`signUp` aislado y finaliza con `Crear cuenta Coach`.
+
+El texto informativo aprobado es: `¿Ya tienes una cuenta Organizatech Usuario?
+Puedes usar esa misma cuenta para acceder también como Coach. Si prefieres mantener
+ambas cuentas separadas, crea tu cuenta Coach con otro correo.`
+
+### AC-041 — Ownership del formulario Auth
+
+La revisión completa, los errores, la visibilidad de contraseñas de registro y el
+reset de los diez campos pertenecen a `src/features/auth/`. Cada edición incrementa
+la revisión. Una respuesta tardía sólo puede limpiar el formulario si siguen
+vigentes tanto el owner del submit como la revisión capturada.
+
+Esta responsabilidad sale del composition root. `organizatech-app.tsx` se limita a
+conectar el controller tipado de Auth y a coordinar sesión y navegación
+transversales; no posee tokens, handlers ni estado interno de reset del formulario.
 
 ## 11. Seguridad obligatoria
 

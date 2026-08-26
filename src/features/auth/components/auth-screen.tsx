@@ -9,6 +9,7 @@ import {
   type AuthFieldErrors,
   type AuthFieldName,
 } from "@/features/auth/model/auth-form";
+import type { AuthRegistrationFormBinding } from "@/features/auth/hooks/use-auth-registration-form-controller";
 import type {
   AuthAccountType,
   AuthMode,
@@ -28,21 +29,14 @@ interface AuthScreenProps {
   statusTone: AuthStatusTone;
   fieldErrors: AuthFieldErrors;
   isBusy: boolean;
-  coachIdentitySwitchRequired: boolean;
+  authenticatedUserId: string | null;
+  registrationForm: AuthRegistrationFormBinding;
   loginEmail: string;
   loginPassword: string;
-  registerName: string;
-  registerEmail: string;
-  registerPassword: string;
-  registerConfirmPassword: string;
   onLoginEmailChange: (value: string) => void;
   onLoginPasswordChange: (value: string) => void;
-  onRegisterNameChange: (value: string) => void;
-  onRegisterEmailChange: (value: string) => void;
-  onRegisterPasswordChange: (value: string) => void;
-  onRegisterConfirmPasswordChange: (value: string) => void;
   onSubmit: (data: FormData) => void | Promise<void>;
-  onCoachIdentitySwitch: () => void | Promise<void>;
+  onSharedCoachLogin: () => void;
   onForgotPassword: () => void;
   onModeChange: (mode: AuthMode) => void;
   onAccountTypeChange: (accountType: AuthAccountType) => void;
@@ -58,21 +52,14 @@ export function AuthScreen({
   statusTone,
   fieldErrors,
   isBusy,
-  coachIdentitySwitchRequired,
+  authenticatedUserId,
+  registrationForm,
   loginEmail,
   loginPassword,
-  registerName,
-  registerEmail,
-  registerPassword,
-  registerConfirmPassword,
   onLoginEmailChange,
   onLoginPasswordChange,
-  onRegisterNameChange,
-  onRegisterEmailChange,
-  onRegisterPasswordChange,
-  onRegisterConfirmPasswordChange,
   onSubmit,
-  onCoachIdentitySwitch,
+  onSharedCoachLogin,
   onForgotPassword,
   onModeChange,
   onAccountTypeChange,
@@ -80,17 +67,30 @@ export function AuthScreen({
 }: AuthScreenProps) {
   const isRegister = mode === "registro";
   const isCoachRegistration = isRegister && accountType === "coach";
-  const [lastName, setLastName] = useState("");
-  const [birthDate, setBirthDate] = useState("");
-  const [gender, setGender] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [professionalTitle, setProfessionalTitle] = useState("");
+  const { controller: registrationController, state: registrationState } = registrationForm;
+  const { values: registrationValues } = registrationState;
+  const sharedCoachAuthorized = registrationState.coachFlow === "shared"
+    && registrationState.sharedCoachEligibility.state === "authorized"
+    && registrationState.sharedCoachEligibility.userId === authenticatedUserId;
+  const showRegistrationFields = isRegister && (
+    accountType === "usuario"
+    || registrationState.coachFlow === "separate"
+    || sharedCoachAuthorized
+  );
   const [showLoginPassword, setShowLoginPassword] = useState(false);
-  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
-  const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] = useState(false);
   const userTabRef = useRef<HTMLButtonElement>(null);
   const coachTabRef = useRef<HTMLButtonElement>(null);
-  const age = birthDate ? calculateAgeFromBirthDate(birthDate) : null;
+  const age = registrationValues.birthDate
+    ? calculateAgeFromBirthDate(registrationValues.birthDate)
+    : null;
+  const sharedCoachNeedsLogin = isCoachRegistration
+    && registrationState.coachFlow === "shared"
+    && !sharedCoachAuthorized;
+  const registrationSubmitLabel = isCoachRegistration
+    ? registrationState.coachFlow === "shared"
+      ? "Activar cuenta Coach"
+      : "Crear cuenta Coach"
+    : "Crear cuenta";
 
   function selectAccountType(nextAccountType: AuthAccountType) {
     onAccountTypeChange(nextAccountType);
@@ -145,39 +145,75 @@ export function AuthScreen({
         action={onSubmit}
         autoComplete={isRegister ? "off" : "on"}
       >
-        {isRegister ? <h2>Crea tu cuenta</h2> : null}
+        {isRegister ? <h2>{isCoachRegistration ? "Crear cuenta Coach" : "Crea tu cuenta"}</h2> : null}
+
+        {isCoachRegistration ? (
+          <>
+            <fieldset
+              className={styles.coachRegistrationChoice}
+              aria-label="Modalidad de cuenta Coach"
+            >
+              <label>
+                <input
+                  type="radio"
+                  name="coach-registration-flow"
+                  value="shared"
+                  checked={registrationState.coachFlow === "shared"}
+                  onChange={() => void registrationForm.selectCoachFlow("shared")}
+                />
+                <span>Usar mi cuenta Usuario</span>
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="coach-registration-flow"
+                  value="separate"
+                  checked={registrationState.coachFlow === "separate"}
+                  onChange={() => void registrationForm.selectCoachFlow("separate")}
+                />
+                <span>Crear una cuenta Coach separada</span>
+              </label>
+            </fieldset>
+            <p className={styles.helperText}>
+              ¿Ya tienes una cuenta Organizatech Usuario? Puedes usar esa misma cuenta para acceder también como Coach. Si prefieres mantener ambas cuentas separadas, crea tu cuenta Coach con otro correo.
+            </p>
+          </>
+        ) : null}
 
         <div className={styles.fields}>
-          {isRegister ? (
+          {showRegistrationFields ? (
             <RegistrationFields
               age={age}
-              birthDate={birthDate}
-              gender={gender}
-              lastName={lastName}
-              phoneNumber={phoneNumber}
-              professionalTitle={professionalTitle}
+              birthDate={registrationValues.birthDate}
+              gender={registrationValues.gender}
+              lastName={registrationValues.lastName}
+              phoneNumber={registrationValues.phoneNumber}
+              professionalTitle={registrationValues.professionalTitle}
+              contactEmail={registrationValues.contactEmail}
               includeProfessionalTitle={isCoachRegistration}
-              firstName={registerName}
-              email={registerEmail}
-              password={registerPassword}
-              confirmPassword={registerConfirmPassword}
-              showPassword={showRegisterPassword}
-              showConfirmPassword={showRegisterConfirmPassword}
-              fieldErrors={fieldErrors}
-              onBirthDateChange={setBirthDate}
-              onGenderChange={setGender}
-              onLastNameChange={setLastName}
-              onPhoneNumberChange={setPhoneNumber}
-              onProfessionalTitleChange={setProfessionalTitle}
-              onFirstNameChange={onRegisterNameChange}
-              onEmailChange={onRegisterEmailChange}
-              onPasswordChange={onRegisterPasswordChange}
-              onConfirmPasswordChange={onRegisterConfirmPasswordChange}
-              onPasswordVisibilityChange={() => setShowRegisterPassword((current) => !current)}
-              onConfirmPasswordVisibilityChange={() => setShowRegisterConfirmPassword((current) => !current)}
-              onFieldErrorClear={onFieldErrorClear}
+              includeCredentials={!isCoachRegistration || registrationState.coachFlow === "separate"}
+              firstName={registrationValues.firstName}
+              email={registrationValues.email}
+              password={registrationValues.password}
+              confirmPassword={registrationValues.confirmPassword}
+              showPassword={registrationState.showPassword}
+              showConfirmPassword={registrationState.showConfirmPassword}
+              fieldErrors={registrationState.fieldErrors}
+              onBirthDateChange={(value) => registrationController.edit("birthDate", value)}
+              onGenderChange={(value) => registrationController.edit("gender", value)}
+              onLastNameChange={(value) => registrationController.edit("lastName", value)}
+              onPhoneNumberChange={(value) => registrationController.edit("phoneNumber", value)}
+              onProfessionalTitleChange={(value) => registrationController.edit("professionalTitle", value)}
+              onContactEmailChange={(value) => registrationController.edit("contactEmail", value)}
+              onFirstNameChange={(value) => registrationController.edit("firstName", value)}
+              onEmailChange={(value) => registrationController.edit("email", value)}
+              onPasswordChange={(value) => registrationController.edit("password", value)}
+              onConfirmPasswordChange={(value) => registrationController.edit("confirmPassword", value)}
+              onPasswordVisibilityChange={() => registrationController.togglePasswordVisibility("password")}
+              onConfirmPasswordVisibilityChange={() => registrationController.togglePasswordVisibility("confirmPassword")}
+              onFieldErrorClear={registrationController.clearFieldError}
             />
-          ) : (
+          ) : !isRegister ? (
             <>
               <AuthTextField
                 id="login-email"
@@ -207,33 +243,33 @@ export function AuthScreen({
                 required
               />
             </>
-          )}
+          ) : null}
         </div>
 
         <AuthStatus message={message} tone={statusTone} />
 
-        {isCoachRegistration && coachIdentitySwitchRequired ? (
+        {sharedCoachNeedsLogin ? (
           <button
             className={styles.primaryButton}
             type="button"
-            aria-describedby="auth-form-status"
-            disabled={isBusy}
-            onClick={onCoachIdentitySwitch}
+            disabled={isBusy || registrationState.sharedCoachEligibility.state === "checking"}
+            onClick={onSharedCoachLogin}
           >
-            Cerrar sesión y continuar
+            <LogIn aria-hidden="true" size={21} />
+            Iniciar sesión y continuar
           </button>
         ) : null}
 
-        <button
-          className={styles.primaryButton}
-          type="submit"
-          disabled={isBusy || (isCoachRegistration && coachIdentitySwitchRequired)}
-        >
-          {isRegister ? <UserPlus aria-hidden="true" size={21} /> : <LogIn aria-hidden="true" size={21} />}
-          {isBusy && !coachIdentitySwitchRequired
-            ? (isRegister ? "Creando cuenta..." : "Iniciando sesión...")
-            : isRegister ? "Crear cuenta" : "Iniciar sesión"}
-        </button>
+        {!isCoachRegistration || showRegistrationFields ? (
+          <button
+            className={styles.primaryButton}
+            type="submit"
+            disabled={isBusy}
+          >
+            {isRegister ? <UserPlus aria-hidden="true" size={21} /> : <LogIn aria-hidden="true" size={21} />}
+            {isRegister ? registrationSubmitLabel : isBusy ? "Iniciando sesión..." : "Iniciar sesión"}
+          </button>
+        ) : null}
 
         {!isRegister ? (
           <button className={styles.textButton} type="button" onClick={onForgotPassword}>
@@ -471,7 +507,9 @@ interface RegistrationFieldsProps {
   lastName: string;
   phoneNumber: string;
   professionalTitle: string;
+  contactEmail: string;
   includeProfessionalTitle: boolean;
+  includeCredentials: boolean;
   firstName: string;
   email: string;
   password: string;
@@ -484,6 +522,7 @@ interface RegistrationFieldsProps {
   onLastNameChange: (value: string) => void;
   onPhoneNumberChange: (value: string) => void;
   onProfessionalTitleChange: (value: string) => void;
+  onContactEmailChange: (value: string) => void;
   onFirstNameChange: (value: string) => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
@@ -500,7 +539,9 @@ function RegistrationFields({
   lastName,
   phoneNumber,
   professionalTitle,
+  contactEmail,
   includeProfessionalTitle,
+  includeCredentials,
   firstName,
   email,
   password,
@@ -513,6 +554,7 @@ function RegistrationFields({
   onLastNameChange,
   onPhoneNumberChange,
   onProfessionalTitleChange,
+  onContactEmailChange,
   onFirstNameChange,
   onEmailChange,
   onPasswordChange,
@@ -541,12 +583,21 @@ function RegistrationFields({
         <FieldError id="register-gender-error" message={fieldErrors["register-gender"]} />
       </label>
       <AuthTextField id="register-phone-number" name="register-phone-number" label="Celular" placeholder="+56912345678" type="tel" autoComplete="tel" inputMode="tel" value={phoneNumber} error={fieldErrors["register-phone-number"]} onChange={onPhoneNumberChange} onErrorClear={() => onFieldErrorClear("register-phone-number")} required />
-      <AuthTextField id="register-email" name="register-email" label="Correo" placeholder="nombre@organizatech.cl" type="email" autoComplete="email" value={email} error={fieldErrors["register-email"]} onChange={onEmailChange} onErrorClear={() => onFieldErrorClear("register-email")} required />
+      {includeCredentials ? (
+        <AuthTextField id="register-email" name="register-email" label={includeProfessionalTitle ? "Correo de acceso Coach" : "Correo electrónico"} placeholder="nombre@organizatech.cl" type="email" autoComplete="email" value={email} error={fieldErrors["register-email"]} onChange={onEmailChange} onErrorClear={() => onFieldErrorClear("register-email")} required />
+      ) : null}
+      {includeProfessionalTitle ? (
+        <AuthTextField id="register-contact-email" name="register-contact-email" label="Correo de contacto" placeholder="contacto@organizatech.cl" type="email" autoComplete="email" value={contactEmail} error={fieldErrors["register-contact-email"]} onChange={onContactEmailChange} onErrorClear={() => onFieldErrorClear("register-contact-email")} required />
+      ) : null}
       {includeProfessionalTitle ? (
         <AuthTextField id="register-professional-title" name="register-professional-title" label="Título de estudios" placeholder="Ej: Linc. en Ciencias del deporte" autoComplete="off" value={professionalTitle} error={fieldErrors["register-professional-title"]} onChange={onProfessionalTitleChange} onErrorClear={() => onFieldErrorClear("register-professional-title")} required />
       ) : null}
-      <AuthPasswordField id="register-password" name="register-password" label="Contraseña" placeholder="Crea una contraseña" autoComplete="new-password" value={password} visible={showPassword} error={fieldErrors["register-password"]} onChange={onPasswordChange} onErrorClear={() => onFieldErrorClear("register-password")} onToggle={onPasswordVisibilityChange} required />
-      <AuthPasswordField id="register-confirm-password" name="register-confirm-password" label="Confirmar contraseña" placeholder="Repite tu contraseña" autoComplete="new-password" value={confirmPassword} visible={showConfirmPassword} error={fieldErrors["register-confirm-password"]} onChange={onConfirmPasswordChange} onErrorClear={() => onFieldErrorClear("register-confirm-password")} onToggle={onConfirmPasswordVisibilityChange} required />
+      {includeCredentials ? (
+        <>
+          <AuthPasswordField id="register-password" name="register-password" label="Contraseña" placeholder="Crea una contraseña" autoComplete="new-password" value={password} visible={showPassword} error={fieldErrors["register-password"]} onChange={onPasswordChange} onErrorClear={() => onFieldErrorClear("register-password")} onToggle={onPasswordVisibilityChange} required />
+          <AuthPasswordField id="register-confirm-password" name="register-confirm-password" label="Confirmar contraseña" placeholder="Repite tu contraseña" autoComplete="new-password" value={confirmPassword} visible={showConfirmPassword} error={fieldErrors["register-confirm-password"]} onChange={onConfirmPasswordChange} onErrorClear={() => onFieldErrorClear("register-confirm-password")} onToggle={onConfirmPasswordVisibilityChange} required />
+        </>
+      ) : null}
     </>
   );
 }

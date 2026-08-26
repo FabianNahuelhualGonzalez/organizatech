@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import "@/features/auth/auth-separate-coach-contact-migration-contract.test";
+
 const MIGRATION_PATH =
   "supabase/migrations/20260820041942_auth_confirmation_pending_memberships.sql";
 const PENDING_TABLE = "private.auth_registration_pending_memberships";

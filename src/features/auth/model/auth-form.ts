@@ -1,9 +1,13 @@
-import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
+import {
+  isValidSignupEmailFormat,
+  validateSignupEmail,
+} from "@/lib/auth/signup-email-validation";
 import {
   buildProfilePersonalDataPayload,
 } from "@/lib/profile/profile-form";
 
 export const COACH_PROFESSIONAL_TITLE_MAX_LENGTH = 160;
+export const COACH_CONTACT_EMAIL_MAX_LENGTH = 254;
 export const AUTH_REGISTRATION_PORTAL_METADATA_KEY =
   "organizatech_registration_portal" as const;
 export const AUTH_REGISTRATION_GENDER_VALUES = [
@@ -24,6 +28,7 @@ export type AuthFieldName =
   | "register-gender"
   | "register-phone-number"
   | "register-professional-title"
+  | "register-contact-email"
   | "register-email"
   | "register-password"
   | "register-confirm-password"
@@ -63,6 +68,7 @@ export type ConfirmationRegistrationMetadata =
   | (UserSignupMetadata & {
     organizatech_registration_portal: "coach";
     professional_title: string;
+    contact_email: string;
   });
 
 export interface ConfirmationRegistrationSignupPayload {
@@ -81,12 +87,17 @@ export interface CoachRegistrationWritePayload {
   gender: AuthRegistrationGender;
   phone_number: string;
   professional_title: string;
+  contact_email: string;
 }
 
 export interface CoachRegistrationPreparationPayload {
   auth: UserSignupPayload;
   registration: CoachRegistrationWritePayload;
 }
+
+export type CoachRegistrationSubmission =
+  | ({ flow: "separate" } & CoachRegistrationPreparationPayload)
+  | { flow: "shared"; registration: CoachRegistrationWritePayload };
 
 export type AuthFormPreparation<T> =
   | { ok: true; payload: T }
@@ -109,23 +120,13 @@ export function buildUserSignupPayload(
   formData: FormData,
   referenceDate = new Date(),
 ): AuthFormPreparation<UserSignupPayload> {
-  const firstName = readText(formData, "register-first-name");
-  const lastName = readText(formData, "register-last-name");
-  const birthDate = readText(formData, "register-birth-date");
-  const gender = readText(formData, "register-gender");
-  const phoneNumber = readText(formData, "register-phone-number");
+  const profile = buildRegistrationProfilePayload(formData, referenceDate);
+  if (!profile.ok) return profile;
   const rawEmail = readRawText(formData, "register-email");
   const email = rawEmail.trim().toLowerCase();
   const password = readRawText(formData, "register-password");
   const confirmPassword = readRawText(formData, "register-confirm-password");
 
-  if (!firstName) return { ok: false, field: "register-first-name", message: "Ingresa tu nombre." };
-  if (!lastName) return { ok: false, field: "register-last-name", message: "Ingresa tu apellido." };
-  if (!birthDate) return { ok: false, field: "register-birth-date", message: "Ingresa tu fecha de nacimiento." };
-  if (!isAuthRegistrationGender(gender)) {
-    return { ok: false, field: "register-gender", message: "Selecciona un género válido." };
-  }
-  if (!phoneNumber) return { ok: false, field: "register-phone-number", message: "Ingresa tu celular." };
   if (!email) return { ok: false, field: "register-email", message: "Ingresa tu correo electrónico." };
 
   const emailValidation = validateSignupEmail(rawEmail);
@@ -144,6 +145,130 @@ export function buildUserSignupPayload(
   if (password !== confirmPassword) {
     return { ok: false, field: "register-confirm-password", message: "Las contraseñas no coinciden." };
   }
+
+  return {
+    ok: true,
+    payload: {
+      email,
+      password,
+      options: {
+        data: {
+          ...profile.payload,
+        },
+      },
+    },
+  };
+}
+
+export function buildCoachRegistrationPayload(
+  formData: FormData,
+  referenceDate = new Date(),
+): AuthFormPreparation<CoachRegistrationPreparationPayload> {
+  const auth = buildUserSignupPayload(formData, referenceDate);
+  if (!auth.ok) return auth;
+
+  const registration = buildCoachRegistrationWritePayload(formData, auth.payload.options.data);
+  if (!registration.ok) return registration;
+
+  return {
+    ok: true,
+    payload: {
+      auth: auth.payload,
+      registration: registration.payload,
+    },
+  };
+}
+
+export function buildSharedCoachRegistrationPayload(
+  formData: FormData,
+  referenceDate = new Date(),
+): AuthFormPreparation<CoachRegistrationWritePayload> {
+  const profile = buildRegistrationProfilePayload(formData, referenceDate);
+  if (!profile.ok) return profile;
+  return buildCoachRegistrationWritePayload(formData, profile.payload);
+}
+
+function buildCoachRegistrationWritePayload(
+  formData: FormData,
+  profile: UserSignupMetadata,
+): AuthFormPreparation<CoachRegistrationWritePayload> {
+
+  const professionalTitle = normalizeSpaces(readText(formData, "register-professional-title"));
+  const rawContactEmail = readRawText(formData, "register-contact-email");
+  const contactEmail = rawContactEmail.trim().toLowerCase();
+  if (!professionalTitle) {
+    return {
+      ok: false,
+      field: "register-professional-title",
+      message: "Ingresa tu título de estudios.",
+    };
+  }
+  if (professionalTitle.length > COACH_PROFESSIONAL_TITLE_MAX_LENGTH) {
+    return {
+      ok: false,
+      field: "register-professional-title",
+      message: `El título de estudios no puede superar ${COACH_PROFESSIONAL_TITLE_MAX_LENGTH} caracteres.`,
+    };
+  }
+  if (!contactEmail) {
+    return {
+      ok: false,
+      field: "register-contact-email",
+      message: "Ingresa tu correo de contacto.",
+    };
+  }
+  if (
+    /\s/.test(contactEmail)
+    || contactEmail.length > COACH_CONTACT_EMAIL_MAX_LENGTH
+    || !isValidSignupEmailFormat(contactEmail)
+  ) {
+    return {
+      ok: false,
+      field: "register-contact-email",
+      message: "Ingresa un correo de contacto válido.",
+    };
+  }
+
+  const { first_name, last_name, birth_date, gender, phone_number } = profile;
+  if (!last_name || !birth_date || !phone_number) {
+    return {
+      ok: false,
+      field: "register-first-name",
+      message: "Completa tus datos personales.",
+    };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      first_name,
+      last_name,
+      birth_date,
+      gender,
+      phone_number,
+      professional_title: professionalTitle,
+      contact_email: contactEmail,
+    },
+  };
+}
+
+function buildRegistrationProfilePayload(
+  formData: FormData,
+  referenceDate: Date,
+): AuthFormPreparation<UserSignupMetadata> {
+  const firstName = readText(formData, "register-first-name");
+  const lastName = readText(formData, "register-last-name");
+  const birthDate = readText(formData, "register-birth-date");
+  const gender = readText(formData, "register-gender");
+  const phoneNumber = readText(formData, "register-phone-number");
+
+  if (!firstName) return { ok: false, field: "register-first-name", message: "Ingresa tu nombre." };
+  if (!lastName) return { ok: false, field: "register-last-name", message: "Ingresa tu apellido." };
+  if (!birthDate) return { ok: false, field: "register-birth-date", message: "Ingresa tu fecha de nacimiento." };
+  if (!isAuthRegistrationGender(gender)) {
+    return { ok: false, field: "register-gender", message: "Selecciona un género válido." };
+  }
+  if (!phoneNumber) return { ok: false, field: "register-phone-number", message: "Ingresa tu celular." };
 
   const profile = buildProfilePersonalDataPayload({
     firstName,
@@ -169,72 +294,12 @@ export function buildUserSignupPayload(
   return {
     ok: true,
     payload: {
-      email,
-      password,
-      options: {
-        data: {
-          display_name,
-          first_name,
-          last_name,
-          birth_date,
-          gender,
-          phone_number,
-        },
-      },
-    },
-  };
-}
-
-export function buildCoachRegistrationPayload(
-  formData: FormData,
-  referenceDate = new Date(),
-): AuthFormPreparation<CoachRegistrationPreparationPayload> {
-  const auth = buildUserSignupPayload(formData, referenceDate);
-  if (!auth.ok) return auth;
-
-  const professionalTitle = normalizeSpaces(readText(formData, "register-professional-title"));
-  if (!professionalTitle) {
-    return {
-      ok: false,
-      field: "register-professional-title",
-      message: "Ingresa tu título de estudios.",
-    };
-  }
-  if (professionalTitle.length > COACH_PROFESSIONAL_TITLE_MAX_LENGTH) {
-    return {
-      ok: false,
-      field: "register-professional-title",
-      message: `El título de estudios no puede superar ${COACH_PROFESSIONAL_TITLE_MAX_LENGTH} caracteres.`,
-    };
-  }
-
-  const {
-    first_name,
-    last_name,
-    birth_date,
-    gender,
-    phone_number,
-  } = auth.payload.options.data;
-  if (!last_name || !birth_date || !phone_number) {
-    return {
-      ok: false,
-      field: "register-first-name",
-      message: "Completa tus datos personales.",
-    };
-  }
-
-  return {
-    ok: true,
-    payload: {
-      auth: auth.payload,
-      registration: {
-        first_name,
-        last_name,
-        birth_date,
-        gender,
-        phone_number,
-        professional_title: professionalTitle,
-      },
+      display_name,
+      first_name,
+      last_name,
+      birth_date,
+      gender,
+      phone_number,
     },
   };
 }
@@ -243,7 +308,7 @@ export function withSignupConfirmationMetadata(
   auth: UserSignupPayload,
   registration:
     | { portal: "usuario"; professionalTitle: null }
-    | { portal: "coach"; professionalTitle: string },
+    | { portal: "coach"; professionalTitle: string; contactEmail: string },
   emailRedirectTo: string,
 ): ConfirmationRegistrationSignupPayload {
   const data = auth.options.data;
@@ -265,6 +330,7 @@ export function withSignupConfirmationMetadata(
           ...allowlistedData,
           [AUTH_REGISTRATION_PORTAL_METADATA_KEY]: "coach",
           professional_title: registration.professionalTitle,
+          contact_email: registration.contactEmail,
         }
         : {
           ...allowlistedData,

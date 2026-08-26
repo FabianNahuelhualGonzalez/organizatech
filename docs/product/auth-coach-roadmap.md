@@ -1,7 +1,7 @@
 # Roadmap AUTH-COACH y superficies relacionadas
 
 - Estado de este documento: activo
-- Fecha de actualización: 2026-08-16
+- Fecha de actualización: 2026-08-25
 - Contrato normativo: [`auth-coach-product-contract.md`](./auth-coach-product-contract.md)
 
 Este roadmap registra progreso y dependencias. No altera las decisiones del
@@ -14,10 +14,10 @@ contrato de producto y no autoriza implementar una etapa futura.
 | Nuevo Login y Registro AUTH-01 | QA del dueño aprobada; no producción | Mantener Draft PR y no promover hasta el cierre coordinado |
 | Accesos desde la página web | Flujo incluido en el alcance aprobado | Verificación final antes de producción |
 | Nuevo diseño Entrenemos TRAIN-UI-01 | QA del dueño aprobada; no producción | Mantener integración sin promoción productiva |
-| Login y registro con Google | Pendiente | Tarea independiente con OAuth, seguridad y QA propios |
-| Registro de membresía Coach | Implementado; migración Coach verificada en QA | Reauditoría Claude y cierre coordinado pendientes |
+| Login y registro con Google | Pendiente | `AUTH-GOOGLE-01`: aplicar el modelo híbrido con OAuth, seguridad y QA propios |
+| Registro de membresía Coach | Modelo híbrido implementado localmente; migración no aplicada | Auditoría independiente y ejecución QA expresamente autorizada pendientes |
 | Autorización multipportal | Corrección Usuario implementada localmente | Reauditoría independiente, segunda migración en QA y pruebas materiales con dos identidades |
-| PostgreSQL/RLS AUTH-COACH-01 | Coach QA PASS; Usuario pendiente de QA | Aplicar manualmente la migración `user_registrations` en QA y verificar catálogo, ACL y anti-BOLA |
+| PostgreSQL/RLS AUTH-HYBRID-01 | Migración forward-only no aplicada | Auditar primero; después requerirá autorización separada para QA y verificación material de catálogo, ACL y anti-BOLA |
 | Código de vinculación Coach-alumno | Especificado; no implementado | Diseños del dueño y tarea/backend propios |
 | Un Coach activo por alumno | Especificado; no implementado | Restricción concurrente en PostgreSQL y pruebas materiales |
 | Autosupervisión | Especificada; no implementada | Debe consumir el único cupo activo |
@@ -31,13 +31,18 @@ contrato de producto y no autoriza implementar una etapa futura.
 
 ### Objetivo
 
-Crear y autorizar membresías Usuario y Coach independientes para la misma
-identidad Auth y separar sus destinos mediante un portal Coach provisional, sin
-implementar todavía la relación con alumnos ni funciones futuras.
+Crear y autorizar membresías Usuario y Coach con un modelo Auth híbrido: activar
+Coach sobre una identidad Usuario autenticada o crear una identidad Coach
+separada con otro correo y contraseña, manteniendo destinos de portal separados.
 
 ### Incluye
 
 - formulario de registro Coach con `professional_title`;
+- selector explícito entre cuenta Usuario compartida y cuenta Coach separada;
+- activación Coach compartida exclusivamente para `auth.uid()` con membresía
+  Usuario, sin nueva credencial ni `signUp`;
+- alta Coach separada mediante `signUp` aislado, otro correo y contraseña;
+- `contact_email` profesional sin autoridad de login, ownership o autorización;
 - payload cerrado y ownership derivado por backend;
 - registro Coach autoritativo;
 - tabla y registro Usuario autoritativos, separados del perfil común;
@@ -89,8 +94,10 @@ implementar todavía la relación con alumnos ni funciones futuras.
 
 ### AUTH-GOOGLE-01 — OAuth Google
 
-Implementar creación e inicio de sesión mediante Google sin debilitar la separación
-de membresías ni conceder Coach desde metadata OAuth.
+Implementar creación e inicio de sesión mediante Google sin conceder Coach desde
+metadata OAuth. La misma cuenta Google debe compartir identidad entre Usuario y
+Coach; otra cuenta Google puede mantener una identidad Coach independiente. Hasta
+entonces el botón continúa deshabilitado y no existe wiring OAuth.
 
 ### AUTH-COACH-02 — Correos de membresía Coach
 

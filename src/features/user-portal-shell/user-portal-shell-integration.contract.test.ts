@@ -1560,10 +1560,29 @@ function assertAuthorizationBoundary(sources: Sources) {
     "beginPasswordRecoveryPortalSession",
     "holdAuthenticatedSessionWithoutContinuation",
     "clearUserSessionState",
-    "handleCoachIdentitySwitch",
     "handleAuth",
     "handleLogout",
   ]) requireProofClear(name);
+
+  assert.doesNotMatch(
+    sources.root,
+    /\bhandleCoachIdentitySwitch\b|\bcoachIdentitySwitchRequired\b|\bsignOutForCoachIdentitySwitch\b/,
+    "[AUTH-HYBRID-01.shared-login] el modelo híbrido no restaura el switch absoluto legacy",
+  );
+  const sharedCoachLogin = findNamedFunction(paths.root, sources.root, "handleSharedCoachLogin");
+  const sharedCoachLoginCode = compact(
+    sharedCoachLogin.declaration.getText(sharedCoachLogin.sourceFile),
+  );
+  for (const marker of [
+    "registrationForm.controller.beginSharedCoachLogin()",
+    'authRouteController.replace({mode:"login",accountType:"coach"})',
+    'navigation.transition(createAuthNavigationReset("login","auth-screen-switch"))',
+  ]) {
+    assert.ok(
+      sharedCoachLoginCode.includes(compact(marker)),
+      `[AUTH-HYBRID-01.shared-login] falta ${marker}`,
+    );
+  }
 
   const replaceCoach = findNamedFunction(paths.root, sources.root, "replaceCoachPortalSession");
   assert.ok(
@@ -2232,9 +2251,8 @@ test("la lista de consumidores del gestor de foco es exacta e incluye el drawer 
   ]);
 });
 
-test("Auth visual/recovery, Coach, NotificationPanel, perfil y fallbacks conservan paridad", () => {
+test("Recovery, Coach, NotificationPanel, perfil y fallbacks conservan paridad", () => {
   for (const path of [
-    "src/features/auth/components/auth-screen.tsx",
     "src/features/auth/model/password-recovery-portal-guard.ts",
     "src/features/coach-portal/components/coach-portal.tsx",
     "src/features/notifications/components/NotificationPanel.tsx",

@@ -15,7 +15,7 @@ export interface CoachRegistrationOwner {
 
 export interface CoachRegistrationOwnerController {
   acceptIdentity(userId: string): boolean;
-  begin(): CoachRegistrationOwner;
+  begin(options?: { independentIdentity?: boolean }): CoachRegistrationOwner;
   end(owner: CoachRegistrationOwner): void;
   invalidate(): void;
   isCurrent(owner: CoachRegistrationOwner): boolean;
@@ -114,12 +114,18 @@ export function createCoachRegistrationOwnerController(): CoachRegistrationOwner
   let currentUserId: string | null = null;
   let activeOwner: CoachRegistrationOwner | null = null;
   const expectedUserIds = new WeakMap<CoachRegistrationOwner, string | null>();
+  const independentIdentityOwners = new WeakSet<CoachRegistrationOwner>();
 
   function isCurrent(owner: CoachRegistrationOwner) {
     const expectedUserId = expectedUserIds.get(owner) ?? null;
     return owner.revision === revision
       && activeOwner === owner
-      && (currentUserId === null || expectedUserId === null || expectedUserId === currentUserId);
+      && (
+        independentIdentityOwners.has(owner)
+        || currentUserId === null
+        || expectedUserId === null
+        || expectedUserId === currentUserId
+      );
   }
 
   function invalidateForIdentity(userId: string | null) {
@@ -141,7 +147,7 @@ export function createCoachRegistrationOwnerController(): CoachRegistrationOwner
       return replacedIdentity;
     },
 
-    begin() {
+    begin(options = {}) {
       revision += 1;
       const ownerRevision = revision;
       const owner: CoachRegistrationOwner = Object.freeze({
@@ -154,13 +160,18 @@ export function createCoachRegistrationOwnerController(): CoachRegistrationOwner
           if (!isCurrent(owner)) return false;
           const expectedUserId = expectedUserIds.get(owner) ?? null;
           if (expectedUserId !== null && expectedUserId !== userId) return false;
-          if (currentUserId !== null && currentUserId !== userId) return false;
+          if (
+            !independentIdentityOwners.has(owner)
+            && currentUserId !== null
+            && currentUserId !== userId
+          ) return false;
           expectedUserIds.set(owner, userId);
           return true;
         },
         isCurrent: () => isCurrent(owner),
       });
-      expectedUserIds.set(owner, currentUserId);
+      if (options.independentIdentity) independentIdentityOwners.add(owner);
+      expectedUserIds.set(owner, options.independentIdentity ? null : currentUserId);
       activeOwner = owner;
       return owner;
     },
