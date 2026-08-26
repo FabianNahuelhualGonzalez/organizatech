@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
-  "20260825043212_auth_separate_coach_contact_email.sql":
+  "20260826041258_auth_separate_coach_contact_email.sql":
     "ee0eaad255a622358270bf40877734f42d4a8bfd6abc9fb1d328c7ecefb23c10",
 } as const;
 
 const MIGRATION_PATH =
-  "supabase/migrations/20260825043212_auth_separate_coach_contact_email.sql";
+  "supabase/migrations/20260826041258_auth_separate_coach_contact_email.sql";
 
 const FAILURE = {
   scope: "[AUTH-HYBRID-01.SQL.scope]",

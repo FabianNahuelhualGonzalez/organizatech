@@ -24,8 +24,10 @@ const ROADMAP_PATH = "docs/product/auth-coach-roadmap.md";
 const PACKAGE_PATH = "package.json";
 const AUTH_CONFIRMATION_MIGRATION_PATH =
   "supabase/migrations/20260820041942_auth_confirmation_pending_memberships.sql";
-const AUTH_SEPARATE_CONTACT_MIGRATION_PATH =
+const AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH =
   "supabase/migrations/20260825043212_auth_separate_coach_contact_email.sql";
+const AUTH_SEPARATE_CONTACT_MIGRATION_PATH =
+  "supabase/migrations/20260826041258_auth_separate_coach_contact_email.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -479,19 +481,37 @@ function auditProhibitedArtifacts(sources: Sources) {
     ...(packageJson.devDependencies ?? {}),
   });
   const status = spawnSync("git", ["status", "--porcelain=v1"], { encoding: "utf8" });
-  const changedPaths = (status.stdout ?? "")
+  const changedEntries = (status.stdout ?? "")
     .split(/\r?\n/)
     .filter(Boolean)
-    .map((line) => line.slice(3).trim());
+    .map((line) => ({
+      status: line.slice(0, 2),
+      path: line.slice(3).trim(),
+    }));
+  const contactMigrationRenameInProgress =
+    !existsSync(AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH)
+    && existsSync(AUTH_SEPARATE_CONTACT_MIGRATION_PATH)
+    && changedEntries.some(({ path, status: entryStatus }) => (
+      entryStatus === " D"
+      && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
+    ))
+    && changedEntries.some(({ path, status: entryStatus }) => (
+      entryStatus === "??"
+      && path === AUTH_SEPARATE_CONTACT_MIGRATION_PATH
+    ));
   const allSources = Object.values(sources).join("\n");
   assertContract(
     !dependencyNames.some((name) => /resend|sendgrid|postmark|mailgun|nodemailer|emailjs/i.test(name))
-    && !changedPaths.some((path) => (
+    && !changedEntries.some(({ path }) => (
       path === "package-lock.json"
       || (
         path.startsWith("supabase/migrations/")
         && path !== AUTH_CONFIRMATION_MIGRATION_PATH
         && path !== AUTH_SEPARATE_CONTACT_MIGRATION_PATH
+        && !(
+          contactMigrationRenameInProgress
+          && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
+        )
       )
       || /(^|\/)\.env(?:\.|$)/.test(path)
     ))
