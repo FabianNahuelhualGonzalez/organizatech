@@ -32,6 +32,7 @@ const COACH_ACCESS: AuthorizedPortalAccess = {
     gender: "otro",
     phoneNumber: "+56000000000",
     professionalTitle: "Coach",
+    contactEmail: "contacto@example.net",
   },
 };
 

@@ -24,6 +24,10 @@ const ROADMAP_PATH = "docs/product/auth-coach-roadmap.md";
 const PACKAGE_PATH = "package.json";
 const AUTH_CONFIRMATION_MIGRATION_PATH =
   "supabase/migrations/20260820041942_auth_confirmation_pending_memberships.sql";
+const AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH =
+  "supabase/migrations/20260825043212_auth_separate_coach_contact_email.sql";
+const AUTH_SEPARATE_CONTACT_MIGRATION_PATH =
+  "supabase/migrations/20260826041258_auth_separate_coach_contact_email.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -196,7 +200,8 @@ function auditDestinations(sources: Sources) {
   const userClauses = clauses.filter((clause) => caseLabel(clause) === "user_authorized");
   const userText = userClauses.map((clause) => clause.getText(sourceFile)).join("\n");
   assertContract(
-    userClauses.length === 1 && /continueAuthenticatedSession\(authState, intent\)/.test(userText),
+    userClauses.length === 1
+    && /continueAuthenticatedSession\(\s*authState,\s*intent,\s*clearCompletedAuthForm,\s*\)/.test(userText),
     FAILURE.destinationsShared,
   );
 
@@ -405,6 +410,7 @@ function auditTypedCoachEvidence(sources: Sources) {
     "gender",
     "phoneNumber",
     "professionalTitle",
+    "contactEmail",
   ]) {
     if (!new RegExp(`\\b${field}:`).test(controllerRecord)) {
       assertContract(false, FAILURE.omittedProfessionalTitle);
@@ -412,19 +418,38 @@ function auditTypedCoachEvidence(sources: Sources) {
   }
   assertContract(
     sources.gateway.includes(
-      '"user_id,created_at,first_name,last_name,birth_date,gender,phone_number,professional_title"',
+      '"user_id,created_at,first_name,last_name,birth_date,gender,phone_number,professional_title,contact_email"',
     )
     && /createdAt:\s*row\.created_at/.test(sources.gateway)
     && /professionalTitle:\s*row\.professional_title/.test(sources.gateway)
+    && /contactEmail:\s*row\.contact_email/.test(sources.gateway)
     && /coach:\s*coachRegistration/.test(sources.controller)
     && /registration:\s*access\.coach/.test(sources.root),
     FAILURE.omittedProfessionalTitle,
   );
 
   const registerCoach = functionText(sources.controller, CONTROLLER_PATH, "registerCoach");
+  const registerSharedCoach = functionText(
+    sources.controller,
+    CONTROLLER_PATH,
+    "registerSharedCoach",
+  );
+  const registerSeparateCoach = functionText(
+    sources.controller,
+    CONTROLLER_PATH,
+    "registerSeparateCoach",
+  );
   assertContract(
-    (registerCoach.match(/gateway\.getCoachRegistration\(/g) ?? []).length === 1
-    && /existingCoachRegistration \?\? await gateway\.createCoachRegistration/.test(registerCoach),
+    /input\.flow === "shared"/.test(registerCoach)
+    && /registerSharedCoach\(input\.registration, owner, gateway\)/.test(registerCoach)
+    && /registerSeparateCoach\(input, owner, gateway\)/.test(registerCoach)
+    && (registerSharedCoach.match(/gateway\.createSharedCoachRegistration\(/g) ?? []).length === 1
+    && /coachRegistration\.userId !== currentIdentity\.userId/.test(registerSharedCoach)
+    && (registerSeparateCoach.match(/gateway\.getCoachRegistration\(/g) ?? []).length === 1
+    && /coachRegistration\.userId !== identity\.userId/.test(registerSeparateCoach)
+    && !/gateway\.createCoachRegistration/.test(
+      `${registerCoach}\n${registerSharedCoach}\n${registerSeparateCoach}`,
+    ),
     FAILURE.omittedProfessionalTitle,
   );
 }
@@ -456,18 +481,37 @@ function auditProhibitedArtifacts(sources: Sources) {
     ...(packageJson.devDependencies ?? {}),
   });
   const status = spawnSync("git", ["status", "--porcelain=v1"], { encoding: "utf8" });
-  const changedPaths = (status.stdout ?? "")
+  const changedEntries = (status.stdout ?? "")
     .split(/\r?\n/)
     .filter(Boolean)
-    .map((line) => line.slice(3).trim());
+    .map((line) => ({
+      status: line.slice(0, 2),
+      path: line.slice(3).trim(),
+    }));
+  const contactMigrationRenameInProgress =
+    !existsSync(AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH)
+    && existsSync(AUTH_SEPARATE_CONTACT_MIGRATION_PATH)
+    && changedEntries.some(({ path, status: entryStatus }) => (
+      entryStatus === " D"
+      && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
+    ))
+    && changedEntries.some(({ path, status: entryStatus }) => (
+      entryStatus === "??"
+      && path === AUTH_SEPARATE_CONTACT_MIGRATION_PATH
+    ));
   const allSources = Object.values(sources).join("\n");
   assertContract(
     !dependencyNames.some((name) => /resend|sendgrid|postmark|mailgun|nodemailer|emailjs/i.test(name))
-    && !changedPaths.some((path) => (
+    && !changedEntries.some(({ path }) => (
       path === "package-lock.json"
       || (
         path.startsWith("supabase/migrations/")
         && path !== AUTH_CONFIRMATION_MIGRATION_PATH
+        && path !== AUTH_SEPARATE_CONTACT_MIGRATION_PATH
+        && !(
+          contactMigrationRenameInProgress
+          && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
+        )
       )
       || /(^|\/)\.env(?:\.|$)/.test(path)
     ))
@@ -478,7 +522,13 @@ function auditProhibitedArtifacts(sources: Sources) {
 
 function auditConfirmationAndFutureEmailContract(sources: Sources) {
   assertContract(
-    /export const COACH_REGISTRATION_CONFIRMATION_MESSAGE\s*=\s*\n\s*"Muchas gracias por crear tu cuenta Coach en Organizatech\. Revisa tu correo y haz clic en el enlace de confirmación para activar tu cuenta\. Después podrás iniciar sesión como Coach\.";/.test(
+    /export const USER_REGISTRATION_CONFIRMATION_MESSAGE\s*=\s*\n\s*"Si corresponde, completa la confirmación desde tu correo\. También puedes iniciar sesión, recuperar tu contraseña o usar otro correo de acceso\.";/.test(
+      sources.controller,
+    )
+    && /export const COACH_REGISTRATION_CONFIRMATION_MESSAGE\s*=\s*\n\s*USER_REGISTRATION_CONFIRMATION_MESSAGE;/.test(
+      sources.controller,
+    )
+    && /signup\.kind === "confirmation_required" \|\| signup\.kind === "existing_identity"/.test(
       sources.controller,
     )
     && /state:\s*"coach_confirmation_required"[\s\S]*message:\s*COACH_REGISTRATION_CONFIRMATION_MESSAGE/.test(
@@ -487,32 +537,49 @@ function auditConfirmationAndFutureEmailContract(sources: Sources) {
     FAILURE.confirmationRemoved,
   );
 
-  const registerCoach = functionText(sources.controller, CONTROLLER_PATH, "registerCoach");
-  const signupCalls = registerCoach.match(/gateway\.signUpForCoachRegistration\(/g) ?? [];
-  const identityGuardIndex = registerCoach.indexOf("if (!identity)");
-  const signupIndex = registerCoach.indexOf("gateway.signUpForCoachRegistration(");
-  const coachLookupIndex = registerCoach.indexOf("gateway.getCoachRegistration(");
+  const registerSeparateCoach = functionText(
+    sources.controller,
+    CONTROLLER_PATH,
+    "registerSeparateCoach",
+  );
+  const signupCalls = registerSeparateCoach.match(/gateway\.signUpForCoachRegistration\(/g) ?? [];
+  const signupIndex = registerSeparateCoach.indexOf("gateway.signUpForCoachRegistration(");
+  const neutralResultIndex = registerSeparateCoach.indexOf(
+    'signup.kind === "confirmation_required" || signup.kind === "existing_identity"',
+  );
+  const coachLookupIndex = registerSeparateCoach.indexOf("gateway.getCoachRegistration(");
+  const activeIdentityIndex = registerSeparateCoach.indexOf("gateway.getCurrentIdentity(undefined, owner)");
   assertContract(
     signupCalls.length === 1
-    && identityGuardIndex >= 0
-    && signupIndex > identityGuardIndex
-    && coachLookupIndex > signupIndex,
+    && signupIndex >= 0
+    && neutralResultIndex > signupIndex
+    && coachLookupIndex > neutralResultIndex
+    && activeIdentityIndex > coachLookupIndex,
     FAILURE.confirmationResent,
   );
 
   assertContract(
     sources.productContract.includes("## 10. Correos Coach futuros — AUTH-COACH-02")
-    && sources.productContract.includes("Ahora también eres Coach en Organizatech")
+    && sources.productContract.includes("### AC-037 — Identidades duales históricas")
     && sources.productContract.includes(
-      "Ya estabas registrado como Usuario y ahora también eres Coach en Organizatech.",
+      "Una identidad de Supabase Auth con membresía Usuario puede activar también su",
     )
+    && sources.productContract.includes("comparte correo, contraseña y sesión")
+    && /identidad Coach\s+separada con otro correo/.test(sources.productContract)
+    && sources.productContract.includes("El mismo correo de acceso no puede representar dos identidades")
+    && sources.productContract.includes("`contact_email` profesional Coach puede coincidir")
+    && sources.productContract.includes("nunca participa en login, ownership")
+    && sources.productContract.includes("### AC-040 — Selección explícita del registro Coach híbrido")
+    && sources.productContract.includes("Ahora también eres Coach en Organizatech")
     && sources.productContract.includes("Bienvenido a Organizatech Coaching")
     && sources.productContract.includes("Tu cuenta Coach fue creada correctamente.")
     && sources.productContract.includes("exactamente una vez")
     && sources.productContract.includes("idempotente")
     && /no\s+revertirá\s+la membresía/.test(sources.productContract)
     && sources.productContract.includes("confirmación normal de Supabase Auth")
-    && sources.roadmap.includes("### AUTH-COACH-02 — Correos de membresía Coach"),
+    && sources.roadmap.includes("### AUTH-COACH-02 — Correos de membresía Coach")
+    && sources.roadmap.includes("### AUTH-GOOGLE-01 — OAuth Google")
+    && sources.roadmap.includes("La misma cuenta Google debe compartir identidad"),
     FAILURE.emailContractMissing,
   );
 }
@@ -726,8 +793,8 @@ const mutations = [
     expectedFailure: FAILURE.omittedProfessionalTitle,
     apply: (value: string) => replaceExactlyOnce(
       value,
-      '  "user_id,created_at,first_name,last_name,birth_date,gender,phone_number,professional_title";',
-      '  "user_id,created_at,first_name,last_name,birth_date,gender,phone_number";',
+      '  "user_id,created_at,first_name,last_name,birth_date,gender,phone_number,professional_title,contact_email";',
+      '  "user_id,created_at,first_name,last_name,birth_date,gender,phone_number,contact_email";',
       "M18",
     ),
   },
@@ -759,8 +826,8 @@ const mutations = [
     expectedFailure: FAILURE.confirmationRemoved,
     apply: (value: string) => replaceExactlyOnce(
       value,
-      'export const COACH_REGISTRATION_CONFIRMATION_MESSAGE =\n  "Muchas gracias por crear tu cuenta Coach en Organizatech. Revisa tu correo y haz clic en el enlace de confirmación para activar tu cuenta. Después podrás iniciar sesión como Coach.";',
-      'export const COACH_REGISTRATION_CONFIRMATION_MESSAGE =\n  "Cuenta Coach creada.";',
+      'export const USER_REGISTRATION_CONFIRMATION_MESSAGE =\n  "Si corresponde, completa la confirmación desde tu correo. También puedes iniciar sesión, recuperar tu contraseña o usar otro correo de acceso.";',
+      'export const USER_REGISTRATION_CONFIRMATION_MESSAGE =\n  "Cuenta Coach creada.";',
       "M21",
     ),
   },
@@ -768,12 +835,22 @@ const mutations = [
     name: "agregar membresía reenvía confirmación Auth",
     source: "controller" as const,
     expectedFailure: FAILURE.confirmationResent,
-    apply: (value: string) => replaceExactlyOnce(
-      value,
-      "    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
-      "    await gateway.signUpForCoachRegistration(input.auth, owner);\n    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
-      "M22",
-    ),
+    apply(value: string) {
+      const sourceFile = parseSource(value, CONTROLLER_PATH);
+      const registerSeparateCoach = functionText(
+        value,
+        CONTROLLER_PATH,
+        "registerSeparateCoach",
+      );
+      const mutatedFunction = replaceExactlyOnce(
+        registerSeparateCoach,
+        "    const coachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
+        "    await gateway.signUpForCoachRegistration(input, owner);\n    const coachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
+        "M22",
+      );
+      const registrationFunction = findFunction(sourceFile, "registerSeparateCoach");
+      return `${value.slice(0, registrationFunction.getStart(sourceFile))}${mutatedFunction}${value.slice(registrationFunction.end)}`;
+    },
   },
   {
     name: "AUTH-COACH-02 deja de estar documentado",

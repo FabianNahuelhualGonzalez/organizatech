@@ -12,8 +12,6 @@ import {
 } from "@/features/auth/model/auth-form";
 import {
   createSupabaseMultiportalAuthGateway,
-  toCoachRegistrationInsertPayload,
-  toCoachRegistrationRpcPayload,
 } from "@/features/auth/data/supabase-multiportal-auth-gateway";
 import {
   createMultiportalAuthController,
@@ -40,6 +38,7 @@ const registration: CoachRegistrationWritePayload = {
   gender: "male",
   phone_number: "+56912345678",
   professional_title: "Preparador físico",
+  contact_email: "contacto-usuario@example.net",
 };
 
 const signupPayload: UserSignupPayload = {
@@ -72,6 +71,7 @@ function registrationRow(userId: TestUserId, suffix: string) {
     gender: "male",
     phone_number: `+5690000000${suffix}`,
     professional_title: `Título ${suffix}`,
+    contact_email: `contacto-${suffix.toLowerCase()}@example.net`,
   };
 }
 
@@ -85,6 +85,7 @@ function mappedRegistrationRow(row: ReturnType<typeof registrationRow>) {
     gender: row.gender,
     phoneNumber: row.phone_number,
     professionalTitle: row.professional_title,
+    contactEmail: row.contact_email,
   };
 }
 
@@ -107,6 +108,8 @@ interface StatefulFakeInput {
   onFilterAttempt?(): void;
   selectError?: unknown;
   selectedRowOverride?: unknown;
+  coachRpcRowOverride?: unknown;
+  signOutError?: unknown;
 }
 
 function createStatefulFakeClient(input: StatefulFakeInput = {}) {
@@ -169,6 +172,7 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
     },
     signOut: async (options: unknown) => {
       signOutOptions.push(options);
+      if (input.signOutError) return { error: input.signOutError };
       activeUserId = null;
       return { error: null };
     },
@@ -226,19 +230,24 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
       return { data: row, error: null };
     }
     const expectedKeys = [
-      "p_expected_user_id",
       "p_first_name",
       "p_last_name",
       "p_birth_date",
       "p_gender",
       "p_phone_number",
       "p_professional_title",
+      "p_contact_email",
     ];
-    if (!jwtUserId || Object.keys(payload).some((key) => !expectedKeys.includes(key))) {
+    if (
+      !jwtUserId
+      || !userRows.has(jwtUserId)
+      || Object.keys(payload).length !== expectedKeys.length
+      || Object.keys(payload).some((key) => !expectedKeys.includes(key))
+    ) {
       return { data: null, error: { code: "42501", message: "RLS/ACL" } };
     }
-    if (payload.p_expected_user_id !== jwtUserId) {
-      return { data: null, error: { code: "42501", message: "identity mismatch" } };
+    if (input.coachRpcRowOverride !== undefined) {
+      return { data: input.coachRpcRowOverride, error: null };
     }
     const existing = rows.get(jwtUserId);
     if (existing) return { data: existing, error: null };
@@ -249,6 +258,7 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
       gender: payload.p_gender as CoachRegistrationWritePayload["gender"],
       phone_number: String(payload.p_phone_number),
       professional_title: String(payload.p_professional_title),
+      contact_email: String(payload.p_contact_email),
     };
     insertedPayloads.push(writePayload);
     const row = {
@@ -312,37 +322,15 @@ function beginPortalOwner(userId: TestUserId) {
   return { owners, owner: owners.begin(userId) };
 }
 
-test("allowlist repository descarta ownership, roles, privilegios y campos Auth", () => {
-  const malicious = {
-    ...registration,
-    user_id: "user-a",
-    owner_id: "user-a",
-    profile_id: "user-a",
-    role: "admin",
-    roles: ["admin", "coach"],
-    privileges: ["cross-account-read"],
-    email: "victim@example.com",
-    password: "not-a-real-secret",
-    age: 36,
-  } as CoachRegistrationWritePayload;
-
-  assert.deepEqual(toCoachRegistrationInsertPayload(malicious), registration);
-  assert.deepEqual(Object.keys(toCoachRegistrationInsertPayload(malicious)), [
+test("payload Coach focal conserva sólo datos profesionales allowlisted", () => {
+  assert.deepEqual(Object.keys(registration), [
     "first_name",
     "last_name",
     "birth_date",
     "gender",
     "phone_number",
     "professional_title",
-  ]);
-  assert.deepEqual(Object.keys(toCoachRegistrationRpcPayload(malicious, "user-b")), [
-    "p_expected_user_id",
-    "p_first_name",
-    "p_last_name",
-    "p_birth_date",
-    "p_gender",
-    "p_phone_number",
-    "p_professional_title",
+    "contact_email",
   ]);
 });
 
@@ -802,6 +790,16 @@ test("E9 · respuesta SELECT errónea, cruzada o malformada falla cerrado con ow
       }),
     },
     {
+      name: "fila sin correo de contacto",
+      fake: createStatefulFakeClient({
+        activeUserId: "user-a",
+        selectedRowOverride: {
+          ...registrationRow("user-a", "A"),
+          contact_email: undefined,
+        },
+      }),
+    },
+    {
       name: "fila de otro owner",
       fake: createStatefulFakeClient({
         activeUserId: "user-a",
@@ -809,7 +807,7 @@ test("E9 · respuesta SELECT errónea, cruzada o malformada falla cerrado con ow
       }),
     },
   ] as const;
-  assert.equal(cases.length, 3, "E9 fija error, respuesta malformada y respuesta cruzada");
+  assert.equal(cases.length, 4, "E9 fija error, respuestas malformadas y respuesta cruzada");
 
   for (const { name, fake } of cases) {
     const gateway = createSupabaseMultiportalAuthGateway(fake.client);
@@ -822,6 +820,8 @@ test("E9 · respuesta SELECT errónea, cruzada o malformada falla cerrado con ow
   }
 });
 
+/* AUTH-SEPARATE-01 removes the browser Coach write/sign-in ports exercised by
+ * the historical tests below. Executable replacement follows this block.
 test("límite atómico simulado separa JWT efectivo de expectedUserId", async () => {
   const fake = createStatefulFakeClient({ activeUserId: "user-a" });
   const gateway = createSupabaseMultiportalAuthGateway(fake.client);
@@ -1003,6 +1003,108 @@ for (const operation of ["read", "write"] as const) {
   });
 }
 
+*/
+
+test("gateway Coach expone signUp separado y activación compartida, nunca signIn previo", () => {
+  const gateway = createSupabaseMultiportalAuthGateway({} as SupabaseClient);
+  assert.equal("signInForCoachRegistration" in gateway, false);
+  assert.equal("createCoachRegistration" in gateway, false);
+  assert.equal("signUpForCoachRegistration" in gateway, true);
+  assert.equal("createSharedCoachRegistration" in gateway, true);
+});
+
+test("activación Coach compartida envía allowlist exacta sin ownership y es idempotente", async () => {
+  const fake = createStatefulFakeClient({
+    activeUserId: "user-a",
+    userRows: [{ user_id: "user-a" }],
+  });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const { owner } = beginRegistrationOwner("user-a");
+  const malicious = {
+    ...registration,
+    contact_email: users["user-a"].email!,
+    user_id: "user-b",
+    owner_id: "user-b",
+    profile_id: "user-b",
+    role: "admin",
+  } as CoachRegistrationWritePayload;
+
+  const first = await gateway.createSharedCoachRegistration(malicious, "user-a", owner);
+  const second = await gateway.createSharedCoachRegistration(malicious, "user-a", owner);
+
+  assert.equal(first.userId, "user-a");
+  assert.deepEqual(second, first);
+  assert.deepEqual(fake.rpcPayloads, [
+    {
+      p_first_name: registration.first_name,
+      p_last_name: registration.last_name,
+      p_birth_date: registration.birth_date,
+      p_gender: registration.gender,
+      p_phone_number: registration.phone_number,
+      p_professional_title: registration.professional_title,
+      p_contact_email: users["user-a"].email,
+    },
+    {
+      p_first_name: registration.first_name,
+      p_last_name: registration.last_name,
+      p_birth_date: registration.birth_date,
+      p_gender: registration.gender,
+      p_phone_number: registration.phone_number,
+      p_professional_title: registration.professional_title,
+      p_contact_email: users["user-a"].email,
+    },
+  ]);
+  assert.equal(JSON.stringify(fake.rpcPayloads).includes("user_id"), false);
+  assert.equal(JSON.stringify(fake.rpcPayloads).includes("owner_id"), false);
+  assert.equal(JSON.stringify(fake.rpcPayloads).includes("profile_id"), false);
+  assert.equal(JSON.stringify(fake.rpcPayloads).includes("role"), false);
+  assert.equal(fake.rows.size, 1);
+});
+
+test("activación compartida falla cerrada sin membresía Usuario", async () => {
+  const fake = createStatefulFakeClient({ activeUserId: "user-a" });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const { owner } = beginRegistrationOwner("user-a");
+
+  await assert.rejects(
+    gateway.createSharedCoachRegistration(registration, "user-a", owner),
+    /activar el acceso Coach/,
+  );
+  assert.equal(fake.rows.size, 0);
+  assert.equal(fake.rpcAttempts, 1);
+});
+
+test("activación compartida no despacha RPC para expectedUserId ajeno", async () => {
+  const fake = createStatefulFakeClient({
+    activeUserId: "user-a",
+    userRows: [{ user_id: "user-a" }],
+  });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const { owner } = beginRegistrationOwner("user-a");
+
+  await assert.rejects(
+    gateway.createSharedCoachRegistration(registration, "user-b", owner),
+    /operación de registro ya no está vigente/,
+  );
+  assert.equal(fake.rpcAttempts, 0);
+});
+
+test("activación compartida rechaza una fila RPC de otra identidad", async () => {
+  const fake = createStatefulFakeClient({
+    activeUserId: "user-a",
+    userRows: [{ user_id: "user-a" }],
+    coachRpcRowOverride: registrationRow("user-b", "B"),
+  });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const { owner } = beginRegistrationOwner("user-a");
+
+  await assert.rejects(
+    gateway.createSharedCoachRegistration(registration, "user-a", owner),
+    /confirmar el registro Coach/,
+  );
+  assert.equal(fake.rows.size, 0);
+});
+
 test("signOut vigente revalida A y cierra exactamente una sesión local", async () => {
   const fake = createStatefulFakeClient({ activeUserId: "user-a" });
   const owners = createPortalResolutionOwnerController();
@@ -1037,49 +1139,90 @@ test("signOut stale de A no toca la sesión vigente de B ni publica motivo", asy
   assert.equal(fake.activeUserId, "user-b");
 });
 
-test("cambio Coach A→B revalida A y cierra exclusivamente la sesión local", async () => {
+test("signOut con owner Coach vigente revalida A y cierra exactamente la sesión local", async () => {
   const fake = createStatefulFakeClient({ activeUserId: "user-a" });
-  const { owner } = beginPortalOwner("user-a");
-  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const { owner } = beginRegistrationOwner("user-a");
+  const reasons: string[] = [];
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client, {
+    onBeforeSignOut: (reason) => reasons.push(reason),
+  });
 
-  assert.equal(
-    await gateway.signOutForCoachIdentitySwitch(users["user-b"].email!, owner),
-    "signed_out",
-  );
+  assert.equal(await gateway.signOut("authorization_error", owner), "signed_out");
   assert.deepEqual(fake.signOutOptions, [{ scope: "local" }]);
+  assert.deepEqual(reasons, ["authorization_error"]);
+  assert.equal(fake.identityReads, 1);
+  assert.equal(fake.sessionReads, 1);
   assert.equal(fake.activeUserId, null);
-  assert.equal(fake.relationReads, 0);
-  assert.equal(fake.rpcAttempts, 0);
 });
 
-test("cambio Coach no cierra la identidad si el formulario ya coincide con la sesión", async () => {
+test("signOut Coach exige expectedUserId no nulo antes de consultar o cerrar", async () => {
   const fake = createStatefulFakeClient({ activeUserId: "user-a" });
-  const { owner } = beginPortalOwner("user-a");
+  const { owner } = beginRegistrationOwner(null);
   const gateway = createSupabaseMultiportalAuthGateway(fake.client);
 
-  assert.equal(
-    await gateway.signOutForCoachIdentitySwitch(" COACH-A@example.com ", owner),
-    "stale",
-  );
+  assert.equal(await gateway.signOut("authorization_error", owner), "stale");
+  assert.equal(fake.identityReads, 0);
+  assert.equal(fake.sessionReads, 0);
   assert.deepEqual(fake.signOutOptions, []);
   assert.equal(fake.activeUserId, "user-a");
 });
 
-test("cambio Coach stale de A nunca cierra una sesión B posterior", async () => {
-  const fake = createStatefulFakeClient({ activeUserId: "user-a" });
-  const { owners, owner } = beginPortalOwner("user-a");
-  owners.invalidate();
-  fake.setActiveUserId("user-b");
-  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+test("signOut Coach tardío de A nunca cierra la sesión vigente B", async () => {
+  const identityReadStarted = createDeferred<void>();
+  const releaseIdentityRead = createDeferred<void>();
+  const fake = createStatefulFakeClient({
+    activeUserId: "user-a",
+    beforeGetUser: async () => {
+      identityReadStarted.resolve();
+      await releaseIdentityRead.promise;
+    },
+  });
+  const { owners, owner: ownerA } = beginRegistrationOwner("user-a");
+  const reasons: string[] = [];
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client, {
+    onBeforeSignOut: (reason) => reasons.push(reason),
+  });
 
-  assert.equal(
-    await gateway.signOutForCoachIdentitySwitch(users["user-b"].email!, owner),
-    "stale",
-  );
+  const pendingSignOut = gateway.signOut("authorization_error", ownerA);
+  await identityReadStarted.promise;
+  fake.setActiveUserId("user-b");
+  owners.acceptIdentity("user-b");
+  releaseIdentityRead.resolve();
+
+  assert.equal(await pendingSignOut, "stale");
   assert.deepEqual(fake.signOutOptions, []);
+  assert.deepEqual(reasons, []);
   assert.equal(fake.activeUserId, "user-b");
-  assert.equal(fake.relationReads, 0);
-  assert.equal(fake.rpcAttempts, 0);
+});
+
+test("fallo de signOut Coach local no declara éxito y conserva la sesión", async () => {
+  const signOutError = new Error("local signout failed");
+  const fake = createStatefulFakeClient({
+    activeUserId: "user-a",
+    signOutError,
+  });
+  const { owner } = beginRegistrationOwner("user-a");
+  const callbacks: string[] = [];
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client, {
+    onBeforeSignOut: (reason) => callbacks.push(`before:${reason}`),
+    onSignOutError: (reason) => callbacks.push(`error:${reason}`),
+  });
+
+  await assert.rejects(
+    gateway.signOut("authorization_error", owner),
+    (error: unknown) => (
+      error instanceof Error
+      && error.message === "No pudimos cerrar la sesión."
+      && "cause" in error
+      && error.cause === signOutError
+    ),
+  );
+  assert.deepEqual(fake.signOutOptions, [{ scope: "local" }]);
+  assert.deepEqual(callbacks, [
+    "before:authorization_error",
+    "error:authorization_error",
+  ]);
+  assert.equal(fake.activeUserId, "user-a");
 });
 
 test("signup Coach usa sólo Auth signUp con metadata allowlisted y redirect cerrado", async () => {
@@ -1121,6 +1264,12 @@ test("signup Coach usa sólo Auth signUp con metadata allowlisted y redirect cer
     registration.professional_title,
   );
   assert.equal(
+    "contact_email" in signup.options.data
+      ? signup.options.data.contact_email
+      : null,
+    registration.contact_email,
+  );
+  assert.equal(
     signup.options.emailRedirectTo,
     "https://organizatech.cl/login?flow=signup-confirmation",
   );
@@ -1156,6 +1305,7 @@ test("signup Usuario omite professional_title y también usa una sola llamada Au
   const signup = signupCalls[0] as ConfirmationRegistrationSignupPayload;
   assert.equal(signup.options.data[AUTH_REGISTRATION_PORTAL_METADATA_KEY], "usuario");
   assert.equal("professional_title" in signup.options.data, false);
+  assert.equal("contact_email" in signup.options.data, false);
 });
 
 test("respuesta ofuscada de un segundo signUp se clasifica sin escribir PII fuera de Auth", async () => {
@@ -1187,6 +1337,73 @@ test("respuesta ofuscada de un segundo signUp se clasifica sin escribir PII fuer
   assert.deepEqual(first, { kind: "existing_identity" });
   assert.deepEqual(second, { kind: "existing_identity" });
   assert.equal(signupAttempts, 2);
+});
+
+test("errores explícitos de identidad existente se clasifican antes del copy público en Usuario y Coach", async () => {
+  const cases = [
+    {
+      name: "code estable",
+      error: {
+        code: "user_already_exists",
+        message: "An identity with this email already exists",
+      },
+      expected: { kind: "existing_identity" },
+    },
+    {
+      name: "code equivalente",
+      error: {
+        code: "email_exists",
+        message: "Email address is unavailable",
+      },
+      expected: { kind: "existing_identity" },
+    },
+    {
+      name: "fallback mínimo al mensaje conocido",
+      error: {
+        code: "unexpected_failure",
+        message: "User already registered",
+      },
+      expected: { kind: "existing_identity" },
+    },
+    {
+      name: "control inocente no-identidad",
+      error: {
+        code: "over_email_send_rate_limit",
+        message: "Email rate limit exceeded",
+      },
+      expected: {
+        kind: "error",
+        message: "Se alcanzó el límite de intentos por ahora. Espera unos minutos e intenta nuevamente.",
+      },
+    },
+  ] as const;
+
+  for (const portal of ["coach", "usuario"] as const) {
+    for (const { name, error, expected } of cases) {
+      const isolatedClient = {
+        auth: {
+          signUp: async () => ({ data: { user: null, session: null }, error }),
+        },
+      } as unknown as SupabaseClient;
+      const gateway = createSupabaseMultiportalAuthGateway({} as SupabaseClient, {
+        createRegistrationClient: () => isolatedClient,
+      });
+      const result = portal === "coach"
+        ? await gateway.signUpForCoachRegistration(
+          coachSignupPayload,
+          beginRegistrationOwner(null).owner,
+        )
+        : await gateway.signUpForUserRegistration(
+          signupPayload,
+          beginUserRegistrationOwner(null).owner,
+        );
+
+      assert.deepEqual(result, expected, `${portal}: ${name}`);
+      if (result.kind === "error") {
+        assert.doesNotMatch(result.message, /registrad[oa]/i, `${portal}: copy neutral`);
+      }
+    }
+  }
 });
 
 test("confirmación propia usa RPC sin argumentos y revalida identidad antes y después", async () => {

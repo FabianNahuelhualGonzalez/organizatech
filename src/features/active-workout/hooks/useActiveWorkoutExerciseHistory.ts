@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  createActiveWorkoutHistoryViewKey,
   createActiveWorkoutHistoryPrefetchController,
+  isActiveWorkoutHistoryPublicationCurrent,
   type ActiveWorkoutHistoryPrefetchController,
+  type ActiveWorkoutHistoryPublicationOwner,
+  type ActiveWorkoutHistoryPublicationStatus,
   type ActiveWorkoutHistoryScope,
 } from "@/features/active-workout/model/active-workout-history-prefetch-controller";
 import { runActiveWorkoutHistoryLoad } from "@/lib/training/active-workout-history-load";
@@ -69,10 +73,17 @@ export interface UseActiveWorkoutExerciseHistoryResult {
   latestExercisePerformance: LatestExercisePerformance | null;
   latestExercisePerformanceLoading: boolean;
   latestExercisePerformanceError: string;
+  latestExercisePerformanceStatus: ActiveWorkoutHistoryPublicationStatus;
   latestExerciseObservation: LatestExerciseObservation | null;
   latestExerciseObservationLoading: boolean;
   latestExerciseObservationError: string;
   latestExerciseObservationDidQuery: boolean;
+  /**
+   * Reintenta exclusivamente la performance del ejercicio seleccionado. La identidad de esta
+   * callback es estable; el intento usa el mismo request, token y protección stale del flujo
+   * productivo vigente, sin recargar observaciones ni cambiar temporalmente de ejercicio.
+   */
+  retryExerciseHistory: () => void;
   /** Deja ambos flujos en idle y limpia ambas request keys (reset de sesión de Active Workout). */
   resetExerciseHistory: () => void;
   /**
@@ -96,20 +107,49 @@ export function useActiveWorkoutExerciseHistory(
     historyScope,
     performancePrefetchLineageIds,
   } = input;
+  const performanceViewKey = createActiveWorkoutHistoryViewKey({
+    channel: "performance",
+    activeExerciseId: activeWorkoutExerciseId,
+    activeExerciseLineageId: activeWorkoutExerciseLineageId,
+    workoutStartedAt: activeWorkoutStartedAt,
+    historySource: historyScope?.source ?? null,
+    cycleId: historyScope?.cycleId ?? null,
+    observationUserId: null,
+  });
+  const observationViewKey = createActiveWorkoutHistoryViewKey({
+    channel: "observation",
+    activeExerciseId: activeWorkoutExerciseId,
+    activeExerciseLineageId: activeWorkoutExerciseLineageId,
+    workoutStartedAt: activeWorkoutStartedAt,
+    historySource: null,
+    cycleId: null,
+    observationUserId,
+  });
 
   const [latestExercisePerformance, setLatestExercisePerformance] = useState<LatestExercisePerformance | null>(null);
   const [latestExercisePerformanceLoading, setLatestExercisePerformanceLoading] = useState(false);
   const [latestExercisePerformanceError, setLatestExercisePerformanceError] = useState("");
+  const [latestExercisePerformanceStatus, setLatestExercisePerformanceStatus] =
+    useState<ActiveWorkoutHistoryPublicationStatus>("idle");
+  const [latestExercisePerformancePublicationOwner, setLatestExercisePerformancePublicationOwner] =
+    useState<ActiveWorkoutHistoryPublicationOwner | null>(null);
   const latestExercisePerformanceRequestKeyRef = useRef<string | null>(null);
   const [latestExerciseObservation, setLatestExerciseObservation] = useState<LatestExerciseObservation | null>(null);
   const [latestExerciseObservationLoading, setLatestExerciseObservationLoading] = useState(false);
   const [latestExerciseObservationError, setLatestExerciseObservationError] = useState("");
   const [latestExerciseObservationDidQuery, setLatestExerciseObservationDidQuery] = useState(false);
+  const [latestExerciseObservationPublicationOwner, setLatestExerciseObservationPublicationOwner] =
+    useState<ActiveWorkoutHistoryPublicationOwner | null>(null);
   const latestExerciseObservationRequestKeyRef = useRef<string | null>(null);
   const isSessionDataRequestCurrentRef = useRef(isSessionDataRequestCurrent);
   isSessionDataRequestCurrentRef.current = isSessionDataRequestCurrent;
   const performancePrefetchControllerRef = useRef<ActiveWorkoutHistoryPrefetchController | null>(null);
   const performancePrefetchEnabledRef = useRef(false);
+  const retryExercisePerformanceRef = useRef<(() => void) | null>(null);
+
+  const retryExerciseHistory = useCallback(() => {
+    retryExercisePerformanceRef.current?.();
+  }, []);
 
   const getPerformancePrefetchController = useCallback(() => {
     if (!performancePrefetchControllerRef.current) {
@@ -121,6 +161,7 @@ export function useActiveWorkoutExerciseHistory(
           setLatestExercisePerformance(publication.performance);
           setLatestExercisePerformanceLoading(publication.loading);
           setLatestExercisePerformanceError(publication.error);
+          setLatestExercisePerformanceStatus(publication.status);
         },
       });
     }
@@ -138,14 +179,20 @@ export function useActiveWorkoutExerciseHistory(
   }, [getPerformancePrefetchController]);
 
   const resetExercisePerformanceHistory = useCallback(() => {
+    retryExercisePerformanceRef.current = null;
+    setLatestExercisePerformancePublicationOwner(null);
     performancePrefetchControllerRef.current?.invalidate();
     const idle = getLatestExercisePerformanceIdleState();
     setLatestExercisePerformance(idle.performance);
     setLatestExercisePerformanceLoading(idle.loading);
     setLatestExercisePerformanceError(idle.error);
+    setLatestExercisePerformanceStatus("idle");
   }, []);
 
   const resetExerciseHistory = useCallback(() => {
+    retryExercisePerformanceRef.current = null;
+    setLatestExercisePerformancePublicationOwner(null);
+    setLatestExerciseObservationPublicationOwner(null);
     performancePrefetchControllerRef.current?.invalidate();
     latestExercisePerformanceRequestKeyRef.current = null;
     latestExerciseObservationRequestKeyRef.current = null;
@@ -154,6 +201,7 @@ export function useActiveWorkoutExerciseHistory(
     setLatestExercisePerformance(performanceIdle.performance);
     setLatestExercisePerformanceLoading(performanceIdle.loading);
     setLatestExercisePerformanceError(performanceIdle.error);
+    setLatestExercisePerformanceStatus("idle");
 
     const observationIdle = getLatestExerciseObservationIdleState();
     setLatestExerciseObservation(observationIdle.observation);
@@ -164,17 +212,30 @@ export function useActiveWorkoutExerciseHistory(
 
   useEffect(() => {
     const requestToken = captureSessionDataRequestToken();
+    setLatestExercisePerformancePublicationOwner({
+      viewKey: performanceViewKey,
+      requestToken,
+    });
 
     if (historyScope && performancePrefetchLineageIds) {
       performancePrefetchEnabledRef.current = true;
-      getPerformancePrefetchController().synchronize({
+      const controller = getPerformancePrefetchController();
+      controller.synchronize({
         requestToken,
         historyScope,
         activeExerciseLineageId: activeWorkoutExerciseLineageId,
         workoutStartedAt: activeWorkoutStartedAt,
         performancePrefetchLineageIds,
       });
-      return;
+      const retryCurrentPerformance = () => {
+        void controller.revalidateCurrent();
+      };
+      retryExercisePerformanceRef.current = retryCurrentPerformance;
+      return () => {
+        if (retryExercisePerformanceRef.current === retryCurrentPerformance) {
+          retryExercisePerformanceRef.current = null;
+        }
+      };
     }
 
     // Fallback compatible mientras el root no entregue la API PERF-03. Hoy no existe una sesión
@@ -187,10 +248,12 @@ export function useActiveWorkoutExerciseHistory(
 
     if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
       latestExercisePerformanceRequestKeyRef.current = null;
+      retryExercisePerformanceRef.current = null;
       const idle = getLatestExercisePerformanceIdleState();
       setLatestExercisePerformance(idle.performance);
       setLatestExercisePerformanceLoading(idle.loading);
       setLatestExercisePerformanceError(idle.error);
+      setLatestExercisePerformanceStatus("idle");
       return;
     }
 
@@ -203,41 +266,68 @@ export function useActiveWorkoutExerciseHistory(
     latestExercisePerformanceRequestKeyRef.current = request?.key ?? null;
 
     if (!request) {
+      retryExercisePerformanceRef.current = null;
       const idle = getLatestExercisePerformanceIdleState();
       setLatestExercisePerformance(idle.performance);
       setLatestExercisePerformanceLoading(idle.loading);
       setLatestExercisePerformanceError(idle.error);
+      setLatestExercisePerformanceStatus("idle");
       return;
     }
 
-    const loading = getLatestExercisePerformanceLoadingState();
-    setLatestExercisePerformance(loading.performance);
-    setLatestExercisePerformanceLoading(loading.loading);
-    setLatestExercisePerformanceError(loading.error);
-
     let isMounted = true;
-    void runActiveWorkoutHistoryLoad({
-      load: () => loadLatestExercisePerformanceForRequest({
-        request,
-        fetcher: getLatestExercisePerformanceByLineage,
-        getCurrentRequestKey: () => latestExercisePerformanceRequestKeyRef.current,
-      }),
-      isMounted: () => isMounted,
-      isRequestTokenCurrent: () => isSessionDataRequestCurrent(requestToken),
-    }).then(({ result, decision }) => {
-      if (!decision.commit) return;
-      setLatestExercisePerformance(result.performance);
-      setLatestExercisePerformanceLoading(result.loading);
-      setLatestExercisePerformanceError(result.error);
-    });
+    let pendingLoad: Promise<void> | null = null;
+    const loadCurrentPerformance = (): Promise<void> => {
+      if (pendingLoad) return pendingLoad;
+
+      const loading = getLatestExercisePerformanceLoadingState();
+      setLatestExercisePerformance(loading.performance);
+      setLatestExercisePerformanceLoading(loading.loading);
+      setLatestExercisePerformanceError(loading.error);
+      setLatestExercisePerformanceStatus("loading");
+
+      const load = runActiveWorkoutHistoryLoad({
+        load: () => loadLatestExercisePerformanceForRequest({
+          request,
+          fetcher: getLatestExercisePerformanceByLineage,
+          getCurrentRequestKey: () => latestExercisePerformanceRequestKeyRef.current,
+        }),
+        isMounted: () => isMounted,
+        isRequestTokenCurrent: () => isSessionDataRequestCurrent(requestToken),
+      }).then(({ result, decision }) => {
+        if (!decision.commit) return;
+        setLatestExercisePerformance(result.performance);
+        setLatestExercisePerformanceLoading(result.loading);
+        setLatestExercisePerformanceError(result.error);
+        setLatestExercisePerformanceStatus(
+          result.error ? "error" : result.performance ? "ready" : "empty",
+        );
+      }).finally(() => {
+        if (pendingLoad === load) pendingLoad = null;
+      });
+      pendingLoad = load;
+      return load;
+    };
+    const retryCurrentPerformance = () => {
+      void loadCurrentPerformance();
+    };
+    retryExercisePerformanceRef.current = retryCurrentPerformance;
+    void loadCurrentPerformance();
 
     return () => {
       isMounted = false;
+      if (retryExercisePerformanceRef.current === retryCurrentPerformance) {
+        retryExercisePerformanceRef.current = null;
+      }
     };
-  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, getPerformancePrefetchController, historyScope, isSessionDataRequestCurrent, performancePrefetchLineageIds]);
+  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, getPerformancePrefetchController, historyScope, isSessionDataRequestCurrent, performancePrefetchLineageIds, performanceViewKey]);
 
   useEffect(() => {
     const requestToken = captureSessionDataRequestToken();
+    setLatestExerciseObservationPublicationOwner({
+      viewKey: observationViewKey,
+      requestToken,
+    });
 
     if (activeWorkoutExerciseLineageId && !activeWorkoutStartedAt) {
       latestExerciseObservationRequestKeyRef.current = null;
@@ -293,16 +383,41 @@ export function useActiveWorkoutExerciseHistory(
     return () => {
       isMounted = false;
     };
-  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, isSessionDataRequestCurrent, observationUserId]);
+  }, [activeWorkoutExerciseId, activeWorkoutExerciseLineageId, activeWorkoutStartedAt, captureSessionDataRequestToken, isSessionDataRequestCurrent, observationUserId, observationViewKey]);
+
+  const isPerformancePublicationCurrent = isActiveWorkoutHistoryPublicationCurrent(
+    latestExercisePerformancePublicationOwner,
+    performanceViewKey,
+    isSessionDataRequestCurrentRef.current,
+  );
+  const isObservationPublicationCurrent = isActiveWorkoutHistoryPublicationCurrent(
+    latestExerciseObservationPublicationOwner,
+    observationViewKey,
+    isSessionDataRequestCurrentRef.current,
+  );
 
   return {
-    latestExercisePerformance,
-    latestExercisePerformanceLoading,
-    latestExercisePerformanceError,
-    latestExerciseObservation,
-    latestExerciseObservationLoading,
-    latestExerciseObservationError,
-    latestExerciseObservationDidQuery,
+    latestExercisePerformance: isPerformancePublicationCurrent ? latestExercisePerformance : null,
+    latestExercisePerformanceLoading: isPerformancePublicationCurrent
+      ? latestExercisePerformanceLoading
+      : false,
+    latestExercisePerformanceError: isPerformancePublicationCurrent
+      ? latestExercisePerformanceError
+      : "",
+    latestExercisePerformanceStatus: isPerformancePublicationCurrent
+      ? latestExercisePerformanceStatus
+      : "idle",
+    latestExerciseObservation: isObservationPublicationCurrent ? latestExerciseObservation : null,
+    latestExerciseObservationLoading: isObservationPublicationCurrent
+      ? latestExerciseObservationLoading
+      : false,
+    latestExerciseObservationError: isObservationPublicationCurrent
+      ? latestExerciseObservationError
+      : "",
+    latestExerciseObservationDidQuery: isObservationPublicationCurrent
+      ? latestExerciseObservationDidQuery
+      : false,
+    retryExerciseHistory,
     resetExerciseHistory,
     resetExercisePerformanceHistory,
   };

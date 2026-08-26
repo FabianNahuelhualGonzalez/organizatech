@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -39,6 +39,10 @@ const TOKEN_REFRESHED_AUTHORIZATION_FAILURE =
   "[UI-NAV-01S.token-refresh-authoritative-reachability]";
 const AMBIGUOUS_IDENTITY_FAILURE =
   "[AUTH-CONFIRM-01.existing-identity-neutral] existing_identity termina sin autorización ni navegación";
+const EXPLICIT_EXISTING_IDENTITY_ERROR_FAILURE =
+  "[AUTH-SEPARATE-01.gateway.explicit-existing-identity-error] Usuario y Coach clasifican code/message antes de traducir otros errores";
+const CONFIRMATION_ROOT_NO_EFFECTS_FAILURE =
+  "[AUTH-SEPARATE-01.root.confirmation-no-effects] ambos estados neutralizados sólo reinician Auth, publican copy y retornan";
 const AC039_FAILURES = {
   exactMessage: "[AUTH-COACH-01.AC039.exact-message] conserva el mensaje de duplicado aprobado",
   authenticatedLookup: "[AUTH-COACH-01.AC039.authenticated-own-lookup] el duplicado deriva sólo de identity.userId autenticado",
@@ -81,6 +85,19 @@ function collectProductTypeScriptPaths(directory: string): string[] {
     }
   }
   return paths.sort();
+}
+
+function resolveNodeModulesDirectory() {
+  const localNodeModules = resolve("node_modules");
+  if (existsSync(join(localNodeModules, ".bin", "tsx"))) return localNodeModules;
+
+  const inheritedNodeModules = (process.env.NODE_PATH ?? "")
+    .split(delimiter)
+    .filter(Boolean)
+    .map((path) => resolve(path))
+    .find((path) => existsSync(join(path, ".bin", "tsx")));
+  assert.ok(inheritedNodeModules, "la suite runtime requiere un tsx disponible sin instalar paquetes");
+  return inheritedNodeModules;
 }
 
 const BROWSER_STORAGE_AUDIT_PATHS = [
@@ -743,10 +760,56 @@ function locateRegistrationErrorGuard(root: string, payloadName: string) {
   return { sourceFile, handleAuth, guard: guard! };
 }
 
+function locateRegistrationStateGuard(root: string, state: string) {
+  const sourceFile = parseTypeScript(root, ROOT_PATH);
+  const handleAuth = findNamedFunctionDeep(sourceFile, "handleAuth");
+  const guards = collectIfStatements(handleAuth.body).filter((ifStatement) => (
+    ifStatement.expression.getText(sourceFile) === `registration.state === "${state}"`
+  ));
+  assert.equal(guards.length, 1, CONFIRMATION_ROOT_NO_EFFECTS_FAILURE);
+  return { sourceFile, guard: guards[0]! };
+}
+
+function auditExplicitExistingIdentitySignupErrors(gateway: string) {
+  assert.match(
+    gateway,
+    /const EXISTING_IDENTITY_SIGNUP_ERROR_CODES = new Set\(\[\s*"user_already_exists",\s*"email_exists",\s*\]\);/,
+    EXPLICIT_EXISTING_IDENTITY_ERROR_FAILURE,
+  );
+  assert.match(
+    gateway,
+    /const EXISTING_IDENTITY_SIGNUP_ERROR_MESSAGES = new Set\(\[\s*"user already registered",\s*\]\);/,
+    EXPLICIT_EXISTING_IDENTITY_ERROR_FAILURE,
+  );
+  const sourceFile = parseTypeScript(gateway, GATEWAY_PATH);
+  const classifier = findNamedFunction(sourceFile, "isExistingIdentitySignupError")
+    .getText(sourceFile);
+  assert.equal(
+    /EXISTING_IDENTITY_SIGNUP_ERROR_CODES\.has\(code\)/.test(classifier)
+      && /EXISTING_IDENTITY_SIGNUP_ERROR_MESSAGES\.has\(message\)/.test(classifier),
+    true,
+    EXPLICIT_EXISTING_IDENTITY_ERROR_FAILURE,
+  );
+
+  for (const methodName of [
+    "signUpForCoachRegistration",
+    "signUpForUserRegistration",
+  ] as const) {
+    const method = findNamedMethod(sourceFile, methodName).getText(sourceFile);
+    const classifierPosition = method.indexOf("isExistingIdentitySignupError(error)");
+    const translationPosition = method.indexOf("translateAuthError(error)");
+    assert.equal(
+      classifierPosition >= 0 && translationPosition > classifierPosition,
+      true,
+      EXPLICIT_EXISTING_IDENTITY_ERROR_FAILURE,
+    );
+  }
+}
+
 function auditAmbiguousExistingIdentitySemantics(sources: Sources) {
   const sourceFile = parseTypeScript(sources.controller, CONTROLLER_PATH);
   const approvedMessage =
-    "Revisa tu correo para continuar. Si no recibes un mensaje, inicia sesión o recupera tu contraseña.";
+    "Si corresponde, completa la confirmación desde tu correo. También puedes iniciar sesión, recuperar tu contraseña o usar otro correo de acceso.";
   const approvedMessageNames: string[] = [];
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement)) continue;
@@ -762,19 +825,34 @@ function auditAmbiguousExistingIdentitySemantics(sources: Sources) {
       ) approvedMessageNames.push(declaration.name.text);
     }
   }
-  assert.equal(approvedMessageNames.length, 1, AMBIGUOUS_IDENTITY_FAILURE);
-  const approvedMessageName = approvedMessageNames[0]!;
+  assert.deepEqual(
+    approvedMessageNames,
+    ["USER_REGISTRATION_CONFIRMATION_MESSAGE"],
+    AMBIGUOUS_IDENTITY_FAILURE,
+  );
+  assert.match(
+    sources.controller,
+    /export const COACH_REGISTRATION_CONFIRMATION_MESSAGE\s*=\s*\n\s*USER_REGISTRATION_CONFIRMATION_MESSAGE;/,
+    AMBIGUOUS_IDENTITY_FAILURE,
+  );
+  assert.doesNotMatch(
+    approvedMessage,
+    /existe|registrad[oa]|encontramos|enviad[oa]|cuenta creada|Usuario|Coach/i,
+    AMBIGUOUS_IDENTITY_FAILURE,
+  );
 
   const cases = [
     {
       functionName: "registerUser",
       portal: "usuario",
-      payloadName: "signupPayload",
+      state: "user_confirmation_required",
+      messageName: "USER_REGISTRATION_CONFIRMATION_MESSAGE",
     },
     {
-      functionName: "registerCoach",
+      functionName: "registerSeparateCoach",
       portal: "coach",
-      payloadName: "coachRegistrationPayload",
+      state: "coach_confirmation_required",
+      messageName: "COACH_REGISTRATION_CONFIRMATION_MESSAGE",
     },
   ] as const;
 
@@ -785,12 +863,19 @@ function auditAmbiguousExistingIdentitySemantics(sources: Sources) {
       ? gatewayParameter.text
       : null;
     assert.ok(gatewayName, AMBIGUOUS_IDENTITY_FAILURE);
-    const guards = collectIfStatements(registration.body).filter(
-      (ifStatement) => /\.kind\s*===\s*"existing_identity"/.test(
-        ifStatement.expression.getText(sourceFile),
-      ),
-    );
+    const guards = collectIfStatements(registration.body).filter((ifStatement) => {
+      const condition = ifStatement.expression.getText(sourceFile);
+      return /\.kind\s*===\s*"confirmation_required"/.test(condition)
+        || /\.kind\s*===\s*"existing_identity"/.test(condition);
+    });
     assert.equal(guards.length, 1, AMBIGUOUS_IDENTITY_FAILURE);
+    const condition = guards[0]!.expression.getText(sourceFile);
+    assert.equal(
+      /\.kind\s*===\s*"confirmation_required"/.test(condition)
+        && /\.kind\s*===\s*"existing_identity"/.test(condition),
+      true,
+      AMBIGUOUS_IDENTITY_FAILURE,
+    );
     const ambiguousBranch = guards[0]!.thenStatement;
     if (!ts.isBlock(ambiguousBranch)) assert.fail(AMBIGUOUS_IDENTITY_FAILURE);
     const returns = collectReturns(ambiguousBranch).filter(
@@ -800,9 +885,9 @@ function auditAmbiguousExistingIdentitySemantics(sources: Sources) {
     const expression = returns[0]!.expression!;
     const message = objectLiteralPropertyExpression(expression, "message");
     assert.equal(
-      objectLiteralStringProperty(expression, "state") === "error"
+      objectLiteralStringProperty(expression, "state") === registrationCase.state
         && objectLiteralStringProperty(expression, "requestedPortal") === registrationCase.portal
-        && Boolean(message && isIdentifierNamed(message, approvedMessageName)),
+        && Boolean(message && isIdentifierNamed(message, registrationCase.messageName)),
       true,
       AMBIGUOUS_IDENTITY_FAILURE,
     );
@@ -818,41 +903,34 @@ function auditAmbiguousExistingIdentitySemantics(sources: Sources) {
       false,
       AMBIGUOUS_IDENTITY_FAILURE,
     );
-
-    const { guard: rootErrorGuard } =
-      locateRegistrationErrorGuard(sources.root, registrationCase.payloadName);
-    const forbiddenRootCalls = new Set([
-      "applySessionState",
-      "beginPortalResolution",
-      "continueAuthorizedPortalAccess",
-      "replaceCoachPortalSession",
-      "signOut",
-      "transition",
-      "replace",
-      "push",
-      "back",
-      "assign",
-    ]);
-    const rootErrorCalls = collectCallExpressions(rootErrorGuard.thenStatement);
-    const hasTerminalReturn = ts.isBlock(rootErrorGuard.thenStatement)
-      && rootErrorGuard.thenStatement.statements.some(ts.isReturnStatement);
-    assert.equal(
-      hasTerminalReturn
-        && !rootErrorCalls.some((call) => {
-          const callExpression = unwrapExpression(call.expression);
-          if (ts.isIdentifier(callExpression)) {
-            return forbiddenRootCalls.has(callExpression.text);
-          }
-          return ts.isPropertyAccessExpression(callExpression)
-            && forbiddenRootCalls.has(callExpression.name.text);
-        }),
-      true,
-      `${AMBIGUOUS_IDENTITY_FAILURE}: ${registrationCase.portal}`,
-    );
   }
+
+  const rootBranches = [
+    locateRegistrationStateGuard(sources.root, "user_confirmation_required"),
+    locateRegistrationStateGuard(sources.root, "coach_confirmation_required"),
+  ];
+  const branchTexts: string[] = [];
+  for (const { sourceFile: rootSourceFile, guard } of rootBranches) {
+    const branch = guard.thenStatement;
+    if (!ts.isBlock(branch)) assert.fail(CONFIRMATION_ROOT_NO_EFFECTS_FAILURE);
+    assert.equal(branch.statements.length, 2, CONFIRMATION_ROOT_NO_EFFECTS_FAILURE);
+    assert.equal(ts.isReturnStatement(branch.statements[1]!), true, CONFIRMATION_ROOT_NO_EFFECTS_FAILURE);
+    assert.deepEqual(
+      collectCallExpressions(branch).map((call) => call.expression.getText(rootSourceFile)),
+      ["registrationForm.controller.resetIfCurrent", "setAuthStatus"],
+      CONFIRMATION_ROOT_NO_EFFECTS_FAILURE,
+    );
+    assert.match(
+      branch.getText(rootSourceFile),
+      /^\{\s*if \(registrationForm\.controller\.resetIfCurrent\(registrationRevision\)\) \{\s*setAuthStatus\(registration\.message, "success"\);\s*\}\s*return;\s*\}$/,
+      CONFIRMATION_ROOT_NO_EFFECTS_FAILURE,
+    );
+    branchTexts.push(branch.getText(rootSourceFile));
+  }
+  assert.equal(branchTexts[0], branchTexts[1], CONFIRMATION_ROOT_NO_EFFECTS_FAILURE);
 }
 
-function auditDuplicateCoachRegistrationSemantics(sources: Sources) {
+function _auditDuplicateCoachRegistrationSemantics(sources: Sources) {
   const sourceFile = parseTypeScript(sources.controller, CONTROLLER_PATH);
   const registerCoach = findNamedFunction(sourceFile, "registerCoach");
   const inputParameter = registerCoach.parameters[0]?.name;
@@ -1723,153 +1801,110 @@ function auditGatewayUserLookupSemantics(gateway: string) {
   auditCrossedUserRowGuard(sourceFile);
 }
 
-function auditCoachIdentitySwitchSemantics(sources: Sources) {
+function auditCoachHybridSemantics(sources: Sources) {
   const { controller, gateway, hook, root, screen } = sources;
   const controllerSourceFile = parseTypeScript(controller, CONTROLLER_PATH);
   const registerCoachText = findNamedFunction(
     controllerSourceFile,
     "registerCoach",
   ).getText(controllerSourceFile);
-  const identitySwitchBranch = registerCoachText.match(
-    /if \(identity && !sameEmail\(identity\.email, input\.auth\.email\)\) \{[\s\S]*?state: "identity_switch_required"[\s\S]*?message: COACH_REGISTRATION_IDENTITY_SWITCH_MESSAGE[\s\S]*?\n    \}/,
-  )?.[0] ?? "";
-  assert.equal(
-    Boolean(identitySwitchBranch),
-    true,
-    "[AUTH-COACH-01.SWITCH.email-comparison] A/B distinto retorna el estado tipado antes de continuar",
+  const sharedText = findNamedFunction(
+    controllerSourceFile,
+    "registerSharedCoach",
+  ).getText(controllerSourceFile);
+  const separateText = findNamedFunction(
+    controllerSourceFile,
+    "registerSeparateCoach",
+  ).getText(controllerSourceFile);
+  const preparationText = findNamedFunction(
+    controllerSourceFile,
+    "prepareSharedCoachRegistration",
+  ).getText(controllerSourceFile);
+  assert.match(
+    registerCoachText,
+    /input\.flow === "shared"[\s\S]*registerSharedCoach\(input\.registration, owner, gateway\)[\s\S]*registerSeparateCoach\(input, owner, gateway\)/,
+    "[AUTH-HYBRID-01.controller.explicit-flow] selector tipado decide el flujo",
   );
   assert.match(
-    controller,
-    /"Hay una sesión activa con otro correo\. Cierra sesión para registrar esta cuenta Coach\."/,
-    "[AUTH-COACH-01.SWITCH.exact-message] conserva el aviso aprobado",
+    preparationText,
+    /getCurrentIdentity\(expectedUserId, owner\)[\s\S]*hasUserRegistration\(identity\.userId, owner\)[\s\S]*if \(!hasUserRegistration\) return \{ state: "sign_in_required" \};[\s\S]*state: "authorized"/,
+    "[AUTH-HYBRID-01.shared.login-and-membership] sesión y membresía Usuario son obligatorias",
   );
-  const typedIdentitySwitchResult = controller.match(
-    /\| \{\n    state: "identity_switch_required";[\s\S]*?\n  \}/,
-  )?.[0] ?? "";
-  assert.equal(
-    Boolean(typedIdentitySwitchResult)
-      && !/password|authState|userId|email:/.test(typedIdentitySwitchResult),
-    true,
-    "[AUTH-COACH-01.SWITCH.minimal-result] el resultado UI no transporta identidad ni secretos",
+  assert.match(
+    sharedText,
+    /getCurrentIdentity\(owner\.expectedUserId \?\? undefined, owner\)[\s\S]*hasUserRegistration\(currentIdentity\.userId, owner\)[\s\S]*if \(!hasUserRegistration\) return controlledCoachRegistrationError\(\);[\s\S]*createSharedCoachRegistration\([\s\S]*currentIdentity\.userId[\s\S]*coachRegistration\.userId !== currentIdentity\.userId/,
+    "[AUTH-HYBRID-01.shared.same-identity] activación queda ligada a la identidad Usuario",
   );
-  assert.equal(
-    /const existingCoachRegistration = await gateway\.getCoachRegistration\(identity\.userId, owner\);/.test(registerCoachText)
-      && /gateway\.activateCoachRegistrationIdentity\(identity, owner\)/.test(registerCoachText),
-    true,
-    "[AUTH-COACH-01.SWITCH.session-a-cannot-authorize-b] lookup y activación permanecen ligados a la identidad autenticada",
+  assert.doesNotMatch(
+    sharedText,
+    /signUpForCoachRegistration|activateCoachRegistrationIdentity|password|email:/,
+    "[AUTH-HYBRID-01.shared.no-new-credential] cuenta compartida no crea ni reemplaza credencial",
   );
-
-  const warningBranch = root.match(
-    /if \(registration\.state === "identity_switch_required"\) \{[\s\S]*?\n        \}/,
-  )?.[0] ?? "";
-  assert.equal(
-    /replaceCoachPortalSession\(null\)/.test(warningBranch)
-      && /setCoachIdentitySwitchRequired\(true\)/.test(warningBranch)
-      && /setAuthStatus\(registration\.message, "error"\)/.test(warningBranch),
-    true,
-    "[AUTH-COACH-01.SWITCH.portal-a-cleared-on-warning] el aviso desmonta A antes de exponer la acción",
+  assert.match(
+    separateText,
+    /signUpForCoachRegistration\(input, owner\)[\s\S]*signup\.kind === "confirmation_required" \|\| signup\.kind === "existing_identity"[\s\S]*getCoachRegistration\(identity\.userId, owner\)[\s\S]*getCurrentIdentity\(undefined, owner\)[\s\S]*if \(activeIdentity && activeIdentity\.userId !== identity\.userId\)[\s\S]*state: "coach_confirmation_required"/,
+    "[AUTH-HYBRID-01.separate.isolated-and-neutral] signUp separado no reutiliza sesión activa",
   );
-  assert.equal(
-    !/createCoachRegistration|activateCoachRegistrationIdentity|signInForCoachRegistration|signUpForCoachRegistration/.test(identitySwitchBranch),
-    true,
-    "[AUTH-COACH-01.SWITCH.no-write-before-switch] el mismatch no alcanza autenticación, lookup ni write Coach",
+  assert.doesNotMatch(
+    separateText,
+    /signInForCoachRegistration|signInWithPassword|createSharedCoachRegistration|hasUserRegistration/,
+    "[AUTH-HYBRID-01.separate.no-existing-password-probe] no prueba credenciales Usuario",
   );
 
   const gatewaySourceFile = parseTypeScript(gateway, GATEWAY_PATH);
-  const switchSignOutText = findNamedMethod(
+  const sharedGatewayText = findNamedMethod(
     gatewaySourceFile,
-    "signOutForCoachIdentitySwitch",
+    "createSharedCoachRegistration",
   ).getText(gatewaySourceFile);
-  assert.equal(
-    /getAuthoritativeIdentity\(supabase, owner\.expectedUserId, owner\)/.test(switchSignOutText)
-      && /sameEmail\(identity\.email, requestedEmail\)/.test(switchSignOutText)
-      && /supabase\.auth\.signOut\(\{ scope: "local" \}\)/.test(switchSignOutText)
-      && !/scope: "global"|supabase\.auth\.signOut\(\)/.test(switchSignOutText),
-    true,
-    "[AUTH-COACH-01.SWITCH.local-signout-only] el cambio revalida A y usa sólo signout local",
+  assert.match(
+    sharedGatewayText,
+    /requireAuthoritativeIdentity\(supabase, expectedUserId, owner\)[\s\S]*supabase\.rpc\("register_own_coach", \{[\s\S]*p_first_name:[\s\S]*p_contact_email:[\s\S]*row\.userId !== expectedUserId[\s\S]*requireAuthoritativeIdentity\(supabase, expectedUserId, owner\)/,
+    "[AUTH-HYBRID-01.gateway.allowlist-and-owner] RPC exacta revalida antes y después",
   );
-
-  const switchFunctionStart = hook.indexOf("  function signOutForCoachIdentitySwitch(");
-  const switchFunctionEnd = hook.indexOf("\n  function createGateway(", switchFunctionStart);
-  const switchFunctionText = switchFunctionStart >= 0 && switchFunctionEnd > switchFunctionStart
-    ? hook.slice(switchFunctionStart, switchFunctionEnd)
-    : "";
-  assert.equal(
-    /existingSwitch\?\.operation/.test(switchFunctionText)
-      && switchFunctionText.indexOf("invalidatePortalOperations();")
-        < switchFunctionText.indexOf(".signOutForCoachIdentitySwitch(requestedEmail, owner)")
-      && switchFunctionText.split(".signOutForCoachIdentitySwitch(requestedEmail, owner)").length - 1 === 1
-      && /return await pending\.event;/.test(switchFunctionText)
-      && /settleCoachIdentitySwitch\("signed_out"\)/.test(hook),
-    true,
-    "[AUTH-COACH-01.SWITCH.coordination] invalida owners, deduplica y espera SIGNED_OUT",
+  assert.doesNotMatch(
+    sharedGatewayText,
+    /\.\.\.payload|user_id|owner_id|profile_id|role:|\.insert\(|\.upsert\(/,
+    "[AUTH-HYBRID-01.gateway.no-client-ownership] no existe mass assignment ni ownership cliente",
   );
-
-  const signedOutBranch = root.match(
-    /if \(portalEventDecision === "complete_coach_identity_switch"\) \{[\s\S]*?\n          return;\n        \}/,
-  )?.[0] ?? "";
-  assert.equal(
-    /navigate: false/.test(signedOutBranch)
-      && !/authRouteController|navigation\.|history\./.test(signedOutBranch),
-    true,
-    "[AUTH-COACH-01.SWITCH.coach-route-preserved] SIGNED_OUT no abandona registro/coach",
+  assert.match(
+    hook,
+    /beginCoachRegistrationSubmit\([\s\S]*independentIdentity: flow === "separate"/,
+    "[AUTH-HYBRID-01.owner.flow-bound] sólo cuenta separada admite identidad aislada",
   );
-  assert.equal(
-    /preserveAuthForms: true/.test(signedOutBranch)
-      && /if \(options\.preserveAuthForms\) resetUserScopedTransientStatePreservingAuthForms\(\);\s*else resetUserScopedTransientState\(\);/.test(root)
-      && /<AuthScreen[\s\S]*?key=\{screen\}/.test(root),
-    true,
-    "[AUTH-COACH-01.SWITCH.form-b-preserved] el cierre conserva los campos controlados y locales de B",
+  assert.match(
+    root,
+    /beginCoachRegistrationSubmit\(\s*coachRegistrationPayload\.flow/,
+    "[AUTH-HYBRID-01.root.typed-flow] root sólo conecta el flujo tipado",
   );
-  assert.equal(
-    !/handleAuth\(|requestSubmit\(|\.submit\(|onSubmit/.test(signedOutBranch),
-    true,
-    "[AUTH-COACH-01.SWITCH.manual-resubmit-required] SIGNED_OUT no reenvía el formulario",
+  assert.match(
+    screen,
+    /value="shared"[\s\S]*Usar mi cuenta Usuario[\s\S]*value="separate"[\s\S]*Crear una cuenta Coach separada/,
+    "[AUTH-HYBRID-01.ui.approved-selector] selector conserva opciones aprobadas",
   );
-  assert.equal(
-    /if \(blockedCoachIdentityUserIdRef\.current === currentUserId\) \{\s*return "defer";/.test(hook)
-      && /function beginPortalResolution\(expectedUserId: string\)[\s\S]*portalResolutionOwnersRef\.current\.acceptIdentity\(expectedUserId\);[\s\S]*\.begin\(expectedUserId\)/.test(hook),
-    true,
-    "[AUTH-COACH-01.SWITCH.stale-a-blocked] un callback tardío de A no vuelve a aplicarse",
+  assert.match(screen, /Iniciar sesión y continuar/);
+  assert.match(screen, /Activar cuenta Coach/);
+  assert.match(screen, /Crear cuenta Coach/);
+  assert.doesNotMatch(
+    `${controller}\n${gateway}\n${hook}\n${root}\n${screen}`,
+    /identity_switch_required|signOutForCoachIdentitySwitch|coachIdentitySwitch|Cerrar sesión y continuar/,
+    "[AUTH-HYBRID-01.no-absolute-switch] el modelo absoluto quedó retirado",
   );
-
-  const readOwnCoachText = findNamedFunction(
-    gatewaySourceFile,
-    "readOwnCoachRegistration",
-  ).getText(gatewaySourceFile);
-  assert.equal(
-    /if \(row && row\.userId !== expectedUserId\) \{[\s\S]*?throw new MultiportalAuthRepositoryError/.test(readOwnCoachText),
-    true,
-    "[AUTH-COACH-01.SWITCH.crossed-coach-row-rejected] una fila Coach de otro user_id falla cerrada",
-  );
-  assert.equal(
-    /createCoachPortalSession\(\{[\s\S]*?authorizedUserId: access\.userId,[\s\S]*?registration: access\.coach/.test(root),
-    true,
-    "[AUTH-COACH-01.SWITCH.own-professional-title] el portal deriva professional_title sólo de la fila Coach autorizada",
-  );
-  assert.equal(
-    /const coachRegistration =[\s\S]{0,100}await gateway\.createCoachRegistration\([\s\S]*?input\.registration,[\s\S]*?identity\.userId,[\s\S]*?owner,[\s\S]*?\);/.test(registerCoachText)
-      && /coach: coachRegistration/.test(registerCoachText),
-    true,
-    "[AUTH-COACH-01.SWITCH.membership-required-for-success] no existe éxito Coach sin fila leída o creada",
-  );
-
-  assert.equal(
-    /isCoachRegistration && coachIdentitySwitchRequired \? \([\s\S]*?type="button"[\s\S]*?onClick=\{onCoachIdentitySwitch\}[\s\S]*?Cerrar sesión y continuar/.test(screen)
-      && /disabled=\{isBusy \|\| \(isCoachRegistration && coachIdentitySwitchRequired\)\}/.test(screen),
-    true,
-    "[AUTH-COACH-01.SWITCH.exact-ui] pantalla Auth muestra el botón exacto y bloquea el submit previo",
+  assert.doesNotMatch(
+    `${controller}\n${gateway}\n${hook}\n${root}\n${screen}`,
+    /listUsers|getUserByEmail|from\("auth\.users"\)|\.eq\("email"/,
+    "[AUTH-HYBRID-01.anti-enumeration] no consulta existencia pública de correo",
   );
 }
 
 function auditIntegration(sources: Sources) {
   auditNoSensitiveBrowserStorage(sources);
-  auditCoachIdentitySwitchSemantics(sources);
-  auditDuplicateCoachRegistrationSemantics(sources);
   auditAmbiguousExistingIdentitySemantics(sources);
+  auditExplicitExistingIdentitySignupErrors(sources.gateway);
+  auditCoachHybridSemantics(sources);
   const { root, controller, owner, gateway, hook, form, screen } = sources;
   const controllerSourceFile = parseTypeScript(controller, CONTROLLER_PATH);
-  const registerCoachFunction = findNamedFunction(controllerSourceFile, "registerCoach");
+  const registerSharedCoachFunction = findNamedFunction(controllerSourceFile, "registerSharedCoach");
+  const registerSeparateCoachFunction = findNamedFunction(controllerSourceFile, "registerSeparateCoach");
   const registerUserFunction = findNamedFunction(controllerSourceFile, "registerUser");
 
   assert.match(
@@ -1904,25 +1939,32 @@ function auditIntegration(sources: Sources) {
   );
   assert.match(controller, /identity\.userId !== input\.expectedUserId/);
   assert.match(
-    controller,
-    /async function registerCoach<[\s\S]*?coachRegistration\.userId !== identity\.userId[\s\S]*?controlledCoachRegistrationError\(\)/,
+    registerSharedCoachFunction.getText(controllerSourceFile),
+    /coachRegistration\.userId !== currentIdentity\.userId[\s\S]*?controlledCoachRegistrationError\(\)/,
     "[AUTH-COACH-01.controller.registration-owner] registro cruzado falla cerrado",
   );
   assert.match(
-    controller,
-    /async function registerCoach<[\s\S]*owner: CoachRegistrationOwner[\s\S]*if \(!owner\.isCurrent\(\)\) return staleCoachRegistration\(\)/,
-    "[AUTH-COACH-01.registration.owner-whole-lifecycle] registerCoach exige owner vigente desde el inicio",
+    registerSeparateCoachFunction.getText(controllerSourceFile),
+    /!coachRegistration \|\| coachRegistration\.userId !== identity\.userId[\s\S]*?controlledCoachRegistrationError\(\)/,
+    "[AUTH-COACH-01.controller.registration-owner] registro cruzado falla cerrado",
   );
+  for (const registrationFunction of [registerSharedCoachFunction, registerSeparateCoachFunction]) {
+    assert.match(
+      registrationFunction.getText(controllerSourceFile),
+      /owner: CoachRegistrationOwner[\s\S]*if \(!owner\.isCurrent\(\)\) return staleCoachRegistration\(\)/,
+      "[AUTH-COACH-01.registration.owner-whole-lifecycle] cada flujo exige owner vigente desde el inicio",
+    );
+  }
   assert.match(controller, /owner\.bindExpectedUserId\(identity\.userId\)/);
   assert.match(
-    registerCoachFunction.getText(controllerSourceFile),
-    /gateway\.signInForCoachRegistration\([\s\S]*?\}, owner\);\n      if \(!owner\.isCurrent\(\) \|\| signIn\.kind === "stale"\)/,
-    "[AUTH-COACH-01.registration.post-sign-in-owner] signIn tardío se descarta",
+    registerSeparateCoachFunction.getText(controllerSourceFile),
+    /gateway\.signUpForCoachRegistration\(input, owner\);[\s\S]*?if \(!owner\.isCurrent\(\) \|\| signup\.kind === "stale"\)/,
+    "[AUTH-SEPARATE-01.registration.post-signup-owner] signup tardío se descarta",
   );
-  assert.match(
-    controller,
-    /gateway\.createCoachRegistration\([\s\S]*?identity\.userId,[\s\S]*?owner,[\s\S]*?\);[\s\S]*if \(!owner\.isCurrent\(\)\)/,
-    "[AUTH-COACH-01.registration.post-write-owner] INSERT tardío no publica",
+  assert.doesNotMatch(
+    `${registerSharedCoachFunction.getText(controllerSourceFile)}\n${registerSeparateCoachFunction.getText(controllerSourceFile)}`,
+    /signInForCoachRegistration|createCoachRegistration|signInWithPassword/,
+    "[AUTH-SEPARATE-01.registration.no-existing-identity-reuse] registro Coach no prueba contraseña ni crea membresía cliente",
   );
   assert.match(
     controller,
@@ -1948,8 +1990,8 @@ function auditIntegration(sources: Sources) {
     "[AUTH-COACH-01.USER.registration.no-coach-write] Registro Usuario no crea Coach",
   );
   assert.doesNotMatch(
-    registerCoachFunction.getText(controllerSourceFile),
-    /hasUserRegistration|createUserRegistration|activateUserRegistrationIdentity/,
+    `${registerSharedCoachFunction.getText(controllerSourceFile)}\n${registerSeparateCoachFunction.getText(controllerSourceFile)}`,
+    /createUserRegistration|activateUserRegistrationIdentity/,
     "[AUTH-COACH-01.USER.registration.coach-does-not-create-user] Registro Coach no crea Usuario",
   );
   assert.match(
@@ -1969,50 +2011,85 @@ function auditIntegration(sources: Sources) {
     "[AUTH-COACH-01.owner.identity-bound] owner y usuario vigente deben coincidir",
   );
   assert.match(owner, /export interface CoachRegistrationOwner[\s\S]*readonly id: symbol;[\s\S]*readonly revision: number;[\s\S]*readonly expectedUserId: string \| null;[\s\S]*isCurrent\(\): boolean;/);
-  assert.match(owner, /begin\(\) \{[\s\S]*revision \+= 1;[\s\S]*Symbol\("coach-registration"\)/);
+  assert.match(owner, /begin\(options = \{\}\) \{[\s\S]*revision \+= 1;[\s\S]*Symbol\("coach-registration"\)/);
   assert.match(owner, /bindExpectedUserId\(userId: string\)[\s\S]*currentUserId !== null && currentUserId !== userId/);
 
   assert.match(gateway, /await supabase\.auth\.getUser\(\)/);
   assert.match(gateway, /\.from\("coach_registrations"\)/);
-  assert.match(
-    gateway,
-    /client\.rpc\("register_own_coach", rpcPayload\)/,
-    "[AUTH-COACH-01.gateway.atomic-rpc] write usa la RPC atómica invoker",
-  );
   auditGatewayCoachLookupSemantics(gateway);
   auditGatewayUserLookupSemantics(gateway);
-  assert.match(gateway, /p_expected_user_id: expectedUserId[\s\S]*p_first_name:[\s\S]*p_professional_title:/);
   assert.match(gateway, /persistSession: false,[\s\S]*autoRefreshToken: false,[\s\S]*detectSessionInUrl: false/);
   const gatewaySourceFile = parseTypeScript(gateway, GATEWAY_PATH);
-  const coachSignInMethod = findNamedMethod(gatewaySourceFile, "signInForCoachRegistration");
+  const coachSignupMethod = findNamedMethod(gatewaySourceFile, "signUpForCoachRegistration");
+  const coachSignupText = coachSignupMethod.getText(gatewaySourceFile);
+  assert.equal(
+    /withSignupConfirmationMetadata\([\s\S]*contactEmail: payload\.registration\.contact_email[\s\S]*\)/.test(coachSignupText)
+      && /\.auth\.signUp\(signupPayload\)/.test(coachSignupText)
+      && !/\.auth\.signUp\(payload/.test(coachSignupText),
+    true,
+    "[AUTH-SEPARATE-01.gateway.allowlisted-coach-signup]",
+  );
+  assert.equal(
+    /isolatedClient\.auth\.signUp\(signupPayload\)/.test(coachSignupText)
+      && !/supabase\.auth\.signUp/.test(coachSignupText),
+    true,
+    "[AUTH-SEPARATE-01.gateway.isolated-coach-signup]",
+  );
   const signOutMethod = findNamedMethod(gatewaySourceFile, "signOut");
-  assert.match(
-    coachSignInMethod.getText(gatewaySourceFile),
-    /const isolatedClient = getRegistrationClient\(\);[\s\S]*isolatedClient\.auth\.signInWithPassword/,
-    "[AUTH-COACH-01.registration.isolated-sign-in] credenciales A no mutan la sesión global",
+  const signOutText = signOutMethod.getText(gatewaySourceFile);
+  assert.doesNotMatch(
+    gateway,
+    /signInForCoachRegistration|async createCoachRegistration\(/,
+    "[AUTH-HYBRID-01.gateway.closed-coach-ports] sólo existen signup separado y RPC compartida",
   );
   assert.match(
-    gateway,
-    /async signOut\(reason, owner\) \{\n      if \(!owner\.isCurrent\(\)\) return "stale";/,
+    signOutText,
+    /const expectedUserId = owner\.expectedUserId;[\s\S]*?if \(!expectedUserId \|\| !owner\.isCurrent\(\)\) return "stale";/,
     "[AUTH-COACH-01.gateway.signout-owner-guard] gateway rechaza owner stale antes de efectos",
   );
   assert.match(
-    signOutMethod.getText(gatewaySourceFile),
-    /const identity = await getAuthoritativeIdentity\(supabase, owner\.expectedUserId, owner\);/,
+    signOutText,
+    /const identity = await getAuthoritativeIdentity\(supabase, expectedUserId, owner\);[\s\S]*?identity\.userId !== expectedUserId[\s\S]*?owner\.expectedUserId !== expectedUserId[\s\S]*?!owner\.isCurrent\(\)/,
     "[AUTH-COACH-01.gateway.signout-fresh-identity] signOut revalida expectedUserId",
   );
-  assert.match(gateway, /supabase\.auth\.signOut\(\{ scope: "local" \}\)/);
+  assert.match(signOutText, /supabase\.auth\.signOut\(\{ scope: "local" \}\)/);
   assert.doesNotMatch(
     gateway,
     /\.from\("coach_registrations"\)[\s\S]{0,180}?\.insert\(|\.upsert\(|return\s*\{\s*\.\.\.input|user_metadata|raw_user_meta_data|app_metadata/,
     "[AUTH-COACH-01.gateway.no-raw-spread] no propaga objetos crudos ni metadata",
   );
 
-  assert.match(form, /registration: \{[\s\S]*professional_title: professionalTitle/);
-  assert.doesNotMatch(
-    form.match(/registration: \{[\s\S]*?\n      \},/m)?.[0] ?? "",
-    /user_id|owner_id|profile_id|\bage\b|\brole\b|password|email/,
+  const formSourceFile = parseTypeScript(form, FORM_PATH);
+  const confirmationMetadataFunction = findNamedFunction(
+    formSourceFile,
+    "withSignupConfirmationMetadata",
+  ).getText(formSourceFile);
+  assert.equal(
+    /const allowlistedData: UserSignupMetadata = \{[\s\S]*display_name: data\.display_name,[\s\S]*first_name: data\.first_name,[\s\S]*last_name: data\.last_name,[\s\S]*birth_date: data\.birth_date,[\s\S]*gender: data\.gender,[\s\S]*phone_number: data\.phone_number/.test(
+      confirmationMetadataFunction,
+    )
+      && !/allowlistedData[^=]*= \{[\s\S]*\.\.\.data/.test(confirmationMetadataFunction),
+    true,
+    "[AUTH-SEPARATE-01.form.explicit-metadata-allowlist]",
   );
+  const coachWriteBuilder = findNamedFunction(
+    formSourceFile,
+    "buildCoachRegistrationWritePayload",
+  ).getText(formSourceFile);
+  assert.match(
+    coachWriteBuilder,
+    /payload: \{[\s\S]*first_name,[\s\S]*last_name,[\s\S]*birth_date,[\s\S]*gender,[\s\S]*phone_number,[\s\S]*professional_title: professionalTitle,[\s\S]*contact_email: contactEmail/,
+  );
+  assert.doesNotMatch(
+    coachWriteBuilder,
+    /user_id|owner_id|profile_id|\bage\b|\brole\b|password/,
+  );
+  assert.match(form, /contact_email: registration\.contactEmail/);
+  assert.match(gateway, /contactEmail: payload\.registration\.contact_email/);
+  assert.match(gateway, /contactEmail: row\.contact_email/);
+  assert.match(screen, /Correo de acceso Coach[\s\S]*Correo de contacto/);
+  assert.match(screen, /¿Ya tienes una cuenta Organizatech Usuario\?[\s\S]*crea tu cuenta Coach con otro correo\./);
+  assert.match(screen, /Continuar con Google \(no disponible\)[\s\S]*disabled/);
 
   assert.match(hook, /portalResolutionOwnersRef\.current\.hasPending\(\)/);
   assert.match(
@@ -2032,7 +2109,7 @@ function auditIntegration(sources: Sources) {
   );
   assert.match(hook, /beginPortalResolution\(expectedUserId: string\)/);
   assert.match(hook, /\{ requestedPortal, expectedUserId, owner \}/);
-  assert.match(hook, /beginCoachRegistrationSubmit\(\)[\s\S]*coachRegistrationOwnersRef\.current\.begin\(\)/);
+  assert.match(hook, /beginCoachRegistrationSubmit\([\s\S]*independentIdentity: flow === "separate"/);
   assert.match(
     hook,
     /beginUserRegistrationSubmit\(\)[\s\S]*userRegistrationOwnersRef\.current\.begin\(\)/,
@@ -2078,7 +2155,7 @@ function auditIntegration(sources: Sources) {
   assert.match(root, /event === "SIGNED_OUT"[\s\S]*interactiveAuthAttemptRef\.current = false/);
   assert.match(
     root,
-    /case "user_authorized": \{[\s\S]*createUserPortalAuthorizationProof\(\{[\s\S]*replaceCoachPortalSession\(null\);[\s\S]*const continuation = await continueAuthenticatedSession\(authState, intent\);[\s\S]*continuation\.kind === "stale"[\s\S]*replaceUserPortalAuthorizationProof\(authorizationProof\);/,
+    /case "user_authorized": \{[\s\S]*createUserPortalAuthorizationProof\(\{[\s\S]*replaceCoachPortalSession\(null\);[\s\S]*const continuation = await continueAuthenticatedSession\(\s*authState,\s*intent,\s*clearCompletedAuthForm,\s*\);[\s\S]*continuation\.kind === "stale"[\s\S]*replaceUserPortalAuthorizationProof\(authorizationProof\);/,
     "[AUTH-COACH-01.USER.root.user-destination] Usuario conserva su continuación productiva",
   );
   assert.match(
@@ -2252,7 +2329,7 @@ function replaceExactlyOnce(source: string, target: string, replacement: string,
 }
 
 function injectAfterAuthCredentials(source: string, injectedSource: string, name: string) {
-  const credentialsDeclaration = "    const { email, password } = authPayload;";
+  const credentialsDeclaration = '    const password = authPayload?.password ?? "";';
   return replaceExactlyOnce(
     source,
     credentialsDeclaration,
@@ -2332,68 +2409,74 @@ test("controles positivos semánticos toleran nombres y reformateos inocentes", 
   }
 });
 
-const duplicateCoachPositiveControls = [
+const authSeparatePositiveControls = [
   {
-    name: "AC-039 acepta renombre inocente de la fila Coach existente",
-    apply(source: string) {
-      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
-      const registerCoach = findNamedFunction(sourceFile, "registerCoach");
-      return renameIdentifiersWithin(
-        source,
-        sourceFile,
-        registerCoach,
-        "existingCoachRegistration",
-        "authenticatedOwnCoachMembership",
-      );
-    },
-  },
-  {
-    name: "AC-039 acepta reformateo multilinea del lookup own-only",
+    name: "AUTH-SEPARATE-01 tolera comentario antes del signup Coach",
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
-      `    const existingCoachRegistration = await gateway.getCoachRegistration(
-      identity.userId,
-      owner,
-    );`,
-      "control positivo AC-039: reformateo",
+      "    const signup = await gateway.signUpForCoachRegistration(input, owner);",
+      `    // La identidad Coach se crea únicamente mediante este signup aislado.
+    const signup = await gateway.signUpForCoachRegistration(input, owner);`,
+      "control positivo AUTH-SEPARATE-01 controller",
     ),
   },
   {
-    name: "AC-039 ignora comentarios sobre fallback, metadata y títulos",
+    name: "AUTH-SEPARATE-01 tolera comentario antes del payload allowlisted",
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const method = findNamedMethod(sourceFile, "signUpForCoachRegistration");
+      const transformedMethod = replaceExactlyOnce(
+        method.getText(sourceFile),
+        "      const signupPayload = withSignupConfirmationMetadata(",
+        `      // El transporte conserva sólo los campos explícitos del registro.
+      const signupPayload = withSignupConfirmationMetadata(`,
+        "control positivo AUTH-SEPARATE-01 gateway",
+      );
+      return replaceNodeText(source, sourceFile, method, transformedMethod);
+    },
+  },
+  {
+    name: "AUTH-SEPARATE-01 tolera comentario sobre el correo de contacto",
+    file: "form" as const,
+    path: FORM_PATH,
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "    if (existingCoachRegistration) {",
-      `    // No usar metadata ni el professional_title del intento como fallback.
-    if (existingCoachRegistration) {`,
-      "control positivo AC-039: comentario",
+      "  const rawContactEmail = readRawText(formData, \"register-contact-email\");",
+      `  // El contacto profesional no participa del inicio de sesión.
+  const rawContactEmail = readRawText(formData, "register-contact-email");`,
+      "control positivo AUTH-SEPARATE-01 form",
     ),
   },
 ] as const;
 
-const EXPECTED_DUPLICATE_COACH_POSITIVE_CONTROL_COUNT = 3;
+const EXPECTED_AUTH_SEPARATE_POSITIVE_CONTROL_COUNT = 3;
 assert.equal(
-  duplicateCoachPositiveControls.length,
-  EXPECTED_DUPLICATE_COACH_POSITIVE_CONTROL_COUNT,
-  "AUTH-COACH-01 AC-039 fija tres controles inocentes de nombre, formato y comentarios",
+  authSeparatePositiveControls.length,
+  EXPECTED_AUTH_SEPARATE_POSITIVE_CONTROL_COUNT,
+  "AUTH-SEPARATE-01 fija tres controles positivos inocentes",
 );
 
-test("controles positivos AC-039 toleran renombres, formato y comentarios", () => {
+test("controles positivos AUTH-SEPARATE-01 toleran comentarios inocentes", () => {
   const sources = readSources();
-  for (const control of duplicateCoachPositiveControls) {
-    const transformed = control.apply(sources.controller);
+  for (const control of authSeparatePositiveControls) {
+    const original = sources[control.file];
+    const transformed = control.apply(original);
     assert.notEqual(
       sha256(transformed),
-      sha256(sources.controller),
+      sha256(original),
       `${control.name}: transformación efectiva`,
     );
-    assertValidTypeScript(transformed, CONTROLLER_PATH);
+    assertValidTypeScript(transformed, control.path);
     assert.doesNotThrow(
-      () => auditDuplicateCoachRegistrationSemantics({
+      () => auditIntegration({
         ...sources,
-        controller: transformed,
+        [control.file]: transformed,
       }),
-      `${control.name}: no cambia la semántica AC-039`,
+      `${control.name}: no cambia la semántica AUTH-SEPARATE-01`,
     );
   }
 });
@@ -2590,7 +2673,7 @@ test("wiring multiportal bloquea bypass cliente y deja seam Coach tipado", () =>
 const mutations = [
   {
     name: "AC-039 · restaura fallback existing ?? create",
-    ac039Evidence: "restore_existing_fallback" as const,
+    supersededAc039Evidence: "restore_existing_fallback" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.existingBranch,
@@ -2624,7 +2707,7 @@ const mutations = [
   },
   {
     name: "AC-039 · fila existente retorna coach_authorized",
-    ac039Evidence: "authorize_existing_registration" as const,
+    supersededAc039Evidence: "authorize_existing_registration" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.controlledError,
@@ -2649,7 +2732,7 @@ const mutations = [
   },
   {
     name: "AC-039 · crea antes de rechazar duplicado",
-    ac039Evidence: "create_before_duplicate_rejection" as const,
+    supersededAc039Evidence: "create_before_duplicate_rejection" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.noCreate,
@@ -2664,7 +2747,7 @@ const mutations = [
   },
   {
     name: "AC-039 · activa identidad antes de rechazar duplicado",
-    ac039Evidence: "activate_before_duplicate_rejection" as const,
+    supersededAc039Evidence: "activate_before_duplicate_rejection" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.noActivation,
@@ -2679,7 +2762,7 @@ const mutations = [
   },
   {
     name: "AC-039 · aplica professional_title nuevo sobre la fila existente",
-    ac039Evidence: "overwrite_existing_title" as const,
+    supersededAc039Evidence: "overwrite_existing_title" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.immutableRow,
@@ -2696,7 +2779,7 @@ const mutations = [
   },
   {
     name: "AC-039 · navega después de publicar el error duplicado",
-    ac039Evidence: "navigate_after_duplicate" as const,
+    supersededAc039Evidence: "navigate_after_duplicate" as const,
     file: "root" as const,
     path: ROOT_PATH,
     expectedFailure: AC039_FAILURES.rootNoContinuation,
@@ -2722,7 +2805,7 @@ const mutations = [
   },
   {
     name: "AC-039 · ejecuta signOut durante el rechazo duplicado",
-    ac039Evidence: "signout_on_duplicate" as const,
+    supersededAc039Evidence: "signout_on_duplicate" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.noSignOut,
@@ -2740,7 +2823,7 @@ const mutations = [
   },
   {
     name: "AC-039 · infiere duplicado desde el correo controlado por cliente",
-    ac039Evidence: "infer_duplicate_from_client_email" as const,
+    supersededAc039Evidence: "infer_duplicate_from_client_email" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.noClientInference,
@@ -2772,7 +2855,7 @@ const mutations = [
   },
   {
     name: "AC-039 · revela duplicado con contraseña incorrecta",
-    ac039Evidence: "reveal_duplicate_with_invalid_password" as const,
+    supersededAc039Evidence: "reveal_duplicate_with_invalid_password" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.invalidPasswordPrivacy,
@@ -2798,7 +2881,7 @@ const mutations = [
   },
   {
     name: "AC-039 · rechaza incorrectamente a Usuario-only",
-    ac039Evidence: "reject_user_only" as const,
+    supersededAc039Evidence: "reject_user_only" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.userOnlyAllowed,
@@ -2824,7 +2907,7 @@ const mutations = [
   },
   {
     name: "AC-039 · rompe Login Coach con fila propia",
-    ac039Evidence: "break_coach_login" as const,
+    supersededAc039Evidence: "break_coach_login" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: "[AUTH-COACH-01.controller.unique-coach-authorization-path] resolvePortalAccess tiene un único retorno Coach",
@@ -2845,7 +2928,7 @@ const mutations = [
   },
   {
     name: "AC-039 · consulta duplicado antes del mismatch A→B",
-    ac039Evidence: "lookup_before_identity_switch" as const,
+    supersededAc039Evidence: "lookup_before_identity_switch" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.switchPrecedence,
@@ -2861,7 +2944,7 @@ const mutations = [
   },
   {
     name: "AC-039 · acepta fila cruzada como duplicado",
-    ac039Evidence: "accept_crossed_row_as_duplicate" as const,
+    supersededAc039Evidence: "accept_crossed_row_as_duplicate" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.crossedRow,
@@ -2875,7 +2958,7 @@ const mutations = [
   },
   {
     name: "AC-039 · cambia el mensaje exacto aprobado",
-    ac039Evidence: "change_exact_message" as const,
+    supersededAc039Evidence: "change_exact_message" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.exactMessage,
@@ -2889,7 +2972,7 @@ const mutations = [
   },
   {
     name: "AC-039 · transporta professional_title nuevo en el error",
-    ac039Evidence: "transport_new_title" as const,
+    supersededAc039Evidence: "transport_new_title" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.minimalResult,
@@ -2905,7 +2988,7 @@ const mutations = [
   },
   {
     name: "AC-039 · ejecuta signup antes de rechazar y puede emitir correo",
-    ac039Evidence: "signup_before_duplicate_rejection" as const,
+    supersededAc039Evidence: "signup_before_duplicate_rejection" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: AC039_FAILURES.noEmail,
@@ -2919,17 +3002,206 @@ const mutations = [
     ),
   },
   {
-    name: "SWITCH · omite comparación de correo A/B",
+    name: "AC-039 R1 · Coach distingue existing_identity de confirmation_required",
+    ac039Evidence: "coach_public_outcome_diverges" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AMBIGUOUS_IDENTITY_FAILURE,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '    if (signup.kind === "confirmation_required" || signup.kind === "existing_identity") {',
+      '    if (signup.kind === "confirmation_required") {',
+      "AC-039 R1 separa existing_identity Coach",
+    ),
+  },
+  {
+    name: "AC-039 R1 · Usuario distingue existing_identity de confirmation_required",
+    ac039Evidence: "user_public_outcome_diverges" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AMBIGUOUS_IDENTITY_FAILURE,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      `          signup.kind === "confirmation_required"
+          || signup.kind === "existing_identity"`,
+      '          signup.kind === "confirmation_required"',
+      "AC-039 R1 separa existing_identity Usuario",
+    ),
+  },
+  {
+    name: "AC-039 R1 · consulta membresía Coach antes del resultado neutral",
+    ac039Evidence: "coach_membership_lookup_before_neutral_result" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AMBIGUOUS_IDENTITY_FAILURE,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      `    if (signup.kind === "confirmation_required" || signup.kind === "existing_identity") {
+      return {`,
+      `    if (signup.kind === "confirmation_required" || signup.kind === "existing_identity") {
+      await gateway.getCoachRegistration("enumerated-user", owner);
+      return {`,
+      "AC-039 R1 agrega lookup Coach al resultado neutral",
+    ),
+  },
+  {
+    name: "AC-039 R1 · copy público afirma existencia",
+    ac039Evidence: "public_copy_reveals_existing_account" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: AMBIGUOUS_IDENTITY_FAILURE,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "Si corresponde, completa la confirmación desde tu correo. También puedes iniciar sesión, recuperar tu contraseña o usar otro correo de acceso.",
+      "Esta cuenta ya existe.",
+      "AC-039 R1 revela existencia en copy público",
+    ),
+  },
+  {
+    name: "AUTH-SEPARATE-01 R2 · omite code estable de identidad existente",
+    r2Evidence: "existing_identity_code" as const,
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: EXPLICIT_EXISTING_IDENTITY_ERROR_FAILURE,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '  "user_already_exists",',
+      '  "user_identity_unknown",',
+      "R2 omite code estable",
+    ),
+  },
+  {
+    name: "AUTH-SEPARATE-01 R2 · omite fallback de mensaje conocido",
+    r2Evidence: "existing_identity_message" as const,
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: EXPLICIT_EXISTING_IDENTITY_ERROR_FAILURE,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      '  "user already registered",',
+      '  "unknown signup error",',
+      "R2 omite fallback message",
+    ),
+  },
+  {
+    name: "AUTH-SEPARATE-01 R2 · clasifica cualquier error como identidad existente",
+    r2Evidence: "non_identity_error_control" as const,
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: EXPLICIT_EXISTING_IDENTITY_ERROR_FAILURE,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "  return EXISTING_IDENTITY_SIGNUP_ERROR_MESSAGES.has(message);",
+      "  return Boolean(message);",
+      "R2 elimina control inocente no-identidad",
+    ),
+  },
+  {
+    name: "AUTH-SEPARATE-01 R2 · Coach cambia ruta tras confirmación neutral",
+    r2Evidence: "coach_auth_route" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: CONFIRMATION_ROOT_NO_EFFECTS_FAILURE,
+    apply(source: string) {
+      const { sourceFile, guard } = locateRegistrationStateGuard(
+        source,
+        "coach_confirmation_required",
+      );
+      assert.ok(ts.isBlock(guard.thenStatement), "R2 localiza confirmación Coach");
+      const block = guard.thenStatement;
+      const mutatedBlock = replaceExactlyOnce(
+        block.getText(sourceFile),
+        "          return;",
+        `          authRouteController.replace({ mode: "login", accountType: "coach" });
+          return;`,
+        "R2 Coach cambia ruta",
+      );
+      return replaceNodeText(source, sourceFile, block, mutatedBlock);
+    },
+  },
+  {
+    name: "AUTH-SEPARATE-01 R2 · Usuario navega tras confirmación neutral",
+    r2Evidence: "user_navigation" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: CONFIRMATION_ROOT_NO_EFFECTS_FAILURE,
+    apply(source: string) {
+      const { sourceFile, guard } = locateRegistrationStateGuard(
+        source,
+        "user_confirmation_required",
+      );
+      assert.ok(ts.isBlock(guard.thenStatement), "R2 localiza confirmación Usuario");
+      const block = guard.thenStatement;
+      const mutatedBlock = replaceExactlyOnce(
+        block.getText(sourceFile),
+        "          return;",
+        `          navigation.transition(
+            createAuthNavigationReset("login", "signup-confirmation-pending"),
+          );
+          return;`,
+        "R2 Usuario navega",
+      );
+      return replaceNodeText(source, sourceFile, block, mutatedBlock);
+    },
+  },
+  {
+    name: "AUTH-SEPARATE-01 R2 · Coach aplica sesión tras confirmación neutral",
+    r2Evidence: "coach_session_application" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: CONFIRMATION_ROOT_NO_EFFECTS_FAILURE,
+    apply(source: string) {
+      const { sourceFile, guard } = locateRegistrationStateGuard(
+        source,
+        "coach_confirmation_required",
+      );
+      assert.ok(ts.isBlock(guard.thenStatement), "R2 localiza confirmación Coach");
+      const block = guard.thenStatement;
+      const mutatedBlock = replaceExactlyOnce(
+        block.getText(sourceFile),
+        "          return;",
+        `          applySessionState(registration.authState);
+          return;`,
+        "R2 Coach aplica sesión",
+      );
+      return replaceNodeText(source, sourceFile, block, mutatedBlock);
+    },
+  },
+  {
+    name: "AUTH-SEPARATE-01 R2 · Coach publica portal tras confirmación neutral",
+    r2Evidence: "coach_portal_application" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: CONFIRMATION_ROOT_NO_EFFECTS_FAILURE,
+    apply(source: string) {
+      const { sourceFile, guard } = locateRegistrationStateGuard(
+        source,
+        "coach_confirmation_required",
+      );
+      assert.ok(ts.isBlock(guard.thenStatement), "R2 localiza confirmación Coach");
+      const block = guard.thenStatement;
+      const mutatedBlock = replaceExactlyOnce(
+        block.getText(sourceFile),
+        "          return;",
+        `          replaceCoachPortalSession(null);
+          return;`,
+        "R2 Coach publica portal",
+      );
+      return replaceNodeText(source, sourceFile, block, mutatedBlock);
+    },
+  },
+  {
+    name: "SWITCH · permite reutilizar una sesión activa del mismo correo",
     identitySwitchEvidence: "omit_email_comparison" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
-    expectedFailure: "[AUTH-COACH-01.SWITCH.email-comparison] A/B distinto retorna el estado tipado antes de continuar",
+    expectedFailure: "[AUTH-SEPARATE-01.SWITCH.any-session] cualquier sesión activa exige cierre antes del signup",
     exactFailureLine: true,
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "    if (identity && !sameEmail(identity.email, input.auth.email)) {",
-      "    if (false) {",
-      "SWITCH omite comparación de correo",
+      "    if (currentIdentity) {",
+      "    if (currentIdentity.email !== input.auth.email) {",
+      "SWITCH permite reutilizar sesión del mismo correo",
     ),
   },
   {
@@ -2941,8 +3213,8 @@ const mutations = [
     exactFailureLine: true,
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
-      "    const existingCoachRegistration = await gateway.getCoachRegistration(input.auth.email, owner);",
+      "    const coachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
+      "    const coachRegistration = await gateway.getCoachRegistration(input.auth.email, owner);",
       "SWITCH autoriza B con sesión A",
     ),
   },
@@ -2961,7 +3233,7 @@ const mutations = [
     ),
   },
   {
-    name: "SWITCH · ejecuta write Coach antes del cambio de identidad",
+    name: "SWITCH · consulta membresía Coach antes del cambio de identidad",
     identitySwitchEvidence: "write_before_switch" as const,
     file: "controller" as const,
     path: CONTROLLER_PATH,
@@ -2969,9 +3241,9 @@ const mutations = [
     exactFailureLine: true,
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "    if (identity && !sameEmail(identity.email, input.auth.email)) {\n      return {",
-      "    if (identity && !sameEmail(identity.email, input.auth.email)) {\n      await gateway.createCoachRegistration(input.registration, identity.userId, owner);\n      return {",
-      "SWITCH write antes del cambio",
+      "    if (currentIdentity) {\n      if (!owner.bindExpectedUserId(currentIdentity.userId)) return staleCoachRegistration();",
+      "    if (currentIdentity) {\n      await gateway.getCoachRegistration(currentIdentity.userId, owner);\n      if (!owner.bindExpectedUserId(currentIdentity.userId)) return staleCoachRegistration();",
+      "SWITCH lookup antes del cambio",
     ),
   },
   {
@@ -3091,21 +3363,8 @@ const mutations = [
     exactFailureLine: true,
     apply: (source: string) => replaceExactlyOnce(
       source,
-      `    const coachRegistration = existingCoachRegistration ?? await gateway.createCoachRegistration(
-      input.registration,
-      identity.userId,
-      owner,
-    );`,
-      `    const coachRegistration = {
-      userId: identity.userId,
-      createdAt: "not-persisted",
-      firstName: input.registration.first_name,
-      lastName: input.registration.last_name,
-      birthDate: input.registration.birth_date,
-      gender: input.registration.gender,
-      phoneNumber: input.registration.phone_number,
-      professionalTitle: input.registration.professional_title,
-    };`,
+      "    if (!coachRegistration || coachRegistration.userId !== identity.userId) {",
+      "    if (false) {",
       "SWITCH éxito sin membresía",
     ),
   },
@@ -3332,6 +3591,180 @@ const mutations = [
     ),
   },
   {
+    name: "AUTH-HYBRID-01 · el dispatcher ignora el flujo elegido",
+    hybridEvidence: "explicit_flow" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-HYBRID-01.controller.explicit-flow] selector tipado decide el flujo",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      'input.flow === "shared"',
+      "true",
+      "HYBRID dispatcher ignora flujo",
+    ),
+  },
+  {
+    name: "AUTH-HYBRID-01 · preparación compartida omite membresía Usuario",
+    hybridEvidence: "preparation_user_membership" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-HYBRID-01.shared.login-and-membership] sesión y membresía Usuario son obligatorias",
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const preparation = findNamedFunction(sourceFile, "prepareSharedCoachRegistration");
+      const mutatedPreparation = replaceExactlyOnce(
+        preparation.getText(sourceFile),
+        '    if (!hasUserRegistration) return { state: "sign_in_required" };',
+        '    if (false) return { state: "sign_in_required" };',
+        "HYBRID preparación sin Usuario",
+      );
+      return replaceNodeText(source, sourceFile, preparation, mutatedPreparation);
+    },
+  },
+  {
+    name: "AUTH-HYBRID-01 · activación compartida omite membresía Usuario",
+    hybridEvidence: "shared_user_membership" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-HYBRID-01.shared.same-identity] activación queda ligada a la identidad Usuario",
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const shared = findNamedFunction(sourceFile, "registerSharedCoach");
+      const mutatedShared = replaceExactlyOnce(
+        shared.getText(sourceFile),
+        "    if (!hasUserRegistration) return controlledCoachRegistrationError();",
+        "    if (false) return controlledCoachRegistrationError();",
+        "HYBRID activación sin Usuario",
+      );
+      return replaceNodeText(source, sourceFile, shared, mutatedShared);
+    },
+  },
+  {
+    name: "AUTH-HYBRID-01 · cuenta compartida ejecuta signUp",
+    hybridEvidence: "shared_signup" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-HYBRID-01.shared.no-new-credential] cuenta compartida no crea ni reemplaza credencial",
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const shared = findNamedFunction(sourceFile, "registerSharedCoach");
+      const mutatedShared = replaceExactlyOnce(
+        shared.getText(sourceFile),
+        "    const coachRegistration = await gateway.createSharedCoachRegistration(",
+        "    await gateway.signUpForCoachRegistration(registration as never, owner);\n    const coachRegistration = await gateway.createSharedCoachRegistration(",
+        "HYBRID shared signUp",
+      );
+      return replaceNodeText(source, sourceFile, shared, mutatedShared);
+    },
+  },
+  {
+    name: "AUTH-HYBRID-01 · cuenta compartida acepta fila cruzada",
+    hybridEvidence: "shared_crossed_row" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-HYBRID-01.shared.same-identity] activación queda ligada a la identidad Usuario",
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const shared = findNamedFunction(sourceFile, "registerSharedCoach");
+      const mutatedShared = replaceExactlyOnce(
+        shared.getText(sourceFile),
+        "    if (coachRegistration.userId !== currentIdentity.userId) {",
+        "    if (coachRegistration.userId === currentIdentity.userId) {",
+        "HYBRID shared fila cruzada",
+      );
+      return replaceNodeText(source, sourceFile, shared, mutatedShared);
+    },
+  },
+  {
+    name: "AUTH-HYBRID-01 · cuenta separada prueba contraseña existente",
+    hybridEvidence: "separate_password_probe" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-HYBRID-01.separate.no-existing-password-probe] no prueba credenciales Usuario",
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const separate = findNamedFunction(sourceFile, "registerSeparateCoach");
+      const mutatedSeparate = replaceExactlyOnce(
+        separate.getText(sourceFile),
+        "    const signup = await gateway.signUpForCoachRegistration(input, owner);",
+        "    await gateway.signInForCoachRegistration(input.auth, owner);\n    const signup = await gateway.signUpForCoachRegistration(input, owner);",
+        "HYBRID separate prueba password",
+      );
+      return replaceNodeText(source, sourceFile, separate, mutatedSeparate);
+    },
+  },
+  {
+    name: "AUTH-HYBRID-01 · cuenta separada reutiliza silenciosamente la sesión A",
+    hybridEvidence: "separate_silent_identity_reuse" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-HYBRID-01.separate.isolated-and-neutral] signUp separado no reutiliza sesión activa",
+    exactFailureLine: true,
+    apply: (source: string) => replaceExactlyOnce(
+      source,
+      "    if (activeIdentity && activeIdentity.userId !== identity.userId) {",
+      "    if (false) {",
+      "HYBRID separate reutiliza A",
+    ),
+  },
+  {
+    name: "AUTH-HYBRID-01 · cuenta separada invoca la RPC compartida",
+    hybridEvidence: "separate_shared_rpc" as const,
+    file: "controller" as const,
+    path: CONTROLLER_PATH,
+    expectedFailure: "[AUTH-HYBRID-01.separate.no-existing-password-probe] no prueba credenciales Usuario",
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const separate = findNamedFunction(sourceFile, "registerSeparateCoach");
+      const mutatedSeparate = replaceExactlyOnce(
+        separate.getText(sourceFile),
+        "    const signup = await gateway.signUpForCoachRegistration(input, owner);",
+        "    await gateway.createSharedCoachRegistration(input.registration, \"other-user\", owner);\n    const signup = await gateway.signUpForCoachRegistration(input, owner);",
+        "HYBRID separate usa RPC shared",
+      );
+      return replaceNodeText(source, sourceFile, separate, mutatedSeparate);
+    },
+  },
+  {
+    name: "AUTH-HYBRID-01 · RPC compartida recibe ownership cliente",
+    hybridEvidence: "shared_client_ownership" as const,
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-HYBRID-01.gateway.no-client-ownership] no existe mass assignment ni ownership cliente",
+    exactFailureLine: true,
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const shared = findNamedMethod(sourceFile, "createSharedCoachRegistration");
+      const mutatedShared = replaceExactlyOnce(
+        shared.getText(sourceFile),
+        "        p_first_name: payload.first_name,",
+        "        user_id: expectedUserId,\n        p_first_name: payload.first_name,",
+        "HYBRID RPC ownership cliente",
+      );
+      return replaceNodeText(source, sourceFile, shared, mutatedShared);
+    },
+  },
+  {
+    name: "AUTH-HYBRID-01 · persiste credenciales de registro en Browser Storage",
+    hybridEvidence: "sensitive_browser_storage" as const,
+    file: "root" as const,
+    path: ROOT_PATH,
+    expectedFailure: NO_SENSITIVE_BROWSER_STORAGE_FAILURE,
+    exactFailureLine: true,
+    apply: (source: string) => injectAfterAuthCredentials(
+      source,
+      '    window.localStorage.setItem("auth-registration", JSON.stringify({ email, password }));',
+      "HYBRID Browser Storage",
+    ),
+  },
+  {
     name: "accountType concede Coach sin fila",
     file: "controller" as const,
     path: CONTROLLER_PATH,
@@ -3393,8 +3826,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.gateway.signout-owner-guard]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      '    async signOut(reason, owner) {\n      if (!owner.isCurrent()) return "stale";',
-      '    async signOut(reason, owner) {\n      if (false) return "stale";',
+      '      if (!expectedUserId || !owner.isCurrent()) return "stale";',
+      '      if (!expectedUserId || false) return "stale";',
       "gateway omite guard de owner antes de signOut",
     ),
   },
@@ -3403,12 +3836,17 @@ const mutations = [
     file: "gateway" as const,
     path: GATEWAY_PATH,
     expectedFailure: "[AUTH-COACH-01.gateway.signout-fresh-identity]",
-    apply: (source: string) => replaceExactlyOnce(
-      source,
-      '    async signOut(reason, owner) {\n      if (!owner.isCurrent()) return "stale";\n      const identity = await getAuthoritativeIdentity(supabase, owner.expectedUserId, owner);',
-      '    async signOut(reason, owner) {\n      if (!owner.isCurrent()) return "stale";\n      const identity = { userId: owner.expectedUserId };',
-      "gateway omite identidad fresca antes de signOut",
-    ),
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const method = findNamedMethod(sourceFile, "signOut");
+      const mutatedMethod = replaceExactlyOnce(
+        method.getText(sourceFile),
+        "      const identity = await getAuthoritativeIdentity(supabase, expectedUserId, owner);",
+        "      const identity = { userId: expectedUserId };",
+        "gateway omite identidad fresca antes de signOut",
+      );
+      return replaceNodeText(source, sourceFile, method, mutatedMethod);
+    },
   },
   {
     name: "SIGNED_OUT conserva owner A",
@@ -3459,76 +3897,86 @@ const mutations = [
     ),
   },
   {
-    name: "repository envía objeto crudo",
+    name: "signup Coach envía el objeto crudo sin allowlist",
     file: "gateway" as const,
     path: GATEWAY_PATH,
-    expectedFailure: "[AUTH-COACH-01.gateway.atomic-rpc]",
-    apply: (source: string) => replaceExactlyOnce(
-      source,
-      'client.rpc("register_own_coach", rpcPayload)',
-      'client.rpc("register_own_coach", payload)',
-      "repository envía objeto crudo",
-    ),
+    expectedFailure: "[AUTH-SEPARATE-01.gateway.allowlisted-coach-signup]",
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const method = findNamedMethod(sourceFile, "signUpForCoachRegistration");
+      const mutatedMethod = replaceExactlyOnce(
+        method.getText(sourceFile),
+        "isolatedClient.auth.signUp(signupPayload)",
+        "isolatedClient.auth.signUp(payload as never)",
+        "signup Coach envía objeto crudo",
+      );
+      return replaceNodeText(source, sourceFile, method, mutatedMethod);
+    },
   },
   {
-    name: "repository propaga ownership por spread",
-    file: "gateway" as const,
-    path: GATEWAY_PATH,
-    expectedFailure: "[AUTH-COACH-01.gateway.no-raw-spread]",
+    name: "metadata Coach propaga el payload Auth por spread",
+    file: "form" as const,
+    path: FORM_PATH,
+    expectedFailure: "[AUTH-SEPARATE-01.form.explicit-metadata-allowlist]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "  return {\n    first_name: input.first_name,",
-      "  return {\n    ...input,\n    first_name: input.first_name,",
-      "repository propaga ownership por spread",
+      "  const allowlistedData: UserSignupMetadata = {\n    display_name: data.display_name,",
+      "  const allowlistedData: UserSignupMetadata = {\n    ...data,\n    display_name: data.display_name,",
+      "metadata Coach propaga payload por spread",
     ),
   },
   {
     name: "ownership cruzado deja de fallar cerrado",
     file: "controller" as const,
     path: CONTROLLER_PATH,
-    expectedFailure: "[AUTH-COACH-01.controller.registration-owner]",
+    expectedFailure: "[AUTH-COACH-01.controller.registration-owner] registro cruzado falla cerrado",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "    if (coachRegistration.userId !== identity.userId) {\n      return controlledCoachRegistrationError();",
-      "    if (false) {\n      return controlledCoachRegistrationError();",
+      "    if (!coachRegistration || coachRegistration.userId !== identity.userId) {\n      return controlledCoachRegistrationError();",
+      "    if (!coachRegistration || coachRegistration.userId === identity.userId) {\n      return controlledCoachRegistrationError();",
       "ownership cruzado deja de fallar cerrado",
     ),
   },
   {
-    name: "RPC atómica se reemplaza por endpoint no contractual",
+    name: "gateway reintroduce el write Coach desde el cliente",
     file: "gateway" as const,
     path: GATEWAY_PATH,
-    expectedFailure: "[AUTH-COACH-01.gateway.atomic-rpc]",
+    expectedFailure: "[AUTH-HYBRID-01.gateway.closed-coach-ports] sólo existen signup separado y RPC compartida",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      'client.rpc("register_own_coach", rpcPayload)',
-      'client.rpc("register_coach_without_expected_identity", rpcPayload)',
-      "RPC atómica se reemplaza por endpoint no contractual",
+      "    async createUserRegistration(expectedUserId, owner) {",
+      "    async createCoachRegistration() {\n      return supabase.rpc(\"register_own_coach\");\n    },\n\n    async createUserRegistration(expectedUserId, owner) {",
+      "gateway reintroduce write Coach",
     ),
   },
   {
-    name: "registro omite guard posterior a signIn",
+    name: "registro omite guard posterior a signup",
     file: "controller" as const,
     path: CONTROLLER_PATH,
-    expectedFailure: "[AUTH-COACH-01.registration.post-sign-in-owner]",
+    expectedFailure: "[AUTH-SEPARATE-01.registration.post-signup-owner] signup tardío se descarta",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      'if (!owner.isCurrent() || signIn.kind === "stale") return staleCoachRegistration();',
-      'if (signIn.kind === "stale") return staleCoachRegistration();',
-      "registro omite guard posterior a signIn",
+      'if (!owner.isCurrent() || signup.kind === "stale") return staleCoachRegistration();',
+      'if (signup.kind === "stale") return staleCoachRegistration();',
+      "registro omite guard posterior a signup",
     ),
   },
   {
-    name: "signIn Coach usa cliente global",
+    name: "signup Coach usa cliente global",
     file: "gateway" as const,
     path: GATEWAY_PATH,
-    expectedFailure: "[AUTH-COACH-01.registration.isolated-sign-in]",
-    apply: (source: string) => replaceExactlyOnce(
-      source,
-      "    async signInForCoachRegistration(credentials: LoginPayload, owner) {\n      if (!owner.isCurrent()) return { kind: \"stale\" };\n      const isolatedClient = getRegistrationClient();\n      const { data, error } = await isolatedClient.auth.signInWithPassword({",
-      "    async signInForCoachRegistration(credentials: LoginPayload, owner) {\n      if (!owner.isCurrent()) return { kind: \"stale\" };\n      const isolatedClient = getRegistrationClient();\n      const { data, error } = await supabase.auth.signInWithPassword({",
-      "signIn Coach usa cliente global",
-    ),
+    expectedFailure: "[AUTH-SEPARATE-01.gateway.isolated-coach-signup]",
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const method = findNamedMethod(sourceFile, "signUpForCoachRegistration");
+      const mutatedMethod = replaceExactlyOnce(
+        method.getText(sourceFile),
+        "isolatedClient.auth.signUp(signupPayload)",
+        "supabase.auth.signUp(signupPayload)",
+        "signup Coach usa cliente global",
+      );
+      return replaceNodeText(source, sourceFile, method, mutatedMethod);
+    },
   },
   {
     name: "SIGNED_OUT conserva owner de registro A",
@@ -3784,12 +4232,17 @@ const mutations = [
     file: "controller" as const,
     path: CONTROLLER_PATH,
     expectedFailure: "[AUTH-COACH-01.USER.registration.no-coach-write]",
-    apply: (source: string) => replaceExactlyOnce(
-      source,
-      "    const hasUserRegistration = await gateway.hasUserRegistration(identity.userId, owner);",
-      "    await gateway.createCoachRegistration(input as never, identity.userId, owner as never);\n    const hasUserRegistration = await gateway.hasUserRegistration(identity.userId, owner);",
-      "Usuario crea Coach",
-    ),
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, CONTROLLER_PATH);
+      const registerUser = findNamedFunction(sourceFile, "registerUser");
+      const mutatedRegisterUser = replaceExactlyOnce(
+        registerUser.getText(sourceFile),
+        "    const hasUserRegistration = await gateway.hasUserRegistration(identity.userId, owner);",
+        "    await gateway.createCoachRegistration(input as never, identity.userId, owner as never);\n    const hasUserRegistration = await gateway.hasUserRegistration(identity.userId, owner);",
+        "Usuario crea Coach",
+      );
+      return replaceNodeText(source, sourceFile, registerUser, mutatedRegisterUser);
+    },
   },
   {
     name: "Registro Coach crea accidentalmente Usuario",
@@ -3798,8 +4251,8 @@ const mutations = [
     expectedFailure: "[AUTH-COACH-01.USER.registration.coach-does-not-create-user]",
     apply: (source: string) => replaceExactlyOnce(
       source,
-      "    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
-      "    await gateway.createUserRegistration(identity.userId, owner as never);\n    const existingCoachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
+      "    const coachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
+      "    await gateway.createUserRegistration(identity.userId, owner as never);\n    const coachRegistration = await gateway.getCoachRegistration(identity.userId, owner);",
       "Coach crea Usuario",
     ),
   },
@@ -3868,9 +4321,11 @@ const mutations = [
   },
 ] as const;
 
-const EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT = 79;
-const EXPECTED_AC039_MUTATION_PROBE_COUNT = 16;
+const EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT = 100;
+const EXPECTED_AC039_MUTATION_PROBE_COUNT = 4;
+const EXPECTED_R2_MUTATION_PROBE_COUNT = 7;
 const EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT = 26;
+const EXPECTED_HYBRID_MUTATION_PROBE_COUNT = 10;
 const EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT = 14;
 const EXPECTED_RUNTIME_MUTATION_PROBE_COUNT = 7;
 const EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT = 6;
@@ -3883,24 +4338,27 @@ assert.deepEqual(
     .filter((mutation) => "ac039Evidence" in mutation)
     .map((mutation) => mutation.ac039Evidence),
   [
-    "restore_existing_fallback",
-    "authorize_existing_registration",
-    "create_before_duplicate_rejection",
-    "activate_before_duplicate_rejection",
-    "overwrite_existing_title",
-    "navigate_after_duplicate",
-    "signout_on_duplicate",
-    "infer_duplicate_from_client_email",
-    "reveal_duplicate_with_invalid_password",
-    "reject_user_only",
-    "break_coach_login",
-    "lookup_before_identity_switch",
-    "accept_crossed_row_as_duplicate",
-    "change_exact_message",
-    "transport_new_title",
-    "signup_before_duplicate_rejection",
+    "coach_public_outcome_diverges",
+    "user_public_outcome_diverges",
+    "coach_membership_lookup_before_neutral_result",
+    "public_copy_reveals_existing_account",
   ],
-  `AUTH-COACH-01 AC-039 fija ${EXPECTED_AC039_MUTATION_PROBE_COUNT} probes focales`,
+  `AUTH-SEPARATE-01 R1 AC-039 fija ${EXPECTED_AC039_MUTATION_PROBE_COUNT} probes focales activos`,
+);
+assert.deepEqual(
+  mutations
+    .filter((mutation) => "r2Evidence" in mutation)
+    .map((mutation) => mutation.r2Evidence),
+  [
+    "existing_identity_code",
+    "existing_identity_message",
+    "non_identity_error_control",
+    "coach_auth_route",
+    "user_navigation",
+    "coach_session_application",
+    "coach_portal_application",
+  ],
+  `AUTH-SEPARATE-01 R2 fija ${EXPECTED_R2_MUTATION_PROBE_COUNT} probes focales activos`,
 );
 assert.deepEqual(
   mutations
@@ -3934,7 +4392,25 @@ assert.deepEqual(
     "sensitive_destructured_global_alias",
     "sensitive_destructured_storage_alias_chain",
   ],
-  `AUTH-COACH-01 fija ${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT} probes A/B de cambio de identidad`,
+  `AUTH-SEPARATE-01 conserva ${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT} probes históricos superseded`,
+);
+assert.deepEqual(
+  mutations
+    .filter((mutation) => "hybridEvidence" in mutation)
+    .map((mutation) => mutation.hybridEvidence),
+  [
+    "explicit_flow",
+    "preparation_user_membership",
+    "shared_user_membership",
+    "shared_signup",
+    "shared_crossed_row",
+    "separate_password_probe",
+    "separate_silent_identity_reuse",
+    "separate_shared_rpc",
+    "shared_client_ownership",
+    "sensitive_browser_storage",
+  ],
+  `AUTH-HYBRID-01 fija ${EXPECTED_HYBRID_MUTATION_PROBE_COUNT} probes focales activos`,
 );
 assert.deepEqual(
   mutations
@@ -3993,8 +4469,9 @@ function assertMetadataRuntimeMutation(mutatedController: string, expectedFailur
     cpSync("src", join(mutationDirectory, "src"), { recursive: true });
     cpSync("tsconfig.json", join(mutationDirectory, "tsconfig.json"));
     cpSync("package.json", join(mutationDirectory, "package.json"));
-    symlinkSync(resolve("node_modules"), join(mutationDirectory, "node_modules"), "dir");
-    const tsx = resolve("node_modules/.bin/tsx");
+    const nodeModulesDirectory = resolveNodeModulesDirectory();
+    symlinkSync(nodeModulesDirectory, join(mutationDirectory, "node_modules"), "dir");
+    const tsx = join(nodeModulesDirectory, ".bin", "tsx");
 
     writeFileSync(copiedControllerPath, mutatedController, "utf8");
     assert.equal(
@@ -4118,8 +4595,9 @@ function assertAuthSuiteRuntimeMutation(
     cpSync("src", join(mutationDirectory, "src"), { recursive: true });
     cpSync("tsconfig.json", join(mutationDirectory, "tsconfig.json"));
     cpSync("package.json", join(mutationDirectory, "package.json"));
-    symlinkSync(resolve("node_modules"), join(mutationDirectory, "node_modules"), "dir");
-    const tsx = resolve("node_modules/.bin/tsx");
+    const nodeModulesDirectory = resolveNodeModulesDirectory();
+    symlinkSync(nodeModulesDirectory, join(mutationDirectory, "node_modules"), "dir");
+    const tsx = join(nodeModulesDirectory, ".bin", "tsx");
     const childEnvironment = { ...process.env };
     delete childEnvironment.NODE_TEST_CONTEXT;
     writeFileSync(copiedPath, mutatedSource, "utf8");
@@ -4218,7 +4696,17 @@ function assertFocalMutationContract(
   }
 }
 
-for (const mutation of mutations) {
+const activeMutations = mutations.filter((mutation) => (
+  !("supersededAc039Evidence" in mutation)
+  && !("identitySwitchEvidence" in mutation)
+));
+assert.equal(
+  activeMutations.filter((mutation) => "ac039Evidence" in mutation).length,
+  EXPECTED_AC039_MUTATION_PROBE_COUNT,
+  "AUTH-SEPARATE-01 R1 mantiene todos los probes ac039Evidence dentro de la suite activa",
+);
+
+for (const mutation of activeMutations) {
   test(`mutation probe integración: ${mutation.name}`, () => {
     const sources = readSources();
     const original = sources[mutation.file];
@@ -4261,5 +4749,5 @@ for (const mutation of mutations) {
 }
 
 console.log(
-  `AUTH-COACH-01 integration mutation probes: ${mutations.length}/${EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT}; AC-039: ${EXPECTED_AC039_MUTATION_PROBE_COUNT}/${EXPECTED_AC039_MUTATION_PROBE_COUNT}; cambio A/B: ${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT}/${EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT}; M11 Browser Storage: ${EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT}/${EXPECTED_BROWSER_STORAGE_MUTATION_PROBE_COUNT}; controles AC-039: ${EXPECTED_DUPLICATE_COACH_POSITIVE_CONTROL_COUNT}/${EXPECTED_DUPLICATE_COACH_POSITIVE_CONTROL_COUNT}; controles M11: ${EXPECTED_BROWSER_STORAGE_POSITIVE_CONTROL_COUNT}/${EXPECTED_BROWSER_STORAGE_POSITIVE_CONTROL_COUNT}; runtime: ${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}/${EXPECTED_RUNTIME_MUTATION_PROBE_COUNT}; Auth suite E7-E9/H1-H3: ${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}/${EXPECTED_AUTH_SUITE_MUTATION_PROBE_COUNT}`,
+  `AUTH-HYBRID-01 active integration mutation probes: ${activeMutations.length}; probes SWITCH superseded excluidos`,
 );

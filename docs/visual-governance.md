@@ -96,3 +96,40 @@ Aprendizajes incorporados:
 - el gate de producto es independiente del resultado de la auditoría técnica.
 
 Este registro describe únicamente el comportamiento y la remediación. No contiene datos de usuarios, secretos, credenciales ni información sensible.
+
+## Registro trazable AUTH-HYBRID-01
+
+- Clasificación principal: `Cambio visual aprobado`.
+- Pantalla y ubicación: `Registro > Coach`, inmediatamente bajo el título
+  `Crear cuenta Coach`.
+- Aprobador: dueño de producto de Organizatech.
+- Fecha y referencia: instrucción `AUTH-HYBRID-01 — Corrección del modelo Coach
+  híbrido y cierre de auditoría`, 2026-08-25, en el hilo de trabajo asociado.
+- Alcance aprobado: agregar un selector accesible de elección única con
+  `Usar mi cuenta Usuario` y `Crear una cuenta Coach separada`; mostrar los campos
+  autorizados por el flujo elegido; usar los CTA `Iniciar sesión y continuar`,
+  `Activar cuenta Coach` y `Crear cuenta Coach` exactamente donde corresponda.
+- Texto visible aprobado: `¿Ya tienes una cuenta Organizatech Usuario? Puedes usar
+  esa misma cuenta para acceder también como Coach. Si prefieres mantener ambas
+  cuentas separadas, crea tu cuenta Coach con otro correo.`
+- Card, Modal, Drawer y Section nuevos: ninguno.
+- Button: no se agrega otro control de envío; el CTA existente cambia su etiqueta
+  según el flujo aprobado. Las dos opciones son controles de selección, no submit.
+
+Wireframe textual aprobado:
+
+```text
+Crear cuenta Coach
+( ) Usar mi cuenta Usuario
+( ) Crear una cuenta Coach separada
+¿Ya tienes una cuenta Organizatech Usuario? Puedes usar esa misma cuenta para acceder también como Coach. Si prefieres mantener ambas cuentas separadas, crea tu cuenta Coach con otro correo.
+[campos autorizados según la opción]
+[CTA aprobado según la opción]
+```
+
+No se ejecutaron Preview, navegador ni QA mobile porque AUTH-HYBRID-01 los prohíbe
+expresamente. Por lo tanto, Before/After material, Preview URL y QA iPhone 15 Pro
+Max continúan pendientes. El diseño y el copy ya fueron aprobados por el dueño; un
+commit técnico realizado por el dueño puede utilizarse para generar Preview, pero
+Preview, merge y producción permanecen bloqueados hasta que el dueño registre
+`PASS` de QA visual/manual.

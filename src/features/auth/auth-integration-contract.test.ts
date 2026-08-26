@@ -41,12 +41,92 @@ const authCallback = readSource("src/features/auth/model/auth-callback.ts");
 const multiportalController = readSource("src/features/auth/model/multiportal-auth-controller.ts");
 const multiportalGateway = readSource("src/features/auth/data/supabase-multiportal-auth-gateway.ts");
 const multiportalBoundary = readSource("src/features/auth/hooks/use-multiportal-auth-boundary.ts");
+const registrationFormController = readSource(
+  "src/features/auth/model/auth-registration-form-controller.ts",
+);
+const registrationFormHook = readSource(
+  "src/features/auth/hooks/use-auth-registration-form-controller.ts",
+);
 const authConfirmationDesign = readSource("docs/product/auth-confirmation-recovery-design.md");
 const environmentsDesign = readSource("docs/ambientes.md");
 const signupConfirmationController = multiportalController.slice(
   multiportalController.indexOf("async function resolveSignupConfirmation"),
   multiportalController.indexOf("async function rejectPortalSession"),
 );
+
+test("AUTH-HYBRID-01 mantiene revisión/reset dentro de Auth y fuera del root", () => {
+  auditRegistrationOwnership({
+    root,
+    screen: authScreen,
+    controller: registrationFormController,
+    hook: registrationFormHook,
+  });
+});
+
+test("AUTH-HYBRID-01 mata mutantes focales de revisión, owner y selector", () => {
+  runRegistrationOwnershipMutationProbes({
+    root,
+    screen: authScreen,
+    controller: registrationFormController,
+    hook: registrationFormHook,
+  });
+});
+
+test("AUTH-HYBRID-01 mata por conducta los mutantes de elegibilidad shared", () => {
+  runSharedCoachEligibilityBehaviorMutationProbes(registrationFormController);
+});
+
+test("AUTH-HYBRID-01 coordina por conducta el resultado tipado del login Coach compartido", async () => {
+  const authorized = await runSharedCoachLoginRootHarness({
+    state: "authorized",
+    userId: "user-a",
+  });
+  assert.deepEqual(authorized.appliedSessions, ["user-a"]);
+  assert.deepEqual(authorized.routes, [{ mode: "registro", accountType: "coach" }]);
+  assert.deepEqual(authorized.navigations, [{ mode: "registro", reason: "auth-screen-switch" }]);
+  assert.deepEqual(authorized.statuses, [{ message: "", tone: "info" }]);
+  assert.equal(authorized.continuation, undefined);
+
+  for (const state of ["rejected", "error"] as const) {
+    const rejected = await runSharedCoachLoginRootHarness({
+      state,
+      message: "No pudimos completar la acción. Intenta nuevamente.",
+    });
+    assert.deepEqual(rejected.appliedSessions, [], `${state}: no publica sesión`);
+    assert.deepEqual(rejected.routes, [], `${state}: no cambia ruta`);
+    assert.deepEqual(rejected.navigations, [], `${state}: no navega ni abre portal`);
+    assert.deepEqual(rejected.statuses, [{
+      message: "No pudimos completar la acción. Intenta nuevamente.",
+      tone: "error",
+    }]);
+    assert.equal(rejected.signOutNoticeSettlements, 1);
+    assert.equal(rejected.continuation, undefined);
+  }
+
+  for (const state of ["stale", "busy"] as const) {
+    const ignored = await runSharedCoachLoginRootHarness({ state });
+    assert.deepEqual(ignored.appliedSessions, [], `${state}: no publica sesión`);
+    assert.deepEqual(ignored.routes, [], `${state}: no cambia ruta`);
+    assert.deepEqual(ignored.navigations, [], `${state}: no navega`);
+    assert.deepEqual(ignored.statuses, [], `${state}: no publica respuesta ajena`);
+  }
+
+  const normalLogin = await runSharedCoachLoginRootHarness(
+    { state: "stale" },
+    false,
+  );
+  assert.equal(normalLogin.completionCalls, 0);
+  assert.equal(normalLogin.continuation, "normal_login");
+
+  const continuation = focalSourceBetween(
+    root,
+    "if (registrationForm.controller.getState().sharedCoachLoginPending) {",
+    "portalResolutionOwner = multiportalAuth.beginPortalResolution",
+  );
+  assert.doesNotMatch(continuation, /supabase\.auth\.signOut|continueAuthorizedPortalAccess/);
+  assert.match(multiportalController, /completeSharedCoachLogin\([\s\S]*?gateway\.signOut\("authorization_error", owner\)/);
+  assert.match(multiportalBoundary, /existing\?\.expectedUserId === expectedUserId[\s\S]*?return existing\.operation/);
+});
 
 // Landing: cada intención entra al modo y tipo de cuenta autorizados.
 assert.match(landing, /className=\{styles\.headerCta\} href="\/login"/);
@@ -74,7 +154,12 @@ assert.doesNotMatch(root, /function AuthScreen\(/);
 assert.match(root, /buildLoginPayload\(formData\)/);
 assert.match(root, /buildUserSignupPayload\(formData\)/);
 assert.match(root, /buildCoachRegistrationPayload\(formData\)/);
+assert.match(root, /buildSharedCoachRegistrationPayload\(formData\)/);
 assert.match(root, /supabase\.auth\.signInWithPassword\(\{ email, password \}\)/);
+assert.doesNotMatch(multiportalController, /signInForCoachRegistration/);
+assert.doesNotMatch(multiportalGateway, /signInForCoachRegistration/);
+assert.match(multiportalGateway, /createSharedCoachRegistration[\s\S]*rpc\("register_own_coach"/);
+assert.match(multiportalController, /gateway\.signUpForCoachRegistration\(input, owner\)/);
 assert.match(root, /multiportalAuth\.registerUser\(\s*signupPayload,/);
 assert.doesNotMatch(root, /supabase\.auth\.signUp\(signupPayload\)/);
 assert.match(root, /authorizeAndContinuePortalSession\(/);
@@ -138,6 +223,8 @@ for (const marker of [
   "Género",
   "Celular",
   "Correo",
+  "Correo de acceso Coach",
+  "Correo de contacto",
   "Confirmar contraseña",
   "Título de estudios",
   "¿Ya tienes cuenta? Iniciar sesión",
@@ -159,6 +246,11 @@ assert.doesNotMatch(authScreen, /Apple|aria-label="Correo"/);
 assert.doesNotMatch(authScreen, /dangerouslySetInnerHTML/);
 assert.doesNotMatch(authScreen, /email@email\.com/);
 assert.match(authScreen, /placeholder="nombre@organizatech\.cl"/);
+assert.equal(
+  authScreen.split("¿Ya tienes una cuenta Organizatech Usuario? Puedes usar esa misma cuenta para acceder también como Coach. Si prefieres mantener ambas cuentas separadas, crea tu cuenta Coach con otro correo.").length - 1,
+  1,
+  "el copy híbrido aprobado aparece exactamente una vez",
+);
 
 // La fecha y la edad respetan sus columnas incluso con el ancho intrínseco del input date en WebKit.
 runCssBraceBalanceContractChecks(authStyles);
@@ -185,6 +277,543 @@ for (const [foreground, background, label] of [
 }
 
 console.log("auth-integration contract tests passed");
+
+const AUTH_REGISTRATION_OWNERSHIP_FAILURE =
+  "[AUTH-HYBRID-01.registration-form.ownership-and-revision]";
+
+interface RegistrationOwnershipSources {
+  root: string;
+  screen: string;
+  controller: string;
+  hook: string;
+}
+
+function focalSourceBetween(source: string, start: string, end: string) {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex + start.length);
+  assert.ok(
+    startIndex >= 0 && endIndex > startIndex,
+    `${AUTH_REGISTRATION_OWNERSHIP_FAILURE} no se pudo aislar ${start}`,
+  );
+  return source.slice(startIndex, endIndex);
+}
+
+type SharedCoachRootResult =
+  | { state: "authorized"; userId: string }
+  | { state: "rejected" | "error"; message: string }
+  | { state: "busy" | "stale" };
+
+async function runSharedCoachLoginRootHarness(
+  result: SharedCoachRootResult,
+  sharedCoachLoginPending = true,
+) {
+  const continuation = focalSourceBetween(
+    root,
+    "if (registrationForm.controller.getState().sharedCoachLoginPending) {",
+    "portalResolutionOwner = multiportalAuth.beginPortalResolution",
+  );
+  const appliedSessions: string[] = [];
+  const routes: unknown[] = [];
+  const navigations: unknown[] = [];
+  const statuses: Array<{ message: string; tone: string }> = [];
+  let completionCalls = 0;
+  let signOutNoticeSettlements = 0;
+  const context: Record<string, unknown> & {
+    __runSharedCoachLogin?: () => Promise<string | undefined>;
+  } = {
+    registrationForm: {
+      controller: {
+        getState: () => ({ sharedCoachLoginPending }),
+      },
+      completeSharedCoachLogin: async () => {
+        completionCalls += 1;
+        return result;
+      },
+    },
+    session: { user: { id: "user-a" } },
+    authenticatedState: { session: { user: { id: "user-a" } } },
+    multiportalAuth: {
+      settlePortalSignOutMessage: () => {
+        signOutNoticeSettlements += 1;
+        return null;
+      },
+      beginPortalResolution: () => assert.fail("el harness no abre resolución de portal"),
+    },
+    setAuthStatus: (message: string, tone: string) => statuses.push({ message, tone }),
+    applySessionState: (state: { session?: { user?: { id?: string } } }) => {
+      appliedSessions.push(state.session?.user?.id ?? "missing");
+    },
+    captureSessionDataRequestToken: () => ({ generation: 1 }),
+    authRouteController: {
+      replace: (route: unknown) => routes.push(JSON.parse(JSON.stringify(route)) as unknown),
+    },
+    navigation: {
+      transition: (navigation: unknown) => (
+        navigations.push(JSON.parse(JSON.stringify(navigation)) as unknown)
+      ),
+    },
+    createAuthNavigationReset: (mode: string, reason: string) => ({ mode, reason }),
+  };
+  runInNewContext(
+    `let appliedIdentityToken = null;
+     globalThis.__runSharedCoachLogin = async function () {
+       ${continuation}
+       return "normal_login";
+     };`,
+    context,
+  );
+  assert.equal(typeof context.__runSharedCoachLogin, "function");
+  const continuationResult = await context.__runSharedCoachLogin!();
+  return {
+    continuation: continuationResult,
+    appliedSessions,
+    routes,
+    navigations,
+    statuses,
+    completionCalls,
+    signOutNoticeSettlements,
+  };
+}
+
+function auditRegistrationOwnership(sources: RegistrationOwnershipSources) {
+  const { root: rootSource, screen, controller, hook } = sources;
+  const failure = AUTH_REGISTRATION_OWNERSHIP_FAILURE;
+  for (const field of [
+    "firstName",
+    "lastName",
+    "birthDate",
+    "gender",
+    "phoneNumber",
+    "professionalTitle",
+    "contactEmail",
+    "email",
+    "password",
+    "confirmPassword",
+  ]) {
+    assert.match(controller, new RegExp(`${field}: \"\"`), `${failure} falta ${field}`);
+  }
+  assert.match(
+    controller,
+    /function publish[\s\S]*?revision \+= 1;[\s\S]*?state = \{ \.\.\.nextState, revision \};[\s\S]*?for \(const listener of listeners\) listener\(\);/,
+    `${failure} cada publicación debe avanzar la revisión antes de notificar`,
+  );
+  assert.match(
+    controller,
+    /edit\(field, value\) \{\s*publish\(\{[\s\S]*?values: \{ \.\.\.state\.values, \[field\]: value \}/,
+    `${failure} toda edición de campo usa la revisión única`,
+  );
+  assert.match(
+    controller,
+    /resetIfCurrent\(capture\) \{\s*if \(capture\.revision !== revision\) return false;\s*publish\(createInitialState\(revision\)\);\s*return true;/,
+    `${failure} un reset tardío debe fallar cerrado`,
+  );
+  assert.match(controller, /fieldErrors: \{\}[\s\S]*showPassword: false[\s\S]*showConfirmPassword: false/);
+  assert.doesNotMatch(controller, /useEffect|setTimeout|queueMicrotask|Promise\./);
+  assert.doesNotMatch(hook, /setTimeout|queueMicrotask/);
+
+  assert.match(rootSource, /useAuthRegistrationFormController\(\{/);
+  assert.match(rootSource, /registrationForm\.controller\.captureRevision\(\)/);
+  assert.match(rootSource, /registrationForm\.controller\.resetIfCurrent\(registrationRevision\)/);
+  assert.match(rootSource, /registrationForm\.controller\.reset\(\)/);
+  assert.doesNotMatch(
+    rootSource,
+    /authRegistrationResetToken|setAuthRegistrationResetToken|resetAuthRegistrationForm|setRegisterName|setRegisterEmail|setRegisterPassword|setRegisterConfirmPassword/,
+    `${failure} el root no puede recuperar ownership de registro`,
+  );
+
+  const handleAuth = focalSourceBetween(
+    rootSource,
+    "  async function handleAuth(",
+    "  async function handlePasswordRecovery(",
+  );
+  for (const branch of [
+    {
+      name: "Coach",
+      start: "const registration = await multiportalAuth.registerCoach(",
+      owner: "!multiportalAuth.isCoachRegistrationSubmitCurrent(coachRegistrationSubmitOwner)",
+      end: "      if (signupPayload) {",
+    },
+    {
+      name: "Usuario",
+      start: "const registration = await multiportalAuth.registerUser(",
+      owner: "!multiportalAuth.isUserRegistrationSubmitCurrent(userRegistrationSubmitOwner)",
+      end: "      if (mode !== \"login\") return;",
+    },
+  ] as const) {
+    const branchSource = focalSourceBetween(handleAuth, branch.start, branch.end);
+    const ownerIndex = branchSource.indexOf(branch.owner);
+    const revisionIndex = branchSource.indexOf(
+      "!registrationForm.controller.isRevisionCurrent(registrationRevision)",
+    );
+    const firstEffect = Math.min(...[
+      branchSource.indexOf("resetIfCurrent("),
+      branchSource.indexOf("setAuthStatus("),
+      branchSource.indexOf("applySessionState("),
+      branchSource.indexOf("continueAuthorizedPortalAccess("),
+    ].filter((index) => index >= 0));
+    assert.ok(ownerIndex >= 0, `${failure} ${branch.name} pierde owner`);
+    assert.ok(revisionIndex > ownerIndex, `${failure} ${branch.name} pierde revisión completa`);
+    assert.ok(firstEffect > revisionIndex, `${failure} ${branch.name} publica antes de validar revisión`);
+    const continuationIndex = branchSource.lastIndexOf("continueAuthorizedPortalAccess(");
+    const delayedOwnerIndex = branchSource.lastIndexOf(branch.owner.slice(1));
+    const delayedResetIndex = branchSource.lastIndexOf(
+      "registrationForm.controller.resetIfCurrent(registrationRevision)",
+    );
+    assert.ok(
+      continuationIndex >= 0
+      && delayedOwnerIndex > continuationIndex
+      && delayedResetIndex > delayedOwnerIndex,
+      `${failure} ${branch.name} pierde owner o revisión en el reset posterior a la continuación`,
+    );
+  }
+  for (const terminalState of ["coach_confirmation_required", "user_confirmation_required"]) {
+    assert.match(
+      handleAuth,
+      new RegExp(`registration\\.state === \"${terminalState}\"[\\s\\S]*?registrationForm\\.controller\\.resetIfCurrent\\(registrationRevision\\)`),
+      `${failure} ${terminalState} debe resetear sólo la revisión vigente`,
+    );
+  }
+
+  assert.doesNotMatch(
+    screen,
+    /showRegisterPassword|showRegisterConfirmPassword|setLastName|setBirthDate|setGender|setPhoneNumber|setProfessionalTitle|setContactEmail/,
+    `${failure} AuthScreen no conserva estado local de registro`,
+  );
+  assert.equal((screen.match(/registrationController\.edit\(/g) ?? []).length, 10);
+  assert.match(
+    screen,
+    /<h2>\{isCoachRegistration \? "Crear cuenta Coach"[\s\S]*?<fieldset[\s\S]*?aria-label="Modalidad de cuenta Coach"/,
+    `${failure} selector inmediatamente bajo el título Coach`,
+  );
+  for (const [value, label] of [
+    ["shared", "Usar mi cuenta Usuario"],
+    ["separate", "Crear una cuenta Coach separada"],
+  ] as const) {
+    assert.match(
+      screen,
+      new RegExp(`type=\"radio\"[\\s\\S]*?value=\"${value}\"[\\s\\S]*?checked=\\{registrationState\\.coachFlow === \"${value}\"\\}[\\s\\S]*?<span>${label}<\\/span>`),
+      `${failure} opción accesible ${value}`,
+    );
+  }
+  assert.match(screen, /includeCredentials=\{!isCoachRegistration \|\| registrationState\.coachFlow === "separate"\}/);
+  assert.match(screen, /Iniciar sesión y continuar/);
+  assert.match(screen, /\? "Activar cuenta Coach"\s*: "Crear cuenta Coach"/);
+  assert.match(screen, /aria-label="Continuar con Google \(no disponible\)"[\s\S]*?disabled/);
+  assert.doesNotMatch(
+    `${rootSource}\n${screen}\n${hook}`,
+    /identity_switch_required|coachIdentitySwitch|signOutForCoachIdentitySwitch|Cerrar sesión y continuar/,
+    `${failure} el flujo híbrido no conserva el switch absoluto`,
+  );
+}
+
+function replaceRegistrationFragment(source: string, target: string, replacement: string) {
+  assert.equal(source.split(target).length - 1, 1, `mutante focal requiere target único: ${target}`);
+  return source.replace(target, replacement);
+}
+
+function runRegistrationOwnershipMutationProbes(sources: RegistrationOwnershipSources) {
+  const probes: Array<{ name: string; sources: RegistrationOwnershipSources }> = [
+    {
+      name: "una edición no avanza revisión",
+      sources: {
+        ...sources,
+        controller: replaceRegistrationFragment(
+          sources.controller,
+          "    revision += 1;",
+          "    revision += 0;",
+        ),
+      },
+    },
+    {
+      name: "reset ignora revisión capturada",
+      sources: {
+        ...sources,
+        controller: replaceRegistrationFragment(
+          sources.controller,
+          "      if (capture.revision !== revision) return false;\n      publish(createInitialState(revision));",
+          "      publish(createInitialState(revision));",
+        ),
+      },
+    },
+    {
+      name: "respuesta Coach omite revisión completa",
+      sources: {
+        ...sources,
+        root: sources.root.replace(
+          "          || !registrationForm.controller.isRevisionCurrent(registrationRevision)\n",
+          "",
+        ),
+      },
+    },
+    {
+      name: "continuación Usuario resetea sin owner vigente",
+      sources: {
+        ...sources,
+        root: replaceRegistrationFragment(
+          sources.root,
+          `          if (
+            userRegistrationSubmitOwner
+            && multiportalAuth.isUserRegistrationSubmitCurrent(userRegistrationSubmitOwner)
+          ) {
+            registrationForm.controller.resetIfCurrent(registrationRevision);
+          }`,
+          "          registrationForm.controller.resetIfCurrent(registrationRevision);",
+        ),
+      },
+    },
+    {
+      name: "selector compartido deja de ser single-choice",
+      sources: {
+        ...sources,
+        screen: replaceRegistrationFragment(
+          sources.screen,
+          "                  checked={registrationState.coachFlow === \"shared\"}",
+          "                  checked",
+        ),
+      },
+    },
+  ];
+
+  for (const probe of probes) {
+    assert.throws(
+      () => auditRegistrationOwnership(probe.sources),
+      (error: unknown) => error instanceof assert.AssertionError
+        && error.message.includes(AUTH_REGISTRATION_OWNERSHIP_FAILURE),
+      `debe morir el mutante: ${probe.name}`,
+    );
+  }
+  auditRegistrationOwnership({
+    root: `${sources.root}\n// control inocente root`,
+    screen: `${sources.screen}\n// control inocente screen`,
+    controller: `${sources.controller}\n// control inocente controller`,
+    hook: `${sources.hook}\n// control inocente hook`,
+  });
+}
+
+const SHARED_COACH_ELIGIBILITY_BEHAVIOR_FAILURE =
+  "[AUTH-HYBRID-01.registration-form.shared-eligibility-behavior]";
+
+interface ExecutableSharedCoachEligibilityCapture {
+  readonly revision: number;
+  readonly expectedUserId: string | null;
+}
+
+interface ExecutableAuthRegistrationFormController {
+  getState(): {
+    revision: number;
+    coachFlow: "shared" | "separate" | null;
+    sharedCoachEligibility:
+      | { state: "idle" | "checking" | "sign_in_required" }
+      | { state: "authorized"; userId: string };
+  };
+  subscribe(listener: () => void): () => void;
+  edit(field: string, value: string): void;
+  selectCoachFlow(
+    flow: "shared" | "separate",
+    expectedUserId: string | null,
+  ): ExecutableSharedCoachEligibilityCapture;
+  completeSharedCoachEligibility(
+    capture: ExecutableSharedCoachEligibilityCapture,
+    eligibility:
+      | { state: "sign_in_required" }
+      | { state: "authorized"; userId: string },
+  ): boolean;
+}
+
+type ExecutableAuthRegistrationFormControllerFactory =
+  () => ExecutableAuthRegistrationFormController;
+
+function loadRegistrationFormControllerFactory(
+  source: string,
+): ExecutableAuthRegistrationFormControllerFactory {
+  const transpiled = ts.transpileModule(source, {
+    fileName: "auth-registration-form-controller.ts",
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.CommonJS,
+    },
+    reportDiagnostics: true,
+  });
+  const syntaxErrors = (transpiled.diagnostics ?? []).filter(
+    ({ category }) => category === ts.DiagnosticCategory.Error,
+  );
+  assert.deepEqual(
+    syntaxErrors,
+    [],
+    `${SHARED_COACH_ELIGIBILITY_BEHAVIOR_FAILURE}.syntax el fixture debe ser ejecutable`,
+  );
+  const commonJsModule: { exports: Record<string, unknown> } = { exports: {} };
+  runInNewContext(transpiled.outputText, {
+    exports: commonJsModule.exports,
+    module: commonJsModule,
+  });
+  const factory = commonJsModule.exports.createAuthRegistrationFormController;
+  assert.equal(
+    typeof factory,
+    "function",
+    `${SHARED_COACH_ELIGIBILITY_BEHAVIOR_FAILURE}.factory falta el factory ejecutable`,
+  );
+  return factory as ExecutableAuthRegistrationFormControllerFactory;
+}
+
+function executableRegistrationStateSnapshot(
+  controller: ExecutableAuthRegistrationFormController,
+) {
+  return JSON.stringify(controller.getState());
+}
+
+function assertSharedEligibilityRevisionBehavior(
+  factory: ExecutableAuthRegistrationFormControllerFactory,
+) {
+  const failure = `${SHARED_COACH_ELIGIBILITY_BEHAVIOR_FAILURE}.revision`;
+  const controller = factory();
+  const capture = controller.selectCoachFlow("shared", "user-a");
+  controller.edit("contactEmail", "revision-b@example.com");
+  const snapshot = executableRegistrationStateSnapshot(controller);
+  let notifications = 0;
+  const unsubscribe = controller.subscribe(() => {
+    notifications += 1;
+  });
+  const completed = controller.completeSharedCoachEligibility(
+    capture,
+    { state: "sign_in_required" },
+  );
+  unsubscribe();
+
+  assert.equal(completed, false, `${failure} una captura stale no completa`);
+  assert.equal(
+    executableRegistrationStateSnapshot(controller),
+    snapshot,
+    `${failure} una captura stale no modifica estado`,
+  );
+  assert.equal(notifications, 0, `${failure} una captura stale no publica`);
+}
+
+function assertSharedEligibilityFlowBehavior(
+  factory: ExecutableAuthRegistrationFormControllerFactory,
+) {
+  const failure = `${SHARED_COACH_ELIGIBILITY_BEHAVIOR_FAILURE}.flow`;
+  const controller = factory();
+  controller.selectCoachFlow("shared", "user-a");
+  const separateCapture = controller.selectCoachFlow("separate", null);
+  const snapshot = executableRegistrationStateSnapshot(controller);
+  let notifications = 0;
+  const unsubscribe = controller.subscribe(() => {
+    notifications += 1;
+  });
+  const completed = controller.completeSharedCoachEligibility(
+    separateCapture,
+    { state: "sign_in_required" },
+  );
+  unsubscribe();
+
+  assert.equal(completed, false, `${failure} separate no completa elegibilidad shared`);
+  assert.equal(
+    executableRegistrationStateSnapshot(controller),
+    snapshot,
+    `${failure} separate no modifica estado de elegibilidad`,
+  );
+  assert.equal(notifications, 0, `${failure} separate no publica elegibilidad shared`);
+}
+
+function assertSharedEligibilityExpectedIdentityBehavior(
+  factory: ExecutableAuthRegistrationFormControllerFactory,
+) {
+  const failure = `${SHARED_COACH_ELIGIBILITY_BEHAVIOR_FAILURE}.expected-identity`;
+  const controller = factory();
+  const capture = controller.selectCoachFlow("shared", "user-a");
+  const snapshot = executableRegistrationStateSnapshot(controller);
+  let notifications = 0;
+  const unsubscribe = controller.subscribe(() => {
+    notifications += 1;
+  });
+  const completed = controller.completeSharedCoachEligibility(capture, {
+    state: "authorized",
+    userId: "user-b",
+  });
+  unsubscribe();
+
+  assert.equal(completed, false, `${failure} una identidad cruzada no autoriza`);
+  assert.equal(
+    executableRegistrationStateSnapshot(controller),
+    snapshot,
+    `${failure} una identidad cruzada no modifica estado`,
+  );
+  assert.equal(notifications, 0, `${failure} una identidad cruzada no publica`);
+}
+
+function assertSharedCoachEligibilityBehavior(
+  factory: ExecutableAuthRegistrationFormControllerFactory,
+) {
+  assertSharedEligibilityRevisionBehavior(factory);
+  assertSharedEligibilityFlowBehavior(factory);
+  assertSharedEligibilityExpectedIdentityBehavior(factory);
+}
+
+function runSharedCoachEligibilityBehaviorMutationProbes(source: string) {
+  assertSharedCoachEligibilityBehavior(loadRegistrationFormControllerFactory(source));
+
+  const probes = [
+    {
+      name: "elimina guard de revisión",
+      failure: `${SHARED_COACH_ELIGIBILITY_BEHAVIOR_FAILURE}.revision`,
+      assertBehavior: assertSharedEligibilityRevisionBehavior,
+      mutate: (current: string) => replaceRegistrationFragment(
+        current,
+        `        capture.revision !== revision
+        || state.coachFlow !== "shared"`,
+        "        state.coachFlow !== \"shared\"",
+      ),
+    },
+    {
+      name: "elimina guard de flujo shared",
+      failure: `${SHARED_COACH_ELIGIBILITY_BEHAVIOR_FAILURE}.flow`,
+      assertBehavior: assertSharedEligibilityFlowBehavior,
+      mutate: (current: string) => replaceRegistrationFragment(
+        current,
+        `        capture.revision !== revision
+        || state.coachFlow !== "shared"
+        || (`,
+        `        capture.revision !== revision
+        || (`,
+      ),
+    },
+    {
+      name: "elimina verificación de identidad esperada",
+      failure: `${SHARED_COACH_ELIGIBILITY_BEHAVIOR_FAILURE}.expected-identity`,
+      assertBehavior: assertSharedEligibilityExpectedIdentityBehavior,
+      mutate: (current: string) => replaceRegistrationFragment(
+        current,
+        `        || (
+          eligibility.state === "authorized"
+          && eligibility.userId !== capture.expectedUserId
+        )`,
+        "",
+      ),
+    },
+  ] as const;
+
+  for (const probe of probes) {
+    const mutated = probe.mutate(source);
+    assert.notEqual(mutated, source, `el mutante debe modificar la fuente: ${probe.name}`);
+    const factory = loadRegistrationFormControllerFactory(mutated);
+    assert.throws(
+      () => probe.assertBehavior(factory),
+      (error: unknown) => error instanceof assert.AssertionError
+        && error.message.includes(probe.failure),
+      `debe morir por conducta el mutante: ${probe.name}`,
+    );
+  }
+
+  assertSharedCoachEligibilityBehavior(
+    loadRegistrationFormControllerFactory(`${source}\n// control inocente H3`),
+  );
+  assert.equal(
+    readSource("src/features/auth/model/auth-registration-form-controller.ts"),
+    source,
+    `${SHARED_COACH_ELIGIBILITY_BEHAVIOR_FAILURE}.bytes los probes no alteran producto`,
+  );
+}
 
 type AuthJsxOpeningLikeElement = ts.JsxOpeningElement | ts.JsxSelfClosingElement;
 

@@ -433,7 +433,7 @@ function assertP341StaticContracts(sources: P341ContractSources) {
     "refresh: () => refreshTrainingDataForSession(authState.dataMode)",
     "isCurrent: isSessionDataRequestCurrent",
     "onComplete:",
-    "clearAuthForms()",
+    "clearCompletedAuthForm()",
     "restoreActiveFlowForSession",
     'navigation.transition(createAuthNavigationReset("dashboard", "session-established"))',
   ], "continuacion autenticada centralizada");
@@ -464,6 +464,11 @@ function assertP341StaticContracts(sources: P341ContractSources) {
     "el listener no puede abrir refreshes ni invalidar una identidad estable por su cuenta",
   );
   assert.doesNotMatch(authListener, /applySessionState\(nextState\)/);
+  assert.match(
+    authListener,
+    /const sharedCoachLoginSignOut = registrationForm\.controller\.getState\(\)[\s\S]*?\.sharedCoachLoginPending;[\s\S]*?clearUserSessionState\(portalSignOutMessage[\s\S]*?preserveAuthForms: sharedCoachLoginSignOut[\s\S]*?forceSessionBoundary: sharedCoachLoginSignOut/,
+    "el SIGNED_OUT del login Coach compartido conserva el formulario e invalida también null→null",
+  );
 
   const authenticatedHandler = extractBetween(
     sources.app,
@@ -479,7 +484,27 @@ function assertP341StaticContracts(sources: P341ContractSources) {
     /refreshTrainingDataForSession|createAuthNavigationReset\("dashboard", "session-established"\)/,
     "el handler autenticado delega refresh y completion al coordinador",
   );
-  assert.doesNotMatch(authenticatedHandler, /applySessionState\(authenticatedState\)/);
+  const sharedCoachLoginContinuation = extractBetween(
+    authenticatedHandler,
+    'if (registrationForm.controller.getState().sharedCoachLoginPending) {',
+    "portalResolutionOwner = multiportalAuth.beginPortalResolution",
+  );
+  assertMarkersInOrder(sharedCoachLoginContinuation, [
+    "registrationForm.completeSharedCoachLogin(session.user.id)",
+    'sharedPreparation.state !== "authorized"',
+    "applySessionState(authenticatedState)",
+    'authRouteController.replace({ mode: "registro", accountType: "coach" })',
+    'navigation.transition(createAuthNavigationReset("registro", "auth-screen-switch"))',
+    'setAuthStatus("", "info");\n        return;',
+  ], "login Coach compartido conserva sesión y vuelve al registro sin abrir portal");
+  assert.doesNotMatch(
+    sharedCoachLoginContinuation,
+    /refreshTrainingDataForSession|createAuthNavigationReset\("dashboard", "session-established"\)/,
+  );
+  assert.doesNotMatch(
+    authenticatedHandler.replace(sharedCoachLoginContinuation, ""),
+    /applySessionState\(authenticatedState\)/,
+  );
 
   const portalAuthorizationContinuation = extractBetween(
     sources.app,
@@ -987,6 +1012,25 @@ async function run() {
     assert.equal(signedOut.resetActiveWorkoutMemory, true);
     assert.equal(signedOut.clearClosingStorageScope, true);
     assert.equal(signedOut.clearIncomingWorkoutDraft, false);
+
+    const unpublishedLoginEpoch = createSessionDataEpoch();
+    const unpublishedLoginToken = captureSessionDataRequestToken(unpublishedLoginEpoch);
+    const unpublishedSignOut = resolveActiveWorkoutSessionBoundary({
+      currentIdentity: unpublishedLoginEpoch,
+      nextIdentity: { userId: null, scope: null },
+      event: "signed_out",
+    });
+    const closedLoginEpoch = advanceSessionDataEpoch(
+      unpublishedLoginEpoch,
+      { userId: null, scope: null },
+      { force: unpublishedSignOut.forceEpochAdvance },
+    );
+    assert.equal(closedLoginEpoch.generation, unpublishedLoginEpoch.generation + 1);
+    assert.equal(
+      isSessionDataRequestTokenCurrent(closedLoginEpoch, unpublishedLoginToken),
+      false,
+      "el cierre de una sesión Auth aún no publicada invalida respuestas previas null→null",
+    );
   }
 
   {

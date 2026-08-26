@@ -21,6 +21,7 @@ const registration: CoachRegistrationRecord = {
   gender: "prefer_not_to_say",
   phoneNumber: "+56 9 1234 5678",
   professionalTitle: "Preparadora física",
+  contactEmail: "contacto@example.net",
 };
 
 test("la sesión Coach sólo se crea con identidad Auth y fila autoritativa coincidentes", () => {

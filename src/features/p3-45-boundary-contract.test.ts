@@ -16,6 +16,18 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import ts from "typescript";
 import { legacyAppShellLayoutAst } from "@/features/app-shell/test-support/legacy-app-shell-layout-ast";
 
+const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
+  ignoredAttributesByElement: {
+    GuidedTrainingScreen: [
+      "latestExercisePerformanceLoading",
+      "latestExercisePerformanceStatus",
+      "retryExerciseHistory",
+      "saveCompletedTrainingStatus",
+      "retrySaveCompletedTraining",
+    ],
+  },
+} as const;
+
 const BASE_SHA = "920ab40bb3cdf887e6bc57643b0f160d6a9e9195";
 const files = {
   root: "src/components/organizatech-app.tsx",
@@ -325,11 +337,21 @@ const sources = readSources();
 validate(sources);
 
 const baselineRoot = execFileSync("git", ["show", `${BASE_SHA}:${files.root}`], { encoding: "utf8" });
-// UI-NAV-01 sustituye sólo el shell aprobado. El fallback legacy COMPLETO conserva topbar,
-// overlays, screenHeader, pantallas, props, callbacks y orden del baseline P3-45.
+const baselineLayout = legacyAppShellLayoutAst(files.root, baselineRoot, TRAIN_UI_02_LAYOUT_ALLOWANCE);
+// TRAIN-UI-02 sólo sustituye el loading booleano por estados y retries tipados en Guided.
+// El resto del fallback legacy conserva props, callbacks, pantallas y orden del baseline P3-45.
 assert.equal(
-  legacyAppShellLayoutAst(files.root, sources.root),
-  legacyAppShellLayoutAst(files.root, baselineRoot),
+  legacyAppShellLayoutAst(files.root, sources.root, TRAIN_UI_02_LAYOUT_ALLOWANCE),
+  baselineLayout,
+);
+const unexpectedGuidedProp = sources.root.replace(
+  "<GuidedTrainingScreen",
+  "<GuidedTrainingScreen trainUi02UnexpectedProp",
+);
+assert.notEqual(
+  legacyAppShellLayoutAst(files.root, unexpectedGuidedProp, TRAIN_UI_02_LAYOUT_ALLOWANCE),
+  baselineLayout,
+  "cualquier prop adicional de GuidedTrainingScreen sigue bloqueada",
 );
 const profileScreenPath = "src/components/profile/ProfileScreen.tsx";
 assert.equal(
