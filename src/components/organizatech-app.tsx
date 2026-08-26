@@ -1577,14 +1577,15 @@ export function OrganizatechApp({
 
   const {
     latestExercisePerformance,
-    latestExercisePerformanceLoading,
     latestExercisePerformanceError,
+    latestExercisePerformanceStatus,
     latestExerciseObservation,
     latestExerciseObservationLoading,
     latestExerciseObservationError,
     latestExerciseObservationDidQuery,
     resetExerciseHistory,
     resetExercisePerformanceHistory,
+    retryExerciseHistory,
   } = useActiveWorkoutExerciseHistory({
     activeWorkoutExerciseId,
     activeWorkoutExerciseLineageId,
@@ -3825,7 +3826,7 @@ export function OrganizatechApp({
     let ownsBusyState = false;
 
     try {
-      if (isBusy) return;
+      if (isBusy) return "ignored";
 
       const completionStart = resolveActiveWorkoutCompletionStart(
         operationContext.getRuntimeSnapshot().pendingReadinessLink,
@@ -3846,6 +3847,7 @@ export function OrganizatechApp({
         } catch (error) {
           if (!operationContext.isCurrent()) return;
           routineBuilder.publishNotice(translateTrainingWorkoutReadinessLinkError(error));
+          return "error";
         }
         return;
       }
@@ -3943,12 +3945,12 @@ export function OrganizatechApp({
             entries: entriesResult.entries,
           }, operationOwner.userId),
         );
-        if (sessionSaveResult.kind === "stale") return;
+        if (sessionSaveResult.kind === "stale") return "stale";
         if (sessionSaveResult.kind === "error") {
           const message = handlePersistenceError(sessionSaveResult.error);
           if (!operationContext.isCurrent()) return;
           routineBuilder.publishNotice(message);
-          return;
+          return "error";
         }
         const savedTrainingSessionId = sessionSaveResult.value;
 
@@ -3965,7 +3967,7 @@ export function OrganizatechApp({
             nextPendingLink = createdPendingLink;
           } catch (error) {
             routineBuilder.publishNotice(translateTrainingWorkoutReadinessLinkError(error));
-            return;
+            return "error";
           }
 
           const pendingLinkPersisted = persistWorkoutDraftWithPendingLink({
@@ -3992,7 +3994,7 @@ export function OrganizatechApp({
           } catch (error) {
             if (!operationContext.isCurrent()) return;
             routineBuilder.publishNotice(translateTrainingWorkoutReadinessLinkError(error));
-            return;
+            return "error";
           }
         }
 
@@ -4109,6 +4111,7 @@ export function OrganizatechApp({
         routineBuilder.publishNotice(message === "Ya existe un entrenamiento registrado para esta rutina y fecha."
           ? "Ya existe un entrenamiento registrado para esta rutina y fecha. Puedes revisar el resumen o editar el registro existente."
           : message);
+        return "error";
       }
     } finally {
       if (ownsBusyState && operationContext.isCurrent()) {
@@ -4490,8 +4493,8 @@ export function OrganizatechApp({
           }}
           drafts={exerciseDrafts}
           latestExercisePerformance={latestExercisePerformance}
-          latestExercisePerformanceLoading={latestExercisePerformanceLoading}
           latestExercisePerformanceError={latestExercisePerformanceError}
+          latestExercisePerformanceStatus={latestExercisePerformanceStatus}
           latestExerciseObservation={latestExerciseObservation}
           latestExerciseObservationLoading={latestExerciseObservationLoading}
           latestExerciseObservationError={latestExerciseObservationError}
@@ -4499,11 +4502,14 @@ export function OrganizatechApp({
           updateDraft={updateExerciseDraft}
           registerExercise={registerCurrentExercise}
           saveCompletedTraining={activeWorkoutBoundary.complete}
+          saveCompletedTrainingStatus={activeWorkoutBoundary.completionStatus}
+          retrySaveCompletedTraining={activeWorkoutBoundary.retryCompletion}
           editRoutine={() => openRoutineEditor(visibleDay)}
           routineDays={routineDays}
           switchDay={(day) => openRoutineDay(day, true)}
           notice={routineNotice}
           isBusy={isBusy}
+          retryExerciseHistory={retryExerciseHistory}
         />
       )}
       {screen === "comparacion" && (

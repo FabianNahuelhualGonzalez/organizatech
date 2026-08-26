@@ -34,7 +34,46 @@ export interface ActiveWorkoutOperationContext {
 }
 
 export type ActiveWorkoutActionResult = "success" | "stale" | "error" | "ignored";
+export type ActiveWorkoutCompletionStatus = "idle" | "saving" | "error";
 export type ActiveWorkoutReentryResult = "resume-memory" | "restore-draft" | "unavailable";
+
+export interface ActiveWorkoutCompletionPublication {
+  revision: number;
+  status: ActiveWorkoutCompletionStatus;
+}
+
+export const INITIAL_ACTIVE_WORKOUT_COMPLETION_PUBLICATION: ActiveWorkoutCompletionPublication = {
+  revision: 0,
+  status: "idle",
+};
+
+export function beginActiveWorkoutCompletion(
+  current: ActiveWorkoutCompletionPublication,
+): ActiveWorkoutCompletionPublication {
+  return { revision: current.revision + 1, status: "saving" };
+}
+
+export function settleActiveWorkoutCompletion(
+  current: ActiveWorkoutCompletionPublication,
+  capturedRevision: number,
+  result: ActiveWorkoutActionResult,
+): ActiveWorkoutCompletionPublication {
+  if (current.revision !== capturedRevision) return current;
+  return {
+    revision: current.revision,
+    status: result === "error" ? "error" : "idle",
+  };
+}
+
+export function invalidateActiveWorkoutCompletion(
+  current: ActiveWorkoutCompletionPublication,
+): ActiveWorkoutCompletionPublication {
+  return { revision: current.revision + 1, status: "idle" };
+}
+
+export function canRetryActiveWorkoutCompletion(status: ActiveWorkoutCompletionStatus) {
+  return status === "error";
+}
 
 export interface ActiveWorkoutIdentityPort {
   dataMode: DataMode;
@@ -60,12 +99,14 @@ export interface ActiveWorkoutIdentityReset {
 export interface ActiveWorkoutBoundary {
   readonly state: Readonly<ActiveWorkoutControllerState>;
   readonly controllerActions: Readonly<ActiveWorkoutControllerActions>;
+  readonly completionStatus: ActiveWorkoutCompletionStatus;
   start(): Promise<ActiveWorkoutActionResult>;
   submitReadiness(value: Omit<TrainingReadiness, "skipped">): Promise<void>;
   skipReadiness(): Promise<void>;
   pause(): void;
   resumeOrRestore(): ActiveWorkoutReentryResult;
   complete(): Promise<ActiveWorkoutActionResult>;
+  retryCompletion(): Promise<ActiveWorkoutActionResult>;
   discard(): void;
   resetForIdentity(input: ActiveWorkoutIdentityReset): void;
   invalidateOperations(): void;

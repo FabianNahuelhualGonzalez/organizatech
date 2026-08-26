@@ -5,8 +5,11 @@ import test from "node:test";
 import {
   createActiveWorkoutHistoryPrefetchController,
   createActiveWorkoutHistoryPrefetchKey,
+  createActiveWorkoutHistoryViewKey,
+  isActiveWorkoutHistoryPublicationCurrent,
   type ActiveWorkoutHistoryPrefetchInput,
   type ActiveWorkoutHistoryPublication,
+  type ActiveWorkoutHistoryPublicationOwner,
 } from "@/features/active-workout/model/active-workout-history-prefetch-controller";
 import type { LatestExercisePerformance } from "@/lib/training/exercise-last-performance-repository";
 import type { SessionDataRequestToken } from "@/lib/session/session-data-epoch";
@@ -347,6 +350,148 @@ test("revalidación legítima conserva el snapshot visible", async () => {
   controller.dispose();
 });
 
+test("error → retry publica loading y reemplaza el error con el resultado productivo", async () => {
+  const retryGate = deferred<LatestExercisePerformance | null>();
+  const publications: ActiveWorkoutHistoryPublication[] = [];
+  let calls = 0;
+  const currentToken = token();
+  const controller = createActiveWorkoutHistoryPrefetchController({
+    fetchPerformance: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("fallo productivo");
+      return retryGate.promise;
+    },
+    isRequestTokenCurrent: (candidate) => isSameToken(candidate, currentToken),
+    publishCurrent: (publication) => publications.push(publication),
+  });
+  const request = input(currentToken, { performancePrefetchLineageIds: [CURRENT] });
+
+  await controller.synchronize(request).current;
+  assert.equal(publications.at(-1)?.status, "error");
+  assert.notEqual(publications.at(-1)?.error, "");
+
+  const retry = controller.revalidateCurrent();
+  assert.ok(retry);
+  assert.equal(calls, 2);
+  assert.equal(publications.at(-1)?.status, "loading");
+  assert.equal(publications.at(-1)?.loading, true);
+  assert.equal(publications.at(-1)?.error, "");
+
+  retryGate.resolve(performance(CURRENT, "session-after-retry"));
+  await retry;
+  assert.equal(publications.at(-1)?.status, "ready");
+  assert.equal(publications.at(-1)?.performance?.sessionId, "session-after-retry");
+  controller.dispose();
+});
+
+test("un segundo retry durante la petición activa reutiliza la promise y no duplica queries", async () => {
+  const retryGate = deferred<LatestExercisePerformance | null>();
+  let calls = 0;
+  const currentToken = token();
+  const controller = createActiveWorkoutHistoryPrefetchController({
+    fetchPerformance: async ({ exerciseLineageId }) => {
+      calls += 1;
+      return calls === 1
+        ? performance(exerciseLineageId, "session-original")
+        : retryGate.promise;
+    },
+    isRequestTokenCurrent: (candidate) => isSameToken(candidate, currentToken),
+    publishCurrent: () => {},
+  });
+  const request = input(currentToken, { performancePrefetchLineageIds: [CURRENT] });
+
+  await controller.synchronize(request).current;
+  const firstRetry = controller.revalidateCurrent();
+  const secondRetry = controller.revalidateCurrent();
+
+  assert.ok(firstRetry);
+  assert.equal(secondRetry, firstRetry);
+  assert.equal(calls, 2, "dos clicks comparten una sola consulta productiva");
+
+  retryGate.resolve(performance(CURRENT, "session-retried-once"));
+  await firstRetry;
+  assert.equal(calls, 2);
+  controller.dispose();
+});
+
+test("un retry tardío del ejercicio anterior nunca se publica sobre el nuevo ejercicio", async () => {
+  const retryGate = deferred<LatestExercisePerformance | null>();
+  const publications: ActiveWorkoutHistoryPublication[] = [];
+  let currentCalls = 0;
+  const currentToken = token();
+  const controller = createActiveWorkoutHistoryPrefetchController({
+    fetchPerformance: async ({ exerciseLineageId }) => {
+      if (exerciseLineageId === CURRENT) {
+        currentCalls += 1;
+        return currentCalls === 1
+          ? performance(CURRENT, "current-original")
+          : retryGate.promise;
+      }
+      return performance(NEXT, "next-selected");
+    },
+    isRequestTokenCurrent: (candidate) => isSameToken(candidate, currentToken),
+    publishCurrent: (publication) => publications.push(publication),
+  });
+
+  await controller.synchronize(input(currentToken, {
+    performancePrefetchLineageIds: [CURRENT],
+  })).current;
+  const retry = controller.revalidateCurrent();
+  assert.ok(retry);
+  await controller.synchronize(input(currentToken, {
+    activeExerciseLineageId: NEXT,
+    performancePrefetchLineageIds: [NEXT],
+  })).current;
+  assert.equal(publications.at(-1)?.performance?.sessionId, "next-selected");
+
+  const publicationsBeforeStaleResolve = publications.length;
+  retryGate.resolve(performance(CURRENT, "current-late-retry"));
+  await retry;
+  assert.equal(publications.length, publicationsBeforeStaleResolve);
+  assert.equal(publications.at(-1)?.exerciseLineageId, NEXT);
+  assert.equal(publications.at(-1)?.performance?.sessionId, "next-selected");
+  controller.dispose();
+});
+
+test("un cambio de identidad/sesión invalida el retry pendiente y descarta su respuesta", async () => {
+  const retryGate = deferred<LatestExercisePerformance | null>();
+  const publications: ActiveWorkoutHistoryPublication[] = [];
+  let currentToken = token("user-a", 1, "session-a");
+  let userACalls = 0;
+  const controller = createActiveWorkoutHistoryPrefetchController({
+    fetchPerformance: async ({ exerciseLineageId }) => {
+      if (currentToken.userId === "user-a") {
+        userACalls += 1;
+        return userACalls === 1
+          ? performance(exerciseLineageId, "user-a-original")
+          : retryGate.promise;
+      }
+      return performance(exerciseLineageId, "user-b-current");
+    },
+    isRequestTokenCurrent: (candidate) => isSameToken(candidate, currentToken),
+    publishCurrent: (publication) => publications.push(publication),
+  });
+
+  await controller.synchronize(input(currentToken, {
+    performancePrefetchLineageIds: [CURRENT],
+  })).current;
+  const staleRetry = controller.revalidateCurrent();
+  assert.ok(staleRetry);
+
+  currentToken = token("user-b", 2, "session-b");
+  await controller.synchronize(input(currentToken, {
+    performancePrefetchLineageIds: [CURRENT],
+  })).current;
+  assert.equal(publications.at(-1)?.performance?.sessionId, "user-b-current");
+
+  const publicationsBeforeStaleResolve = publications.length;
+  retryGate.resolve(performance(CURRENT, "user-a-late-retry"));
+  await staleRetry;
+  assert.equal(publications.length, publicationsBeforeStaleResolve);
+  assert.equal(publications.at(-1)?.performance?.sessionId, "user-b-current");
+  controller.dispose();
+});
+
 test("un ejercicio ya precargado se publica al seleccionarlo sin request nueva", async () => {
   const publications: ActiveWorkoutHistoryPublication[] = [];
   const calls: string[] = [];
@@ -638,6 +783,59 @@ test("la key distingue generación, identidad, scope, source, ciclo, corte y lin
   assert.equal(new Set([baseKey, ...variants]).size, variants.length + 1);
 });
 
+test("la publicación visible falla cerrado entre ejercicio, sesión, identidad y canal", () => {
+  const viewKey = createActiveWorkoutHistoryViewKey({
+    channel: "performance",
+    activeExerciseId: "exercise-a",
+    activeExerciseLineageId: CURRENT,
+    workoutStartedAt: WORKOUT_STARTED_AT,
+    historySource: "cycle-scoped",
+    cycleId: "cycle-a",
+    observationUserId: null,
+  });
+  const requestToken = token();
+  const owner: ActiveWorkoutHistoryPublicationOwner = { viewKey, requestToken };
+  const isCurrent = (candidate: SessionDataRequestToken) => isSameToken(candidate, requestToken);
+
+  assert.equal(isActiveWorkoutHistoryPublicationCurrent(owner, viewKey, isCurrent), true);
+  assert.equal(isActiveWorkoutHistoryPublicationCurrent(null, viewKey, isCurrent), false);
+  assert.equal(isActiveWorkoutHistoryPublicationCurrent(owner, `${viewKey}:exercise-b`, isCurrent), false);
+  assert.equal(isActiveWorkoutHistoryPublicationCurrent(owner, viewKey, () => false), false);
+
+  for (const changedViewKey of [
+    createActiveWorkoutHistoryViewKey({
+      channel: "performance",
+      activeExerciseId: "exercise-b",
+      activeExerciseLineageId: NEXT,
+      workoutStartedAt: WORKOUT_STARTED_AT,
+      historySource: "cycle-scoped",
+      cycleId: "cycle-a",
+      observationUserId: null,
+    }),
+    createActiveWorkoutHistoryViewKey({
+      channel: "performance",
+      activeExerciseId: "exercise-a",
+      activeExerciseLineageId: CURRENT,
+      workoutStartedAt: "2026-08-06T13:00:00.000Z",
+      historySource: "cycle-scoped",
+      cycleId: "cycle-a",
+      observationUserId: null,
+    }),
+    createActiveWorkoutHistoryViewKey({
+      channel: "observation",
+      activeExerciseId: "exercise-a",
+      activeExerciseLineageId: CURRENT,
+      workoutStartedAt: WORKOUT_STARTED_AT,
+      historySource: null,
+      cycleId: null,
+      observationUserId: "user-a",
+    }),
+  ]) {
+    assert.notEqual(changedViewKey, viewKey);
+    assert.equal(isActiveWorkoutHistoryPublicationCurrent(owner, changedViewKey, isCurrent), false);
+  }
+});
+
 function stripComments(source: string) {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -659,8 +857,35 @@ function getHookIntegrationViolations(source: string): string[] {
   if (!code.includes("performancePrefetchLineageIds?: readonly string[]")) {
     violations.push("lineage_api_missing");
   }
+  if (!code.includes("retryExerciseHistory: () => void")) {
+    violations.push("retry_api_missing");
+  }
+  if (!/const retryExerciseHistory = useCallback\(\(\) => \{[\s\S]*?\}, \[\]\);/.test(code)) {
+    violations.push("retry_identity_unstable");
+  }
+  if (!/retryExercisePerformanceRef\.current\?\.\(\)/.test(code)) {
+    violations.push("retry_current_ref_disconnected");
+  }
+  if (!/controller\.revalidateCurrent\(\)/.test(code)) {
+    violations.push("controller_retry_disconnected");
+  }
+  if (!/const retryCurrentPerformance = \(\) => \{\s*void loadCurrentPerformance\(\);\s*\}/.test(code)) {
+    violations.push("fallback_retry_disconnected");
+  }
+  if (!code.includes("if (pendingLoad) return pendingLoad;")) {
+    violations.push("fallback_single_flight_missing");
+  }
+  if (
+    (code.match(/isActiveWorkoutHistoryPublicationCurrent\(/g) ?? []).length < 2 ||
+    !code.includes("latestExercisePerformance: isPerformancePublicationCurrent ?") ||
+    !code.includes("latestExerciseObservation: isObservationPublicationCurrent ?")
+  ) {
+    violations.push("synchronous_publication_gate_missing");
+  }
 
-  const synchronizeStart = code.indexOf("getPerformancePrefetchController().synchronize({");
+  const synchronizeStart = code.search(
+    /(?:getPerformancePrefetchController\(\)|controller)\.synchronize\(\{/,
+  );
   const synchronizeEnd = synchronizeStart >= 0 ? code.indexOf("});", synchronizeStart) : -1;
   if (synchronizeStart < 0 || synchronizeEnd < 0) {
     violations.push("synchronize_missing");
@@ -684,7 +909,7 @@ function getHookIntegrationViolations(source: string): string[] {
   return violations;
 }
 
-test("el hook integra lifecycle, API opt-in y mantiene observaciones fuera del prefetch", () => {
+test("el hook integra lifecycle, API opt-in, retry estable y mantiene observaciones fuera del prefetch", () => {
   const hookSource = readFileSync(
     new URL("../hooks/useActiveWorkoutExerciseHistory.ts", import.meta.url),
     "utf8",
@@ -703,7 +928,7 @@ test("el hook integra lifecycle, API opt-in y mantiene observaciones fuera del p
   );
   assert.doesNotMatch(
     hookSource.slice(
-      hookSource.indexOf("getPerformancePrefetchController().synchronize({"),
+      hookSource.indexOf("controller.synchronize({"),
       hookSource.indexOf("// Fallback compatible"),
     ),
     /Observation|observation/,
@@ -737,8 +962,50 @@ test("mutation probes de integración detectan desconexión, dispose omitido, me
     {
       expected: "synchronize_missing_workoutStartedAt: activeWorkoutStartedAt",
       source: hookSource.replace(
-        "workoutStartedAt: activeWorkoutStartedAt,",
-        "/* workoutStartedAt eliminado */",
+        "        activeExerciseLineageId: activeWorkoutExerciseLineageId,\n        workoutStartedAt: activeWorkoutStartedAt,\n        performancePrefetchLineageIds,",
+        "        activeExerciseLineageId: activeWorkoutExerciseLineageId,\n        /* workoutStartedAt eliminado */\n        performancePrefetchLineageIds,",
+      ),
+    },
+    {
+      expected: "retry_api_missing",
+      source: hookSource.replace(
+        "retryExerciseHistory: () => void;",
+        "/* retryExerciseHistory eliminado del resultado */",
+      ),
+    },
+    {
+      expected: "retry_identity_unstable",
+      source: hookSource.replace(
+        "const retryExerciseHistory = useCallback(() => {",
+        "const retryExerciseHistory = () => {",
+      ).replace("\n  }, []);", "\n  };"),
+    },
+    {
+      expected: "controller_retry_disconnected",
+      source: hookSource.replace(
+        "void controller.revalidateCurrent();",
+        "/* reintento controller desconectado */",
+      ),
+    },
+    {
+      expected: "fallback_retry_disconnected",
+      source: hookSource.replace(
+        "void loadCurrentPerformance();",
+        "/* reintento fallback desconectado */",
+      ),
+    },
+    {
+      expected: "fallback_single_flight_missing",
+      source: hookSource.replace(
+        "if (pendingLoad) return pendingLoad;",
+        "/* single-flight fallback eliminado */",
+      ),
+    },
+    {
+      expected: "synchronous_publication_gate_missing",
+      source: hookSource.replace(
+        "latestExercisePerformance: isPerformancePublicationCurrent ? latestExercisePerformance : null,",
+        "latestExercisePerformance,",
       ),
     },
   ];

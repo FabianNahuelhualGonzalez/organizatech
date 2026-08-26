@@ -47,6 +47,21 @@ export interface ActiveWorkoutHistoryPublication {
   status: ActiveWorkoutHistoryPublicationStatus;
 }
 
+export interface ActiveWorkoutHistoryViewKeyInput {
+  channel: "performance" | "observation";
+  activeExerciseId: string | null;
+  activeExerciseLineageId: string | null;
+  workoutStartedAt: string | null;
+  historySource: ActiveWorkoutHistoryScope["source"] | null;
+  cycleId: string | null;
+  observationUserId: string | null;
+}
+
+export interface ActiveWorkoutHistoryPublicationOwner {
+  viewKey: string;
+  requestToken: SessionDataRequestToken;
+}
+
 export interface ActiveWorkoutHistoryPrefetchControllerDependencies {
   fetchPerformance: LatestExercisePerformanceFetcher;
   isRequestTokenCurrent: (token: SessionDataRequestToken) => boolean;
@@ -359,6 +374,35 @@ export function createActiveWorkoutHistoryPrefetchKey(
     context.workoutStartedAt,
     lineageId,
   ]);
+}
+
+/**
+ * Identidad síncrona de la vista que puede consumir una publicación. Complementa la request key:
+ * evita que React pinte durante un frame el snapshot del ejercicio anterior antes de que corra el
+ * effect que inicia la siguiente carga.
+ */
+export function createActiveWorkoutHistoryViewKey(
+  input: ActiveWorkoutHistoryViewKeyInput,
+): string {
+  return JSON.stringify([
+    input.channel,
+    input.activeExerciseId,
+    input.activeExerciseLineageId,
+    input.workoutStartedAt,
+    input.historySource,
+    input.cycleId,
+    input.observationUserId,
+  ]);
+}
+
+export function isActiveWorkoutHistoryPublicationCurrent(
+  owner: Readonly<ActiveWorkoutHistoryPublicationOwner> | null,
+  currentViewKey: string,
+  isRequestTokenCurrent: (token: SessionDataRequestToken) => boolean,
+): boolean {
+  return owner !== null &&
+    owner.viewKey === currentViewKey &&
+    isRequestTokenCurrent(owner.requestToken);
 }
 
 function normalizeContext(input: ActiveWorkoutHistoryPrefetchInput): NormalizedContext | null {

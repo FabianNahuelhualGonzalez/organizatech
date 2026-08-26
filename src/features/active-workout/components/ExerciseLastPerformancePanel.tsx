@@ -1,110 +1,171 @@
-import { ChevronDown } from "lucide-react";
-
 import styles from "@/features/active-workout/active-workout.module.css";
+import {
+  invokeActiveWorkoutHistoryRetry,
+  type ActiveWorkoutSheetPanel,
+} from "@/features/active-workout/model/active-workout-sheet";
+import type { ActiveWorkoutHistoryPublicationStatus } from "@/features/active-workout/model/active-workout-history-prefetch-controller";
 import type { ExerciseLastObservationPresentation } from "@/lib/training/exercise-last-observation-presentation";
 import type { ExerciseLastPerformancePresentation } from "@/lib/training/exercise-last-performance-presentation";
 
 export interface ExerciseLastPerformancePanelProps {
   presentation: ExerciseLastPerformancePresentation;
+  historyStatus: ActiveWorkoutHistoryPublicationStatus;
   exerciseId: string;
+  targetSets: number;
   observationPresentation: ExerciseLastObservationPresentation;
   observationValue: string;
   onObservationChange: (value: string) => void;
+  openPanel: ActiveWorkoutSheetPanel | null;
+  onTogglePanel: (panel: ActiveWorkoutSheetPanel) => void;
+  retryExerciseHistory: () => void;
 }
 
+/**
+ * Presenta las dos referencias auxiliares de la hoja. El estado del acordeón pertenece a
+ * active-workout y nunca se mezcla con el draft ni con el loader productivo. Sólo una sección
+ * puede estar abierta a la vez.
+ */
 export function ExerciseLastPerformancePanel({
   presentation,
+  historyStatus,
   exerciseId,
+  targetSets,
   observationPresentation,
   observationValue,
   onObservationChange,
+  openPanel,
+  onTogglePanel,
+  retryExerciseHistory,
 }: ExerciseLastPerformancePanelProps) {
   const observationFieldId = `exercise-observation-${exerciseId}`;
   const observationHintId = `${observationFieldId}-hint`;
+  const historyPanelId = `exercise-history-${exerciseId}`;
+  const historyTriggerId = `${historyPanelId}-trigger`;
+  const commentPanelId = `exercise-comment-${exerciseId}`;
   const hasCurrentObservation = observationValue.trim().length > 0;
 
+  function retryHistory() {
+    if (!invokeActiveWorkoutHistoryRetry(retryExerciseHistory)) return;
+    window.requestAnimationFrame(() => {
+      document.getElementById(historyTriggerId)?.focus({ preventScroll: true });
+    });
+  }
+
   return (
-    <div className={`exercise-reference-card ${styles.referencePanel}`} key={exerciseId}>
-      <details
-        className="exercise-series-details"
-        data-disclosure
-        key={`series-${exerciseId}`}
-      >
-        <summary>
-          <span>
-            {presentation.status === "found"
-              ? presentation.seriesDetailTitle
-              : presentation.lastSummaryText}
-          </span>
-          <ChevronDown size={16} aria-hidden="true" />
-        </summary>
-        <div className={styles.disclosureContent}>
-          <p className={styles.historyTitle}>{presentation.lastHeaderText}</p>
-          {presentation.seriesRows.length > 0 ? (
-            <div className="exercise-series-detail-list">
-              {presentation.seriesRows.map((row) => (
-                <div className="exercise-series-detail-row" key={`${row.label}-${row.value}`}>
-                  <span>{row.label}</span>
-                  <strong>{row.value}</strong>
+    <div className={styles.sheetReferencePanel} key={exerciseId}>
+      <div className={styles.sheetReferencePills}>
+        <button
+          className={styles.sheetReferencePill}
+          id={historyTriggerId}
+          data-kind="history"
+          type="button"
+          aria-expanded={openPanel === "history"}
+          aria-controls={historyPanelId}
+          onClick={() => onTogglePanel("history")}
+        >
+          Registro de la semana pasada
+        </button>
+        <button
+          className={styles.sheetReferencePill}
+          data-kind="comment"
+          type="button"
+          aria-expanded={openPanel === "comment"}
+          aria-controls={commentPanelId}
+          onClick={() => onTogglePanel("comment")}
+        >
+          {hasCurrentObservation ? "Comentario en borrador" : "Comentario"}
+        </button>
+      </div>
+
+      {openPanel === "history" ? (
+        <section
+          className={styles.sheetDrawer}
+          id={historyPanelId}
+          aria-label="Registro de la semana pasada"
+          aria-live="polite"
+        >
+          {historyStatus === "idle" ? (
+            <p className={styles.sheetHistoryEmpty}>
+              Registro anterior no disponible todavía.
+            </p>
+          ) : historyStatus === "loading" ? (
+            <>
+              <p className={styles.sheetHistoryDate}>CARGANDO…</p>
+              {Array.from({ length: Math.min(Math.max(1, targetSets), 5) }, (_, index) => (
+                <div className={styles.sheetHistorySkeletonRow} aria-hidden="true" key={index}>
+                  <span />
+                  <span />
                 </div>
               ))}
-            </div>
-          ) : presentation.status === "loading" ? (
-            <div className={styles.loadingState} role="status" aria-live="polite">
-              <span>{presentation.lastSummaryText}</span>
-              <div className="exercise-performance-skeleton" aria-hidden="true" />
-            </div>
-          ) : (
-            <p
-              className={styles.historyStatus}
-              role={presentation.status === "error" ? "alert" : "status"}
-            >
-              {presentation.lastSummaryText}
-            </p>
-          )}
-          <p className={styles.todayGoal}>{presentation.todayGoalText}</p>
-        </div>
-      </details>
-
-      <details className="exercise-reference-block observation" data-disclosure key={`observation-${exerciseId}`}>
-        <summary>
-          <span>{hasCurrentObservation ? "Comentario en borrador" : "Añadir nuevo comentario"}</span>
-          <ChevronDown size={16} aria-hidden="true" />
-        </summary>
-        <div className={`exercise-observation-content ${styles.disclosureContent}`}>
-          <div className="exercise-observation-history">
-            <p className="exercise-observation-history-label">{observationPresentation.historyLabel}</p>
-            {observationPresentation.status === "loading" ? (
-              <div className={styles.loadingState} role="status" aria-live="polite">
-                <span>{observationPresentation.historyText}</span>
-                <div className="exercise-performance-skeleton" aria-hidden="true" />
+            </>
+          ) : historyStatus === "ready" ? (
+            <>
+              <p className={styles.sheetHistoryDate}>{presentation.lastHeaderText}</p>
+              <div className={styles.sheetHistoryRows}>
+                {presentation.seriesRows.map((row) => (
+                  <div className={styles.sheetHistoryRow} key={`${row.label}-${row.value}`}>
+                    <span>{row.label}</span>
+                    <strong>{row.value}</strong>
+                  </div>
+                ))}
               </div>
-            ) : (
-              <p
-                className="exercise-observation-history-text"
-                role={observationPresentation.status === "error" ? "alert" : "status"}
+            </>
+          ) : historyStatus === "empty" ? (
+            <p className={styles.sheetHistoryEmpty}>
+              Sin registro anterior de este ejercicio.
+            </p>
+          ) : (
+            <div className={styles.sheetHistoryError} role="alert">
+              <p>No se pudo cargar el registro anterior.</p>
+              <button
+                type="button"
+                onClick={retryHistory}
               >
-                {observationPresentation.historyText}
-              </p>
-            )}
-          </div>
+                Reintentar
+              </button>
+            </div>
+          )}
+        </section>
+      ) : null}
 
-          <label className="exercise-observation-field" htmlFor={observationFieldId}>
-            <span className="exercise-observation-field-label">Nueva observación</span>
-            <textarea
-              id={observationFieldId}
-              className="exercise-observation-textarea"
-              rows={4}
-              value={observationValue}
-              aria-describedby={observationHintId}
-              onChange={(event) => onObservationChange(event.target.value)}
-            />
-            <span className="exercise-observation-hint" id={observationHintId}>
-              Registra sensaciones, técnica o algún detalle para tu próxima sesión.
-            </span>
-          </label>
-        </div>
-      </details>
+      {openPanel === "comment" ? (
+        <section
+          className={styles.sheetDrawer}
+          id={commentPanelId}
+          aria-label="Comentario del ejercicio"
+        >
+            <div className={styles.sheetObservationHistory}>
+              <p>{observationPresentation.historyLabel}</p>
+              {observationPresentation.status === "loading" ? (
+                <div className={styles.sheetObservationLoading} role="status" aria-live="polite">
+                  <span>{observationPresentation.historyText}</span>
+                  <span aria-hidden="true" />
+                </div>
+              ) : (
+                <p
+                  className={styles.sheetObservationText}
+                  role={observationPresentation.status === "error" ? "alert" : "status"}
+                >
+                  {observationPresentation.historyText}
+                </p>
+              )}
+            </div>
+
+            <label className={styles.sheetObservationField} htmlFor={observationFieldId}>
+              <span>Nueva observación</span>
+              <textarea
+                id={observationFieldId}
+                rows={4}
+                value={observationValue}
+                aria-describedby={observationHintId}
+                onChange={(event) => onObservationChange(event.target.value)}
+              />
+              <small id={observationHintId}>
+                Registra sensaciones, técnica o algún detalle para tu próxima sesión.
+              </small>
+            </label>
+        </section>
+      ) : null}
     </div>
   );
 }

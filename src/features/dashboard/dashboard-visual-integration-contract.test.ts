@@ -60,14 +60,8 @@ for (const forbiddenImport of [
 
 assert.match(appSource, /import \{ DashboardScreen \} from "@\/features\/dashboard\/components\/dashboard-screen";/);
 assert.match(appSource, /import \{ EmptyDashboard \} from "@\/features\/dashboard\/components\/empty-dashboard";/);
-// P3-30: el root dejo de consumir RoutineMetricGrid al extraerse GuidedTrainingScreen, que era su
-// unico uso inline. La garantia se mantiene igual de fuerte apuntando al consumidor real: se
-// importa siempre desde el modulo compartido de UI, nunca se redeclara (lo ultimo ya se verifica
-// contra appSource en el bucle de arriba).
-assert.match(
-  readFileSync("src/features/active-workout/components/GuidedTrainingScreen.tsx", "utf8"),
-  /import \{ RoutineMetricGrid \} from "@\/ui\/data-display\/metric-grid";/,
-);
+// TRAIN-UI-02 ya no muestra métricas en Guided: la garantía del consumidor productivo compartido
+// se mantiene sobre TrainingStart al final de este contrato, sin crear DOM oculto en Active Workout.
 assert.match(appSource, /<DashboardScreen[\s\S]*?weekDays=\{dashboardCarouselDays\}/);
 assert.doesNotMatch(appSource, /weekDays=\{\[\.\.\.dashboardCarouselDays\]\}/);
 

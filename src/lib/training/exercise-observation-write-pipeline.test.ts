@@ -11,12 +11,26 @@ import { normalizeExerciseDrafts } from "@/lib/training/training-exercise-draft"
 const appSource = readFileSync("src/components/organizatech-app.tsx", "utf8");
 const exerciseDraftSource = readFileSync("src/lib/training/training-exercise-draft.ts", "utf8");
 const exercisePanelSource = readFileSync("src/features/active-workout/components/ExerciseLastPerformancePanel.tsx", "utf8");
-// P3-30: el JSX de la pantalla guiada (draft activo, textarea de observacion y grid de series)
-// dejo de vivir inline en el root y pasó a GuidedTrainingScreen. Las aserciones que apuntaban a
-// ese JSX se re-apuntan aqui, sin relajarse; las aserciones negativas pasan a cubrir AMBAS
-// fuentes para que la garantia no se debilite al mover el codigo de archivo.
 const guidedScreenSource = readFileSync("src/features/active-workout/components/GuidedTrainingScreen.tsx", "utf8");
-const appAndGuidedSource = `${appSource}\n${guidedScreenSource}`;
+const sheetBoundarySource = readFileSync(
+  "src/features/active-workout/components/ActiveWorkoutSheetBoundary.tsx",
+  "utf8",
+);
+const registrationSheetSource = readFileSync(
+  "src/features/active-workout/components/ExerciseRegistrationSheet.tsx",
+  "utf8",
+);
+const activeWorkoutStylesSource = readFileSync(
+  "src/features/active-workout/active-workout.module.css",
+  "utf8",
+);
+const activeWorkoutSources = [
+  appSource,
+  guidedScreenSource,
+  sheetBoundarySource,
+  registrationSheetSource,
+  exercisePanelSource,
+].join("\n");
 const repositorySource = readFileSync("src/lib/data/repository.ts", "utf8");
 const cycleScopedRepositorySource = readFileSync(
   "src/lib/training/cycle-scoped-training-repository.ts",
@@ -154,7 +168,7 @@ function testVisualObservationInputExistsAndIsConnectedToDraft() {
     "debe existir un <textarea> identificado por observationFieldId dentro del panel de referencia",
   );
   assert.match(
-    guidedScreenSource,
+    sheetBoundarySource,
     /observationValue=\{draft\.observation\}/,
     "el valor pasado al panel debe provenir de draft.observation",
   );
@@ -178,17 +192,22 @@ function testHistoricalDraftsRemainCompatible() {
 // [OBS-2B2 / PASO 7 caso 13-14] onChange actualiza exclusivamente el draft del ejercicio activo.
 function testOnChangeUpdatesOnlyTheActiveExerciseDraft() {
   assert.match(
-    guidedScreenSource,
-    /onObservationChange=\{\(value\) => updateDraft\(activeExercise, \{ observation: value \}\)\}/,
-    "el cambio en el textarea debe llamar updateDraft con activeExercise y solo el campo observation",
+    sheetBoundarySource,
+    /onObservationChange=\{\(value\) => updateSelectedExerciseDraft\(\{ observation: value \}\)\}/,
+    "el cambio del textarea debe entrar por la allowlist del draft con solo observation",
+  );
+  assert.match(
+    sheetBoundarySource,
+    /function updateSelectedExerciseDraft\(patch: EditableExerciseDraftPatch\)[\s\S]*?updateDraft\(activeExercise, patch\);/,
+    "la allowlist debe actualizar exclusivamente el draft del ejercicio activo",
   );
 }
 
 // [OBS-2B2 / PASO 7 caso 15] El draft activo se recalcula por exercise.id, aislando el texto al cambiar de ejercicio.
 function testDraftIsRecomputedPerActiveExerciseId() {
   assert.match(
-    guidedScreenSource,
-    /const draft = activeExercise \? normalizeExerciseDraft\(activeExercise, drafts\[activeExercise\.id\]\) : null;/,
+    sheetBoundarySource,
+    /const draft = activeExercise[\s\S]*?normalizeExerciseDraft\(activeExercise, drafts\[activeExercise\.id\]\)[\s\S]*?: null;/,
     "el draft mostrado debe derivarse siempre de drafts[activeExercise.id], nunca de un valor compartido entre ejercicios",
   );
 }
@@ -196,17 +215,17 @@ function testDraftIsRecomputedPerActiveExerciseId() {
 // [OBS-2B2 / PASO 7 caso 16] El historico nunca se copia al draft actual.
 function testHistoryNeverAutofillsDraft() {
   assert.doesNotMatch(
-    appAndGuidedSource,
+    activeWorkoutSources,
     /updateDraft\([^)]*latestExerciseObservation/,
     "updateDraft nunca debe recibir latestExerciseObservation como fuente de datos",
   );
   assert.doesNotMatch(
-    appAndGuidedSource,
+    activeWorkoutSources,
     /updateDraft\([^)]*observationPresentation/,
     "updateDraft nunca debe recibir observationPresentation como fuente de datos",
   );
   assert.doesNotMatch(
-    appAndGuidedSource,
+    activeWorkoutSources,
     /observation:\s*observationPresentation/,
     "ningun draft debe inicializarse leyendo el texto historico de observationPresentation",
   );
@@ -226,33 +245,61 @@ function testHistoryIsNotUsedAsPlaceholder() {
 // [OBS-2B2 / PASO 7 caso 18] El bloque de observacion no reutiliza notes.
 function testObservationBlockDoesNotUseNotes() {
   const observationBlock = exercisePanelSource.match(
-    /<details className="exercise-reference-block observation"[\s\S]*?<\/details>/,
+    /<section[\s\S]*?id=\{commentPanelId\}[\s\S]*?aria-label="Comentario del ejercicio"[\s\S]*?<\/section>/,
   );
-  assert.ok(observationBlock, "no se encontro el bloque JSX de la observacion del ejercicio");
+  assert.ok(observationBlock, "no se encontro la seccion productiva de observacion del ejercicio");
   assert.doesNotMatch(
     observationBlock![0],
     /\.notes\b/,
     "el bloque visual de observacion no debe leer ni mostrar notes",
+  );
+  assert.doesNotMatch(
+    observationBlock![0],
+    /<details|<summary|exercise-reference-block|exercise-observation-content/,
+    "la seccion productiva no debe conservar wrappers disclosure ni clases globales legacy",
   );
 }
 
 // [OBS-2B2 / PASO 7 caso 20] El texto se renderiza como texto plano, sin HTML/Markdown interpretado.
 function testObservationTextRendersAsPlainText() {
   assert.doesNotMatch(
-    `${appAndGuidedSource}\n${exercisePanelSource}`,
+    activeWorkoutSources,
     /dangerouslySetInnerHTML/,
     "la funcionalidad de observacion no debe introducir dangerouslySetInnerHTML en ningun punto",
+  );
+  assert.match(
+    activeWorkoutStylesSource,
+    /\.sheetObservationText \{[\s\S]*?overflow-wrap: anywhere;[\s\S]*?white-space: pre-wrap;/,
+    "el comentario histórico productivo debe conservar saltos y cortar texto largo sin HTML",
   );
 }
 
 // [OBS-2B2 / PASO 7 caso 22] El input de observacion vive a nivel ejercicio, no dentro del map de series.
 function testObservationInputIsNotInsideSeriesMap() {
-  const seriesRepGridBlock = guidedScreenSource.match(/<div className="series-rep-grid">[\s\S]*?<\/div>\s*\n\s*<\/div>/);
-  assert.ok(seriesRepGridBlock, "no se encontro el bloque series-rep-grid");
+  const seriesFieldset = registrationSheetSource.match(
+    /<fieldset className=\{styles\.workoutSeriesField\}>[\s\S]*?<\/fieldset>/,
+  );
+  assert.ok(seriesFieldset, "no se encontro el fieldset productivo de series");
+  assert.match(
+    seriesFieldset[0],
+    /\{draft\.reps\.map\(/,
+    "el fieldset productivo debe renderizar las series desde el draft",
+  );
   assert.doesNotMatch(
-    seriesRepGridBlock![0],
-    /<textarea|exercise-observation/,
-    "el textarea de observacion no debe estar dentro del grid/map de series",
+    seriesFieldset[0],
+    /<textarea|observationValue|onObservationChange/,
+    "el textarea de observacion no debe estar dentro del fieldset/map de series",
+  );
+  const panelUsage = registrationSheetSource.match(
+    /<ExerciseLastPerformancePanel[\s\S]*?\/>/,
+  );
+  assert.ok(panelUsage, "no se encontro el panel productivo de historial/observacion");
+  assert.match(panelUsage[0], /observationValue=\{observationValue\}/);
+  assert.match(panelUsage[0], /onObservationChange=\{onObservationChange\}/);
+  assert.doesNotMatch(
+    activeWorkoutSources,
+    /series-rep-grid/,
+    "no debe existir un marcador DOM/CSS legacy para simular el grid productivo",
   );
   assert.match(
     exercisePanelSource,

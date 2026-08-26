@@ -3,6 +3,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import {
+  beginActiveWorkoutCompletion,
+  canRetryActiveWorkoutCompletion,
+  INITIAL_ACTIVE_WORKOUT_COMPLETION_PUBLICATION,
+  invalidateActiveWorkoutCompletion,
+  settleActiveWorkoutCompletion,
+} from "@/features/active-workout/model/active-workout-boundary-contract";
+
 const root = readFileSync("src/components/organizatech-app.tsx", "utf8");
 const boundary = readFileSync("src/features/active-workout/hooks/useActiveWorkoutBoundary.ts", "utf8");
 const contract = readFileSync("src/features/active-workout/model/active-workout-boundary-contract.ts", "utf8");
@@ -42,6 +50,29 @@ assert.match(contract, /resumeOrRestore\(\): ActiveWorkoutReentryResult/);
 assert.match(contract, /complete\(\): Promise/);
 assert.match(contract, /discard\(\): void/);
 assert.match(contract, /resetForIdentity/);
+
+const savingCompletion = beginActiveWorkoutCompletion(
+  INITIAL_ACTIVE_WORKOUT_COMPLETION_PUBLICATION,
+);
+assert.deepEqual(savingCompletion, { revision: 1, status: "saving" });
+assert.deepEqual(
+  settleActiveWorkoutCompletion(savingCompletion, savingCompletion.revision, "error"),
+  { revision: 1, status: "error" },
+);
+assert.deepEqual(
+  settleActiveWorkoutCompletion(savingCompletion, savingCompletion.revision, "success"),
+  { revision: 1, status: "idle" },
+);
+const invalidatedCompletion = invalidateActiveWorkoutCompletion(savingCompletion);
+assert.deepEqual(invalidatedCompletion, { revision: 2, status: "idle" });
+assert.deepEqual(
+  settleActiveWorkoutCompletion(invalidatedCompletion, savingCompletion.revision, "error"),
+  invalidatedCompletion,
+  "un resultado stale no reemplaza la publicación de una identidad/revisión posterior",
+);
+assert.equal(canRetryActiveWorkoutCompletion("error"), true);
+assert.equal(canRetryActiveWorkoutCompletion("idle"), false);
+assert.equal(canRetryActiveWorkoutCompletion("saving"), false);
 
 assert.doesNotMatch(draftStorage, /const draft = \{\s*\.\.\.parsed/);
 assert.match(draftStorage, /Reconstruct the persisted record by allowlist/);
