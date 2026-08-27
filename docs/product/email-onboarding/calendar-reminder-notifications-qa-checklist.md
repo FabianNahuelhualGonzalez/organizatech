@@ -12,7 +12,7 @@ Esta entrega deja preparada localmente la campana persistente y el envío opcion
 
 ## Configuración QA pendiente
 
-1. Aplicar `20260827120000_calendar_notification_delivery.sql` después de `20260827000000_email_onboarding_transactional_email.sql`. Aplicar luego `20260827165000_calendar_notification_claim_ambiguity_fix.sql`; este hotfix califica los targets `ON CONFLICT` del worker y no cambia tablas, datos ni privilegios.
+1. Aplicar `20260827120000_calendar_notification_delivery.sql` después de `20260827000000_email_onboarding_transactional_email.sql`. Aplicar luego `20260827165000_calendar_notification_claim_ambiguity_fix.sql`; este hotfix califica los targets `ON CONFLICT` del worker y no cambia tablas, datos ni privilegios. Aplicar finalmente `20260827233948_email_calendar_coalesce_runtime_fix.sql`, que corrige `COALESCE` en los RPC runtime y recarga PostgREST sin cambiar firmas ni ACL.
 2. Crear una capability aleatoria distinta a la de onboarding. Guardarla en Vault como `organizatech_calendar_reminder_rpc_secret` y como secreto Edge `CALENDAR_REMINDER_RPC_SECRET`.
 3. Crear otro secreto independiente `CALENDAR_REMINDER_SCHEDULER_SECRET` para invocar el worker programado.
 4. Configurar en la función sólo `BREVO_API_KEY`, sender verificado, `ORGANIZATECH_APP_URL`, anon key y los dos secretos anteriores. Nunca usar `service_role`.

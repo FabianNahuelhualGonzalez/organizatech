@@ -19,6 +19,9 @@ Después de auditoría independiente:
 1. Aplicar la migración en QA. Aplicar después
    `20260827172801_email_onboarding_claim_ambiguity_fix.sql`; este hotfix
    califica el target `ON CONFLICT` del claim Auth sin cambiar tablas, datos ni privilegios.
+   Aplicar finalmente `20260827233948_email_calendar_coalesce_runtime_fix.sql`;
+   corrige el uso runtime de `COALESCE` en confirmación, bienvenida y creación de
+   recordatorios, y recarga el esquema PostgREST sin cambiar firmas ni ACL.
 2. Generar una capability aleatoria de alta entropía y guardar el mismo valor como secreto Edge `EMAIL_LEDGER_RPC_SECRET` y en Vault con nombre `organizatech_email_ledger_rpc_secret`.
 3. Configurar sólo como secretos Edge: `BREVO_API_KEY` y `SEND_EMAIL_HOOK_SECRET`.
 4. Configurar `ORGANIZATECH_EMAIL_SENDER`, `ORGANIZATECH_EMAIL_SENDER_NAME` y una URL HTTPS en `ORGANIZATECH_APP_URL`.

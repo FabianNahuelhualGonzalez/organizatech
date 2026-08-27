@@ -6,12 +6,16 @@ const MIGRATION_PATH =
   "supabase/migrations/20260827000000_email_onboarding_transactional_email.sql";
 const AUTH_CLAIM_FIX_MIGRATION_PATH =
   "supabase/migrations/20260827172801_email_onboarding_claim_ambiguity_fix.sql";
+const COALESCE_RUNTIME_FIX_MIGRATION_PATH =
+  "supabase/migrations/20260827233948_email_calendar_coalesce_runtime_fix.sql";
 
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260827000000_email_onboarding_transactional_email.sql":
     "9f40ec7fc99c75f79b9fdf97c2741962e904cad53a2698d6560e1932c048fad0",
   "20260827172801_email_onboarding_claim_ambiguity_fix.sql":
     "dba6198960cbd8c48ffa000634187590b3f8e8854fb2793d0aac3705b81fa169",
+  "20260827233948_email_calendar_coalesce_runtime_fix.sql":
+    "22dabbbbbf5e803c74e31bc6cb26f083c75a1307bc9a7406ba7879314acd9e19",
 } as const;
 
 type Violation =
@@ -408,6 +412,7 @@ function replaceOnceInsideFunction(
 
 const source = readFileSync(MIGRATION_PATH, "utf8");
 const authClaimFixSource = readFileSync(AUTH_CLAIM_FIX_MIGRATION_PATH, "utf8");
+const coalesceRuntimeFixSource = readFileSync(COALESCE_RUNTIME_FIX_MIGRATION_PATH, "utf8");
 
 test("EMAIL-ONBOARDING-01 hotfix califica el conflicto del claim Auth sin deriva", () => {
   const originalClaim = normalized(
@@ -459,6 +464,55 @@ test("mutation probe rechaza reintroducir el target Auth ambiguo", () => {
   assert.doesNotMatch(
     mutatedClaim,
     /on conflict on constraint transactional_email_deliveries_event_unique do update/,
+  );
+});
+
+test("hotfix COALESCE corrige sólo las tres funciones runtime con contratos cerrados", () => {
+  const sql = normalized(coalesceRuntimeFixSource);
+
+  assert.ok(hasAll(sql, [
+    "'public.claim_auth_transactional_email(text,text,text,text)'::text, 8::integer",
+    "'public.claim_own_transactional_welcome_emails(text)'::text, 4::integer",
+    "'public.create_own_calendar_reminder(uuid,text,text,text,date,time without time zone,text,boolean,text,text[],text,smallint,text,text,text,date,smallint)'::text, 1::integer",
+    "pg_catalog.to_regprocedure(v_target.signature)::oid",
+    "pg_catalog.pg_get_functiondef(procedure.oid)",
+    "not ('search_path=\"\"' = any(v_configuration))",
+    "pg_catalog.replace( v_definition, 'pg_catalog.coalesce', 'coalesce' )",
+    "notify pgrst, 'reload schema'",
+  ]));
+
+  assert.match(sql, /if not v_security_definer/);
+  assert.match(sql, /v_occurrence_count <> v_target\.expected_occurrence_count/);
+  assert.match(sql, /execute v_updated_definition/);
+  assert.ok(hasAll(sql, [
+    "revoke all on function public.claim_auth_transactional_email(text, text, text, text) from public",
+    "grant execute on function public.claim_auth_transactional_email(text, text, text, text) to anon",
+    "revoke all on function public.claim_own_transactional_welcome_emails(text) from public",
+    "grant execute on function public.claim_own_transactional_welcome_emails(text) to authenticated",
+    "grant execute on function public.create_own_calendar_reminder( uuid, text, text, text, date, time without time zone, text, boolean, text, text[], text, smallint, text, text, text, date, smallint ) to authenticated",
+  ]));
+  assert.doesNotMatch(sql, /\bservice_role\b/);
+});
+
+test("mutation probes del hotfix COALESCE rechazan deriva y reemplazo incompleto", () => {
+  const missingSecurityGuard = replaceOnce(
+    coalesceRuntimeFixSource,
+    "or not ('search_path=\"\"' = any(v_configuration))",
+    "or false",
+  );
+  const incompleteReplacement = replaceOnce(
+    coalesceRuntimeFixSource,
+    "'pg_catalog.coalesce',\n      'coalesce'",
+    "'pg_catalog.coalesce',\n      'pg_catalog.coalesce'",
+  );
+
+  assert.doesNotMatch(
+    normalized(missingSecurityGuard),
+    /not \('search_path=""' = any\(v_configuration\)\)/,
+  );
+  assert.doesNotMatch(
+    normalized(incompleteReplacement),
+    /pg_catalog\.replace\( v_definition, 'pg_catalog\.coalesce', 'coalesce' \)/,
   );
 });
 
