@@ -3,6 +3,8 @@
 import { useSearchParams } from "next/navigation";
 
 import { OrganizatechApp } from "@/components/organizatech-app";
+import { AuthLoadingScreen } from "@/features/auth/components/auth-screen";
+import { useGoogleOAuthCallbackGate } from "@/features/auth/hooks/use-google-oauth-callback-gate";
 import { resolveAuthRouteState } from "@/features/auth/model/auth-route";
 
 interface AuthEntryClientProps {
@@ -17,13 +19,20 @@ export function AuthEntryClient({
   trainingWorkoutReadinessV2Enabled,
 }: AuthEntryClientProps) {
   const searchParams = useSearchParams();
+  const googleOAuth = useGoogleOAuthCallbackGate();
+  if (googleOAuth.state === "checking") return <AuthLoadingScreen />;
   const initialAuthRoute = resolveAuthRouteState({
-    mode: searchParams.get("mode") ?? undefined,
-    tipo: searchParams.get("tipo") ?? undefined,
+    mode: googleOAuth.intent
+      ? googleOAuth.intent.mode
+      : searchParams.get("mode") ?? undefined,
+    tipo: googleOAuth.intent
+      ? googleOAuth.intent.portal
+      : searchParams.get("tipo") ?? undefined,
   });
 
   return (
     <OrganizatechApp
+      googleOAuth={googleOAuth}
       initialAuthRoute={initialAuthRoute}
       trainingCyclesRepositoryEnabled={trainingCyclesRepositoryEnabled}
       trainingCyclesSnapshotSource={trainingCyclesSnapshotSource}

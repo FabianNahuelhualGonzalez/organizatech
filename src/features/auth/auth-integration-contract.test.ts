@@ -237,11 +237,11 @@ assertAuthRegistrationInputContract(authScreen);
 runAuthRegistrationInputOrderControls(authScreen);
 runAuthRegistrationInputMutationProbes(authScreen);
 assert.doesNotMatch(authScreen, /COACH_REGISTRATION_SUBMIT_ENABLED/);
-assert.match(authScreen, /action=\{onSubmit\}/);
-assert.match(authScreen, /disabled=\{isBusy\}/);
+assert.match(authScreen, /action=\{handleSubmit\}/);
+assert.match(authScreen, /disabled=\{effectiveBusy\}/);
 assert.match(authScreen, /fieldErrors\["register-professional-title"\]/);
 assert.doesNotMatch(authScreen, /auth-tab-coach[\s\S]{0,300}disabled/);
-assert.match(authScreen, /aria-label="Continuar con Google \(no disponible\)"[\s\S]*?disabled/);
+assert.match(authScreen, /aria-label="Continuar con Google"[\s\S]*?googleOAuth\.start\(\{ mode, portal: accountType \}\)/);
 assert.doesNotMatch(authScreen, /Apple|aria-label="Correo"/);
 assert.doesNotMatch(authScreen, /dangerouslySetInnerHTML/);
 assert.doesNotMatch(authScreen, /email@email\.com/);
@@ -495,10 +495,13 @@ function auditRegistrationOwnership(sources: RegistrationOwnershipSources) {
       `${failure} opción accesible ${value}`,
     );
   }
-  assert.match(screen, /includeCredentials=\{!isCoachRegistration \|\| registrationState\.coachFlow === "separate"\}/);
+  assert.match(
+    screen,
+    /includeCredentials=\{!isGoogleRegistration && \([\s\S]*?!isCoachRegistration \|\| registrationState\.coachFlow === "separate"[\s\S]*?\)\}/,
+  );
   assert.match(screen, /Iniciar sesión y continuar/);
   assert.match(screen, /\? "Activar cuenta Coach"\s*: "Crear cuenta Coach"/);
-  assert.match(screen, /aria-label="Continuar con Google \(no disponible\)"[\s\S]*?disabled/);
+  assert.match(screen, /aria-label="Continuar con Google"[\s\S]*?googleOAuth\.start\(\{ mode, portal: accountType \}\)/);
   assert.doesNotMatch(
     `${rootSource}\n${screen}\n${hook}`,
     /identity_switch_required|coachIdentitySwitch|signOutForCoachIdentitySwitch|Cerrar sesión y continuar/,
