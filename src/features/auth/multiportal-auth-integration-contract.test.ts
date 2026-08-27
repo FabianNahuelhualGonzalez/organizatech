@@ -2089,7 +2089,7 @@ function auditIntegration(sources: Sources) {
   assert.match(gateway, /contactEmail: row\.contact_email/);
   assert.match(screen, /Correo de acceso Coach[\s\S]*Correo de contacto/);
   assert.match(screen, /¿Ya tienes una cuenta Organizatech Usuario\?[\s\S]*crea tu cuenta Coach con otro correo\./);
-  assert.match(screen, /Continuar con Google \(no disponible\)[\s\S]*disabled/);
+  assert.match(screen, /aria-label="Continuar con Google"[\s\S]*googleOAuth\.start\(\{ mode, portal: accountType \}\)/);
 
   assert.match(hook, /portalResolutionOwnersRef\.current\.hasPending\(\)/);
   assert.match(

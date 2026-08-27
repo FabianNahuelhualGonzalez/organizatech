@@ -28,6 +28,8 @@ const AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH =
   "supabase/migrations/20260825043212_auth_separate_coach_contact_email.sql";
 const AUTH_SEPARATE_CONTACT_MIGRATION_PATH =
   "supabase/migrations/20260826041258_auth_separate_coach_contact_email.sql";
+const AUTH_GOOGLE_HYBRID_MIGRATION_PATH =
+  "supabase/migrations/20260826170000_auth_google_hybrid_oauth.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -508,6 +510,7 @@ function auditProhibitedArtifacts(sources: Sources) {
         path.startsWith("supabase/migrations/")
         && path !== AUTH_CONFIRMATION_MIGRATION_PATH
         && path !== AUTH_SEPARATE_CONTACT_MIGRATION_PATH
+        && path !== AUTH_GOOGLE_HYBRID_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH

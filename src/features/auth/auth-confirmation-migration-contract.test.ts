@@ -6,6 +6,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import "@/features/auth/auth-separate-coach-contact-migration-contract.test";
+import "@/features/auth/google-oauth-integration-contract";
+import "@/features/auth/data/google-oauth-gateway.contract";
+import "@/features/auth/model/google-oauth-intent.contract";
+import "@/features/auth/model/google-oauth-operation-owner.contract";
 
 const MIGRATION_PATH =
   "supabase/migrations/20260820041942_auth_confirmation_pending_memberships.sql";
@@ -14,6 +18,8 @@ const PENDING_TABLE = "private.auth_registration_pending_memberships";
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260820041942_auth_confirmation_pending_memberships.sql":
     "7b5e6e73ed592dd011cb0eac518b859cdea5dec2051417a82f0a2fc4eafdbad6",
+  "20260826170000_auth_google_hybrid_oauth.sql":
+    "6fe130e759a1311e56a08c362a0e7662ff4d935a9763f24eb2207dd27139e5e6",
 } as const;
 
 const FAILURE = {

@@ -61,6 +61,11 @@ export interface UserSignupPayload {
   };
 }
 
+export type GoogleUserRegistrationWritePayload = Pick<
+  UserSignupMetadata,
+  "first_name" | "last_name" | "birth_date" | "gender" | "phone_number"
+>;
+
 export type ConfirmationRegistrationMetadata =
   | (UserSignupMetadata & {
     organizatech_registration_portal: "usuario";
@@ -157,6 +162,19 @@ export function buildUserSignupPayload(
         },
       },
     },
+  };
+}
+
+export function buildGoogleUserRegistrationPayload(
+  formData: FormData,
+  referenceDate = new Date(),
+): AuthFormPreparation<GoogleUserRegistrationWritePayload> {
+  const profile = buildRegistrationProfilePayload(formData, referenceDate);
+  if (!profile.ok) return profile;
+  const { first_name, last_name, birth_date, gender, phone_number } = profile.payload;
+  return {
+    ok: true,
+    payload: { first_name, last_name, birth_date, gender, phone_number },
   };
 }
 
