@@ -10,6 +10,7 @@ import {
   type AuthFieldName,
 } from "@/features/auth/model/auth-form";
 import type { AuthRegistrationFormBinding } from "@/features/auth/hooks/use-auth-registration-form-controller";
+import type { GoogleOAuthBoundary } from "@/features/auth/hooks/use-google-oauth-callback-gate";
 import type {
   AuthAccountType,
   AuthMode,
@@ -30,6 +31,7 @@ interface AuthScreenProps {
   fieldErrors: AuthFieldErrors;
   isBusy: boolean;
   authenticatedUserId: string | null;
+  googleOAuth: GoogleOAuthBoundary;
   registrationForm: AuthRegistrationFormBinding;
   loginEmail: string;
   loginPassword: string;
@@ -53,6 +55,7 @@ export function AuthScreen({
   fieldErrors,
   isBusy,
   authenticatedUserId,
+  googleOAuth,
   registrationForm,
   loginEmail,
   loginPassword,
@@ -67,6 +70,9 @@ export function AuthScreen({
 }: AuthScreenProps) {
   const isRegister = mode === "registro";
   const isCoachRegistration = isRegister && accountType === "coach";
+  const isGoogleRegistration = googleOAuth.registrationPending
+    && googleOAuth.intent?.mode === "registro"
+    && googleOAuth.intent.portal === accountType;
   const { controller: registrationController, state: registrationState } = registrationForm;
   const { values: registrationValues } = registrationState;
   const sharedCoachAuthorized = registrationState.coachFlow === "shared"
@@ -74,6 +80,7 @@ export function AuthScreen({
     && registrationState.sharedCoachEligibility.userId === authenticatedUserId;
   const showRegistrationFields = isRegister && (
     accountType === "usuario"
+    || isGoogleRegistration
     || registrationState.coachFlow === "separate"
     || sharedCoachAuthorized
   );
@@ -91,9 +98,27 @@ export function AuthScreen({
       ? "Activar cuenta Coach"
       : "Crear cuenta Coach"
     : "Crear cuenta";
+  const effectiveBusy = isBusy || googleOAuth.isBusy;
+  const effectiveMessage = googleOAuth.message || message;
+  const effectiveStatusTone = googleOAuth.message ? googleOAuth.statusTone : statusTone;
 
   function selectAccountType(nextAccountType: AuthAccountType) {
+    if (nextAccountType !== accountType) googleOAuth.cancelRegistration();
     onAccountTypeChange(nextAccountType);
+  }
+
+  async function handleSubmit(formData: FormData) {
+    if (!isGoogleRegistration) return onSubmit(formData);
+    const revision = registrationController.captureRevision();
+    const result = await googleOAuth.submitRegistration(formData, {
+      isCurrent: () => registrationController.isRevisionCurrent(revision),
+    });
+    if (
+      result.state === "field_error"
+      && registrationController.isRevisionCurrent(revision)
+    ) {
+      registrationController.setFieldError(result.field, result.message);
+    }
   }
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
@@ -142,12 +167,12 @@ export function AuthScreen({
         id="auth-panel"
         role="tabpanel"
         aria-labelledby={accountType === "usuario" ? "auth-tab-usuario" : "auth-tab-coach"}
-        action={onSubmit}
+        action={handleSubmit}
         autoComplete={isRegister ? "off" : "on"}
       >
         {isRegister ? <h2>{isCoachRegistration ? "Crear cuenta Coach" : "Crea tu cuenta"}</h2> : null}
 
-        {isCoachRegistration ? (
+        {isCoachRegistration && !isGoogleRegistration ? (
           <>
             <fieldset
               className={styles.coachRegistrationChoice}
@@ -191,7 +216,9 @@ export function AuthScreen({
               professionalTitle={registrationValues.professionalTitle}
               contactEmail={registrationValues.contactEmail}
               includeProfessionalTitle={isCoachRegistration}
-              includeCredentials={!isCoachRegistration || registrationState.coachFlow === "separate"}
+              includeCredentials={!isGoogleRegistration && (
+                !isCoachRegistration || registrationState.coachFlow === "separate"
+              )}
               firstName={registrationValues.firstName}
               email={registrationValues.email}
               password={registrationValues.password}
@@ -246,13 +273,13 @@ export function AuthScreen({
           ) : null}
         </div>
 
-        <AuthStatus message={message} tone={statusTone} />
+        <AuthStatus message={effectiveMessage} tone={effectiveStatusTone} />
 
         {sharedCoachNeedsLogin ? (
           <button
             className={styles.primaryButton}
             type="button"
-            disabled={isBusy || registrationState.sharedCoachEligibility.state === "checking"}
+            disabled={effectiveBusy || registrationState.sharedCoachEligibility.state === "checking"}
             onClick={onSharedCoachLogin}
           >
             <LogIn aria-hidden="true" size={21} />
@@ -264,10 +291,10 @@ export function AuthScreen({
           <button
             className={styles.primaryButton}
             type="submit"
-            disabled={isBusy}
+            disabled={effectiveBusy}
           >
             {isRegister ? <UserPlus aria-hidden="true" size={21} /> : <LogIn aria-hidden="true" size={21} />}
-            {isRegister ? registrationSubmitLabel : isBusy ? "Iniciando sesión..." : "Iniciar sesión"}
+            {isRegister ? registrationSubmitLabel : effectiveBusy ? "Iniciando sesión..." : "Iniciar sesión"}
           </button>
         ) : null}
 
@@ -277,22 +304,30 @@ export function AuthScreen({
           </button>
         ) : null}
 
-        <div className={styles.separator} aria-hidden="true"><span />ó<span /></div>
+        {!isGoogleRegistration ? (
+          <>
+            <div className={styles.separator} aria-hidden="true"><span />ó<span /></div>
 
-        <button
-          className={styles.googleButton}
-          type="button"
-          aria-label="Continuar con Google (no disponible)"
-          disabled
-        >
-          <span className={styles.googleMark} aria-hidden="true">G</span>
-          Continuar con Google
-        </button>
+            <button
+              className={styles.googleButton}
+              type="button"
+              aria-label="Continuar con Google"
+              disabled={effectiveBusy}
+              onClick={() => void googleOAuth.start({ mode, portal: accountType })}
+            >
+              <span className={styles.googleMark} aria-hidden="true">G</span>
+              Continuar con Google
+            </button>
+          </>
+        ) : null}
 
         <button
           className={styles.switchButton}
           type="button"
-          onClick={() => onModeChange(isRegister ? "login" : "registro")}
+          onClick={() => {
+            googleOAuth.cancelRegistration();
+            onModeChange(isRegister ? "login" : "registro");
+          }}
         >
           {isRegister ? "¿Ya tienes cuenta? Iniciar sesión" : "¿No tienes cuenta? Crea una"}
         </button>

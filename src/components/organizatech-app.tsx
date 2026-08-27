@@ -47,6 +47,7 @@ import {
   type AuthStatusTone,
 } from "@/features/auth/components/auth-screen";
 import { useAuthRegistrationFormController } from "@/features/auth/hooks/use-auth-registration-form-controller";
+import type { GoogleOAuthBoundary } from "@/features/auth/hooks/use-google-oauth-callback-gate";
 import { useAuthRouteController } from "@/features/auth/hooks/use-auth-route-controller";
 import {
   PASSWORD_RECOVERY_FLOW,
@@ -431,6 +432,7 @@ interface OrganizatechAppProps {
   trainingCyclesSnapshotSource?: "ui-main-production" | "ui-main-qa";
   trainingWorkoutReadinessV2Enabled?: boolean;
   initialAuthRoute?: AuthRouteState;
+  googleOAuth: GoogleOAuthBoundary;
 }
 
 export function OrganizatechApp({
@@ -438,6 +440,7 @@ export function OrganizatechApp({
   trainingCyclesSnapshotSource = "ui-main-qa",
   trainingWorkoutReadinessV2Enabled = false,
   initialAuthRoute = DEFAULT_AUTH_ROUTE,
+  googleOAuth,
 }: OrganizatechAppProps) {
   const initialSignupConfirmationRef = useRef<SignupConfirmationSnapshot | null>(null);
   const initialSignupConfirmation = initialSignupConfirmationRef.current
@@ -4288,6 +4291,7 @@ export function OrganizatechApp({
           fieldErrors={authFieldErrors}
           isBusy={isBusy}
           authenticatedUserId={supabaseUser?.id ?? null}
+          googleOAuth={googleOAuth}
           registrationForm={registrationForm}
           loginEmail={loginEmail}
           loginPassword={loginPassword}
