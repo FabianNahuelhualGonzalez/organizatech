@@ -16,7 +16,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useReducer, useRef, type RefObject } from "react";
+import { useMemo, useReducer, useRef, useState, type RefObject } from "react";
 
 import {
   COACH_HOME_MESSAGE,
@@ -27,6 +27,7 @@ import {
   reduceCoachPortalState,
   type CoachPortalSession,
 } from "@/features/coach-portal/model/coach-portal";
+import { CalendarRemindersProductiveBoundary } from "@/features/calendar-reminders";
 import { AppBackButton } from "@/ui/navigation/app-back-button";
 import {
   OVERLAY_INITIAL_FOCUS_ATTRIBUTE,
@@ -66,6 +67,7 @@ export function CoachPortalBoundary({
     createInitialCoachPortalState,
   );
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const profile = useMemo(() => createCoachPortalProfileViewModel(session), [session]);
 
   function handleLogout() {
@@ -101,16 +103,29 @@ export function CoachPortalBoundary({
       <CoachPortalNavigationDrawer
         isOpen={state.isMenuOpen}
         activeScreen={state.screen}
+        isCalendarOpen={isCalendarOpen}
         fullName={profile.fullName}
         professionalTitle={profile.professionalTitle}
         isLoggingOut={isLoggingOut}
         restoreFocusRef={menuButtonRef}
         onClose={() => dispatch({ type: "menu_closed" })}
-        onOpenProfile={() => dispatch({ type: "profile_opened" })}
+        onOpenProfile={() => {
+          setIsCalendarOpen(false);
+          dispatch({ type: "profile_opened" });
+        }}
+        onOpenCalendar={() => {
+          dispatch({ type: "menu_closed" });
+          setIsCalendarOpen(true);
+        }}
         onLogout={handleLogout}
       />
 
-      {state.screen === "home" ? (
+      {isCalendarOpen ? (
+        <CalendarRemindersProductiveBoundary
+          identityKey={session.userId}
+          onBack={() => setIsCalendarOpen(false)}
+        />
+      ) : state.screen === "home" ? (
         <CoachPortalHome fullName={profile.fullName} />
       ) : (
         <CoachPortalProfile
@@ -208,22 +223,26 @@ function CoachProfileField({ label, value }: { label: string; value: string }) {
 function CoachPortalNavigationDrawer({
   isOpen,
   activeScreen,
+  isCalendarOpen,
   fullName,
   professionalTitle,
   isLoggingOut,
   restoreFocusRef,
   onClose,
   onOpenProfile,
+  onOpenCalendar,
   onLogout,
 }: {
   isOpen: boolean;
   activeScreen: "home" | "profile";
+  isCalendarOpen: boolean;
   fullName: string;
   professionalTitle: string;
   isLoggingOut: boolean;
   restoreFocusRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onOpenProfile: () => void;
+  onOpenCalendar: () => void;
   onLogout: () => void;
 }) {
   const drawerRef = useOverlayFocusManagement<HTMLDivElement>({
@@ -290,8 +309,24 @@ function CoachPortalNavigationDrawer({
                     <button
                       className={styles.menuItem}
                       type="button"
-                      aria-current={activeScreen === "profile" ? "page" : undefined}
+                      aria-current={!isCalendarOpen && activeScreen === "profile" ? "page" : undefined}
                       onClick={onOpenProfile}
+                    >
+                      <ItemIcon aria-hidden="true" size={19} />
+                      <span>{item.label}</span>
+                    </button>
+                  </li>
+                );
+              }
+
+              if (item.id === "calendar") {
+                return (
+                  <li key={item.id}>
+                    <button
+                      className={styles.menuItem}
+                      type="button"
+                      aria-current={isCalendarOpen ? "page" : undefined}
+                      onClick={onOpenCalendar}
                     >
                       <ItemIcon aria-hidden="true" size={19} />
                       <span>{item.label}</span>

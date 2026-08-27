@@ -15,6 +15,10 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
 
+export const POST_PERF_06_MIGRATION_OWNERSHIP = {
+  "20260826213606_calendar_reminders_shared_portal.sql": "738fd557683411eb30a2fcdeb7ab97c59899e953dbd9929e206f9af00898120e",
+} as const;
+
 const BASE_SHA = "8b98ac9774fd7512191551234ebf4ee61fe36181";
 
 const paths = {
@@ -43,6 +47,7 @@ const EXPECTED_MAPPING = {
   comparison: "comparacion",
   "edit-cycle": "registro-entrenamiento",
   "cycle-history": "historial-ciclos",
+  calendar: "calendario",
 };
 
 const EXPECTED_IDS = [
@@ -52,6 +57,7 @@ const EXPECTED_IDS = [
   "comparison",
   "edit-cycle",
   "cycle-history",
+  "calendar",
   "logout",
 ];
 
@@ -62,6 +68,7 @@ const EXPECTED_LABELS = [
   "Comparación semanal",
   "Modificar ciclo de entrenamiento",
   "Historial ciclo de entrenamiento",
+  "Calendario",
   "Cerrar sesión",
 ];
 
@@ -1755,7 +1762,7 @@ function validateIntegration(sources: Sources) {
     "[UI-NAV-01.navigation-enabled] destinos ofrecidos habilitados",
   );
   assert.equal(
-    navigationItems.some(({ label }) => label === "Calendario" || label === "Mensajes"),
+    navigationItems.some(({ label }) => label === "Mensajes"),
     false,
     "[UI-NAV-01.navigation-invented] sin destinos inventados",
   );
@@ -2251,10 +2258,9 @@ test("la lista de consumidores del gestor de foco es exacta e incluye el drawer 
   ]);
 });
 
-test("Recovery, Coach, NotificationPanel, perfil y fallbacks conservan paridad", () => {
+test("Recovery, NotificationPanel, perfil y fallbacks no modificados conservan paridad", () => {
   for (const path of [
     "src/features/auth/model/password-recovery-portal-guard.ts",
-    "src/features/coach-portal/components/coach-portal.tsx",
     "src/features/notifications/components/NotificationPanel.tsx",
     "src/features/app-shell/components/app-topbar.tsx",
     "src/features/app-shell/components/app-navigation-drawer.tsx",
@@ -2580,13 +2586,13 @@ const mutationProbes: Array<{
     ),
   },
   {
-    name: "inventar Calendario o Mensajes",
+    name: "inventar Mensajes",
     target: "model",
     barrier: "[UI-NAV-01.navigation-labels]",
     mutate: (source) => replaceExactlyOnce(
       source,
       'label: "Comparación semanal"',
-      'label: "Calendario"',
+      'label: "Mensajes"',
       "Invented destination",
     ),
   },

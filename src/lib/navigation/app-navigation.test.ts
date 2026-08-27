@@ -27,6 +27,7 @@ const screens: Screen[] = [
   "registro-entrenamiento",
   "comparacion",
   "historial-ciclos",
+  "calendario",
   "perfil",
 ];
 
@@ -39,6 +40,7 @@ const activeFlows: ActiveFlow[] = [
   "active_workout",
   "comparison",
   "cycle_history",
+  "calendar",
   "profile",
 ];
 
@@ -50,6 +52,7 @@ assert.equal(getActiveFlow("entrenamiento", true, false, true, null), "motivatio
 assert.equal(getActiveFlow("entrenamiento", true, false, true, { skipped: false }), "active_workout");
 assert.equal(getActiveFlow("comparacion", true, false, false, null), "comparison");
 assert.equal(getActiveFlow("historial-ciclos", true, false, false, null), "cycle_history");
+assert.equal(getActiveFlow("calendario", true, false, false, null), "calendar");
 assert.equal(getActiveFlow("perfil", true, false, false, null), "profile");
 assert.equal(getActiveFlow("training-summary", true, false, false, null), "dashboard");
 
@@ -77,6 +80,7 @@ assert.deepEqual(
     "Modificar ciclo de entrenamiento",
     "Comparación semanal",
     "Historial ciclo de entrenamiento",
+    "Calendario",
     "Mi perfil",
   ],
 );

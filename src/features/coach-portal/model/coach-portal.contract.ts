@@ -92,7 +92,7 @@ test("inicio, orden del menú y navegación local permanecen cerrados", () => {
     "disabled",
     "disabled",
     "disabled",
-    "disabled",
+    "enabled",
     "disabled",
     "action",
   ]);

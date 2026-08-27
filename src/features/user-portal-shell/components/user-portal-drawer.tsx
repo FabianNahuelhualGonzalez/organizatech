@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  CalendarDays,
   ChartNoAxesCombined,
   Dumbbell,
   History,
@@ -32,6 +33,7 @@ const userPortalDestinationIcons: Record<UserPortalDestinationId, LucideIcon> = 
   comparison: ChartNoAxesCombined,
   "edit-cycle": Settings2,
   "cycle-history": History,
+  calendar: CalendarDays,
 };
 
 export interface UserPortalDrawerProps {

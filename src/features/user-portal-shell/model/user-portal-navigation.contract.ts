@@ -22,6 +22,7 @@ const PRIMARY_SCREENS: readonly Screen[] = [
   "comparacion",
   "registro-entrenamiento",
   "historial-ciclos",
+  "calendario",
 ];
 
 const EXPECTED_IDS = [
@@ -31,6 +32,7 @@ const EXPECTED_IDS = [
   "comparison",
   "edit-cycle",
   "cycle-history",
+  "calendar",
   "logout",
 ] as const;
 
@@ -41,6 +43,7 @@ const EXPECTED_LABELS = [
   "Comparación semanal",
   "Modificar ciclo de entrenamiento",
   "Historial ciclo de entrenamiento",
+  "Calendario",
   "Cerrar sesión",
 ] as const;
 
@@ -48,9 +51,9 @@ test("el menú Usuario conserva orden, IDs, etiquetas y sólo opciones aprobadas
   assert.deepEqual(USER_PORTAL_NAVIGATION_ITEMS.map(({ id }) => id), EXPECTED_IDS);
   assert.deepEqual(USER_PORTAL_NAVIGATION_ITEMS.map(({ label }) => label), EXPECTED_LABELS);
   const labels = USER_PORTAL_NAVIGATION_ITEMS.map(({ label }) => String(label));
-  assert.equal(labels.includes("Calendario"), false);
+  assert.equal(labels.includes("Calendario"), true);
   assert.equal(labels.includes("Mensajes"), false);
-  assert.equal(USER_PORTAL_NAVIGATION_ITEMS.filter(isUserPortalDestination).length, 6);
+  assert.equal(USER_PORTAL_NAVIGATION_ITEMS.filter(isUserPortalDestination).length, 7);
 });
 
 test("el mapeo visual a Screen es exacto, total y reversible", () => {
@@ -61,6 +64,7 @@ test("el mapeo visual a Screen es exacto, total y reversible", () => {
     comparison: "comparacion",
     "edit-cycle": "registro-entrenamiento",
     "cycle-history": "historial-ciclos",
+    calendar: "calendario",
   });
 
   for (const destinationId of Object.keys(
@@ -80,7 +84,7 @@ test("el modelo consume la visibilidad canónica y nunca deshabilita destinos of
 
   assert.deepEqual(
     model.items.map(({ id }) => id),
-    ["profile", "dashboard", "training", "comparison", "edit-cycle", "logout"],
+    ["profile", "dashboard", "training", "comparison", "edit-cycle", "calendar", "logout"],
   );
   assert.equal(model.items.every((item) => (
     item.kind === "logout" || item.availability === "enabled"
@@ -103,6 +107,7 @@ test("la opción activa deriva de la pantalla real e incluye el resumen interno 
     ["comparacion", "comparison"],
     ["registro-entrenamiento", "edit-cycle"],
     ["historial-ciclos", "cycle-history"],
+    ["calendario", "calendar"],
   ]);
 
   for (const [screen, activeItemId] of expected) {
@@ -130,7 +135,7 @@ test("cada destino visual ejecuta una sola navegación tipada", () => {
   }
 
   assert.deepEqual(calls, PRIMARY_SCREENS);
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 7);
 });
 
 test("el modelo visual identifica únicamente las pantallas productivas del portal Usuario", () => {

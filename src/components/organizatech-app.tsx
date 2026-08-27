@@ -97,6 +97,7 @@ import {
   type UserPortalSessionRevalidation,
 } from "@/features/auth/model/user-portal-session-revalidation";
 import { CoachPortalBoundary } from "@/features/coach-portal/components/coach-portal";
+import { CalendarRemindersProductiveBoundary } from "@/features/calendar-reminders";
 import {
   createCoachPortalSession,
   type CoachPortalSession,
@@ -406,7 +407,7 @@ const ComparisonScreenV2 = dynamic<ComparisonScreenV2Props>(
     .then((module) => module.ComparisonScreenV2),
 );
 
-const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
+const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos", "calendario"];
 const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
 const objectiveDescriptions: Record<string, string> = {
   Fuerza: "Busca aumentar la capacidad de levantar más carga. Prioriza ejercicios base, descansos amplios y progresión controlada de peso.",
@@ -4587,6 +4588,14 @@ export function OrganizatechApp({
           onSavePersonalData={handleSaveProfilePersonalData}
           onUploadAvatar={handleUploadProfileAvatar}
           cycleContextLabel={`${trainingTopbarMeta?.cycleLabel ?? "Ciclo"} + ${trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`}`}
+        />
+      )}
+      {screen === "calendario" && supabaseUser?.id && (
+        <CalendarRemindersProductiveBoundary
+          key={supabaseUser.id}
+          identityKey={supabaseUser.id}
+          onBack={goBack}
+          showBackButton={false}
         />
       )}
       {isNewCycleConfirmOpen && (
