@@ -4,10 +4,14 @@ import test from "node:test";
 
 const MIGRATION_PATH =
   "supabase/migrations/20260827000000_email_onboarding_transactional_email.sql";
+const AUTH_CLAIM_FIX_MIGRATION_PATH =
+  "supabase/migrations/20260827172801_email_onboarding_claim_ambiguity_fix.sql";
 
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260827000000_email_onboarding_transactional_email.sql":
     "9f40ec7fc99c75f79b9fdf97c2741962e904cad53a2698d6560e1932c048fad0",
+  "20260827172801_email_onboarding_claim_ambiguity_fix.sql":
+    "dba6198960cbd8c48ffa000634187590b3f8e8854fb2793d0aac3705b81fa169",
 } as const;
 
 type Violation =
@@ -403,6 +407,60 @@ function replaceOnceInsideFunction(
 }
 
 const source = readFileSync(MIGRATION_PATH, "utf8");
+const authClaimFixSource = readFileSync(AUTH_CLAIM_FIX_MIGRATION_PATH, "utf8");
+
+test("EMAIL-ONBOARDING-01 hotfix califica el conflicto del claim Auth sin deriva", () => {
+  const originalClaim = normalized(
+    functionSource(source, "public.claim_auth_transactional_email"),
+  );
+  const fixedClaim = normalized(
+    functionSource(authClaimFixSource, "public.claim_auth_transactional_email"),
+  );
+  const expectedClaim = originalClaim
+    .replace(
+      "create function public.claim_auth_transactional_email(",
+      "create or replace function public.claim_auth_transactional_email(",
+    )
+    .replace(
+      "on conflict (user_id, delivery_kind, event_key) do update",
+      "on conflict on constraint transactional_email_deliveries_event_unique do update",
+    );
+
+  assert.equal(fixedClaim, expectedClaim);
+  assert.match(
+    fixedClaim,
+    /on conflict on constraint transactional_email_deliveries_event_unique do update/,
+  );
+  assert.doesNotMatch(fixedClaim, /on conflict\s*\(\s*user_id\b/);
+  assert.match(fixedClaim, /security definer set search_path = ''/);
+  assert.match(fixedClaim, /private\.verify_transactional_email_capability\(p_capability\)/);
+
+  const sql = normalized(authClaimFixSource);
+  assert.ok(hasAll(sql, [
+    "revoke all on function public.claim_auth_transactional_email(text, text, text, text) from public",
+    "revoke all on function public.claim_auth_transactional_email(text, text, text, text) from anon",
+    "revoke all on function public.claim_auth_transactional_email(text, text, text, text) from authenticated",
+    "grant execute on function public.claim_auth_transactional_email(text, text, text, text) to anon",
+  ]));
+  assert.doesNotMatch(sql, /\bservice_role\b/);
+});
+
+test("mutation probe rechaza reintroducir el target Auth ambiguo", () => {
+  const mutated = replaceOnce(
+    authClaimFixSource,
+    "on conflict on constraint transactional_email_deliveries_event_unique do update",
+    "on conflict (user_id, delivery_kind, event_key) do update",
+  );
+  const mutatedClaim = normalized(
+    functionSource(mutated, "public.claim_auth_transactional_email"),
+  );
+
+  assert.match(mutatedClaim, /on conflict \(user_id, delivery_kind, event_key\) do update/);
+  assert.doesNotMatch(
+    mutatedClaim,
+    /on conflict on constraint transactional_email_deliveries_event_unique do update/,
+  );
+});
 
 test("EMAIL-ONBOARDING-01 SQL conserva ledger privado, RLS, ACL e idempotencia", () => {
   assert.deepEqual([...inspectMigration(source)], []);

@@ -16,7 +16,9 @@ El Send Email Hook es global. El fallback neutral cubre todas las acciones Auth 
 
 Después de auditoría independiente:
 
-1. Aplicar la migración en QA.
+1. Aplicar la migración en QA. Aplicar después
+   `20260827172801_email_onboarding_claim_ambiguity_fix.sql`; este hotfix
+   califica el target `ON CONFLICT` del claim Auth sin cambiar tablas, datos ni privilegios.
 2. Generar una capability aleatoria de alta entropía y guardar el mismo valor como secreto Edge `EMAIL_LEDGER_RPC_SECRET` y en Vault con nombre `organizatech_email_ledger_rpc_secret`.
 3. Configurar sólo como secretos Edge: `BREVO_API_KEY` y `SEND_EMAIL_HOOK_SECRET`.
 4. Configurar `ORGANIZATECH_EMAIL_SENDER`, `ORGANIZATECH_EMAIL_SENDER_NAME` y una URL HTTPS en `ORGANIZATECH_APP_URL`.
