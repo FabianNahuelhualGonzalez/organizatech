@@ -4,10 +4,13 @@ import test from "node:test";
 
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260827120000_calendar_notification_delivery.sql": "9deefd69a077ca906ad55d61f54ad9c73160cdb8917c6a5936fd77c4ce1ebe7e",
+  "20260827165000_calendar_notification_claim_ambiguity_fix.sql": "6ae4a7929a36275520046bb9239b4e4ddf54a0b0d79add62b7e167aed5980861",
 } as const;
 
 const migrationPath = "supabase/migrations/20260827120000_calendar_notification_delivery.sql";
 const migration = readFileSync(migrationPath, "utf8");
+const ambiguityFixPath = "supabase/migrations/20260827165000_calendar_notification_claim_ambiguity_fix.sql";
+const ambiguityFix = readFileSync(ambiguityFixPath, "utf8");
 
 function assertSecureCalendarMigration(source: string) {
   assert.match(source, /alter table public\.calendar_notifications enable row level security;/);
@@ -35,6 +38,19 @@ function assertSecureCalendarMigration(source: string) {
   assert.match(source, /recipient_unavailable/);
 }
 
+function assertClaimAmbiguityFix(source: string) {
+  assert.match(source, /create or replace function public\.claim_due_calendar_reminder_deliveries\(p_capability text\)/);
+  assert.match(source, /security definer[\s\S]*set search_path = ''/);
+  assert.match(source, /private\.verify_calendar_reminder_capability\(p_capability\)/);
+  assert.match(source, /on conflict on constraint calendar_notifications_occurrence_unique do nothing/);
+  assert.match(source, /returning inserted_notification\.reminder_id, inserted_notification\.occurrence_on/);
+  assert.match(source, /on conflict on constraint calendar_reminder_deliveries_occurrence_unique do nothing/);
+  assert.doesNotMatch(source, /on conflict \(reminder_id, occurrence_on\)/);
+  assert.doesNotMatch(source, /returning reminder_id, occurrence_on/);
+  assert.match(source, /revoke all on function public\.claim_due_calendar_reminder_deliveries\(text\)[\s\S]*from public, anon, authenticated/);
+  assert.match(source, /grant execute on function public\.claim_due_calendar_reminder_deliveries\(text\) to anon/);
+}
+
 test("migración endurece ownership, claims, recurrencia y DST", () => {
   assertSecureCalendarMigration(migration);
 });
@@ -57,6 +73,31 @@ test("mutantes críticos de seguridad y entrega mueren", () => {
 
 test("migración previa de Calendario permanece anterior y no fue reescrita", () => {
   assert.ok("20260826213606" < "20260827120000");
+  assert.ok("20260827120000" < "20260827165000");
   assert.equal(migration.includes("training_sessions"), false);
   assert.equal(migration.includes("exercise_entries"), false);
+  assert.equal(ambiguityFix.includes("training_sessions"), false);
+  assert.equal(ambiguityFix.includes("exercise_entries"), false);
+});
+
+test("hotfix califica los targets que chocan con variables RETURNS TABLE", () => {
+  assertClaimAmbiguityFix(ambiguityFix);
+});
+
+test("mutantes que restauran la ambigüedad PL/pgSQL mueren", () => {
+  const mutants = [
+    ambiguityFix.replace(
+      "on conflict on constraint calendar_notifications_occurrence_unique do nothing",
+      "on conflict (reminder_id, occurrence_on) do nothing",
+    ),
+    ambiguityFix.replace(
+      "returning inserted_notification.reminder_id, inserted_notification.occurrence_on",
+      "returning reminder_id, occurrence_on",
+    ),
+    ambiguityFix.replace(
+      "on conflict on constraint calendar_reminder_deliveries_occurrence_unique do nothing",
+      "on conflict (reminder_id, occurrence_on) do nothing",
+    ),
+  ];
+  for (const mutant of mutants) assert.throws(() => assertClaimAmbiguityFix(mutant));
 });
