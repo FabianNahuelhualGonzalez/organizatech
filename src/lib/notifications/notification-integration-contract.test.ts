@@ -28,11 +28,13 @@ function assertInOrder(source: string, markers: string[]) {
 
 // CASO 1: la aplicacion delega la construccion completa al modelo puro.
 assert.match(appSource, /useNotificationsController\(\{/);
-assert.match(notificationsControllerSource, /const appNotifications = buildAppNotifications\(catalogInput, now\)/);
+assert.match(notificationsControllerSource, /const appNotifications = sortNotificationsByPriority\(dedupeNotifications\(\[/);
+assert.match(notificationsControllerSource, /\.\.\.\(includeCatalog \? buildAppNotifications\(catalogInput, now\) : \[\]\), \.\.\.additional/);
 assert.match(notificationGroupSource, /resolveNotificationIconKey\(notification\.category\)/);
 
 // CASO 2: seleccion y textos derivados salen del selector puro.
-assert.match(notificationsControllerSource, /selectNotificationView\(appNotifications, seenRecords\)/);
+assert.match(notificationsControllerSource, /const mergedSeen = \[\.\.\.seenRecords, \.\.\.persistedSeen\]/);
+assert.match(notificationsControllerSource, /selectNotificationView\(appNotifications, mergedSeen\)/);
 assert.match(notificationsControllerSource, /buildNotificationPanelSubtitleText/);
 assert.match(notificationsControllerSource, /buildNotificationBadgeText/);
 assert.match(notificationsControllerSource, /buildNotificationBadgeAriaLabel/);

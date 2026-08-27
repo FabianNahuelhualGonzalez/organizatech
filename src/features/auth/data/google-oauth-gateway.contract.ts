@@ -194,6 +194,9 @@ interface FakeClientOptions {
   provider?: string;
   onGetUser?: (count: number) => void;
   onGetSession?: (count: number) => void;
+  onWelcome?: () => void;
+  welcomeError?: unknown;
+  welcomeThrows?: unknown;
 }
 
 function fakeClient(options: FakeClientOptions = {}) {
@@ -201,6 +204,7 @@ function fakeClient(options: FakeClientOptions = {}) {
   let getUserCount = 0;
   let getSessionCount = 0;
   const rpcCalls: Array<{ name: string; payload: Record<string, string> }> = [];
+  const functionCalls: Array<{ name: string; options: unknown }> = [];
   const setSessionCalls: Array<Record<string, string>> = [];
   let signOutCalls = 0;
   const client = {
@@ -260,10 +264,19 @@ function fakeClient(options: FakeClientOptions = {}) {
       rpcCalls.push({ name, payload });
       return { data: { user_id: options.rpcUserId ?? USER_A }, error: null };
     },
+    functions: {
+      async invoke(name: string, invokeOptions: unknown) {
+        functionCalls.push({ name, options: invokeOptions });
+        options.onWelcome?.();
+        if (options.welcomeThrows) throw options.welcomeThrows;
+        return { data: null, error: options.welcomeError ?? null };
+      },
+    },
   };
   return {
     client: client as unknown as SupabaseClient,
     rpcCalls,
+    functionCalls,
     setSessionCalls,
     get signOutCalls() { return signOutCalls; },
     setUserId(userId: string | null) { currentUserId = userId; },
@@ -331,6 +344,19 @@ test("callback Usuario conserva sesión transitoria y escribe DTO completo sólo
       p_phone_number: "+56 9 1111 2222",
     },
   }]);
+  assert.equal(transient.functionCalls.length, 1);
+  assert.equal(transient.functionCalls[0]?.name, "send-welcome-email");
+  const welcomeOptions = transient.functionCalls[0]?.options as {
+    body?: unknown;
+    signal?: unknown;
+  };
+  assert.deepEqual(welcomeOptions.body, {});
+  assert.ok(welcomeOptions.signal instanceof AbortSignal);
+  assert.equal(
+    JSON.stringify(transient.functionCalls).includes("oauth@example.test"),
+    false,
+    "el correo autenticado no viaja en el body",
+  );
 });
 
 test("Coach Google fresco e identidad compartida usan RPC propia sin booleano cliente", async () => {
@@ -339,6 +365,7 @@ test("Coach Google fresco e identidad compartida usan RPC propia sin booleano cl
   const freshPrincipal = fakeClient({ userId: null });
   await fresh.operation.transferToPrincipal(freshPrincipal.client, fresh.guard);
   assert.equal(fresh.transient.rpcCalls[0]?.name, "register_own_google_coach");
+  assert.equal(fresh.transient.functionCalls.length, 1);
   assert.equal(freshPrincipal.setSessionCalls.length, 1);
 
   const shared = await pendingOperation({ portal: "coach" });
@@ -347,6 +374,7 @@ test("Coach Google fresco e identidad compartida usan RPC propia sin booleano cl
   await shared.operation.registerCoach(coachPayload, shared.guard);
   await shared.operation.transferToPrincipal(principalA.client, shared.guard);
   assert.equal(shared.transient.rpcCalls[0]?.name, "register_own_google_coach");
+  assert.equal(shared.transient.functionCalls.length, 1);
   assert.equal(principalA.setSessionCalls.length, 0, "same uid vigente no requiere transferencia");
 });
 
@@ -358,7 +386,42 @@ test("login Google transfiere sin crear memberships", async () => {
   const principal = fakeClient({ userId: null });
   await operation.transferToPrincipal(principal.client, guard);
   assert.equal(transient.rpcCalls.length, 0);
+  assert.equal(transient.functionCalls.length, 0, "login Google nunca solicita bienvenida");
   assert.equal(principal.setSessionCalls.length, 1);
+});
+
+test("fallo de bienvenida Google no revierte la membresía materializada", async () => {
+  for (const transient of [
+    fakeClient({ welcomeError: { message: "Brevo unavailable" } }),
+    fakeClient({ welcomeThrows: new Error("network unavailable") }),
+  ]) {
+    const { operation, guard } = await pendingOperation({ portal: "usuario", transient });
+    await assert.doesNotReject(operation.registerUser(userPayload, guard));
+    assert.equal(transient.rpcCalls.length, 1);
+    assert.equal(transient.functionCalls.length, 1);
+    assert.equal(transient.functionCalls[0]?.name, "send-welcome-email");
+    const welcomeOptions = transient.functionCalls[0]?.options as {
+      body?: unknown;
+      signal?: unknown;
+    };
+    assert.deepEqual(welcomeOptions.body, {});
+    assert.ok(welcomeOptions.signal instanceof AbortSignal);
+  }
+});
+
+test("Google invalidado durante bienvenida queda stale después del RPC", async () => {
+  const guard = mutableGuard();
+  const transient = fakeClient({
+    onWelcome: () => { guard.current = false; },
+  });
+  const { operation } = await pendingOperation({ portal: "usuario", transient, guard });
+
+  await assert.rejects(
+    operation.registerUser(userPayload, guard),
+    GoogleOAuthStaleOperationError,
+  );
+  assert.equal(transient.rpcCalls.length, 1, "la membresía ya quedó materializada para A");
+  assert.equal(transient.functionCalls.length, 1);
 });
 
 test("identity.user_id, row.user_id y activated user id deben coincidir con A", async () => {
@@ -375,6 +438,7 @@ test("identity.user_id, row.user_id y activated user id deben coincidir con A", 
     crossedRow.operation.registerUser(userPayload, crossedRow.guard),
     /registration identity mismatch/,
   );
+  assert.equal(crossedRow.transient.functionCalls.length, 0);
 
   const crossedActivation = await pendingOperation({ portal: "usuario" });
   const principal = fakeClient({

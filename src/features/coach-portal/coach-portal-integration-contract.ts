@@ -32,6 +32,10 @@ const AUTH_GOOGLE_HYBRID_MIGRATION_PATH =
   "supabase/migrations/20260826170000_auth_google_hybrid_oauth.sql";
 const CALENDAR_REMINDERS_MIGRATION_PATH =
   "supabase/migrations/20260826213606_calendar_reminders_shared_portal.sql";
+const EMAIL_ONBOARDING_MIGRATION_PATH =
+  "supabase/migrations/20260827000000_email_onboarding_transactional_email.sql";
+const CALENDAR_NOTIFICATION_DELIVERY_MIGRATION_PATH =
+  "supabase/migrations/20260827120000_calendar_notification_delivery.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -514,6 +518,8 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== AUTH_SEPARATE_CONTACT_MIGRATION_PATH
         && path !== AUTH_GOOGLE_HYBRID_MIGRATION_PATH
         && path !== CALENDAR_REMINDERS_MIGRATION_PATH
+        && path !== EMAIL_ONBOARDING_MIGRATION_PATH
+        && path !== CALENDAR_NOTIFICATION_DELIVERY_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH

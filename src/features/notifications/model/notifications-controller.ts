@@ -1,4 +1,4 @@
-import { buildAppNotifications, type BuildAppNotificationsInput } from "@/lib/notifications/notification-model";
+import { buildAppNotifications, dedupeNotifications, sortNotificationsByPriority, type BuildAppNotificationsInput } from "@/lib/notifications/notification-model";
 import {
   buildNotificationBadgeAriaLabel,
   buildNotificationBadgeText,
@@ -53,7 +53,7 @@ export interface NotificationsController {
   getSeenRecords(): readonly SeenNotificationRecord[];
   subscribe(listener: (records: readonly SeenNotificationRecord[]) => void): () => void;
   replaceIdentityScope(scope: BrowserStorageScope | null): void;
-  derive(input: BuildAppNotificationsInput, now?: Date): NotificationsDerivedSnapshot;
+  derive(input: BuildAppNotificationsInput, now?: Date, additional?: readonly AppNotification[], persistedSeen?: readonly SeenNotificationRecord[], includeCatalog?: boolean): NotificationsDerivedSnapshot;
   captureCommands(): CapturedNotificationCommands;
   invalidateIdentity(): void;
   dispose(): void;
@@ -147,9 +147,17 @@ export function createNotificationsController(input: {
       publish(scope ? input.storage.load(scope) : []);
     },
 
-    derive(catalogInput, now) {
-      const appNotifications = buildAppNotifications(catalogInput, now);
-      const view = selectNotificationView(appNotifications, seenRecords);
+    derive(catalogInput, now, additional = [], persistedSeen = [], includeCatalog = true) {
+      const appNotifications = sortNotificationsByPriority(dedupeNotifications([
+        ...(includeCatalog ? buildAppNotifications(catalogInput, now) : []), ...additional,
+      ]));
+      const mergedSeen = [...seenRecords, ...persistedSeen].reduce<SeenNotificationRecord[]>((records, record) => {
+        const index = records.findIndex((candidate) => candidate.id === record.id);
+        if (index < 0) records.push(record);
+        else if (records[index]!.seenAt < record.seenAt) records[index] = record;
+        return records;
+      }, []);
+      const view = selectNotificationView(appNotifications, mergedSeen);
       return {
         appNotifications,
         newNotifications: view.newNotifications,
@@ -190,9 +198,13 @@ export function createNotificationsController(input: {
           const intent = resolveNotificationOpenIntent(notification);
           const replayGuard = acquireOpenReplayGuard(owner, intent);
           if (!replayGuard) return false;
-          if (!markSeen([notification.id])) {
-            releaseOpenReplayGuard(replayGuard);
-            return false;
+          const isPersistedCalendarNotification = notification.kind === "calendar"
+            && notification.id.startsWith("calendar:");
+          if (!isPersistedCalendarNotification) {
+            if (!markSeen([notification.id])) {
+              releaseOpenReplayGuard(replayGuard);
+              return false;
+            }
           }
           if (!isCapturedOwnerCurrent(owner)) {
             releaseOpenReplayGuard(replayGuard);
