@@ -1,0 +1,15 @@
+ORGANIZATECH
+CONFIRMACIÓN DE CUENTA · USUARIO
+
+Sólo falta un paso
+Hola, Alex Ejemplo.
+
+Confirma tu cuenta de Usuario para completar tu registro en Organizatech.
+
+Este enlace es personal. Si no solicitaste esta cuenta, puedes ignorar este correo.
+
+Confirmar mi cuenta: https://organizatech.cl/login?flow=signup-confirmation&portal=usuario
+
+Nos vemos en Organizatech.
+
+Correo transaccional de Organizatech. Sin seguimiento publicitario.

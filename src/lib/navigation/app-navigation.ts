@@ -10,6 +10,7 @@ export type Screen =
   | "registro-entrenamiento"
   | "comparacion"
   | "historial-ciclos"
+  | "calendario"
   | "perfil";
 
 export type ActiveFlow =
@@ -21,6 +22,7 @@ export type ActiveFlow =
   | "active_workout"
   | "comparison"
   | "cycle_history"
+  | "calendar"
   | "profile";
 
 export interface ContextualNavigationState {
@@ -76,6 +78,7 @@ const appScreens: readonly Screen[] = [
   "registro-entrenamiento",
   "comparacion",
   "historial-ciclos",
+  "calendario",
   "perfil",
 ];
 
@@ -88,6 +91,7 @@ const activeFlows: readonly ActiveFlow[] = [
   "active_workout",
   "comparison",
   "cycle_history",
+  "calendar",
   "profile",
 ];
 
@@ -102,6 +106,7 @@ const screenLabels: Record<Screen, string> = {
   "training-summary": "Resumen de entrenamiento",
   "registro-entrenamiento": "Modificar ciclo de entrenamiento",
   "historial-ciclos": "Historial ciclo de entrenamiento",
+  calendario: "Calendario",
   comparacion: "Comparación semanal",
   perfil: "Mi perfil",
 };
@@ -123,6 +128,7 @@ export function getActiveFlow(
   }
   if (screen === "comparacion") return "comparison";
   if (screen === "historial-ciclos") return "cycle_history";
+  if (screen === "calendario") return "calendar";
   if (screen === "perfil") return "profile";
   return "dashboard";
 }
@@ -261,10 +267,11 @@ export function resolveActiveFlowRestoration(flow: unknown): ActiveFlowRestorati
     return { kind: "screen", screen: "entrenamiento", resetTrainingStart: true };
   }
 
-  const screenByFlow: Record<"dashboard" | "comparison" | "cycle_history" | "profile", Screen> = {
+  const screenByFlow: Record<"dashboard" | "comparison" | "cycle_history" | "calendar" | "profile", Screen> = {
     dashboard: "dashboard",
     comparison: "comparacion",
     cycle_history: "historial-ciclos",
+    calendar: "calendario",
     profile: "perfil",
   };
 

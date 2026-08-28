@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import { legacyAppShellLayoutAst } from "@/features/app-shell/test-support/legacy-app-shell-layout-ast";
 
 const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
+  ignoredDirectConditionalElements: ["CalendarRemindersProductiveBoundary"],
   ignoredAttributesByElement: {
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",

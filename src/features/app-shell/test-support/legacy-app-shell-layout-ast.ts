@@ -8,6 +8,7 @@ const EXPANDABLE_SLOTS = new Set([
 
 export interface LegacyAppShellLayoutAstOptions {
   readonly ignoredAttributesByElement?: Readonly<Record<string, readonly string[]>>;
+  readonly ignoredDirectConditionalElements?: readonly string[];
 }
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {
@@ -125,6 +126,22 @@ export function legacyAppShellLayoutAst(
       if (ts.isJsxText(child)) {
         const text = child.getText(sourceFile).replace(/\s+/g, " ").trim();
         return text ? [["text", text]] : [];
+      }
+      const childExpression = ts.isJsxExpression(child) && child.expression
+        ? unwrapExpression(child.expression)
+        : undefined;
+      if (childExpression && ts.isBinaryExpression(childExpression)) {
+        const directBoundary = unwrapExpression(childExpression.right);
+        const elementName = ts.isJsxElement(directBoundary)
+          ? directBoundary.openingElement.tagName.getText(sourceFile)
+          : ts.isJsxSelfClosingElement(directBoundary)
+            ? directBoundary.tagName.getText(sourceFile)
+            : null;
+        if (
+          childExpression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+          && elementName
+          && options.ignoredDirectConditionalElements?.includes(elementName)
+        ) return [];
       }
       if (
         ts.isJsxExpression(child)

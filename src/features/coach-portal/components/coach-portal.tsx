@@ -3,6 +3,7 @@
 import Image from "next/image";
 import {
   CalendarDays,
+  Bell,
   ChartNoAxesCombined,
   Dumbbell,
   History,
@@ -16,7 +17,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useReducer, useRef, type RefObject } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import {
   COACH_HOME_MESSAGE,
@@ -27,6 +28,7 @@ import {
   reduceCoachPortalState,
   type CoachPortalSession,
 } from "@/features/coach-portal/model/coach-portal";
+import { CalendarRemindersProductiveBoundary } from "@/features/calendar-reminders";
 import { AppBackButton } from "@/ui/navigation/app-back-button";
 import {
   OVERLAY_INITIAL_FOCUS_ATTRIBUTE,
@@ -52,12 +54,32 @@ const coachMenuIcons: Record<(typeof COACH_PORTAL_MENU_ITEMS)[number]["id"], Luc
 export interface CoachPortalBoundaryProps {
   session: CoachPortalSession;
   isLoggingOut: boolean;
+  isNotificationPanelOpen: boolean;
+  notificationBadgeText: string | null;
+  notificationBadgeAriaLabel: string | null;
+  notificationOverlay: ReactNode;
+  onToggleNotifications: () => void;
+  calendarOpenRequest: {
+    ownerUserId: string;
+    sequence: number;
+  } | null;
+  onCalendarOpenRequestConsumed: (request: {
+    ownerUserId: string;
+    sequence: number;
+  }) => void;
   onLogout: () => void | Promise<void>;
 }
 
 export function CoachPortalBoundary({
   session,
   isLoggingOut,
+  isNotificationPanelOpen,
+  notificationBadgeText,
+  notificationBadgeAriaLabel,
+  notificationOverlay,
+  onToggleNotifications,
+  calendarOpenRequest,
+  onCalendarOpenRequestConsumed,
   onLogout,
 }: CoachPortalBoundaryProps) {
   const [state, dispatch] = useReducer(
@@ -66,7 +88,16 @@ export function CoachPortalBoundary({
     createInitialCoachPortalState,
   );
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const profile = useMemo(() => createCoachPortalProfileViewModel(session), [session]);
+
+  useEffect(() => {
+    if (calendarOpenRequest?.ownerUserId === session.userId) {
+      dispatch({ type: "menu_closed" });
+      setIsCalendarOpen(true);
+      onCalendarOpenRequestConsumed(calendarOpenRequest);
+    }
+  }, [calendarOpenRequest, onCalendarOpenRequestConsumed, session.userId]);
 
   function handleLogout() {
     dispatch({ type: "reset" });
@@ -95,22 +126,50 @@ export function CoachPortalBoundary({
             <p>Coaching</p>
           </div>
         </div>
-        <span className={styles.topbarSpacer} aria-hidden="true" />
+        <span className={styles.notificationShell}>
+          <button
+            className={styles.iconButton}
+            type="button"
+            aria-label={notificationBadgeAriaLabel ?? "Ver notificaciones"}
+            aria-expanded={isNotificationPanelOpen}
+            aria-controls="notification-panel"
+            onClick={onToggleNotifications}
+          >
+            <Bell aria-hidden="true" size={22} />
+          </button>
+          {notificationBadgeText ? <span className={styles.notificationBadge} aria-hidden="true">{notificationBadgeText}</span> : null}
+        </span>
       </header>
+
+      {notificationOverlay}
 
       <CoachPortalNavigationDrawer
         isOpen={state.isMenuOpen}
         activeScreen={state.screen}
+        isCalendarOpen={isCalendarOpen}
         fullName={profile.fullName}
         professionalTitle={profile.professionalTitle}
         isLoggingOut={isLoggingOut}
         restoreFocusRef={menuButtonRef}
         onClose={() => dispatch({ type: "menu_closed" })}
-        onOpenProfile={() => dispatch({ type: "profile_opened" })}
+        onOpenProfile={() => {
+          setIsCalendarOpen(false);
+          dispatch({ type: "profile_opened" });
+        }}
+        onOpenCalendar={() => {
+          dispatch({ type: "menu_closed" });
+          setIsCalendarOpen(true);
+        }}
         onLogout={handleLogout}
       />
 
-      {state.screen === "home" ? (
+      {isCalendarOpen ? (
+        <CalendarRemindersProductiveBoundary
+          identityKey={session.userId}
+          portalScope="coach"
+          onBack={() => setIsCalendarOpen(false)}
+        />
+      ) : state.screen === "home" ? (
         <CoachPortalHome fullName={profile.fullName} />
       ) : (
         <CoachPortalProfile
@@ -208,22 +267,26 @@ function CoachProfileField({ label, value }: { label: string; value: string }) {
 function CoachPortalNavigationDrawer({
   isOpen,
   activeScreen,
+  isCalendarOpen,
   fullName,
   professionalTitle,
   isLoggingOut,
   restoreFocusRef,
   onClose,
   onOpenProfile,
+  onOpenCalendar,
   onLogout,
 }: {
   isOpen: boolean;
   activeScreen: "home" | "profile";
+  isCalendarOpen: boolean;
   fullName: string;
   professionalTitle: string;
   isLoggingOut: boolean;
   restoreFocusRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onOpenProfile: () => void;
+  onOpenCalendar: () => void;
   onLogout: () => void;
 }) {
   const drawerRef = useOverlayFocusManagement<HTMLDivElement>({
@@ -290,8 +353,24 @@ function CoachPortalNavigationDrawer({
                     <button
                       className={styles.menuItem}
                       type="button"
-                      aria-current={activeScreen === "profile" ? "page" : undefined}
+                      aria-current={!isCalendarOpen && activeScreen === "profile" ? "page" : undefined}
                       onClick={onOpenProfile}
+                    >
+                      <ItemIcon aria-hidden="true" size={19} />
+                      <span>{item.label}</span>
+                    </button>
+                  </li>
+                );
+              }
+
+              if (item.id === "calendar") {
+                return (
+                  <li key={item.id}>
+                    <button
+                      className={styles.menuItem}
+                      type="button"
+                      aria-current={isCalendarOpen ? "page" : undefined}
+                      onClick={onOpenCalendar}
                     >
                       <ItemIcon aria-hidden="true" size={19} />
                       <span>{item.label}</span>

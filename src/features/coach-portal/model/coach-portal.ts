@@ -17,7 +17,7 @@ export const COACH_PORTAL_MENU_ITEMS = [
   { id: "comparison", label: "Comparación semanal", availability: "disabled" },
   { id: "edit-cycle", label: "Modificar ciclo de entrenamiento", availability: "disabled" },
   { id: "cycle-history", label: "Historial ciclo de entrenamiento", availability: "disabled" },
-  { id: "calendar", label: "Calendario", availability: "disabled" },
+  { id: "calendar", label: "Calendario", availability: "enabled" },
   { id: "messages", label: "Mensajes", availability: "disabled" },
   { id: "logout", label: "Cerrar sesión", availability: "action" },
 ] as const;

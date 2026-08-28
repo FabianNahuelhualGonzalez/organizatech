@@ -15,13 +15,13 @@ import type { AppNotificationSection } from "@/lib/notifications/notification-ty
  */
 
 // Mismo catálogo que el root entrega al resolver de menú.
-const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"];
+const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos", "calendario"];
 
-// Los 12 valores de Screen (paridad con app-navigation.ts).
+// Los 13 valores de Screen (paridad con app-navigation.ts).
 const allScreens: Screen[] = [
   "login", "registro", "recuperar-password", "nueva-password", "recovery-expired",
   "dashboard", "entrenamiento", "training-summary", "registro-entrenamiento",
-  "comparacion", "historial-ciclos", "perfil",
+  "comparacion", "historial-ciclos", "perfil", "calendario",
 ];
 
 // CASO — resolveMenuScreens: con entradas de entrenamiento, muestra todas las primaryScreens.
@@ -36,23 +36,23 @@ assert.notEqual(
 // CASO — sin entradas y sin ciclos visibles: historial-ciclos se excluye.
 assert.deepEqual(
   resolveMenuScreens(primaryScreens, false, 0),
-  ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento"],
+  ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "calendario"],
 );
 
 // CASO — sin entradas pero con ciclos visibles: historial-ciclos se conserva.
 assert.deepEqual(
   resolveMenuScreens(primaryScreens, false, 3),
-  ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos"],
+  ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos", "calendario"],
 );
 
-// CASO — cada pantalla válida: canGoBackFromScreen para las 12 pantallas conocidas.
+// CASO — cada pantalla válida: canGoBackFromScreen para las 13 pantallas conocidas.
 assert.equal(canGoBackFromScreen("dashboard"), false);
 assert.equal(canGoBackFromScreen("training-summary"), false);
 for (const screen of allScreens) {
   if (screen === "dashboard" || screen === "training-summary") continue;
   assert.equal(canGoBackFromScreen(screen), true, `${screen} debe permitir volver`);
 }
-assert.equal(allScreens.length, 12, "paridad con las 12 pantallas de app-navigation.ts");
+assert.equal(allScreens.length, 13, "paridad con las 13 pantallas de app-navigation.ts");
 
 // CASO — reseteo de día (ciclo activo / rutina): mismo paquete de valores en toda transición de ciclo.
 assert.deepEqual(resolveDayStateReset(), { activeRoutineDay: "Lunes", dashboardDayOverride: "", comparisonDay: "Lunes" });

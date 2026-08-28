@@ -4,6 +4,7 @@ import {
   AUTH_REGISTRATION_GENDER_VALUES,
   AUTH_REGISTRATION_PORTAL_METADATA_KEY,
   buildCoachRegistrationPayload,
+  buildGoogleUserRegistrationPayload,
   buildLoginPayload,
   buildSharedCoachRegistrationPayload,
   buildUserSignupPayload,
@@ -31,6 +32,30 @@ function createUserRegistrationForm(overrides: Record<string, string> = {}) {
   const formData = new FormData();
   for (const [key, value] of Object.entries(values)) formData.set(key, value);
   return formData;
+}
+
+{
+  const result = buildGoogleUserRegistrationPayload(
+    createUserRegistrationForm({
+      "register-email": "pii-no-transportada@example.test",
+      "register-password": "credencial-no-transportada-123",
+    }),
+    new Date(2026, 7, 14),
+  );
+  assert.deepEqual(result, {
+    ok: true,
+    payload: {
+      first_name: "Fabian",
+      last_name: "Nahuelhual",
+      birth_date: "1990-08-14",
+      gender: "male",
+      phone_number: "+56 9 1234 5678",
+    },
+  });
+  const serialized = JSON.stringify(result);
+  for (const forbidden of ["email", "password", "user_id", "owner_id", "profile_id", "role"]) {
+    assert.equal(serialized.includes(forbidden), false, `${forbidden} no entra al DTO Google Usuario`);
+  }
 }
 
 {

@@ -24,6 +24,7 @@ export const USER_PORTAL_NAVIGATION_ITEMS = [
     kind: "destination",
     availability: "enabled",
   },
+  { id: "calendar", label: "Calendario", kind: "destination", availability: "enabled" },
   { id: "logout", label: "Cerrar sesión", kind: "logout", availability: "action" },
 ] as const;
 
@@ -40,6 +41,7 @@ export type UserPortalScreen = Extract<
   | "comparacion"
   | "registro-entrenamiento"
   | "historial-ciclos"
+  | "calendario"
 >;
 
 export const USER_PORTAL_DESTINATION_SCREENS = {
@@ -49,6 +51,7 @@ export const USER_PORTAL_DESTINATION_SCREENS = {
   comparison: "comparacion",
   "edit-cycle": "registro-entrenamiento",
   "cycle-history": "historial-ciclos",
+  calendar: "calendario",
 } as const satisfies Record<UserPortalDestinationId, UserPortalScreen>;
 
 const USER_PORTAL_ACTIVE_DESTINATIONS = {
@@ -59,6 +62,7 @@ const USER_PORTAL_ACTIVE_DESTINATIONS = {
   comparacion: "comparison",
   "registro-entrenamiento": "edit-cycle",
   "historial-ciclos": "cycle-history",
+  calendario: "calendar",
 } as const satisfies Partial<Record<Screen, UserPortalDestinationId>>;
 
 const USER_PORTAL_RENDERABLE_SCREENS: readonly Screen[] = [
@@ -69,6 +73,7 @@ const USER_PORTAL_RENDERABLE_SCREENS: readonly Screen[] = [
   "comparacion",
   "registro-entrenamiento",
   "historial-ciclos",
+  "calendario",
 ];
 
 export interface UserPortalNavigationModel {

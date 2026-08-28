@@ -120,6 +120,7 @@ function createGateway(
     signInForUserRegistration: async () => assert.fail("signIn Usuario inesperado"),
     signUpForUserRegistration: async () => assert.fail("signUp Usuario inesperado"),
     getOwnSignupConfirmation: async () => ({ status: "confirmed", portal: "usuario" }),
+    requestWelcomeEmail: async () => undefined,
     signOutAfterSignupConfirmation: async (_expectedUserId, owner) => (
       owner.isCurrent() ? "signed_out" : "stale"
     ),
@@ -442,6 +443,7 @@ test("Usuario autenticado sólo resuelve user_authorized con membresía Usuario"
   const { owner } = beginCurrentResolution();
   let userReads = 0;
   let coachReads = 0;
+  let welcomeRequests = 0;
   const result = await controller.resolvePortalAccess({
     requestedPortal: "usuario",
     expectedUserId: "user-a",
@@ -455,6 +457,9 @@ test("Usuario autenticado sólo resuelve user_authorized con membresía Usuario"
       coachReads += 1;
       return createCoachRecord();
     },
+    requestWelcomeEmail: async () => {
+      welcomeRequests += 1;
+    },
   }));
 
   assert.deepEqual(result, {
@@ -464,6 +469,7 @@ test("Usuario autenticado sólo resuelve user_authorized con membresía Usuario"
   });
   assert.equal(userReads, 1);
   assert.equal(coachReads, 0);
+  assert.equal(welcomeRequests, 0, "login sólo autoriza y nunca solicita bienvenida");
 });
 
 test("Coach-only es rechazado del portal Usuario con el mensaje aprobado", async () => {
@@ -1004,6 +1010,7 @@ const staleRegistrationAwaitPoints = [
   "current_identity",
   "isolated_sign_up",
   "coach_lookup",
+  "welcome_email",
   "session_activation",
 ] as const;
 
@@ -1039,6 +1046,9 @@ for (const awaitPoint of staleRegistrationAwaitPoints) {
         effects.lookups += 1;
         await pause("coach_lookup");
         return createCoachRecord();
+      },
+      async requestWelcomeEmail() {
+        await pause("welcome_email");
       },
       async activateCoachRegistrationIdentity(identity, owner) {
         effects.activations += 1;
@@ -1102,6 +1112,7 @@ test("Registro Usuario con confirmación pendiente no concede membresía sin ses
   const controller = createMultiportalAuthController<TestAuthState>();
   const { owner } = beginCurrentUserRegistration(null);
   let writes = 0;
+  let welcomeRequests = 0;
   const order: string[] = [];
   let signupPayload: unknown;
   const result = await controller.registerUser(coachInput.auth, owner, createGateway({
@@ -1119,6 +1130,9 @@ test("Registro Usuario con confirmación pendiente no concede membresía sin ses
       writes += 1;
       assert.fail("sin sesión autenticada no se crea membresía Usuario");
     },
+    requestWelcomeEmail: async () => {
+      welcomeRequests += 1;
+    },
   }));
 
   assert.deepEqual(result, {
@@ -1129,6 +1143,7 @@ test("Registro Usuario con confirmación pendiente no concede membresía sin ses
   assert.deepEqual(order, ["sign_in_miss", "sign_up"]);
   assert.deepEqual(signupPayload, coachInput.auth);
   assert.equal(writes, 0);
+  assert.equal(welcomeRequests, 0);
 });
 
 test("existing_identity y confirmation_required Usuario son públicamente indistinguibles", async () => {
@@ -1180,16 +1195,22 @@ test("repetir Registro Usuario es idempotente y no reescribe la membresía", asy
   const controller = createMultiportalAuthController<TestAuthState>();
   const { owner } = beginCurrentUserRegistration();
   let writes = 0;
+  const welcomeUserIds: string[] = [];
   const result = await controller.registerUser(coachInput.auth, owner, createGateway({
     hasUserRegistration: async () => true,
     createUserRegistration: async () => {
       writes += 1;
       assert.fail("membresía Usuario existente no debe reescribirse");
     },
+    requestWelcomeEmail: async (expectedUserId) => {
+      welcomeUserIds.push(expectedUserId);
+      throw new Error("proveedor no disponible");
+    },
   }));
 
   assert.equal(result.state, "user_authorized");
   assert.equal(writes, 0);
+  assert.deepEqual(welcomeUserIds, [userA.userId]);
 });
 
 const staleUserRegistrationAwaitPoints = [
@@ -1198,20 +1219,21 @@ const staleUserRegistrationAwaitPoints = [
   "isolated_sign_up",
   "user_lookup",
   "atomic_insert",
+  "welcome_email",
   "session_activation",
 ] as const;
-const EXPECTED_STALE_USER_REGISTRATION_AWAIT_POINT_COUNT = 6;
+const EXPECTED_STALE_USER_REGISTRATION_AWAIT_POINT_COUNT = 7;
 assert.equal(
   staleUserRegistrationAwaitPoints.length,
   EXPECTED_STALE_USER_REGISTRATION_AWAIT_POINT_COUNT,
-  "Registro Usuario fija los seis límites async A→SIGNED_OUT→B",
+  "Registro Usuario fija los siete límites async A→SIGNED_OUT→B",
 );
 
 for (const awaitPoint of staleUserRegistrationAwaitPoints) {
   test(`Registro Usuario A→SIGNED_OUT→B queda stale en ${awaitPoint}`, async () => {
     const controller = createMultiportalAuthController<TestAuthState>();
     const owners = createUserRegistrationOwnerController();
-    if (["user_lookup", "atomic_insert", "session_activation"].includes(awaitPoint)) {
+    if (["user_lookup", "atomic_insert", "welcome_email", "session_activation"].includes(awaitPoint)) {
       owners.acceptIdentity(userA.userId);
     }
     const ownerA = owners.begin();
@@ -1234,7 +1256,7 @@ for (const awaitPoint of staleUserRegistrationAwaitPoints) {
     const gateway = createGateway({
       async getCurrentIdentity() {
         await pause("current_identity");
-        return ["user_lookup", "atomic_insert", "session_activation"].includes(awaitPoint)
+        return ["user_lookup", "atomic_insert", "welcome_email", "session_activation"].includes(awaitPoint)
           ? userA
           : null;
       },
@@ -1250,13 +1272,16 @@ for (const awaitPoint of staleUserRegistrationAwaitPoints) {
       },
       async hasUserRegistration() {
         await pause("user_lookup");
-        return awaitPoint === "session_activation";
+        return ["welcome_email", "session_activation"].includes(awaitPoint);
       },
       async createUserRegistration(expectedUserId) {
         if (expectedUserId === userA.userId) effects.userWritesA += 1;
         else effects.userWritesB += 1;
         await pause("atomic_insert");
         return { userId: expectedUserId };
+      },
+      async requestWelcomeEmail() {
+        await pause("welcome_email");
       },
       async activateUserRegistrationIdentity(identity, owner) {
         await pause("session_activation");
@@ -2303,7 +2328,7 @@ test("Auth sin membresía Usuario no puede preparar ni escribir activación Coac
 test("cuenta compartida activa Coach sobre auth.uid sin signUp ni cambio de sesión", async () => {
   const controller = createMultiportalAuthController<TestAuthState>();
   const { owner } = beginCurrentSharedRegistration();
-  const effects = { signUps: 0, writes: 0, activations: 0 };
+  const effects = { signUps: 0, writes: 0, welcomes: 0, activations: 0 };
   const result = await controller.registerCoach(sharedCoachInput, owner, createGateway({
     getCurrentIdentity: async () => userA,
     signUpForCoachRegistration: async () => {
@@ -2316,6 +2341,11 @@ test("cuenta compartida activa Coach sobre auth.uid sin signUp ni cambio de sesi
       assert.deepEqual(payload, coachInput.registration);
       assert.equal(expectedUserId, userA.userId);
       return createCoachRecord(expectedUserId);
+    },
+    requestWelcomeEmail: async (expectedUserId) => {
+      effects.welcomes += 1;
+      assert.equal(expectedUserId, userA.userId);
+      throw new Error("proveedor no disponible");
     },
     activateCoachRegistrationIdentity: async () => {
       effects.activations += 1;
@@ -2330,7 +2360,34 @@ test("cuenta compartida activa Coach sobre auth.uid sin signUp ni cambio de sesi
     coach: createCoachRecord(),
     authState: userA.authState,
   });
-  assert.deepEqual(effects, { signUps: 0, writes: 1, activations: 0 });
+  assert.deepEqual(effects, { signUps: 0, writes: 1, welcomes: 1, activations: 0 });
+});
+
+test("cuenta compartida invalidada durante bienvenida queda stale sin autorizar B", async () => {
+  const controller = createMultiportalAuthController<TestAuthState>();
+  const { owners, owner } = beginCurrentSharedRegistration();
+  const welcomeStarted = createDeferred<void>();
+  const releaseWelcome = createDeferred<void>();
+  let writes = 0;
+  const pending = controller.registerCoach(sharedCoachInput, owner, createGateway({
+    getCurrentIdentity: async () => userA,
+    hasUserRegistration: async () => true,
+    createSharedCoachRegistration: async () => {
+      writes += 1;
+      return createCoachRecord(userA.userId);
+    },
+    requestWelcomeEmail: async () => {
+      welcomeStarted.resolve();
+      await releaseWelcome.promise;
+    },
+  }));
+
+  await welcomeStarted.promise;
+  owners.acceptIdentity(userB.userId);
+  releaseWelcome.resolve();
+
+  assert.deepEqual(await pending, { state: "stale", requestedPortal: "coach" });
+  assert.equal(writes, 1, "la membresía A ya materializada no se atribuye a B");
 });
 
 test("activación Coach compartida es idempotente y nunca acepta respuesta cruzada", async () => {
@@ -2417,6 +2474,10 @@ test("Usuario A y Coach B usan identidades y contraseñas independientes", async
       calls.push(`membership:${expectedUserId}`);
       return createCoachRecord(userB.userId);
     },
+    requestWelcomeEmail: async (expectedUserId) => {
+      calls.push(`welcome:${expectedUserId}`);
+      throw new Error("proveedor no disponible");
+    },
     activateCoachRegistrationIdentity: async (identity) => {
       calls.push(`activate:${identity.userId}`);
       return identity;
@@ -2432,6 +2493,7 @@ test("Usuario A y Coach B usan identidades y contraseñas independientes", async
   assert.deepEqual(calls, [
     `signup:${userB.email}`,
     `membership:${userB.userId}`,
+    `welcome:${userB.userId}`,
     "current_identity:none",
     `activate:${userB.userId}`,
   ]);
@@ -2669,6 +2731,7 @@ test("confirmación resuelve el portal exclusivamente desde el resultado backend
     const controller = createMultiportalAuthController<TestAuthState>();
     const { owner } = beginCurrentResolution();
     const requestedIds: string[] = [];
+    const welcomeUserIds: string[] = [];
     const result = await controller.resolveSignupConfirmation({
       expectedUserId: userA.userId,
       owner,
@@ -2676,6 +2739,10 @@ test("confirmación resuelve el portal exclusivamente desde el resultado backend
       getOwnSignupConfirmation: async (expectedUserId) => {
         requestedIds.push(expectedUserId);
         return { status: "confirmed", portal: candidate.portal };
+      },
+      requestWelcomeEmail: async (expectedUserId) => {
+        welcomeUserIds.push(expectedUserId);
+        throw new Error("proveedor no disponible");
       },
     }));
 
@@ -2685,6 +2752,7 @@ test("confirmación resuelve el portal exclusivamente desde el resultado backend
       message: candidate.message,
     });
     assert.deepEqual(requestedIds, [userA.userId]);
+    assert.deepEqual(welcomeUserIds, [userA.userId]);
   }
 });
 
@@ -2718,17 +2786,22 @@ test("confirmación vencida, inválida o reutilizada falla cerrada con copy cont
   for (const status of ["expired", "invalid"] as const) {
     const controller = createMultiportalAuthController<TestAuthState>();
     const { owner } = beginCurrentResolution();
+    let welcomeRequests = 0;
     const result = await controller.resolveSignupConfirmation({
       expectedUserId: userA.userId,
       owner,
     }, createGateway({
       getOwnSignupConfirmation: async () => ({ status, portal: "coach" }),
+      requestWelcomeEmail: async () => {
+        welcomeRequests += 1;
+      },
     }));
     assert.deepEqual(result, {
       state: "invalid",
       requestedPortal: "coach",
       message: SIGNUP_CONFIRMATION_INVALID_MESSAGE,
     });
+    assert.equal(welcomeRequests, 0);
   }
 });
 
@@ -2764,6 +2837,35 @@ test("confirmación A tardía queda stale después de SIGNED_OUT→B y no public
   });
   assert.equal(ownerA.isCurrent(), false);
   assert.equal(ownerB.isCurrent(), true);
+});
+
+test("confirmación invalidada durante bienvenida queda stale antes del signOut", async () => {
+  const controller = createMultiportalAuthController<TestAuthState>();
+  const owners = createPortalResolutionOwnerController();
+  owners.acceptIdentity(userA.userId);
+  const ownerA = owners.begin(userA.userId);
+  const welcomeStarted = createDeferred<void>();
+  const releaseWelcome = createDeferred<void>();
+  const resolutionA = controller.resolveSignupConfirmation({
+    expectedUserId: userA.userId,
+    owner: ownerA,
+  }, createGateway({
+    getOwnSignupConfirmation: async () => ({ status: "confirmed", portal: "usuario" }),
+    requestWelcomeEmail: async () => {
+      welcomeStarted.resolve();
+      await releaseWelcome.promise;
+    },
+  }));
+
+  await welcomeStarted.promise;
+  owners.invalidate();
+  owners.acceptIdentity(userB.userId);
+  releaseWelcome.resolve();
+
+  assert.deepEqual(await resolutionA, {
+    state: "stale",
+    requestedPortal: "usuario",
+  });
 });
 
 test("identidad A→B directa antes del RPC no consulta ni publica confirmación cruzada", async () => {
