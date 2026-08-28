@@ -1447,6 +1447,44 @@ test("confirmación propia usa RPC sin argumentos y revalida identidad antes y d
   assert.equal(sessionReads, 2);
 });
 
+test("bienvenida usa Edge autenticada con body vacío y su fallo es best-effort", async () => {
+  const fake = createStatefulFakeClient({ activeUserId: "user-a" });
+  const invokeCalls: unknown[][] = [];
+  Object.assign(fake.client, {
+    functions: {
+      invoke: async (...args: unknown[]) => {
+        invokeCalls.push(args);
+        throw new Error("Edge no disponible");
+      },
+    },
+  });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const { owners, owner } = beginPortalOwner("user-a");
+
+  await assert.doesNotReject(gateway.requestWelcomeEmail("user-a", owner));
+  assert.equal(invokeCalls.length, 1);
+  assert.equal(invokeCalls[0]?.[0], "send-welcome-email");
+  const welcomeOptions = invokeCalls[0]?.[1] as { body?: unknown; signal?: unknown };
+  assert.deepEqual(welcomeOptions.body, {});
+  assert.ok(welcomeOptions.signal instanceof AbortSignal);
+  const serializedCall = JSON.stringify(invokeCalls);
+  for (const forbidden of [
+    "user-a",
+    users["user-a"].email!,
+    registration.contact_email,
+    "user_id",
+    "owner_id",
+    "profile_id",
+    "portal",
+  ]) {
+    assert.equal(serializedCall.includes(forbidden), false, `${forbidden} no sale en el request`);
+  }
+
+  owners.invalidate();
+  await gateway.requestWelcomeEmail("user-a", owner);
+  assert.equal(invokeCalls.length, 1, "owner stale no vuelve a invocar la Edge Function");
+});
+
 test("respuesta tardía A no se acepta si la identidad global cambió a B", async () => {
   let activeUserId: TestUserId = "user-a";
   const rpcStarted = createDeferred<void>();

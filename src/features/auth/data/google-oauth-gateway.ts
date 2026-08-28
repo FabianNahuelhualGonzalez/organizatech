@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 
+import { requestWelcomeEmailBestEffort } from "@/features/auth/data/request-welcome-email";
 import type {
   CoachRegistrationWritePayload,
   GoogleUserRegistrationWritePayload,
@@ -169,6 +170,8 @@ function createPendingOperation(input: {
     const rowUserId = readRegistrationUserId(data);
     if (rowUserId !== userId) throw new Error("Google registration identity mismatch.");
     await assertTransientIdentity(transient, userId, guard);
+    assertCurrent(guard);
+    await requestWelcomeEmailBestEffort(transient);
     assertCurrent(guard);
   }
 

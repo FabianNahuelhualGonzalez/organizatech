@@ -126,6 +126,10 @@ export interface MultiportalAuthGateway<TAuthState> {
     expectedUserId: string,
     owner: PortalResolutionOwner,
   ): Promise<SignupConfirmationRecord>;
+  requestWelcomeEmail(
+    expectedUserId: string,
+    owner: PortalResolutionOwner | CoachRegistrationOwner | UserRegistrationOwner,
+  ): Promise<void>;
   signOutAfterSignupConfirmation(
     expectedUserId: string,
     owner: PortalResolutionOwner,
@@ -472,6 +476,9 @@ async function resolveSignupConfirmation<TAuthState>(
       };
     }
 
+    await requestWelcomeEmailBestEffort(gateway, identity.userId, input.owner);
+    if (!ownsPortalResolution(input)) return stale();
+
     return {
       state: "confirmed",
       requestedPortal: confirmation.portal,
@@ -632,6 +639,8 @@ async function registerSharedCoach<TAuthState>(
     if (coachRegistration.userId !== currentIdentity.userId) {
       return controlledCoachRegistrationError();
     }
+    await requestWelcomeEmailBestEffort(gateway, currentIdentity.userId, owner);
+    if (!owner.isCurrent()) return staleCoachRegistration();
     return {
       state: "coach_authorized",
       requestedPortal: "coach",
@@ -676,6 +685,9 @@ async function registerSeparateCoach<TAuthState>(
     if (!coachRegistration || coachRegistration.userId !== identity.userId) {
       return controlledCoachRegistrationError();
     }
+
+    await requestWelcomeEmailBestEffort(gateway, identity.userId, owner);
+    if (!owner.isCurrent()) return staleCoachRegistration();
 
     const activeIdentity = await gateway.getCurrentIdentity(undefined, owner);
     if (!owner.isCurrent()) return staleCoachRegistration();
@@ -777,6 +789,9 @@ async function registerUser<TAuthState>(
       }
     }
 
+    await requestWelcomeEmailBestEffort(gateway, identity.userId, owner);
+    if (!owner.isCurrent()) return staleUserRegistration();
+
     const activatedIdentity = await gateway.activateUserRegistrationIdentity(identity, owner);
     if (!owner.isCurrent()) return staleUserRegistration();
     if (!activatedIdentity || activatedIdentity.userId !== identity.userId) {
@@ -791,6 +806,18 @@ async function registerUser<TAuthState>(
   } catch {
     if (!owner.isCurrent()) return staleUserRegistration();
     return controlledUserRegistrationError();
+  }
+}
+
+async function requestWelcomeEmailBestEffort<TAuthState>(
+  gateway: MultiportalAuthGateway<TAuthState>,
+  expectedUserId: string,
+  owner: PortalResolutionOwner | CoachRegistrationOwner | UserRegistrationOwner,
+): Promise<void> {
+  try {
+    await gateway.requestWelcomeEmail(expectedUserId, owner);
+  } catch {
+    // El envío es best-effort y nunca revierte una membresía ya materializada.
   }
 }
 

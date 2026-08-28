@@ -107,6 +107,7 @@ import { DashboardScreen } from "@/features/dashboard/components/dashboard-scree
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
 import { useNotificationsController } from "@/features/notifications/hooks/useNotificationsController";
+import { usePersistedCalendarNotifications } from "@/features/notifications/hooks/usePersistedCalendarNotifications";
 import { useProfileController } from "@/features/profile/hooks/useProfileController";
 import { UserPortalShell } from "@/features/user-portal-shell/components/user-portal-shell";
 import {
@@ -471,6 +472,10 @@ export function OrganizatechApp({
   const [supabaseSession, setSupabaseSession] = useState<SupabaseSessionState["session"]>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
   const [coachPortalSession, setCoachPortalSession] = useState<CoachPortalSession | null>(null);
+  const [coachCalendarOpenRequest, setCoachCalendarOpenRequest] = useState<{
+    ownerUserId: string;
+    sequence: number;
+  } | null>(null);
   const coachPortalSessionRef = useRef<CoachPortalSession | null>(null);
   const [userPortalAuthorizationProof, setUserPortalAuthorizationProof] =
     useState<UserPortalAuthorizationProof | null>(null);
@@ -1558,10 +1563,17 @@ export function OrganizatechApp({
     todayTrainingNotificationContext,
     weeklyEquivalentProgress,
   ]);
+  const persistedCalendarNotifications = usePersistedCalendarNotifications(
+    supabaseUser?.id ?? null,
+    coachPortalSession ? "coach" : "usuario",
+  );
   const notificationsBoundary = useNotificationsController({
     identity: trainingDataIdentityPort,
     scope: activeFeatureStorageScope,
     catalogInput: notificationCatalogInput,
+    additionalNotifications: persistedCalendarNotifications.notifications,
+    persistedSeenRecords: persistedCalendarNotifications.seenRecords,
+    includeCatalogNotifications: !coachPortalSession,
     onOpenIntent: handleNotificationOpenIntent,
   });
   const {
@@ -1624,6 +1636,9 @@ export function OrganizatechApp({
   }
 
   function replaceCoachPortalSession(session: CoachPortalSession | null) {
+    if (session?.userId !== coachPortalSessionRef.current?.userId) {
+      setCoachCalendarOpenRequest(null);
+    }
     if (session) replaceUserPortalAuthorizationProof(null);
     coachPortalSessionRef.current = session;
     setCoachPortalSession(session);
@@ -4269,12 +4284,40 @@ export function OrganizatechApp({
     );
   }
 
+  const notificationOverlay = (
+    <NotificationPanel
+      isOpen={isNotificationPanelOpen}
+      subtitle={notificationPanelSubtitle}
+      totalNotificationsCount={appNotifications.length}
+      newNotifications={newNotifications}
+      historyNotifications={historyNotifications}
+      seenNotificationRecordsById={seenNotificationRecordsById}
+      emptyMessage={NOTIFICATION_EMPTY_MESSAGE}
+      onClose={appShell.closeNotifications}
+      onOpenNotification={openNotificationTarget}
+    />
+  );
+
   if (coachPortalSession) {
     return (
       <CoachPortalBoundary
         key={`${coachPortalSession.userId}:${coachPortalSession.registration.createdAt}`}
         session={coachPortalSession}
         isLoggingOut={isBusy}
+        isNotificationPanelOpen={isNotificationPanelOpen}
+        notificationBadgeText={notificationBadgeText}
+        notificationBadgeAriaLabel={notificationBadgeAriaLabel}
+        notificationOverlay={notificationOverlay}
+        onToggleNotifications={toggleNotifications}
+        calendarOpenRequest={coachCalendarOpenRequest}
+        onCalendarOpenRequestConsumed={(request) => {
+          setCoachCalendarOpenRequest((current) => (
+            current?.ownerUserId === request.ownerUserId
+              && current.sequence === request.sequence
+              ? null
+              : current
+          ));
+        }}
         onLogout={handleLogout}
       />
     );
@@ -4340,10 +4383,23 @@ export function OrganizatechApp({
   }
 
   function toggleNotifications() {
+    if (!isNotificationPanelOpen) void persistedCalendarNotifications.reload();
     appShell.toggleNotifications();
   }
 
   function handleNotificationOpenIntent(intent: NotificationOpenIntent) {
+    if (intent.notificationId.startsWith("calendar:")) {
+      void persistedCalendarNotifications.markRead(intent.notificationId);
+    }
+    if (coachPortalSessionRef.current && intent.target === "calendario") {
+      const ownerUserId = coachPortalSessionRef.current.userId;
+      appShell.closeNotifications();
+      setCoachCalendarOpenRequest((current) => ({
+        ownerUserId,
+        sequence: current?.ownerUserId === ownerUserId ? current.sequence + 1 : 1,
+      }));
+      return;
+    }
     appShell.closeNotifications();
     activeWorkoutActions.clearTrainingCompletionSummary();
     if (intent.dashboardDayOverride) {
@@ -4408,19 +4464,6 @@ export function OrganizatechApp({
     });
   }
 
-  const notificationOverlay = (
-    <NotificationPanel
-      isOpen={isNotificationPanelOpen}
-      subtitle={notificationPanelSubtitle}
-      totalNotificationsCount={appNotifications.length}
-      newNotifications={newNotifications}
-      historyNotifications={historyNotifications}
-      seenNotificationRecordsById={seenNotificationRecordsById}
-      emptyMessage={NOTIFICATION_EMPTY_MESSAGE}
-      onClose={appShell.closeNotifications}
-      onOpenNotification={openNotificationTarget}
-    />
-  );
   const screenHeader = canGoBackFromScreen(screen)
     ? <AppScreenHeader onBack={goBack} />
     : null;
@@ -4598,6 +4641,7 @@ export function OrganizatechApp({
         <CalendarRemindersProductiveBoundary
           key={supabaseUser.id}
           identityKey={supabaseUser.id}
+          portalScope="usuario"
           onBack={goBack}
           showBackButton={false}
         />

@@ -96,6 +96,30 @@
   height: 44px;
 }
 
+.notificationShell {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.notificationBadge {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 2px solid var(--background);
+  border-radius: 999px;
+  padding: 0 4px;
+  color: #fff;
+  background: var(--primary);
+  font-size: 10px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
 .home {
   display: grid;
   gap: 12px;

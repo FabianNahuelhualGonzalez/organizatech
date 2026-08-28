@@ -53,6 +53,7 @@ function row(id: string) {
 function fakeClient(input: {
   readonly authIds: readonly string[];
   readonly rows?: readonly ReturnType<typeof row>[];
+  readonly rowsByPortal?: Readonly<Record<"usuario" | "coach", readonly ReturnType<typeof row>[]>>;
   readonly rpcId?: string;
   readonly onRpc?: (args: Readonly<Record<string, unknown>>) => void;
 }): CalendarRemindersClient {
@@ -65,23 +66,12 @@ function fakeClient(input: {
         return { data: { user: id ? user(id) : null }, error: null };
       },
     },
-    from() {
-      return {
-        select() {
-          return {
-            eq() {
-              return {
-                async lte() {
-                  return { data: [...(input.rows ?? [])], error: null };
-                },
-              };
-            },
-          };
-        },
-      };
-    },
-    async rpc(_name, args) {
+    async rpc(name, args) {
       input.onRpc?.(args);
+      if (name === "list_own_calendar_reminders") {
+        const portal = args.p_portal_scope as "usuario" | "coach";
+        return { data: [...(input.rowsByPortal?.[portal] ?? input.rows ?? [])], error: null };
+      }
       return { data: { id: input.rpcId ?? "created" }, error: null };
     },
   };
@@ -105,19 +95,22 @@ function fakeOperation(input: {
   };
 }
 
-test("Usuario y Coach con el mismo auth.uid leen el mismo calendario; otra identidad queda aislada", async () => {
-  const shared = fakeClient({ authIds: ["hybrid", "hybrid", "hybrid", "hybrid"], rows: [row("shared")] });
+test("Usuario y Coach con el mismo auth.uid reciben calendarios separados; otra identidad queda aislada", async () => {
+  const shared = fakeClient({
+    authIds: ["hybrid", "hybrid", "hybrid", "hybrid"],
+    rowsByPortal: { usuario: [row("user-row")], coach: [row("coach-row")] },
+  });
   const fromUserPortal = await listOwnCalendarReminderOccurrences({
-    client: shared, expectedUserId: "hybrid", from: "2026-08-01", to: "2026-08-31",
+    client: shared, expectedUserId: "hybrid", portalScope: "usuario", from: "2026-08-01", to: "2026-08-31",
   });
   const fromCoachPortal = await listOwnCalendarReminderOccurrences({
-    client: shared, expectedUserId: "hybrid", from: "2026-08-01", to: "2026-08-31",
+    client: shared, expectedUserId: "hybrid", portalScope: "coach", from: "2026-08-01", to: "2026-08-31",
   });
-  assert.deepEqual(fromUserPortal, fromCoachPortal);
+  assert.notEqual(fromUserPortal[0]?.id, fromCoachPortal[0]?.id);
 
   const separateCoach = fakeClient({ authIds: ["coach-only", "coach-only"], rows: [row("coach-row")] });
   const separate = await listOwnCalendarReminderOccurrences({
-    client: separateCoach, expectedUserId: "coach-only", from: "2026-08-01", to: "2026-08-31",
+    client: separateCoach, expectedUserId: "coach-only", portalScope: "coach", from: "2026-08-01", to: "2026-08-31",
   });
   assert.notEqual(separate[0]?.id, fromUserPortal[0]?.id);
 });
@@ -126,6 +119,7 @@ test("BOLA y respuestas de una sesión cambiada fallan cerradas", async () => {
   await assert.rejects(() => listOwnCalendarReminderOccurrences({
     client: fakeClient({ authIds: ["user-a"] }),
     expectedUserId: "user-b",
+    portalScope: "usuario",
     from: "2026-08-01",
     to: "2026-08-31",
   }), /session-mismatch/);
@@ -133,6 +127,7 @@ test("BOLA y respuestas de una sesión cambiada fallan cerradas", async () => {
   await assert.rejects(() => createOwnCalendarReminder({
     operation: fakeOperation({ expectedUserId: "user-a", authIds: ["user-a", "user-b"] }),
     expectedUserId: "user-a",
+    portalScope: "usuario",
     requestId: "11111111-1111-4111-8111-111111111111",
     dto,
     isCurrent: () => true,
@@ -177,6 +172,7 @@ test("cambio adversarial A→B invalida antes del write y ejecuta cero RPC", asy
   await assert.rejects(() => createOwnCalendarReminder({
     operation: pinned,
     expectedUserId: "user-a",
+    portalScope: "coach",
     requestId: "11111111-1111-4111-8111-111111111111",
     dto,
     isCurrent: () => currentIdentity === "user-a",
@@ -193,6 +189,7 @@ test("el write usa RPC, allowlist e idempotency key sin ownership controlable", 
       onRpc: (args) => { capture.value = args; },
     }),
     expectedUserId: "user-a",
+    portalScope: "coach",
     requestId: "11111111-1111-4111-8111-111111111111",
     dto,
     isCurrent: () => true,
@@ -200,6 +197,7 @@ test("el write usa RPC, allowlist e idempotency key sin ownership controlable", 
   assert.equal(result.id, "created:2026-08-26");
   assert.ok(capture.value);
   assert.equal(capture.value.p_request_id, "11111111-1111-4111-8111-111111111111");
+  assert.equal(capture.value.p_portal_scope, "coach");
   assert.deepEqual(
     Object.keys(capture.value).filter((key) => /user|owner|profile/i.test(key)),
     [],
@@ -260,6 +258,7 @@ test("createClient real fija Data/RPC al token A sin acceder al proxy auth", asy
   const result = await createOwnCalendarReminder({
     operation,
     expectedUserId: "user-a",
+    portalScope: "usuario",
     requestId: "11111111-1111-4111-8111-111111111111",
     dto,
     isCurrent: () => true,

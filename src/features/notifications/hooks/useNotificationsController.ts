@@ -18,6 +18,9 @@ export function useNotificationsController(input: {
   identity: NotificationsIdentityPort;
   scope: BrowserStorageScope | null;
   catalogInput: BuildAppNotificationsInput;
+  additionalNotifications?: readonly AppNotification[];
+  persistedSeenRecords?: readonly import("@/lib/notifications/notification-types").SeenNotificationRecord[];
+  includeCatalogNotifications?: boolean;
   onOpenIntent(intent: NotificationOpenIntent): void;
 }) {
   const controller = useMemo(() => createNotificationsController({
@@ -53,7 +56,13 @@ export function useNotificationsController(input: {
   }, [controller, input.scope]);
 
   const commands = controller.captureCommands();
-  const derived = controller.derive(input.catalogInput);
+  const derived = controller.derive(
+    input.catalogInput,
+    undefined,
+    input.additionalNotifications,
+    input.persistedSeenRecords,
+    input.includeCatalogNotifications,
+  );
 
   return {
     controller,

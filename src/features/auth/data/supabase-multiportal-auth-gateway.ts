@@ -1,5 +1,6 @@
 import { createClient, type Session, type SupabaseClient, type User } from "@supabase/supabase-js";
 
+import { requestWelcomeEmailBestEffort } from "@/features/auth/data/request-welcome-email";
 import type {
   CoachRegistrationPreparationPayload,
   CoachRegistrationWritePayload,
@@ -225,6 +226,18 @@ export function createSupabaseMultiportalAuthGateway(
       const confirmation = mapSignupConfirmationRecord(data);
       await requireAuthoritativeIdentity(supabase, expectedUserId, owner);
       return confirmation;
+    },
+
+    async requestWelcomeEmail(expectedUserId, owner) {
+      if (!ownsExpectedIdentity(owner, expectedUserId)) return;
+      const client = dataClientFor(expectedUserId);
+      try {
+        await requireAuthoritativeIdentity(client, expectedUserId, owner);
+        if (!ownsExpectedIdentity(owner, expectedUserId)) return;
+        await requestWelcomeEmailBestEffort(client);
+      } catch {
+        // El proveedor o la Edge Function no pueden cambiar el resultado del registro.
+      }
     },
 
     async signOutAfterSignupConfirmation(expectedUserId, owner) {
@@ -453,6 +466,13 @@ async function readOwnCoachRegistration(
 
 function ownsRegistration(
   owner: CoachRegistrationOwner | UserRegistrationOwner,
+  expectedUserId: string,
+) {
+  return owner.isCurrent() && owner.expectedUserId === expectedUserId;
+}
+
+function ownsExpectedIdentity(
+  owner: PortalResolutionOwner | CoachRegistrationOwner | UserRegistrationOwner,
   expectedUserId: string,
 ) {
   return owner.isCurrent() && owner.expectedUserId === expectedUserId;

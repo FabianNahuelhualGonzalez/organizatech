@@ -1,0 +1,11 @@
+# Local/deployment metadata only. Remote hook URLs and secrets are configured
+# manually in QA first; this file does not mutate any Supabase project.
+
+[functions.auth-send-email-hook]
+verify_jwt = false
+
+[functions.send-welcome-email]
+verify_jwt = true
+
+[functions.send-calendar-reminders]
+verify_jwt = false

@@ -7,7 +7,7 @@ import type { Screen } from "@/lib/navigation/app-navigation";
  * acoplamiento en tiempo de ejecución — para no duplicar definiciones que ya existen en producción.
  */
 
-export type AppNotificationTarget = Extract<Screen, "dashboard" | "perfil" | "comparacion">;
+export type AppNotificationTarget = Extract<Screen, "dashboard" | "perfil" | "comparacion" | "calendario">;
 
 export type AppNotificationSection =
   | "profile-avatar"
@@ -31,7 +31,7 @@ export type AppNotificationTone = "info" | "success" | "warning" | "progress";
 
 export type AppNotificationPriority = "high" | "medium" | "low";
 
-export type AppNotificationKind = "feature" | "profile" | "week" | "progress" | "coach";
+export type AppNotificationKind = "feature" | "profile" | "week" | "progress" | "coach" | "calendar";
 
 export interface AppNotification {
   id: string;
