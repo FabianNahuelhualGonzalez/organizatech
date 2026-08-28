@@ -8,6 +8,7 @@ import type {
   CalendarDateKey,
   CalendarReminder,
   CalendarReminderEnd,
+  CalendarPortalScope,
   CalendarReminderRecurrence,
   CalendarWeekday,
   CreateCalendarReminderDto,
@@ -36,18 +37,11 @@ interface CalendarReminderRow {
 }
 
 export interface CalendarRemindersDataClient {
-  from(table: "calendar_reminders"): {
-    select(columns: string): {
-      eq(column: "user_id", value: string): {
-        lte(column: "starts_on", value: CalendarDateKey): Promise<{
-          data: CalendarReminderRow[] | null;
-          error: RepositoryError;
-        }>;
-      };
-    };
-  };
-  rpc(name: "create_own_calendar_reminder", args: Readonly<Record<string, unknown>>): Promise<{
-    data: { id?: unknown } | readonly { id?: unknown }[] | null;
+  rpc(
+    name: "create_own_calendar_reminder" | "list_own_calendar_reminders",
+    args: Readonly<Record<string, unknown>>,
+  ): Promise<{
+    data: unknown;
     error: RepositoryError;
   }>;
 }
@@ -68,13 +62,6 @@ export interface CalendarRemindersPinnedOperation {
   readonly dataClient: CalendarRemindersDataClient;
   readonly verifyExpectedUser: () => Promise<void>;
 }
-
-const SELECT_COLUMNS = [
-  "id", "starts_on", "title", "description", "kind", "reminder_time", "lead_time",
-  "email_notification", "recurrence_frequency", "weekly_days", "monthly_mode",
-  "monthly_day", "monthly_weekday", "monthly_position", "end_mode", "ends_on",
-  "occurrence_count",
-].join(",");
 
 const WEEKDAYS = new Set<CalendarWeekday>(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
 
@@ -218,18 +205,28 @@ export async function captureCalendarRemindersOperationClient(input: {
 export async function listOwnCalendarReminderOccurrences(input: {
   readonly client: CalendarRemindersClient;
   readonly expectedUserId: string;
+  readonly portalScope: CalendarPortalScope;
   readonly from: CalendarDateKey;
   readonly to: CalendarDateKey;
 }): Promise<readonly CalendarReminder[]> {
   await assertExpectedUser(input.client, input.expectedUserId);
-  const { data, error } = await input.client
-    .from("calendar_reminders")
-    .select(SELECT_COLUMNS)
-    .eq("user_id", input.expectedUserId)
-    .lte("starts_on", input.to);
-  if (error || !data) throw new Error("calendar-reminders-read-failed");
+  const { data, error } = await input.client.rpc("list_own_calendar_reminders", {
+    p_portal_scope: input.portalScope,
+    p_starts_on_lte: input.to,
+  });
+  if (error || !Array.isArray(data) || data.length > 500) {
+    throw new Error("calendar-reminders-read-failed");
+  }
   await assertExpectedUser(input.client, input.expectedUserId);
-  return data.flatMap((row) => expandCalendarReminder(mapRow(row), { from: input.from, to: input.to }));
+  return data.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new Error("calendar-reminders-invalid-row");
+    }
+    return expandCalendarReminder(mapRow(candidate as CalendarReminderRow), {
+      from: input.from,
+      to: input.to,
+    });
+  });
 }
 
 function recurrenceRpcFields(recurrence: CreateCalendarReminderDto["recurrence"]) {
@@ -253,6 +250,7 @@ function recurrenceRpcFields(recurrence: CreateCalendarReminderDto["recurrence"]
 export async function createOwnCalendarReminder(input: {
   readonly operation: CalendarRemindersPinnedOperation;
   readonly expectedUserId: string;
+  readonly portalScope: CalendarPortalScope;
   readonly requestId: string;
   readonly dto: CreateCalendarReminderDto;
   readonly isCurrent: () => boolean;
@@ -270,6 +268,7 @@ export async function createOwnCalendarReminder(input: {
     p_reminder_time: dto.time,
     p_lead_time: dto.leadTime,
     p_email_notification: dto.emailNotification,
+    p_portal_scope: input.portalScope,
     ...recurrenceRpcFields(dto.recurrence),
   });
   if (error || !data) throw new Error("calendar-reminders-create-failed");

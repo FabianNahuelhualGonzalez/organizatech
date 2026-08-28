@@ -1,4 +1,5 @@
 export type CalendarDateKey = string;
+export type CalendarPortalScope = "usuario" | "coach";
 
 export type CalendarReminderKind = "revision" | "vencimiento" | "personal";
 export type CalendarReminderRepeat = "once" | "daily" | "weekly" | "monthly";

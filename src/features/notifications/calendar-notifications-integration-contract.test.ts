@@ -14,8 +14,8 @@ const controller = readFileSync("src/features/notifications/model/notifications-
 const config = readFileSync("supabase/config.toml", "utf8");
 const repository = readFileSync("src/features/notifications/data/supabase-calendar-notifications-repository.ts", "utf8");
 
-test("Usuario y Coach comparten repositorio por auth uid, pero Coach no recibe catálogo Usuario", () => {
-  assert.match(root, /usePersistedCalendarNotifications\(supabaseUser\?\.id \?\? null\)/);
+test("Usuario y Coach usan scopes persistidos separados y Coach no recibe catálogo Usuario", () => {
+  assert.match(root, /usePersistedCalendarNotifications\([\s\S]*supabaseUser\?\.id \?\? null,[\s\S]*coachPortalSession \? "coach" : "usuario"/);
   assert.match(root, /includeCatalogNotifications: !coachPortalSession/);
   assert.match(root, /additionalNotifications: persistedCalendarNotifications\.notifications/);
   assert.match(root, /persistedSeenRecords: persistedCalendarNotifications\.seenRecords/);
@@ -48,16 +48,16 @@ test("un snapshot Calendar nunca cruza de la identidad A a B mientras B carga o 
     createdAt: "2026-08-27T20:00:00.000Z",
   };
   const snapshotA = {
-    ownerIdentityKey: "identity-a",
+    ownerContextKey: "identity-a:usuario",
     notifications: [notification],
     seenRecords: [{ id: notification.id, seenAt: 1 }],
   };
 
-  assert.deepEqual(selectOwnedCalendarNotificationsSnapshot(snapshotA, "identity-a"), {
+  assert.deepEqual(selectOwnedCalendarNotificationsSnapshot(snapshotA, "identity-a:usuario"), {
     notifications: [notification],
     seenRecords: [{ id: notification.id, seenAt: 1 }],
   });
-  assert.deepEqual(selectOwnedCalendarNotificationsSnapshot(snapshotA, "identity-b"), {
+  assert.deepEqual(selectOwnedCalendarNotificationsSnapshot(snapshotA, "identity-a:coach"), {
     notifications: [],
     seenRecords: [],
   });
@@ -68,11 +68,18 @@ test("un snapshot Calendar nunca cruza de la identidad A a B mientras B carga o 
 });
 
 test("el hook aplica el gate de owner en render e invalida operaciones antes de pintar B", () => {
-  assert.match(hook, /ownerIdentityKey: requestedIdentityKey/);
-  assert.match(hook, /currentState\.ownerIdentityKey === identityKey/);
-  assert.match(hook, /selectOwnedCalendarNotificationsSnapshot\(state, identityKey\)/);
+  assert.match(hook, /ownerContextKey: requestedContextKey/);
+  assert.match(hook, /currentState\.ownerContextKey === contextKey/);
+  assert.match(hook, /selectOwnedCalendarNotificationsSnapshot\(state, contextKey\)/);
   assert.match(hook, /useLayoutEffect\(\(\) => \{[\s\S]*generation\.current \+= 1/);
   assert.match(hook, /return \{ \.\.\.visibleState, markRead, reload \}/);
+});
+
+test("list y mark-read envían el mismo portal allowlisted al RPC", () => {
+  assert.match(repository, /list_own_calendar_notifications"[\s\S]*p_portal_scope: portalScope/);
+  assert.match(repository, /mark_own_calendar_notifications_read"[\s\S]*p_portal_scope: portalScope/);
+  assert.match(hook, /listOwnCalendarNotifications\([\s\S]*requestedIdentityKey,[\s\S]*portalScope/);
+  assert.match(hook, /markOwnCalendarNotificationRead\([\s\S]*identityKey,[\s\S]*portalScope/);
 });
 
 test("un fallo tardío de markRead A no invalida la carga vigente de B", () => {

@@ -10,15 +10,17 @@ import {
 } from "../data/supabase-calendar-reminders-repository";
 import { createCalendarDateKey, getDaysInMonth, parseCalendarDateKey } from "../model/calendar-date";
 import { getSantiagoCalendarDate } from "../model/reminder-recurrence";
-import type { CalendarReminder, CreateCalendarReminderDto } from "../model/types";
+import type { CalendarPortalScope, CalendarReminder, CreateCalendarReminderDto } from "../model/types";
 import { CalendarRemindersFeature } from "./calendar-reminders-feature";
 
 export function CalendarRemindersProductiveBoundary({
   identityKey,
+  portalScope,
   onBack,
   showBackButton = true,
 }: {
   readonly identityKey: string;
+  readonly portalScope: CalendarPortalScope;
   readonly onBack: () => void;
   readonly showBackButton?: boolean;
 }) {
@@ -43,6 +45,7 @@ export function CalendarRemindersProductiveBoundary({
       const next = await listOwnCalendarReminderOccurrences({
         client,
         expectedUserId: identityKey,
+        portalScope,
         from: range.from,
         to: range.to,
       });
@@ -50,7 +53,7 @@ export function CalendarRemindersProductiveBoundary({
     } catch {
       if (generationRef.current === generation) setReminders([]);
     }
-  }, [client, identityKey, range.from, range.to]);
+  }, [client, identityKey, portalScope, range.from, range.to]);
 
   useEffect(() => {
     setReminders([]);
@@ -76,17 +79,18 @@ export function CalendarRemindersProductiveBoundary({
     const result = await createOwnCalendarReminder({
       operation,
       expectedUserId: operationIdentity,
+      portalScope,
       requestId: globalThis.crypto.randomUUID(),
       dto,
       isCurrent,
     });
     if (isCurrent()) void reload();
     return result;
-  }, [client, identityKey, reload]);
+  }, [client, identityKey, portalScope, reload]);
 
   return (
     <CalendarRemindersFeature
-      key={identityKey}
+      key={`${identityKey}:${portalScope}`}
       year={year}
       month={month}
       reminders={reminders}

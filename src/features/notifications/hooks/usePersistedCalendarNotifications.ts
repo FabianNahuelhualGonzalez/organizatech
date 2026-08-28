@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AppNotification, SeenNotificationRecord } from "@/lib/notifications/notification-types";
-import { listOwnCalendarNotifications, markOwnCalendarNotificationRead } from "../data/supabase-calendar-notifications-repository";
+import {
+  listOwnCalendarNotifications,
+  markOwnCalendarNotificationRead,
+  type CalendarNotificationPortalScope,
+} from "../data/supabase-calendar-notifications-repository";
 
 type PersistedCalendarNotificationsSnapshot = {
-  ownerIdentityKey: string | null;
+  ownerContextKey: string | null;
   notifications: AppNotification[];
   seenRecords: SeenNotificationRecord[];
 };
@@ -17,9 +21,9 @@ const EMPTY_VISIBLE_SNAPSHOT = {
 
 export function selectOwnedCalendarNotificationsSnapshot(
   snapshot: PersistedCalendarNotificationsSnapshot,
-  identityKey: string | null,
+  contextKey: string | null,
 ) {
-  if (!identityKey || snapshot.ownerIdentityKey !== identityKey) return EMPTY_VISIBLE_SNAPSHOT;
+  if (!contextKey || snapshot.ownerContextKey !== contextKey) return EMPTY_VISIBLE_SNAPSHOT;
   return { notifications: snapshot.notifications, seenRecords: snapshot.seenRecords };
 }
 
@@ -30,32 +34,41 @@ export function shouldReloadAfterCalendarMarkReadFailure(
   return requestedGeneration === currentGeneration;
 }
 
-export function usePersistedCalendarNotifications(identityKey: string | null) {
+export function usePersistedCalendarNotifications(
+  identityKey: string | null,
+  portalScope: CalendarNotificationPortalScope,
+) {
+  const contextKey = identityKey ? `${identityKey}:${portalScope}` : null;
   const generation = useRef(0);
   const [state, setState] = useState<PersistedCalendarNotificationsSnapshot>({
-    ownerIdentityKey: null,
+    ownerContextKey: null,
     notifications: [],
     seenRecords: [],
   });
 
   const reload = useCallback(async () => {
     const requestedIdentityKey = identityKey;
+    const requestedContextKey = contextKey;
     const current = ++generation.current;
     if (!requestedIdentityKey) {
-      setState({ ownerIdentityKey: null, notifications: [], seenRecords: [] });
+      setState({ ownerContextKey: null, notifications: [], seenRecords: [] });
       return;
     }
     try {
-      const next = await listOwnCalendarNotifications(requestedIdentityKey, () => generation.current === current);
+      const next = await listOwnCalendarNotifications(
+        requestedIdentityKey,
+        portalScope,
+        () => generation.current === current,
+      );
       if (generation.current === current) {
-        setState({ ownerIdentityKey: requestedIdentityKey, ...next });
+        setState({ ownerContextKey: requestedContextKey, ...next });
       }
     } catch {
       if (generation.current === current) {
-        setState({ ownerIdentityKey: requestedIdentityKey, notifications: [], seenRecords: [] });
+        setState({ ownerContextKey: requestedContextKey, notifications: [], seenRecords: [] });
       }
     }
-  }, [identityKey]);
+  }, [contextKey, identityKey, portalScope]);
 
   useLayoutEffect(() => {
     void reload();
@@ -78,7 +91,7 @@ export function usePersistedCalendarNotifications(identityKey: string | null) {
     if (!identityKey || !notificationId.startsWith("calendar:")) return;
     const current = generation.current;
     const now = Date.now();
-    setState((currentState) => currentState.ownerIdentityKey === identityKey
+    setState((currentState) => currentState.ownerContextKey === contextKey
       ? {
           ...currentState,
           seenRecords: [
@@ -89,13 +102,14 @@ export function usePersistedCalendarNotifications(identityKey: string | null) {
       : currentState);
     void markOwnCalendarNotificationRead(
       identityKey,
+      portalScope,
       notificationId,
       () => generation.current === current,
     ).catch(() => {
       if (shouldReloadAfterCalendarMarkReadFailure(current, generation.current)) void reload();
     });
-  }, [identityKey, reload]);
+  }, [contextKey, identityKey, portalScope, reload]);
 
-  const visibleState = selectOwnedCalendarNotificationsSnapshot(state, identityKey);
+  const visibleState = selectOwnedCalendarNotificationsSnapshot(state, contextKey);
   return { ...visibleState, markRead, reload };
 }

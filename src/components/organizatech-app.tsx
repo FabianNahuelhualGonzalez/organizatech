@@ -1563,7 +1563,10 @@ export function OrganizatechApp({
     todayTrainingNotificationContext,
     weeklyEquivalentProgress,
   ]);
-  const persistedCalendarNotifications = usePersistedCalendarNotifications(supabaseUser?.id ?? null);
+  const persistedCalendarNotifications = usePersistedCalendarNotifications(
+    supabaseUser?.id ?? null,
+    coachPortalSession ? "coach" : "usuario",
+  );
   const notificationsBoundary = useNotificationsController({
     identity: trainingDataIdentityPort,
     scope: activeFeatureStorageScope,
@@ -4638,6 +4641,7 @@ export function OrganizatechApp({
         <CalendarRemindersProductiveBoundary
           key={supabaseUser.id}
           identityKey={supabaseUser.id}
+          portalScope="usuario"
           onBack={goBack}
           showBackButton={false}
         />

@@ -15,6 +15,8 @@ interface Row {
   readonly created_at: string;
 }
 
+export type CalendarNotificationPortalScope = "usuario" | "coach";
+
 export interface CalendarNotificationsDataClient {
   rpc(
     name: "list_own_calendar_notifications" | "mark_own_calendar_notifications_read",
@@ -106,21 +108,26 @@ function parseRows(value: unknown): readonly Row[] {
 
 export async function listOwnCalendarNotifications(
   expectedUserId: string,
+  portalScope: CalendarNotificationPortalScope,
   isCurrent: () => boolean = () => true,
 ): Promise<{ notifications: AppNotification[]; seenRecords: SeenNotificationRecord[] }> {
   const principal = getPrincipalClient();
   if (!principal) return { notifications: [], seenRecords: [] };
   const operation = await captureCalendarNotificationsOperation({ principal, expectedUserId, isCurrent });
-  return listCalendarNotificationsWithOperation({ operation, isCurrent });
+  return listCalendarNotificationsWithOperation({ operation, portalScope, isCurrent });
 }
 
 export async function listCalendarNotificationsWithOperation(input: {
   readonly operation: CalendarNotificationsPinnedOperation;
+  readonly portalScope: CalendarNotificationPortalScope;
   readonly isCurrent: () => boolean;
 }): Promise<{ notifications: AppNotification[]; seenRecords: SeenNotificationRecord[] }> {
-  const { operation, isCurrent } = input;
+  const { operation, portalScope, isCurrent } = input;
   if (!isCurrent()) throw new Error("calendar-notifications-operation-stale");
-  const result = await operation.dataClient.rpc("list_own_calendar_notifications", { p_limit: 50 });
+  const result = await operation.dataClient.rpc("list_own_calendar_notifications", {
+    p_portal_scope: portalScope,
+    p_limit: 50,
+  });
   if (result.error || !isCurrent()) throw new Error("calendar-notifications-load-failed");
   await operation.verifyExpectedUser();
   if (!isCurrent()) throw new Error("calendar-notifications-operation-stale");
@@ -146,6 +153,7 @@ export async function listCalendarNotificationsWithOperation(input: {
 
 export async function markOwnCalendarNotificationRead(
   expectedUserId: string,
+  portalScope: CalendarNotificationPortalScope,
   appNotificationId: string,
   isCurrent: () => boolean = () => true,
 ) {
@@ -155,20 +163,22 @@ export async function markOwnCalendarNotificationRead(
   const principal = getPrincipalClient();
   if (!principal) throw new Error("calendar-notifications-client-unavailable");
   const operation = await captureCalendarNotificationsOperation({ principal, expectedUserId, isCurrent });
-  await markCalendarNotificationReadWithOperation({ operation, appNotificationId, isCurrent });
+  await markCalendarNotificationReadWithOperation({ operation, portalScope, appNotificationId, isCurrent });
 }
 
 export async function markCalendarNotificationReadWithOperation(input: {
   readonly operation: CalendarNotificationsPinnedOperation;
+  readonly portalScope: CalendarNotificationPortalScope;
   readonly appNotificationId: string;
   readonly isCurrent: () => boolean;
 }) {
-  const { operation, appNotificationId, isCurrent } = input;
+  const { operation, portalScope, appNotificationId, isCurrent } = input;
   if (!appNotificationId.startsWith("calendar:")) throw new Error("calendar-notifications-invalid-id");
   const id = appNotificationId.slice("calendar:".length);
   if (!UUID.test(id)) throw new Error("calendar-notifications-invalid-id");
   if (!isCurrent()) throw new Error("calendar-notifications-operation-stale");
   const result = await operation.dataClient.rpc("mark_own_calendar_notifications_read", {
+    p_portal_scope: portalScope,
     p_notification_ids: [id],
   });
   if (result.error || result.data !== 1 || !isCurrent()) throw new Error("calendar-notifications-mark-read-failed");
