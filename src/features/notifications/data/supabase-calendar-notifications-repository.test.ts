@@ -63,17 +63,22 @@ test("lista mapea detalle civil y read_at sólo después de postvalidar A", asyn
   let verifications = 0;
   const result = await listCalendarNotificationsWithOperation({
     operation: {
-      dataClient: { rpc: async () => ({ data: [{
-        id: NOTIFICATION,
-        title: "Control",
-        body: "Revisar avance",
-        occurrence_on: "2026-09-07",
-        reminder_time: "09:30:00",
-        read_at: "2026-09-01T12:00:00.000Z",
-        created_at: "2026-09-01T11:00:00.000Z",
-      }], error: null }) },
+      dataClient: { rpc: async (name, args) => {
+        assert.equal(name, "list_own_calendar_notifications");
+        assert.equal(args.p_portal_scope, "usuario");
+        return { data: [{
+          id: NOTIFICATION,
+          title: "Control",
+          body: "Revisar avance",
+          occurrence_on: "2026-09-07",
+          reminder_time: "09:30:00",
+          read_at: "2026-09-01T12:00:00.000Z",
+          created_at: "2026-09-01T11:00:00.000Z",
+        }], error: null };
+      } },
       verifyExpectedUser: async () => { verifications += 1; },
     },
+    portalScope: "usuario",
     isCurrent: () => true,
   });
   assert.equal(verifications, 1);
@@ -89,9 +94,14 @@ test("mark-read exige una fila own y descarta owner stale", async () => {
   ]) {
     await assert.rejects(markCalendarNotificationReadWithOperation({
       operation: {
-        dataClient: { rpc: async () => ({ data: candidate.data, error: null }) },
+        dataClient: { rpc: async (name, args) => {
+          assert.equal(name, "mark_own_calendar_notifications_read");
+          assert.equal(args.p_portal_scope, "coach");
+          return { data: candidate.data, error: null };
+        } },
         verifyExpectedUser: async () => undefined,
       },
+      portalScope: "coach",
       appNotificationId: `calendar:${NOTIFICATION}`,
       isCurrent: () => candidate.current,
     }));

@@ -5,12 +5,15 @@ import test from "node:test";
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260827120000_calendar_notification_delivery.sql": "9deefd69a077ca906ad55d61f54ad9c73160cdb8917c6a5936fd77c4ce1ebe7e",
   "20260827165000_calendar_notification_claim_ambiguity_fix.sql": "6ae4a7929a36275520046bb9239b4e4ddf54a0b0d79add62b7e167aed5980861",
+  "20260828020534_notifications_portal_separation.sql": "8c1cb748c127f249ebeb61cd84b07761d6f7604d0d5de28c15740deeccc52771",
 } as const;
 
 const migrationPath = "supabase/migrations/20260827120000_calendar_notification_delivery.sql";
 const migration = readFileSync(migrationPath, "utf8");
 const ambiguityFixPath = "supabase/migrations/20260827165000_calendar_notification_claim_ambiguity_fix.sql";
 const ambiguityFix = readFileSync(ambiguityFixPath, "utf8");
+const portalSeparationPath = "supabase/migrations/20260828020534_notifications_portal_separation.sql";
+const portalSeparation = readFileSync(portalSeparationPath, "utf8");
 
 function assertSecureCalendarMigration(source: string) {
   assert.match(source, /alter table public\.calendar_notifications enable row level security;/);
@@ -49,6 +52,25 @@ function assertClaimAmbiguityFix(source: string) {
   assert.doesNotMatch(source, /returning reminder_id, occurrence_on/);
   assert.match(source, /revoke all on function public\.claim_due_calendar_reminder_deliveries\(text\)[\s\S]*from public, anon, authenticated/);
   assert.match(source, /grant execute on function public\.claim_due_calendar_reminder_deliveries\(text\) to anon/);
+}
+
+function assertNotificationPortalSeparation(source: string) {
+  assert.match(source, /alter table public\.calendar_notifications[\s\S]*add column portal_scope text not null default 'usuario'/);
+  assert.match(source, /calendar_notifications_portal_scope_allowed[\s\S]*portal_scope in \('usuario', 'coach'\)/);
+  assert.match(source, /calendar_notifications_owner_portal_created_idx[\s\S]*\(user_id, portal_scope, created_at desc, id\)/);
+  assert.match(source, /revoke all privileges on table public\.calendar_notifications from public, anon, authenticated/);
+  assert.doesNotMatch(source, /grant select on table public\.calendar_notifications to authenticated/);
+  assert.match(source, /before insert on public\.calendar_notifications[\s\S]*assign_calendar_notification_portal_scope/);
+  assert.match(source, /new\.portal_scope := v_portal_scope/);
+  assert.match(source, /v_reminder_user_id is distinct from new\.user_id/);
+  assert.match(source, /create function public\.list_own_calendar_notifications\([\s\S]*p_portal_scope text/);
+  assert.match(source, /notification\.user_id = v_user_id[\s\S]*notification\.portal_scope = p_portal_scope/);
+  assert.match(source, /create function public\.mark_own_calendar_notifications_read\([\s\S]*p_portal_scope text/);
+  assert.match(source, /notification\.portal_scope = p_portal_scope[\s\S]*notification\.id = any\(p_notification_ids\)/);
+  assert.match(source, /p_portal_scope = 'coach'[\s\S]*public\.coach_registrations/);
+  assert.match(source, /security definer[\s\S]*set search_path = ''/);
+  assert.match(source, /grant execute on function public\.list_own_calendar_notifications\(text, integer\)[\s\S]*to authenticated/);
+  assert.match(source, /grant execute on function public\.mark_own_calendar_notifications_read\(text, uuid\[\]\)[\s\S]*to authenticated/);
 }
 
 test("migración endurece ownership, claims, recurrencia y DST", () => {
@@ -100,4 +122,27 @@ test("mutantes que restauran la ambigüedad PL/pgSQL mueren", () => {
     ),
   ];
   for (const mutant of mutants) assert.throws(() => assertClaimAmbiguityFix(mutant));
+});
+
+test("migración posterior separa inbox y read_at por portal", () => {
+  assertNotificationPortalSeparation(portalSeparation);
+});
+
+test("mutantes de portal, ownership y bypass directo mueren", () => {
+  const mutants = [
+    portalSeparation.replaceAll("notification.portal_scope = p_portal_scope", "true"),
+    portalSeparation.replace("new.portal_scope := v_portal_scope", "new.portal_scope := 'usuario'"),
+    portalSeparation.replace("v_reminder_user_id is distinct from new.user_id", "false"),
+    portalSeparation.replace(
+      "revoke all privileges on table public.calendar_notifications from public, anon, authenticated",
+      "grant select on table public.calendar_notifications to authenticated",
+    ),
+    portalSeparation.replaceAll("set search_path = ''", "set search_path = 'public'"),
+  ];
+  mutants.forEach((mutant, index) => {
+    assert.throws(
+      () => assertNotificationPortalSeparation(mutant),
+      `notification portal mutant ${index + 1} sobrevivió`,
+    );
+  });
 });

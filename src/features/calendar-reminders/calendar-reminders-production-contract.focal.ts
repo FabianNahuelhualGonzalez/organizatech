@@ -8,6 +8,7 @@ function read(relativePath: string): string {
 }
 
 const migration = read("../../../supabase/migrations/20260826213606_calendar_reminders_shared_portal.sql");
+const portalMigration = read("../../../supabase/migrations/20260828020534_notifications_portal_separation.sql");
 const repository = read("./data/supabase-calendar-reminders-repository.ts");
 const boundary = read("./components/calendar-reminders-productive-boundary.tsx");
 const root = read("../../components/organizatech-app.tsx");
@@ -29,7 +30,7 @@ function hasPinnedWriteGuards(repositorySource: string, boundarySource: string):
     && !repositorySource.includes("input.operation.dataClient.auth")
     && /const operation = await captureCalendarRemindersOperationClient/.test(boundarySource)
     && /createOwnCalendarReminder\(\{[\s\S]*?operation,/.test(boundarySource)
-    && /<CalendarRemindersFeature[\s\S]*?key=\{identityKey\}/.test(boundarySource);
+    && /<CalendarRemindersFeature[\s\S]*?key=\{`\$\{identityKey\}:\$\{portalScope\}`\}/.test(boundarySource);
 }
 
 test("migración local aplica RLS/FORCE RLS, ownership Auth y grants mínimos", () => {
@@ -63,6 +64,8 @@ test("RPC SECURITY DEFINER está cerrada, calificada, allowlisted e idempotente"
 test("repository no hace writes directos y protege sesión antes y después de cada await remoto", () => {
   assert.doesNotMatch(repository, /\.insert\(|\.update\(|\.delete\(|\.upsert\(/);
   assert.match(repository, /rpc\("create_own_calendar_reminder"/);
+  assert.match(repository, /rpc\("list_own_calendar_reminders"/);
+  assert.doesNotMatch(repository, /\.from\("calendar_reminders"\)/);
   assert.ok((repository.match(/await assertExpectedUser/g) ?? []).length >= 2);
   assert.ok((repository.match(/await input\.operation\.verifyExpectedUser/g) ?? []).length >= 2);
   assert.match(repository, /principal\.auth\.getUser\(accessToken\)/);
@@ -85,12 +88,42 @@ test("repository no hace writes directos y protege sesión antes y después de c
   )), true);
 });
 
-test("ambos portales conectan la misma boundary con su auth identity efectiva", () => {
+test("ambos portales conectan la boundary con identidad efectiva y scope explícito", () => {
   assert.match(root, /screen === "calendario"[\s\S]*?<CalendarRemindersProductiveBoundary[\s\S]*?identityKey=\{supabaseUser\.id\}/);
+  assert.match(root, /identityKey=\{supabaseUser\.id\}[\s\S]*?portalScope="usuario"/);
   assert.match(coach, /<CalendarRemindersProductiveBoundary[\s\S]*?identityKey=\{session\.userId\}/);
+  assert.match(coach, /identityKey=\{session\.userId\}[\s\S]*?portalScope="coach"/);
   assert.doesNotMatch(`${root}\n${coach}`, /service_role|SUPABASE_SERVICE/i);
   assert.match(coach, /aria-current=\{!isCalendarOpen && activeScreen === "profile" \? "page" : undefined\}/);
   assert.match(coach, /aria-current=\{isCalendarOpen \? "page" : undefined\}/);
+});
+
+function assertPortalSeparation(source: string) {
+  assert.match(source, /add column portal_scope text not null default 'usuario'/);
+  assert.match(source, /calendar_reminders_portal_scope_allowed\s+check \(portal_scope in \('usuario', 'coach'\)\)/);
+  assert.match(source, /calendar_reminders_user_portal_starts_on_idx/);
+  assert.match(source, /revoke all privileges on table public\.calendar_reminders from public, anon, authenticated/);
+  assert.doesNotMatch(source, /grant select on table public\.calendar_reminders to authenticated/);
+  assert.match(source, /create function public\.list_own_calendar_reminders\(\s*p_portal_scope text/);
+  assert.match(source, /create function public\.list_own_calendar_reminders[\s\S]*?reminder\.user_id = v_user_id[\s\S]*?reminder\.portal_scope = p_portal_scope/);
+  assert.match(source, /p_portal_scope = 'coach'[\s\S]*public\.coach_registrations/);
+  assert.match(source, /set search_path = ''/);
+  assert.match(source, /grant execute on function public\.list_own_calendar_reminders\(text, date\)[\s\S]*to authenticated/);
+}
+
+test("migración posterior separa Calendario por portal sin debilitar ownership", () => {
+  assertPortalSeparation(portalMigration);
+  const mutants = [
+    portalMigration.replaceAll("reminder.portal_scope = p_portal_scope", "true"),
+    portalMigration.replace("portal_scope in ('usuario', 'coach')", "portal_scope is not null"),
+    portalMigration.replace(
+      "revoke all privileges on table public.calendar_reminders from public, anon, authenticated",
+      "grant select on table public.calendar_reminders to authenticated",
+    ),
+  ];
+  mutants.forEach((mutant, index) => {
+    assert.throws(() => assertPortalSeparation(mutant), `portal mutant ${index + 1} sobrevivió`);
+  });
 });
 
 test("gate oficial referencia una sola vez cada focal presente en disco", () => {

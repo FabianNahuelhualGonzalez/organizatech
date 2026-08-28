@@ -12,6 +12,13 @@ Implementación local de correos transaccionales de confirmación y bienvenida p
 
 El Send Email Hook es global. El fallback neutral cubre todas las acciones Auth actuales, incluidas recovery, magic link, cambio de email y notificaciones de seguridad. Los enlaces con token usan exclusivamente el `SUPABASE_URL` server-side como origen Auth y construyen `/auth/v1/verify` en ese origen. Los valores firmados `redirect_to` y `site_url` son destinos validados de la aplicación: nunca determinan el host de verificación. Para notificaciones se prioriza `redirect_to` y se conserva `site_url` sólo como fallback si el redirect está ausente. GoTrue no incluye el destinatario alternativo de `identity_unlinked_notification` en el payload del hook; mientras esa limitación upstream exista, el fallback usa el `user.email` firmado.
 
+Los recordatorios y las notificaciones de Calendario quedan separados por
+contexto `usuario`/`coach`, incluso cuando ambos portales comparten el mismo
+`auth.uid()`. La identidad Auth sigue siendo la frontera de seguridad frente a
+otras cuentas; el scope de portal evita mezclar información en la experiencia
+de producto. Como las filas históricas no guardaban su portal de origen, la
+migración las asigna determinísticamente a Usuario.
+
 ## Configuración futura (QA primero)
 
 Después de auditoría independiente:
@@ -22,6 +29,9 @@ Después de auditoría independiente:
    Aplicar finalmente `20260827233948_email_calendar_coalesce_runtime_fix.sql`;
    corrige el uso runtime de `COALESCE` en confirmación, bienvenida y creación de
    recordatorios, y recarga el esquema PostgREST sin cambiar firmas ni ACL.
+   Después, aplicar `20260828020534_notifications_portal_separation.sql`; añade
+   los RPC con scope `usuario`/`coach` y asigna a Usuario las filas históricas
+   que no tenían procedencia de portal.
 2. Generar una capability aleatoria de alta entropía y guardar el mismo valor como secreto Edge `EMAIL_LEDGER_RPC_SECRET` y en Vault con nombre `organizatech_email_ledger_rpc_secret`.
 3. Configurar sólo como secretos Edge: `BREVO_API_KEY` y `SEND_EMAIL_HOOK_SECRET`.
 4. Configurar `ORGANIZATECH_EMAIL_SENDER`, `ORGANIZATECH_EMAIL_SENDER_NAME` y una URL HTTPS en `ORGANIZATECH_APP_URL`.

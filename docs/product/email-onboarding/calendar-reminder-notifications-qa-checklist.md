@@ -12,7 +12,7 @@ Esta entrega deja preparada localmente la campana persistente y el envío opcion
 
 ## Configuración QA pendiente
 
-1. Aplicar `20260827120000_calendar_notification_delivery.sql` después de `20260827000000_email_onboarding_transactional_email.sql`. Aplicar luego `20260827165000_calendar_notification_claim_ambiguity_fix.sql`; este hotfix califica los targets `ON CONFLICT` del worker y no cambia tablas, datos ni privilegios. Aplicar finalmente `20260827233948_email_calendar_coalesce_runtime_fix.sql`, que corrige `COALESCE` en los RPC runtime y recarga PostgREST sin cambiar firmas ni ACL.
+1. Aplicar `20260827120000_calendar_notification_delivery.sql` después de `20260827000000_email_onboarding_transactional_email.sql`. Aplicar luego `20260827165000_calendar_notification_claim_ambiguity_fix.sql`; este hotfix califica los targets `ON CONFLICT` del worker y no cambia tablas, datos ni privilegios. Aplicar después `20260827233948_email_calendar_coalesce_runtime_fix.sql`, que corrige `COALESCE` en los RPC runtime y recarga PostgREST sin cambiar firmas ni ACL. Aplicar finalmente `20260828020534_notifications_portal_separation.sql`; crea los RPC con scope `usuario`/`coach` y asigna a Usuario las filas históricas sin procedencia de portal.
 2. Crear una capability aleatoria distinta a la de onboarding. Guardarla en Vault como `organizatech_calendar_reminder_rpc_secret` y como secreto Edge `CALENDAR_REMINDER_RPC_SECRET`.
 3. Crear otro secreto independiente `CALENDAR_REMINDER_SCHEDULER_SECRET` para invocar el worker programado.
 4. Configurar en la función sólo `BREVO_API_KEY`, sender verificado, `ORGANIZATECH_APP_URL`, anon key y los dos secretos anteriores. Nunca usar `service_role`.
@@ -20,5 +20,13 @@ Esta entrega deja preparada localmente la campana persistente y el envío opcion
 6. Programar el POST con una cadencia máxima de cinco minutos. No incluir secretos en URL, payload, logs o respuestas.
 7. Validar en QA: preferencia correo activa/inactiva, misma `auth.uid()` en Usuario/Coach, otra identidad aislada, campana read/unread, dos workers concurrentes, reintento 429 y resultados ambiguos sin reenvío.
 8. Verificar en Brevo el template HTML/texto, sender `organizatech.cl`, tracking desactivado e idempotencia real con la misma clave.
+
+## Separación por portal
+
+- Con el mismo `auth.uid()`, un recordatorio creado en Usuario sólo aparece en el Calendario y la campana Usuario.
+- Con el mismo `auth.uid()`, un recordatorio creado en Coach sólo aparece en el Calendario y la campana Coach.
+- Marcar una notificación como vista en un portal no altera una fila del otro portal.
+- Una identidad Auth diferente no puede listar ni marcar filas ajenas.
+- Los recordatorios históricos previos a la separación aparecen únicamente en Usuario.
 
 PROD requiere una autorización separada después del PASS de Preview y QA manual del dueño.

@@ -166,6 +166,7 @@ export function CoachPortalBoundary({
       {isCalendarOpen ? (
         <CalendarRemindersProductiveBoundary
           identityKey={session.userId}
+          portalScope="coach"
           onBack={() => setIsCalendarOpen(false)}
         />
       ) : state.screen === "home" ? (
