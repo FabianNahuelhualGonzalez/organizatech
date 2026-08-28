@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import {
+  selectOwnedCalendarNotificationsSnapshot,
+  shouldReloadAfterCalendarMarkReadFailure,
+} from "./hooks/usePersistedCalendarNotifications";
+import type { AppNotification } from "@/lib/notifications/notification-types";
 
 const root = readFileSync("src/components/organizatech-app.tsx", "utf8");
 const coach = readFileSync("src/features/coach-portal/components/coach-portal.tsx", "utf8");
@@ -24,9 +29,67 @@ test("read_at remoto es autoridad de calendar y localStorage no puede ocultar ro
   assert.match(controller, /isPersistedCalendarNotification/);
   assert.match(controller, /if \(!isPersistedCalendarNotification\) \{[\s\S]*if \(!markSeen\(\[notification\.id\]\)\)/);
   assert.match(hook, /markOwnCalendarNotificationRead/);
-  assert.match(hook, /\.catch\(\(\) => void reload\(\)\)/);
+  assert.match(hook, /\.catch\(\(\) => \{[\s\S]*shouldReloadAfterCalendarMarkReadFailure\(current, generation\.current\)[\s\S]*void reload\(\)/);
   assert.match(hook, /visibilitychange/);
   assert.match(root, /if \(!isNotificationPanelOpen\) void persistedCalendarNotifications\.reload\(\)/);
+});
+
+test("un snapshot Calendar nunca cruza de la identidad A a B mientras B carga o falla", () => {
+  const notification: AppNotification = {
+    id: "calendar:00000000-0000-4000-8000-000000000001",
+    title: "Privado A",
+    summary: "Sólo pertenece a A",
+    category: "Sistema",
+    tone: "info",
+    priority: "high",
+    dedupeKey: "calendar:00000000-0000-4000-8000-000000000001",
+    target: "calendario",
+    kind: "calendar",
+    createdAt: "2026-08-27T20:00:00.000Z",
+  };
+  const snapshotA = {
+    ownerIdentityKey: "identity-a",
+    notifications: [notification],
+    seenRecords: [{ id: notification.id, seenAt: 1 }],
+  };
+
+  assert.deepEqual(selectOwnedCalendarNotificationsSnapshot(snapshotA, "identity-a"), {
+    notifications: [notification],
+    seenRecords: [{ id: notification.id, seenAt: 1 }],
+  });
+  assert.deepEqual(selectOwnedCalendarNotificationsSnapshot(snapshotA, "identity-b"), {
+    notifications: [],
+    seenRecords: [],
+  });
+  assert.deepEqual(selectOwnedCalendarNotificationsSnapshot(snapshotA, null), {
+    notifications: [],
+    seenRecords: [],
+  });
+});
+
+test("el hook aplica el gate de owner en render e invalida operaciones antes de pintar B", () => {
+  assert.match(hook, /ownerIdentityKey: requestedIdentityKey/);
+  assert.match(hook, /currentState\.ownerIdentityKey === identityKey/);
+  assert.match(hook, /selectOwnedCalendarNotificationsSnapshot\(state, identityKey\)/);
+  assert.match(hook, /useLayoutEffect\(\(\) => \{[\s\S]*generation\.current \+= 1/);
+  assert.match(hook, /return \{ \.\.\.visibleState, markRead, reload \}/);
+});
+
+test("un fallo tardío de markRead A no invalida la carga vigente de B", () => {
+  const markReadGenerationA = 4;
+
+  assert.equal(
+    shouldReloadAfterCalendarMarkReadFailure(markReadGenerationA, markReadGenerationA),
+    true,
+  );
+  assert.equal(
+    shouldReloadAfterCalendarMarkReadFailure(markReadGenerationA, markReadGenerationA + 1),
+    false,
+  );
+  assert.match(
+    hook,
+    /\.catch\(\(\) => \{[\s\S]*shouldReloadAfterCalendarMarkReadFailure\(current, generation\.current\)[\s\S]*void reload\(\)/,
+  );
 });
 
 test("worker exige scheduler secret y capability separada, sin service_role", () => {
