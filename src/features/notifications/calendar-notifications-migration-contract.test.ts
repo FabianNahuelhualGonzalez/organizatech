@@ -6,6 +6,7 @@ export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260827120000_calendar_notification_delivery.sql": "9deefd69a077ca906ad55d61f54ad9c73160cdb8917c6a5936fd77c4ce1ebe7e",
   "20260827165000_calendar_notification_claim_ambiguity_fix.sql": "6ae4a7929a36275520046bb9239b4e4ddf54a0b0d79add62b7e167aed5980861",
   "20260828020534_notifications_portal_separation.sql": "8c1cb748c127f249ebeb61cd84b07761d6f7604d0d5de28c15740deeccc52771",
+  "20260828192434_sec_calendar_resource_bounds.sql": "274d2674d5efcc05304ba1f666cc23f933cffba3af8589dc6ef0dcf5b34a3f38",
 } as const;
 
 const migrationPath = "supabase/migrations/20260827120000_calendar_notification_delivery.sql";
@@ -14,6 +15,8 @@ const ambiguityFixPath = "supabase/migrations/20260827165000_calendar_notificati
 const ambiguityFix = readFileSync(ambiguityFixPath, "utf8");
 const portalSeparationPath = "supabase/migrations/20260828020534_notifications_portal_separation.sql";
 const portalSeparation = readFileSync(portalSeparationPath, "utf8");
+const resourceBoundsPath = "supabase/migrations/20260828192434_sec_calendar_resource_bounds.sql";
+const resourceBounds = readFileSync(resourceBoundsPath, "utf8");
 
 function assertSecureCalendarMigration(source: string) {
   assert.match(source, /alter table public\.calendar_notifications enable row level security;/);
@@ -71,6 +74,44 @@ function assertNotificationPortalSeparation(source: string) {
   assert.match(source, /security definer[\s\S]*set search_path = ''/);
   assert.match(source, /grant execute on function public\.list_own_calendar_notifications\(text, integer\)[\s\S]*to authenticated/);
   assert.match(source, /grant execute on function public\.mark_own_calendar_notifications_read\(text, uuid\[\]\)[\s\S]*to authenticated/);
+}
+
+function assertCalendarResourceBounds(source: string) {
+  const recurrenceBody =
+    source.match(/create or replace function private\.calendar_reminder_occurs_on[\s\S]*?\$calendar_reminder_occurs_on\$;/i)?.[0] ??
+    "";
+  assert.ok(recurrenceBody, "hotfix reemplaza el helper de recurrencia");
+  assert.doesNotMatch(
+    recurrenceBody,
+    /generate_series\s*\(\s*p_reminder\.starts_on/i,
+    "recurrencia no expande un día por fecha desde starts_on",
+  );
+  assert.match(recurrenceBody, /\(v_days \/ 7\) \* pg_catalog\.cardinality\(p_reminder\.weekly_days\)/);
+  assert.match(recurrenceBody, /for v_offset in 0\.\.v_remainder loop/);
+  assert.match(recurrenceBody, /if v_month_span > 120 then[\s\S]*return false/);
+  assert.match(recurrenceBody, /for v_month_offset in 0\.\.v_month_span loop/);
+  assert.match(source, /create or replace function public\.create_own_calendar_reminder\([\s\S]*p_portal_scope text/);
+  assert.match(source, /security definer[\s\S]*set search_path = ''/);
+  assert.match(source, /v_user_id uuid := auth\.uid\(\)/);
+  assert.match(source, /p_portal_scope = 'coach'[\s\S]*public\.coach_registrations/);
+  assert.match(source, /pg_catalog\.pg_advisory_xact_lock\([\s\S]*security-calendar-quota/);
+  assert.match(
+    source,
+    /security-calendar-quota:[\s\S]*pg_catalog\.pg_advisory_xact_lock\([\s\S]*organizatech:calendar-request:/,
+    "el lock de cuota precede al lock por request para serializar reuso cross-portal sin deadlocks",
+  );
+  assert.match(source, /organizatech:calendar-request:[\s\S]*p_request_id::pg_catalog\.text/);
+  assert.match(source, /reminder\.user_id = v_user_id[\s\S]*reminder\.portal_scope = p_portal_scope[\s\S]*offset 499\s+limit 1/);
+  assert.match(source, /errcode = '54000'[\s\S]*calendar reminder limit reached/);
+  assert.match(source, /from private\.create_own_calendar_reminder\(/);
+  assert.match(source, /revoke all on function public\.create_own_calendar_reminder\([\s\S]*from public, anon, authenticated/);
+  assert.match(source, /grant execute on function public\.create_own_calendar_reminder\([\s\S]*to authenticated/);
+  assert.doesNotMatch(
+    source,
+    /alter function public\.claim_due_calendar_reminder_deliveries\(text\)[\s\S]*set statement_timeout/,
+    "un timeout configurado dentro de la función no limita la sentencia RPC ya iniciada",
+  );
+  assert.doesNotMatch(source, /public\.(training_sessions|exercise_entries)/);
 }
 
 test("migración endurece ownership, claims, recurrencia y DST", () => {
@@ -143,6 +184,27 @@ test("mutantes de portal, ownership y bypass directo mueren", () => {
     assert.throws(
       () => assertNotificationPortalSeparation(mutant),
       `notification portal mutant ${index + 1} sobrevivió`,
+    );
+  });
+});
+
+test("hotfix acota recurrencia y cardinalidad sin un falso timeout local", () => {
+  assertCalendarResourceBounds(resourceBounds);
+});
+
+test("mutantes de agotamiento de recursos de calendario mueren", () => {
+  const mutants = [
+    resourceBounds.replace("if v_month_span > 120 then", "if false then"),
+    resourceBounds.replace("offset 499", "offset 499999"),
+    resourceBounds.replace("pg_catalog.pg_advisory_xact_lock", "pg_catalog.pg_advisory_unlock"),
+    resourceBounds.replace("'organizatech:calendar-request:'", "'organizatech:calendar-request-disabled:'"),
+    `${resourceBounds}\nalter function public.claim_due_calendar_reminder_deliveries(text) set statement_timeout = '2500ms';`,
+    resourceBounds.replace("v_user_id uuid := auth.uid()", "v_user_id uuid := p_request_id"),
+  ];
+  mutants.forEach((mutant, index) => {
+    assert.throws(
+      () => assertCalendarResourceBounds(mutant),
+      `calendar resource mutant ${index + 1} sobrevivió`,
     );
   });
 });

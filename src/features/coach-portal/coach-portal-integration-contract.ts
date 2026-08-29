@@ -44,6 +44,10 @@ const EMAIL_CALENDAR_COALESCE_RUNTIME_FIX_MIGRATION_PATH =
   "supabase/migrations/20260827233948_email_calendar_coalesce_runtime_fix.sql";
 const NOTIFICATIONS_PORTAL_SEPARATION_MIGRATION_PATH =
   "supabase/migrations/20260828020534_notifications_portal_separation.sql";
+const CALENDAR_RESOURCE_BOUNDS_MIGRATION_PATH =
+  "supabase/migrations/20260828192434_sec_calendar_resource_bounds.sql";
+const READINESS_RESOURCE_BOUNDS_MIGRATION_PATH =
+  "supabase/migrations/20260828192436_sec_readiness_resource_bounds.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -532,6 +536,8 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== EMAIL_ONBOARDING_CLAIM_FIX_MIGRATION_PATH
         && path !== EMAIL_CALENDAR_COALESCE_RUNTIME_FIX_MIGRATION_PATH
         && path !== NOTIFICATIONS_PORTAL_SEPARATION_MIGRATION_PATH
+        && path !== CALENDAR_RESOURCE_BOUNDS_MIGRATION_PATH
+        && path !== READINESS_RESOURCE_BOUNDS_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH

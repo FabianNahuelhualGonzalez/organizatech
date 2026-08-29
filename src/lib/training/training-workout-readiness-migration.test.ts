@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+export const POST_PERF_06_MIGRATION_OWNERSHIP = {
+  "20260828192436_sec_readiness_resource_bounds.sql": "ff1424f2bb8a4bf32b2b047b705908d297de087ffccabb17bd9e5de5cb3d8f32",
+} as const;
+
 const migration = readFileSync("supabase/migrations/20260620000001_training_workout_readiness.sql", "utf8");
 const postcheck = readFileSync("supabase/operations/qa/release-b/d2/01_postcheck_readonly.sql", "utf8");
+const securityBoundsMigration = readFileSync(
+  "supabase/migrations/20260828192436_sec_readiness_resource_bounds.sql",
+  "utf8",
+);
 
 function normalizeLineEndings(value: string): string {
   return value.replace(/\r\n?/g, "\n");
@@ -137,5 +145,72 @@ assert.doesNotMatch(executableSql, /insert\s+into\s+public\.training_daily_readi
 assert.doesNotMatch(executableSql, /backfill|dual-write|dual write/i, "sin backfill ni dual-write ejecutable");
 assert.doesNotMatch(executableSql, /drop\s+[^;]*cascade/i, "sin DROP con cascade");
 assert.doesNotMatch(executableSql, /delete\s+from|truncate\s+table/i, "sin borrados fisicos");
+
+const securityBoundsSql = normalizeLineEndings(securityBoundsMigration);
+const executableSecurityBoundsSql = stripSqlComments(securityBoundsSql);
+const boundedSaveFunctionBody =
+  executableSecurityBoundsSql.match(
+    /create or replace function public\.save_training_workout_readiness_v2[\s\S]*?\$function\$;/i,
+  )?.[0] ?? "";
+assert.ok(boundedSaveFunctionBody, "hotfix reemplaza save readiness v2");
+assert.match(
+  boundedSaveFunctionBody,
+  /return query[\s\S]*workout_attempt_id = p_workout_attempt_id;[\s\S]*if found then[\s\S]*return;[\s\S]*pg_catalog\.octet_length\(p_payload::pg_catalog\.text\) > 1024/,
+  "reintentos exactos históricos se resuelven antes de aplicar límites a nuevos inserts",
+);
+assert.match(
+  securityBoundsSql,
+  /training_workout_readiness_user_pending_created_idx[\s\S]*where training_session_id is null/,
+  "índice parcial soporta cuota de intentos pendientes",
+);
+assert.match(
+  securityBoundsSql,
+  /before insert on public\.training_workout_readiness[\s\S]*enforce_training_workout_readiness_payload_insert/,
+  "trigger protege cualquier futura ruta de inserción",
+);
+assert.match(
+  securityBoundsSql,
+  /pg_catalog\.octet_length\((?:new\.payload|p_payload)::pg_catalog\.text\) > 1024/g,
+  "payload tiene límite en trigger y RPC",
+);
+assert.match(
+  securityBoundsSql,
+  /new\.payload <> pg_catalog\.jsonb_build_object\('skipped', true\)/,
+  "skipped acepta sólo la clave permitida",
+);
+assert.match(
+  securityBoundsSql,
+  /'skipped', false,[\s\S]*'motivation',[\s\S]*'hydration',[\s\S]*'sleep',[\s\S]*'energy'/,
+  "payload completo usa allowlist explícita",
+);
+assert.match(
+  boundedSaveFunctionBody,
+  /pg_catalog\.pg_advisory_xact_lock\([\s\S]*security-readiness:user/,
+  "save serializa la cuota por usuario",
+);
+assert.match(
+  boundedSaveFunctionBody,
+  /readiness\.created_at >= v_now - interval '36 hours'[\s\S]*limit 32[\s\S]*v_recent_attempt_count >= 32/,
+  "save limita creación por ventana",
+);
+assert.match(
+  boundedSaveFunctionBody,
+  /readiness\.training_session_id is null[\s\S]*limit 32[\s\S]*v_pending_attempt_count >= 32/,
+  "save limita cardinalidad persistente sin enlazar",
+);
+assert.match(boundedSaveFunctionBody, /cycle\.user_id = v_user_id[\s\S]*cycle\.deleted_at is null/);
+assert.match(boundedSaveFunctionBody, /day\.cycle_id = p_cycle_id[\s\S]*day\.deleted_at is null/);
+assert.match(
+  securityBoundsSql,
+  /revoke all on function public\.save_training_workout_readiness_v2\([\s\S]*from public, anon, authenticated, service_role/,
+  "RPC revoca roles antes del grant mínimo",
+);
+assert.match(
+  securityBoundsSql,
+  /grant execute on function public\.save_training_workout_readiness_v2\([\s\S]*to authenticated/,
+  "sólo authenticated recibe execute",
+);
+assert.doesNotMatch(executableSecurityBoundsSql, /public\.(training_sessions|exercise_entries)/, "hotfix no toca tablas fuera de alcance");
+assert.doesNotMatch(executableSecurityBoundsSql, /delete\s+from|truncate\s+table|drop\s+table/i, "hotfix no elimina datos");
 
 console.log("training-workout-readiness migration tests passed");
