@@ -7,7 +7,7 @@ export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260829200846_cycle_redesign_schema.sql":
     "fc6b89d7f610a2a188a2b2f98b3971325aabdaaf8868c1dda7c9c7c1057aa681",
   "20260829200847_cycle_redesign_api.sql":
-    "f4899bec988188a8c02081821309d5c3d05fa2191ab6ab053caea8eebfd410d1",
+    "b978ebb0b669a5cbb9715f60242b90c3054fc7b2c3d3d6e8e954e4557697b23e",
 } as const;
 
 const schemaPath =
@@ -869,8 +869,9 @@ function validateProgrammedLifecycle(
   assert.match(claim, /if auth\.uid\(\) is not null/);
   assert.match(claim, /private\.verify_training_cycle_lifecycle_capability/);
   assert.match(claim, /p_limit not between 1 and 25/);
-  assert.match(claim, /for update of notification skip locked limit 100/);
-  assert.match(claim, /for update of lifecycle_check skip locked limit 50/);
+  assert.match(claim, /limit 100 for update of notification skip locked/);
+  assert.match(claim, /limit 50 for update of lifecycle_check skip locked/);
+  assert.match(claim, /limit p_limit for update of delivery skip locked/);
   assert.match(claim, /v_now \+ interval '15 minutes'/);
   assert.match(
     claim,
@@ -1094,6 +1095,23 @@ test("migration ownership hashes match the two exact forward-only files", () => 
     sha256(api),
     POST_PERF_06_MIGRATION_OWNERSHIP["20260829200847_cycle_redesign_api.sql"],
   );
+});
+
+test("API migration uses parser-safe string search and locking clause order", () => {
+  assert.doesNotMatch(apiSql, /pg_catalog\.position\s*\(/);
+  assert.match(
+    apiSql,
+    /pg_catalog\.strpos\(pg_catalog\.coalesce\(exercise\.notes, ''\), v_retired_marker\) > 0/,
+  );
+  assert.match(
+    apiSql,
+    /pg_catalog\.strpos\(pg_catalog\.lower\(source\.name\), v_query\) > 0/,
+  );
+  assert.match(
+    apiSql,
+    /pg_catalog\.strpos\(pg_catalog\.lower\(source\.muscle_group\), v_query\) > 0/,
+  );
+  assert.doesNotMatch(apiSql, /for update of [a-z_]+ skip locked limit/);
 });
 
 test("cycle plan payload has exact allowlists and hard resource bounds", () => {

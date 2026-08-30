@@ -797,7 +797,7 @@ begin
   if p_source_version_id is not null then
     update public.training_cycle_exercises as exercise
     set notes = case
-      when pg_catalog.position(v_retired_marker in pg_catalog.coalesce(exercise.notes, '')) > 0
+      when pg_catalog.strpos(pg_catalog.coalesce(exercise.notes, ''), v_retired_marker) > 0
         then exercise.notes
       when pg_catalog.nullif(pg_catalog.btrim(exercise.notes), '') is null
         then v_retired_marker
@@ -1621,8 +1621,8 @@ begin
       and notification.superseded_at is null
       and cycle.current_plan_version_id is not null
     order by notification.scheduled_on, notification.id
-    for update of notification skip locked
     limit 100
+    for update of notification skip locked
   )
   update public.training_cycle_notifications as notification
   set materialized_at = v_now
@@ -1688,8 +1688,8 @@ begin
       and cycle.current_plan_version_id is not null
       and cycle.planned_end_date < v_today
     order by lifecycle_check.next_check_at, lifecycle_check.cycle_id
-    for update of lifecycle_check skip locked
     limit 50
+    for update of lifecycle_check skip locked
   loop
     v_closed_cycle_id := private.materialize_training_cycle_lifecycle_for_identity(
       v_check.user_id,
@@ -1788,8 +1788,8 @@ begin
           - pg_catalog.make_interval(mins => delivery.attempt_count * 5)
       )
     order by delivery.created_at, delivery.id
-    for update of delivery skip locked
     limit p_limit
+    for update of delivery skip locked
   ), claimed as (
     update private.training_cycle_notification_deliveries as delivery
     set
@@ -2344,8 +2344,8 @@ begin
     from all_sources as source
     where (
       v_query = ''
-      or pg_catalog.position(v_query in pg_catalog.lower(source.name)) > 0
-      or pg_catalog.position(v_query in pg_catalog.lower(source.muscle_group)) > 0
+      or pg_catalog.strpos(pg_catalog.lower(source.name), v_query) > 0
+      or pg_catalog.strpos(pg_catalog.lower(source.muscle_group), v_query) > 0
     )
       and (
         p_after_source_kind is null
