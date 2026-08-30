@@ -1,0 +1,2511 @@
+.feature {
+  --cycle-panel: #0d1a26;
+  --cycle-panel-strong: #101f2d;
+  --cycle-blue: #3c7aff;
+  --cycle-blue-soft: #8fb2ff;
+  --cycle-text: #ffffff;
+  --cycle-muted: rgba(255, 255, 255, 0.56);
+  --cycle-faint: rgba(255, 255, 255, 0.4);
+  --cycle-line: rgba(255, 255, 255, 0.16);
+  --cycle-green: #4ade80;
+  --cycle-amber: #fbbf24;
+  --cycle-red: #f87171;
+  position: relative;
+  width: min(100%, 560px);
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding:
+    calc(14px + env(safe-area-inset-top))
+    clamp(10px, 3.6vw, 16px)
+    calc(28px + env(safe-area-inset-bottom));
+  overflow-x: hidden;
+  color: var(--cycle-text);
+  background: var(--background);
+  font-family: "Roboto Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.feature *,
+.feature *::before,
+.feature *::after {
+  box-sizing: border-box;
+}
+
+.feature button,
+.feature input {
+  font: inherit;
+}
+
+.feature button:focus-visible,
+.feature input:focus-visible {
+  outline: 2px solid var(--cycle-blue-soft);
+  outline-offset: 2px;
+}
+
+.feature input:focus-visible {
+  border-color: var(--cycle-blue);
+  box-shadow: 0 0 0 3px rgba(60, 122, 255, 0.2);
+}
+
+.feature button:disabled {
+  cursor: not-allowed;
+}
+
+.utilityRow {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.utilityRow > :last-child {
+  min-width: 0;
+  margin-left: auto;
+}
+
+.saveChip {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--cycle-faint);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.saveChip[data-state="offline"] {
+  color: var(--cycle-amber);
+}
+
+.saveChip[data-state="error"] {
+  color: var(--cycle-red);
+}
+
+.spinner {
+  flex: none;
+  animation: cycle-spin 700ms linear infinite;
+}
+
+.stepBar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+  padding: 3px 0 10px;
+  list-style: none;
+}
+
+.stepBar li {
+  min-width: 0;
+  color: var(--cycle-faint);
+  text-align: center;
+}
+
+.stepBar li > span {
+  display: block;
+  height: 3px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.stepBar li[data-current="true"],
+.stepBar li[data-complete="true"] {
+  color: var(--cycle-blue-soft);
+}
+
+.stepBar li[data-current="true"] > span,
+.stepBar li[data-complete="true"] > span {
+  background: var(--cycle-blue);
+}
+
+.stepBar small {
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.bannerStack {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.statusBanner {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid rgba(143, 178, 255, 0.35);
+  border-radius: 11px;
+  background: rgba(60, 122, 255, 0.07);
+}
+
+.statusBanner[data-tone="success"] {
+  border-color: rgba(74, 222, 128, 0.38);
+  background: rgba(74, 222, 128, 0.07);
+}
+
+.statusBanner[data-tone="warning"] {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.07);
+}
+
+.statusBanner[data-tone="error"] {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.07);
+}
+
+.statusBanner[data-tone="success"] > svg {
+  color: var(--cycle-green);
+}
+
+.statusBanner[data-tone="warning"] > svg {
+  color: var(--cycle-amber);
+}
+
+.statusBanner[data-tone="error"] > svg {
+  color: var(--cycle-red);
+}
+
+.statusBanner strong {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11px;
+}
+
+.statusBanner p {
+  margin: 0;
+  color: var(--cycle-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.statusBanner > button {
+  min-width: 44px;
+  min-height: 44px;
+  margin: -7px -7px -7px 0;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 22px;
+  color: var(--cycle-text);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.content {
+  min-height: 0;
+}
+
+.screen {
+  display: grid;
+  gap: 10px;
+  padding: 5px 0 8px;
+}
+
+.screenHeading {
+  margin-bottom: 5px;
+}
+
+.screenHeading h2 {
+  margin: 0;
+  font-size: clamp(18px, 5vw, 21px);
+  line-height: 1.3;
+  letter-spacing: -0.35px;
+}
+
+.screenHeading p {
+  margin: 6px 0 0;
+  color: var(--cycle-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border-radius: 12px;
+  color: var(--cycle-text);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.primaryAction {
+  border: 1px solid transparent;
+  background: var(--cycle-blue);
+}
+
+.primaryAction:disabled {
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.secondaryAction {
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: transparent;
+}
+
+.secondaryAction:disabled {
+  color: rgba(255, 255, 255, 0.3);
+  opacity: 0.7;
+}
+
+.choiceChip {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 22px;
+  color: rgba(255, 255, 255, 0.72);
+  background: transparent;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.choiceChip[data-selected="true"] {
+  border-color: var(--cycle-blue);
+  color: var(--cycle-text);
+  background: rgba(60, 122, 255, 0.18);
+}
+
+.startOptions,
+.nextOptions {
+  display: grid;
+  gap: 10px;
+}
+
+.startOption,
+.nextOptions > button {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  padding: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 14px;
+  color: var(--cycle-text);
+  background: transparent;
+  text-align: left;
+}
+
+.startOption[data-recommended="true"],
+.nextOptions > button[data-recommended] {
+  border-color: var(--cycle-blue);
+  background: rgba(60, 122, 255, 0.1);
+}
+
+.optionMeta {
+  display: flex;
+  min-height: 25px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.optionMeta b,
+.nextOptions > button > b {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 20px;
+  color: var(--cycle-text);
+  background: var(--cycle-blue);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.optionMeta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--cycle-blue-soft);
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.startOption > strong,
+.nextOptions > button > strong {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 14.5px;
+}
+
+.startOption > p,
+.nextOptions > button > p {
+  margin: 0;
+  color: var(--cycle-muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.optionMetrics {
+  display: grid;
+  grid-template-columns: 1.5fr 0.65fr 0.9fr;
+  gap: 10px;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.optionMetrics > span {
+  min-width: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.optionMetrics small {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+}
+
+.resumeDraft {
+  display: flex;
+  min-height: 70px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 13px;
+  border: 1px dashed rgba(255, 255, 255, 0.24);
+  border-radius: 12px;
+}
+
+.resumeDraft > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.resumeDraft strong {
+  display: block;
+  font-size: 11.5px;
+}
+
+.resumeDraft p {
+  margin: 3px 0 0;
+  color: var(--cycle-muted);
+  font-size: 9.5px;
+}
+
+.resumeDraft button,
+.noResults button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--cycle-blue);
+  border-radius: 22px;
+  color: var(--cycle-text);
+  background: rgba(60, 122, 255, 0.14);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.summaryCard,
+.daySummaryCard,
+.compareCard,
+.quickConfig,
+.recommendationCard,
+.videoCard,
+.successSummary,
+.activeSummary,
+.closedSummary {
+  overflow: hidden;
+  border: 1px solid var(--cycle-line);
+  border-radius: 13px;
+  background: transparent;
+}
+
+.summaryCard {
+  padding: 14px;
+}
+
+.summaryCard > small,
+.quickConfig > small,
+.closedSummary > small {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--cycle-faint);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.copiedGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 12px;
+}
+
+.copiedGrid span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+}
+
+.copiedGrid svg {
+  flex: none;
+  color: var(--cycle-green);
+}
+
+.daySummaryCard h3 {
+  margin: 0;
+  padding: 13px 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12.5px;
+}
+
+.daySummaryCard > div {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  min-height: 55px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.daySummaryCard > div:last-child {
+  border-bottom: 0;
+}
+
+.daySummaryCard > div > small {
+  color: var(--cycle-faint);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.daySummaryCard > div > span {
+  min-width: 0;
+}
+
+.daySummaryCard strong,
+.daySummaryCard span small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daySummaryCard strong {
+  font-size: 11.5px;
+}
+
+.daySummaryCard span small {
+  margin-top: 3px;
+  color: var(--cycle-faint);
+  font-size: 9px;
+}
+
+.daySummaryCard b {
+  font-size: 10.5px;
+}
+
+.compareCard > button {
+  display: grid;
+  width: 100%;
+  min-height: 58px;
+  grid-template-columns: 20px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 13px;
+  border: 0;
+  color: var(--cycle-text);
+  background: transparent;
+  text-align: left;
+}
+
+.compareCard > button > svg:first-child {
+  color: var(--cycle-blue-soft);
+}
+
+.compareCard > button > svg:last-child {
+  transition: transform 160ms ease;
+}
+
+.compareCard > button[aria-expanded="true"] > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.compareCard > button strong,
+.compareCard > button small {
+  display: block;
+}
+
+.compareCard > button strong {
+  font-size: 11.5px;
+}
+
+.compareCard > button small {
+  margin-top: 3px;
+  color: var(--cycle-faint);
+  font-size: 9.5px;
+}
+
+.comparisonTable {
+  padding: 0 13px 12px;
+}
+
+.comparisonTable > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px 74px;
+  gap: 6px;
+  align-items: center;
+  min-height: 42px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 10px;
+}
+
+.comparisonTable .comparisonHead {
+  min-height: 30px;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+  font-weight: 700;
+}
+
+.comparisonTable > div > :nth-child(n + 2) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.comparisonTable strong[data-outcome="met"] {
+  color: var(--cycle-green);
+}
+
+.comparisonTable strong[data-outcome="below"] {
+  color: var(--cycle-amber);
+}
+
+.comparisonTable > p {
+  margin: 9px 0 0;
+  color: var(--cycle-faint);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.goalGrid,
+.dateFields,
+.dayPicker,
+.musclePicker,
+.techniquePicker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.goalGrid > legend,
+.dateFields > legend,
+.dayPicker > legend,
+.techniquePicker > legend,
+.eyebrowTitle {
+  margin-bottom: 8px;
+  color: var(--cycle-faint);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.goalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.goalGrid > legend,
+.dateFields > legend,
+.dayPicker > legend {
+  grid-column: 1 / -1;
+}
+
+.goalGrid > button {
+  min-height: 66px;
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+  color: var(--cycle-text);
+  background: transparent;
+  text-align: left;
+}
+
+.goalGrid > button[data-selected="true"] {
+  border-color: var(--cycle-blue);
+  background: rgba(60, 122, 255, 0.16);
+}
+
+.goalGrid strong,
+.goalGrid small {
+  display: block;
+}
+
+.goalGrid strong {
+  font-size: 12px;
+}
+
+.goalGrid small {
+  margin-top: 4px;
+  color: var(--cycle-faint);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.dateFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 7px;
+}
+
+.dateFields label,
+.stackField,
+.routineNameField {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--cycle-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.dateFields input,
+.stackField input,
+.routineNameField input,
+.searchField,
+.quickConfig input,
+.setRow input,
+.videoCard input {
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 11px;
+  color: var(--cycle-text);
+  background: transparent;
+  font-size: 16px;
+}
+
+.durationBox {
+  display: flex;
+  min-height: 63px;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid rgba(60, 122, 255, 0.35);
+  border-radius: 12px;
+  background: rgba(60, 122, 255, 0.07);
+}
+
+.durationBox[data-invalid="true"] {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.07);
+}
+
+.durationBox span {
+  min-width: 0;
+  flex: 1;
+}
+
+.durationBox small,
+.durationBox strong {
+  display: block;
+}
+
+.durationBox small {
+  margin-bottom: 3px;
+  color: var(--cycle-faint);
+  font-size: 9px;
+}
+
+.durationBox strong {
+  font-size: 13px;
+}
+
+.durationBox p {
+  max-width: 48%;
+  margin: 0;
+  color: var(--cycle-red);
+  font-size: 9.5px;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.educationalNote,
+.extensionProtection {
+  display: flex;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+}
+
+.educationalNote svg,
+.extensionProtection svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--cycle-blue-soft);
+}
+
+.educationalNote p,
+.extensionProtection p {
+  margin: 0;
+  color: var(--cycle-muted);
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+
+.educationalNote strong {
+  color: var(--cycle-text);
+}
+
+.dayPicker > div {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.dayPicker button {
+  min-width: 44px;
+  min-height: 52px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 11px;
+  color: var(--cycle-text);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dayPicker button[data-selected="true"] {
+  border-color: var(--cycle-blue);
+  background: var(--cycle-blue);
+}
+
+.trainRestGrid,
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.trainRestGrid > div,
+.metricGrid > div {
+  min-height: 78px;
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 11px;
+}
+
+.trainRestGrid small,
+.metricGrid small {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+  font-weight: 700;
+}
+
+.trainRestGrid strong,
+.metricGrid strong {
+  display: block;
+  font-size: 18px;
+}
+
+.trainRestGrid span,
+.metricGrid span {
+  display: block;
+  margin-top: 3px;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+  line-height: 1.35;
+}
+
+.suggestedDistribution {
+  padding: 12px;
+  border: 1px solid rgba(60, 122, 255, 0.35);
+  border-radius: 12px;
+  background: rgba(60, 122, 255, 0.07);
+}
+
+.suggestedDistribution > small {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--cycle-blue-soft);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.suggestedDistribution > strong,
+.suggestedDistribution > span {
+  display: block;
+}
+
+.suggestedDistribution > strong {
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+
+.suggestedDistribution > span {
+  color: var(--cycle-muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.suggestedDistribution > div {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  min-height: 32px;
+}
+
+.suggestedDistribution b,
+.suggestedDistribution span {
+  color: var(--cycle-muted);
+  font-size: 9px;
+}
+
+.suggestedDistribution strong {
+  font-size: 10.5px;
+}
+
+.suggestedDistribution span {
+  overflow: hidden;
+  max-width: 154px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dayTabs {
+  display: flex;
+  gap: 6px;
+  margin: 0 -2px 4px;
+  padding: 0 2px 5px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dayTabs::-webkit-scrollbar {
+  display: none;
+}
+
+.dayTabs button {
+  flex: none;
+  min-width: 66px;
+  min-height: 52px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 11px;
+  color: var(--cycle-text);
+  background: transparent;
+  text-align: left;
+}
+
+.dayTabs button[data-selected="true"] {
+  border-color: var(--cycle-blue);
+  background: rgba(60, 122, 255, 0.16);
+}
+
+.dayTabs strong,
+.dayTabs small {
+  display: block;
+}
+
+.dayTabs strong {
+  font-size: 11px;
+}
+
+.dayTabs small {
+  margin-top: 3px;
+  color: var(--cycle-faint);
+  font-size: 9px;
+}
+
+.routineNameField input {
+  height: 46px;
+  font-weight: 700;
+}
+
+.sectionTitleRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 3px;
+}
+
+.sectionTitleRow h3 {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.sectionTitleRow span {
+  color: var(--cycle-faint);
+  font-size: 9.5px;
+  text-align: right;
+}
+
+.emptyRoutine {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  padding: 20px;
+  border: 1px dashed rgba(251, 191, 36, 0.36);
+  border-radius: 13px;
+  text-align: center;
+}
+
+.emptyRoutine svg {
+  color: var(--cycle-amber);
+}
+
+.emptyRoutine strong {
+  font-size: 12px;
+}
+
+.emptyRoutine p {
+  margin: 0;
+  color: var(--cycle-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.exerciseList {
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--cycle-line);
+  border-radius: 13px;
+  list-style: none;
+}
+
+.exerciseList > li {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.exerciseList > li:last-child {
+  border-bottom: 0;
+}
+
+.exerciseList > li[data-menu-open="true"] {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.exerciseRow {
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  min-height: 64px;
+  padding: 7px 7px 7px 11px;
+}
+
+.exerciseOrder {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.66);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.exerciseMain {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 5px 0;
+  border: 0;
+  color: var(--cycle-text);
+  background: transparent;
+  text-align: left;
+}
+
+.exerciseMain > strong {
+  display: block;
+  overflow: hidden;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exerciseMain > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--cycle-muted);
+  font-size: 9px;
+}
+
+.exerciseMain svg {
+  color: var(--cycle-green);
+}
+
+.groupTag,
+.techniqueTag {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 6px;
+  border: 1px solid rgba(143, 178, 255, 0.32);
+  border-radius: 10px;
+  color: var(--cycle-blue-soft);
+  font-size: 8.5px;
+}
+
+.techniqueTag {
+  font-weight: 700;
+}
+
+.touchIconButton {
+  display: inline-grid;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: var(--cycle-muted);
+  background: transparent;
+}
+
+.exerciseActions,
+.setActions {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  padding: 0 10px 10px;
+}
+
+.exerciseActions button,
+.setActions button {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 22px;
+  color: var(--cycle-text);
+  background: transparent;
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+.exerciseActions button[data-danger],
+.setActions button:last-child {
+  border-color: rgba(248, 113, 113, 0.42);
+  color: var(--cycle-red);
+  background: rgba(248, 113, 113, 0.07);
+}
+
+.exerciseActions button:disabled,
+.setActions button:disabled {
+  opacity: 0.35;
+}
+
+.routineActions {
+  display: grid;
+  gap: 7px;
+}
+
+.routineActions > .secondaryAction {
+  border-color: var(--cycle-blue);
+  background: rgba(60, 122, 255, 0.1);
+}
+
+.routineActions > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.routineActions > div button {
+  min-height: 52px;
+  padding-inline: 7px;
+  font-size: 9.5px;
+}
+
+.searchField {
+  display: flex;
+  height: 48px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.searchField svg {
+  flex: none;
+  color: var(--cycle-faint);
+}
+
+.searchField input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  color: var(--cycle-text);
+  background: transparent;
+  font-size: 16px;
+}
+
+.searchField input:focus-visible {
+  box-shadow: none;
+}
+
+.segmentedControl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.segmentedControl button {
+  min-height: 46px;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 11px;
+  color: var(--cycle-text);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.segmentedControl button[data-selected="true"] {
+  border-color: var(--cycle-blue);
+  background: rgba(60, 122, 255, 0.16);
+}
+
+.catalogList {
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--cycle-line);
+  border-radius: 13px;
+  list-style: none;
+}
+
+.catalogList li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  min-height: 58px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.catalogList li:last-child {
+  border-bottom: 0;
+}
+
+.catalogList li > div {
+  min-width: 0;
+}
+
+.catalogList strong {
+  display: block;
+  overflow: hidden;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalogList li > div > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 3px;
+}
+
+.catalogList li > div > span > small:not(.groupTag) {
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+}
+
+.catalogList li > button {
+  display: grid;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  color: var(--cycle-text);
+  background: transparent;
+}
+
+.noResults {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  gap: 7px;
+  padding: 20px;
+  border: 1px solid var(--cycle-line);
+  border-radius: 13px;
+  text-align: center;
+}
+
+.noResults strong {
+  font-size: 11.5px;
+}
+
+.noResults p {
+  margin: 0;
+  color: var(--cycle-muted);
+  font-size: 10px;
+}
+
+.musclePicker > legend {
+  color: var(--cycle-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.musclePicker > p {
+  margin: 5px 0 8px;
+  color: var(--cycle-faint);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.musclePicker > div,
+.techniquePicker > div,
+.extensionShortcuts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.exerciseHeading {
+  margin-bottom: 2px;
+}
+
+.exerciseHeading > small {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--cycle-faint);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.exerciseHeading h2 {
+  overflow: hidden;
+  margin: 0 0 7px;
+  font-size: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exerciseHeading .groupTag {
+  min-height: 24px;
+  padding-inline: 8px;
+  font-size: 9.5px;
+}
+
+.exerciseHeading + .segmentedControl {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quickConfig {
+  padding: 13px;
+}
+
+.quickConfig > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.quickConfig label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.quickConfig label > span:first-child {
+  color: var(--cycle-faint);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.quickConfig input {
+  padding: 0 5px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.stepper {
+  display: grid;
+  height: 48px;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 11px;
+}
+
+.stepper button {
+  min-width: 44px;
+  min-height: 46px;
+  padding: 0;
+  border: 0;
+  color: var(--cycle-text);
+  background: transparent;
+  font-size: 17px;
+}
+
+.stepper button:disabled {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.stepper strong {
+  text-align: center;
+}
+
+.quickConfig .secondaryAction {
+  min-height: 46px;
+  border-color: var(--cycle-blue);
+  background: rgba(60, 122, 255, 0.1);
+  font-size: 10.5px;
+}
+
+.techniquePicker {
+  margin-top: 4px;
+}
+
+.techniquePicker > p {
+  margin: 9px 0 0;
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+  color: var(--cycle-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.setTable {
+  overflow: hidden;
+  border: 1px solid var(--cycle-line);
+  border-radius: 13px;
+}
+
+.setTableHead,
+.setRow {
+  display: grid;
+  grid-template-columns: 28px minmax(56px, 1fr) minmax(56px, 1fr) 44px 44px;
+  gap: 5px;
+  align-items: center;
+}
+
+.setTableHead {
+  min-height: 32px;
+  padding: 4px 7px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--cycle-faint);
+  font-size: 8px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.setBlock {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.setBlock[data-open="true"] {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.setRow {
+  min-height: 62px;
+  padding: 7px;
+}
+
+.setRow > strong {
+  color: var(--cycle-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.setRow label {
+  min-width: 0;
+}
+
+.setRow input {
+  height: 46px;
+  padding: 0 4px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.failureButton {
+  min-width: 44px;
+  min-height: 46px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  color: var(--cycle-faint);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.failureButton[data-selected="true"] {
+  border-color: var(--cycle-amber);
+  color: var(--cycle-amber);
+  background: rgba(251, 191, 36, 0.14);
+}
+
+.setRow > .touchIconButton[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.setDetails {
+  padding: 0 7px 10px;
+}
+
+.dropEditor {
+  margin: 0 3px 8px;
+  padding: 9px;
+  border: 1px solid rgba(143, 178, 255, 0.3);
+  border-radius: 11px;
+}
+
+.dropEditor > small {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--cycle-blue-soft);
+  font-size: 8.5px;
+  font-weight: 700;
+}
+
+.dropEditor > div {
+  display: grid;
+  grid-template-columns: 20px minmax(45px, 1fr) 18px minmax(45px, 1fr) 28px 44px;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+
+.dropEditor b,
+.dropEditor span {
+  color: var(--cycle-faint);
+  font-size: 8px;
+}
+
+.dropEditor label {
+  min-width: 0;
+}
+
+.dropEditor input {
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  padding: 0 3px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 9px;
+  color: var(--cycle-text);
+  background: transparent;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.dropEditor > button,
+.addSetButton {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px dashed rgba(143, 178, 255, 0.4);
+  border-radius: 10px;
+  color: var(--cycle-blue-soft);
+  background: transparent;
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.setActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 0 3px;
+}
+
+.addSetButton {
+  border: 0;
+  border-radius: 0;
+}
+
+.recommendationCard,
+.videoCard {
+  padding: 13px;
+}
+
+.recommendationCard {
+  border-color: rgba(60, 122, 255, 0.36);
+  background: rgba(60, 122, 255, 0.06);
+}
+
+.recommendationCard[data-decision="accepted"] {
+  border-color: rgba(74, 222, 128, 0.4);
+  background: rgba(74, 222, 128, 0.06);
+}
+
+.recommendationCard[data-decision="ignored"] {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: transparent;
+}
+
+.recommendationCard > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.recommendationCard > header > svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--cycle-blue-soft);
+}
+
+.recommendationCard[data-decision="accepted"] > header > svg {
+  color: var(--cycle-green);
+}
+
+.recommendationCard header strong {
+  display: block;
+  font-size: 11px;
+}
+
+.recommendationCard header p {
+  margin: 3px 0 0;
+  color: var(--cycle-muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.recommendationCard dl {
+  margin: 10px 0;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.recommendationCard dl > div {
+  display: flex;
+  min-height: 27px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recommendationCard dt {
+  color: var(--cycle-faint);
+  font-size: 9.5px;
+}
+
+.recommendationCard dd {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.recommendationCard > small {
+  display: block;
+  margin: 9px 0;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
+.recommendationActions {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 5px;
+}
+
+.recommendationActions button {
+  min-height: 44px;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  color: var(--cycle-text);
+  background: transparent;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.recommendationActions button:first-child {
+  border-color: transparent;
+  background: var(--cycle-blue);
+}
+
+.videoCard header {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.videoCard header svg {
+  color: var(--cycle-red);
+}
+
+.videoCard header strong {
+  flex: 1;
+  font-size: 11px;
+}
+
+.videoCard header small {
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+}
+
+.videoCard input {
+  height: 46px;
+}
+
+.videoStatus {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  border-radius: 10px;
+  background: rgba(74, 222, 128, 0.06);
+}
+
+.videoStatus svg {
+  flex: none;
+  color: var(--cycle-green);
+}
+
+.videoStatus p {
+  margin: 0;
+  color: var(--cycle-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.fieldError {
+  color: var(--cycle-red);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.videoStatus strong {
+  color: var(--cycle-text);
+}
+
+.dayDistribution {
+  overflow: hidden;
+  margin: 0 0 6px;
+  padding: 5px 13px;
+  border: 1px solid var(--cycle-line);
+  border-radius: 12px;
+}
+
+.dayDistribution > div {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dayDistribution dt {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.dayDistribution dd {
+  margin: 0;
+  color: var(--cycle-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.weekDistribution {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--cycle-line);
+  border-radius: 12px;
+}
+
+.weekDistribution > div > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.weekDistribution strong {
+  font-size: 10.5px;
+}
+
+.weekDistribution small {
+  color: var(--cycle-faint);
+  font-size: 9px;
+}
+
+.weekDistribution > div > div {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.weekDistribution > div > div > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--cycle-blue);
+}
+
+.weekDistribution > div > div > span[data-low="true"] {
+  background: var(--cycle-amber);
+}
+
+.accordionSection {
+  overflow: hidden;
+  border: 1px solid var(--cycle-line);
+  border-radius: 12px;
+}
+
+.accordionSection > button {
+  display: grid;
+  width: 100%;
+  min-height: 58px;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 0;
+  color: var(--cycle-text);
+  background: transparent;
+  text-align: left;
+}
+
+.accordionSection > button strong,
+.accordionSection > button small {
+  display: block;
+}
+
+.accordionSection > button strong {
+  font-size: 11.5px;
+}
+
+.accordionSection > button small {
+  margin-top: 3px;
+  color: var(--cycle-faint);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.accordionSection > button svg {
+  color: var(--cycle-faint);
+  transition: transform 160ms ease;
+}
+
+.accordionSection > button[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.accordionPanel {
+  padding: 0 12px 11px;
+}
+
+.reviewLines {
+  margin: 0 0 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.reviewLines > div {
+  display: flex;
+  min-height: 32px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.reviewLines dt {
+  max-width: 42%;
+  color: var(--cycle-faint);
+  font-size: 9.5px;
+}
+
+.reviewLines dd {
+  max-width: 58%;
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.accordionPanel .secondaryAction {
+  min-height: 44px;
+  font-size: 10px;
+}
+
+.actionHint {
+  margin: -3px 0 0;
+  color: var(--cycle-faint);
+  font-size: 9px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.textAction {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  color: var(--cycle-faint);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.successScreen {
+  padding-top: 22px;
+}
+
+.successMark {
+  display: grid;
+  width: 62px;
+  height: 62px;
+  place-items: center;
+  margin-bottom: 5px;
+  border-radius: 50%;
+  color: var(--cycle-green);
+  background: rgba(74, 222, 128, 0.14);
+}
+
+.successSummary > div {
+  padding: 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.successSummary > div small,
+.successSummary > div strong,
+.successSummary > div span {
+  display: block;
+}
+
+.successSummary > div small {
+  margin-bottom: 4px;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+  font-weight: 700;
+}
+
+.successSummary > div strong {
+  font-size: 14px;
+}
+
+.successSummary > div span {
+  margin-top: 3px;
+  color: var(--cycle-muted);
+  font-size: 10px;
+}
+
+.successSummary dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.successSummary dl > div {
+  min-height: 66px;
+  padding: 11px 13px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.successSummary dl > div:nth-child(even) {
+  border-right: 0;
+}
+
+.successSummary dl > div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.successSummary dt,
+.activeSummary dt {
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+  font-weight: 700;
+}
+
+.successSummary dd,
+.activeSummary dd {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.expiryBanner {
+  padding: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.42);
+  border-radius: 12px;
+  background: rgba(251, 191, 36, 0.07);
+}
+
+.expiryBanner[data-last-day="true"] {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.07);
+}
+
+.expiryBanner > div {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.expiryBanner svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--cycle-amber);
+}
+
+.expiryBanner strong {
+  display: block;
+  font-size: 11px;
+}
+
+.expiryBanner p {
+  margin: 3px 0 0;
+  color: var(--cycle-muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.expiryBanner > button {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  color: #2a1e05;
+  background: var(--cycle-amber);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.activeSummary > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.activeSummary header small,
+.activeSummary header strong {
+  display: block;
+}
+
+.activeSummary header small {
+  margin-bottom: 3px;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+  font-weight: 700;
+}
+
+.activeSummary header strong {
+  font-size: 14px;
+}
+
+.activeSummary header b {
+  padding: 4px 8px;
+  border-radius: 20px;
+  color: var(--cycle-green);
+  background: rgba(74, 222, 128, 0.14);
+  font-size: 8.5px;
+}
+
+.activeSummary dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 11px 13px 8px;
+}
+
+.activeSummary dd[data-warning="true"] {
+  color: var(--cycle-amber);
+}
+
+.progressTrack {
+  height: 7px;
+  overflow: hidden;
+  margin: 3px 13px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.progressTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--cycle-blue);
+}
+
+.activeSummary > p {
+  margin: 0;
+  padding: 0 13px 12px;
+  color: var(--cycle-faint);
+  font-size: 9px;
+}
+
+.activeDays {
+  overflow: hidden;
+  border: 1px solid var(--cycle-line);
+  border-radius: 12px;
+}
+
+.activeDays > div {
+  display: grid;
+  width: 100%;
+  min-height: 56px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--cycle-text);
+  text-align: left;
+}
+
+.activeDays > div:last-child {
+  border-bottom: 0;
+}
+
+.activeDays > div > small {
+  color: var(--cycle-faint);
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.activeDays span strong,
+.activeDays span small {
+  display: block;
+}
+
+.activeDays span strong {
+  font-size: 11px;
+}
+
+.activeDays span small {
+  margin-top: 3px;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+}
+
+.alertList {
+  display: grid;
+  gap: 9px;
+}
+
+.alertList article {
+  padding: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.38);
+  border-radius: 12px;
+  background: rgba(251, 191, 36, 0.06);
+}
+
+.alertList article[data-last-day="true"] {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(248, 113, 113, 0.06);
+}
+
+.alertList article > header {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.alertList article > header > span {
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--cycle-amber);
+}
+
+.alertList article[data-last-day="true"] > header > span {
+  background: var(--cycle-red);
+}
+
+.alertList header div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.alertList header strong {
+  font-size: 11px;
+}
+
+.alertList header small {
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+}
+
+.alertList article > p {
+  margin: 5px 0 9px 16px;
+  color: var(--cycle-muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.alertList article > div {
+  display: flex;
+  gap: 6px;
+  padding-left: 16px;
+}
+
+.alertList article > div button,
+.alertList article > div span {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 22px;
+  color: var(--cycle-muted);
+  background: transparent;
+  font-size: 8.5px;
+  font-weight: 600;
+}
+
+.alertList article > div button {
+  border-color: var(--cycle-blue);
+  color: var(--cycle-text);
+  background: rgba(60, 122, 255, 0.13);
+}
+
+.closingTimeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.closingTimeline li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 92px;
+}
+
+.closingTimeline li::after {
+  position: absolute;
+  top: 14px;
+  bottom: 0;
+  left: 5px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.16);
+  content: "";
+}
+
+.closingTimeline li[data-final="true"]::after {
+  display: none;
+}
+
+.closingTimeline li > span {
+  z-index: 1;
+  width: 11px;
+  height: 11px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.closingTimeline li:first-child > span {
+  background: var(--cycle-amber);
+}
+
+.closingTimeline li[data-final="true"] > span {
+  background: var(--cycle-blue);
+}
+
+.closingTimeline small,
+.closingTimeline strong {
+  display: block;
+}
+
+.closingTimeline small {
+  margin-bottom: 3px;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+  font-weight: 700;
+}
+
+.closingTimeline strong {
+  font-size: 11.5px;
+}
+
+.closingTimeline p {
+  margin: 4px 0 0;
+  color: var(--cycle-muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.closedSummary {
+  padding: 13px;
+}
+
+.closedSummary > strong {
+  display: block;
+  font-size: 13px;
+}
+
+.closedSummary > p {
+  margin: 4px 0 0;
+  color: var(--cycle-muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.nextOptions > button > b {
+  margin-bottom: 8px;
+}
+
+.bottomSheet {
+  position: fixed;
+  z-index: 101;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  width: min(100%, 560px);
+  max-height: 84dvh;
+  flex-direction: column;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--cycle-line);
+  border-bottom: 0;
+  border-radius: 25px 25px 0 0;
+  color: var(--cycle-text);
+  background: var(--cycle-panel);
+  box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.5);
+  animation: cycle-rise 240ms cubic-bezier(0.22, 0.9, 0.26, 1);
+}
+
+.sheetGrip {
+  display: grid;
+  min-height: 16px;
+  place-items: center;
+}
+
+.sheetGrip span {
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.sheetHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 8px;
+  align-items: start;
+  padding: 8px 14px 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.sheetHeader h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.sheetHeader p {
+  margin: 3px 0 0;
+  color: var(--cycle-muted);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.sheetHeader > button {
+  display: grid;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+  margin: -5px -5px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--cycle-muted);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sheetBody {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  overscroll-behavior: contain;
+}
+
+.sheetFooter {
+  padding: 10px 14px calc(16px + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.copySources {
+  display: grid;
+}
+
+.copySources > button {
+  display: grid;
+  width: 100%;
+  min-height: 58px;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--cycle-text);
+  background: transparent;
+  text-align: left;
+}
+
+.copySources strong,
+.copySources small {
+  display: block;
+}
+
+.copySources strong {
+  font-size: 11px;
+}
+
+.copySources small {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lockedDate {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 10px;
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 11px;
+  opacity: 0.6;
+}
+
+.lockedDate svg {
+  flex: none;
+}
+
+.lockedDate small,
+.lockedDate strong {
+  display: block;
+}
+
+.lockedDate small {
+  margin-bottom: 3px;
+  color: var(--cycle-faint);
+  font-size: 8.5px;
+  font-weight: 700;
+}
+
+.lockedDate strong {
+  font-size: 12px;
+}
+
+.extensionShortcuts {
+  margin: 9px 0;
+}
+
+.extensionShortcuts > button {
+  min-width: 104px;
+  flex: 1;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes cycle-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes cycle-rise {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes cycle-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 389px) {
+  .dayPicker > div {
+    gap: 2px;
+  }
+
+  .dayPicker button {
+    min-width: 42px;
+  }
+
+  .dropEditor > div {
+    grid-template-columns: 18px minmax(41px, 1fr) 16px minmax(41px, 1fr) 24px 42px;
+    gap: 2px;
+  }
+
+  .recommendationActions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feature *,
+  .feature *::before,
+  .feature *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

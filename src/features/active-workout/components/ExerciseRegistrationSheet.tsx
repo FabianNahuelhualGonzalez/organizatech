@@ -12,6 +12,7 @@ import {
 import styles from "@/features/active-workout/active-workout.module.css";
 import { ExerciseGoalsCard } from "@/features/active-workout/components/ExerciseGoalsCard";
 import { ExerciseLastPerformancePanel } from "@/features/active-workout/components/ExerciseLastPerformancePanel";
+import type { AdvancedWorkoutExerciseIntegration } from "@/lib/training/advanced-workout-execution-contract";
 import {
   buildActiveWorkoutSheetGoals,
   getActiveWorkoutSeriesColumns,
@@ -59,6 +60,7 @@ export interface ExerciseRegistrationSheetProps {
   onObservationChange: (value: string) => void;
   onCommitRegistration: (action: ActiveWorkoutRegistrationCommit) => void;
   onClose: () => void;
+  advancedExecution?: AdvancedWorkoutExerciseIntegration;
 }
 
 export function ExerciseRegistrationSheet({
@@ -81,6 +83,7 @@ export function ExerciseRegistrationSheet({
   onObservationChange,
   onCommitRegistration,
   onClose,
+  advancedExecution,
 }: ExerciseRegistrationSheetProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const weightInputRef = useRef<HTMLInputElement>(null);
@@ -180,50 +183,54 @@ export function ExerciseRegistrationSheet({
         </header>
 
         <div className={styles.workoutSheetBody}>
-          <div className={styles.workoutCapture} data-rows={hasTwoRows ? "2" : "1"}>
-            <label className={styles.workoutWeightField}>
-              <span>KG utilizado</span>
-              <span className={styles.workoutWeightInput}>
-                <input
-                  ref={weightInputRef}
-                  type="text"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  placeholder={formatDecimalEs(exercise.baseWeight)}
-                  value={draft.weight}
-                  onChange={(event) => onWeightChange(event.target.value)}
-                />
-                <span aria-hidden="true">kg</span>
-              </span>
-            </label>
+          {advancedExecution ? (
+            advancedExecution.renderRegistrationFields(weightInputRef)
+          ) : (
+            <div className={styles.workoutCapture} data-rows={hasTwoRows ? "2" : "1"}>
+              <label className={styles.workoutWeightField}>
+                <span>KG utilizado</span>
+                <span className={styles.workoutWeightInput}>
+                  <input
+                    ref={weightInputRef}
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder={formatDecimalEs(exercise.baseWeight)}
+                    value={draft.weight}
+                    onChange={(event) => onWeightChange(event.target.value)}
+                  />
+                  <span aria-hidden="true">kg</span>
+                </span>
+              </label>
 
-            <fieldset className={styles.workoutSeriesField}>
-              <legend>
-                <span>Repeticiones por serie</span>
-                <span>{goals.filledSets}/{exercise.targetSets}</span>
-              </legend>
-              <div className={styles.workoutSeriesGrid} style={seriesGridStyle}>
-                {draft.reps.map((repetitions, index) => {
-                  const isFilled = repetitions !== "";
-                  return (
-                    <label className={styles.workoutSeriesInput} data-filled={isFilled} key={index}>
-                      <span>S{index + 1}</span>
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        inputMode="numeric"
-                        placeholder="–"
-                        value={repetitions}
-                        aria-label={`Repeticiones de la serie ${index + 1} de ${exercise.targetSets}`}
-                        onChange={(event) => onRepetitionsChange(index, event.target.value)}
-                      />
-                    </label>
-                  );
-                })}
-              </div>
-            </fieldset>
-          </div>
+              <fieldset className={styles.workoutSeriesField}>
+                <legend>
+                  <span>Repeticiones por serie</span>
+                  <span>{goals.filledSets}/{exercise.targetSets}</span>
+                </legend>
+                <div className={styles.workoutSeriesGrid} style={seriesGridStyle}>
+                  {draft.reps.map((repetitions, index) => {
+                    const isFilled = repetitions !== "";
+                    return (
+                      <label className={styles.workoutSeriesInput} data-filled={isFilled} key={index}>
+                        <span>S{index + 1}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          inputMode="numeric"
+                          placeholder="–"
+                          value={repetitions}
+                          aria-label={`Repeticiones de la serie ${index + 1} de ${exercise.targetSets}`}
+                          onChange={(event) => onRepetitionsChange(index, event.target.value)}
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            </div>
+          )}
 
           <ExerciseGoalsCard goals={goals} />
 

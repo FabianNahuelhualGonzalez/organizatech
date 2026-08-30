@@ -20,6 +20,7 @@ import {
 } from "@/features/active-workout/model/active-workout-sheet";
 import type { ActiveWorkoutHistoryPublicationStatus } from "@/features/active-workout/model/active-workout-history-prefetch-controller";
 import type { ActiveWorkoutCompletionStatus } from "@/features/active-workout/model/active-workout-boundary-contract";
+import type { AdvancedWorkoutExecutionIntegration } from "@/lib/training/advanced-workout-execution-contract";
 import type { ExerciseTemplate } from "@/lib/progress/types";
 import {
   formatDecimalEs,
@@ -75,6 +76,7 @@ export interface ActiveWorkoutSheetBoundaryProps {
   isBusy: boolean;
   latestExercisePerformanceStatus: ActiveWorkoutHistoryPublicationStatus;
   retryExerciseHistory: () => void;
+  advancedExecution?: AdvancedWorkoutExecutionIntegration;
 }
 
 /**
@@ -96,9 +98,9 @@ export function ActiveWorkoutSheetBoundary({
   latestExerciseObservationDidQuery,
   updateDraft,
   registerExercise,
-  saveCompletedTraining,
+  saveCompletedTraining: saveLegacyCompletedTraining,
   saveCompletedTrainingStatus,
-  retrySaveCompletedTraining,
+  retrySaveCompletedTraining: retryLegacySaveCompletedTraining,
   editRoutine,
   routineDays,
   switchDay,
@@ -106,6 +108,7 @@ export function ActiveWorkoutSheetBoundary({
   isBusy,
   latestExercisePerformanceStatus,
   retryExerciseHistory,
+  advancedExecution,
 }: ActiveWorkoutSheetBoundaryProps) {
   const selectedExercise = exercises[activeIndex] ?? exercises[0] ?? null;
   const exerciseIds = useMemo(() => exercises.map((exercise) => exercise.id), [exercises]);
@@ -133,11 +136,15 @@ export function ActiveWorkoutSheetBoundary({
   const draft = activeExercise
     ? normalizeExerciseDraft(activeExercise, drafts[activeExercise.id])
     : null;
-  const completedCount = exercises.filter((exercise) =>
-    isActiveWorkoutRegistrationComplete(exercise, drafts[exercise.id])
-  ).length;
+  const isRegistrationComplete = (exercise: ExerciseTemplate) => {
+    if (!isActiveWorkoutRegistrationComplete(exercise, drafts[exercise.id])) return false;
+    return advancedExecution?.getExercise(exercise.id)?.isReady ?? true;
+  };
+  const completedCount = exercises.filter(isRegistrationComplete).length;
   const allRegistrationsComplete = exercises.length > 0 && completedCount === exercises.length;
-  const canSaveTraining = canSaveActiveWorkoutDrafts(exercises, drafts);
+  const advancedDraftReady = advancedExecution?.isReady ?? true;
+  const canSaveTraining = canSaveActiveWorkoutDrafts(exercises, drafts)
+    && advancedDraftReady;
   const remainingExercises = Math.max(0, exercises.length - completedCount);
   const isDuplicateConflict = notice.includes("Ya existe un entrenamiento");
   const currentRovingExerciseId = rovingExerciseId && exerciseIds.includes(rovingExerciseId)
@@ -241,6 +248,18 @@ export function ActiveWorkoutSheetBoundary({
     updateDraft(activeExercise, patch);
   }
 
+  function publishAdvancedPayload() {
+    return advancedExecution?.publishPendingPayload() ?? true;
+  }
+
+  function saveCompletedTraining() {
+    if (publishAdvancedPayload()) saveLegacyCompletedTraining();
+  }
+
+  function retrySaveCompletedTraining() {
+    if (publishAdvancedPayload()) retryLegacySaveCompletedTraining();
+  }
+
   if (!selectedExercise || !activeExercise || !draft || !performancePresentation) {
     return (
       <div className={styles.guidedEmpty}>
@@ -249,11 +268,15 @@ export function ActiveWorkoutSheetBoundary({
     );
   }
 
+  const activeAdvancedExercise = advancedExecution?.getExercise(activeExercise.id) ?? null;
+  const activeAdvancedExerciseReady = activeAdvancedExercise?.isReady ?? true;
   const registrationComplete = isActiveWorkoutRegistrationComplete(
     activeExercise,
     drafts[activeExercise.id],
-  );
-  const registrationCommit = createActiveWorkoutRegistrationCommit(activeExercise, draft);
+  ) && activeAdvancedExerciseReady;
+  const registrationCommit = activeAdvancedExerciseReady
+    ? createActiveWorkoutRegistrationCommit(activeExercise, draft)
+    : null;
   const isSavingCompletion = saveCompletedTrainingStatus === "saving";
   const finishButtonLabel = isSavingCompletion
     ? "Guardando…"
@@ -324,10 +347,7 @@ export function ActiveWorkoutSheetBoundary({
               <div className={styles.guidedExerciseRows}>
                 {exercises.map((exercise, index) => {
                   const isSelected = exercise.id === selectedExercise.id;
-                  const isComplete = isActiveWorkoutRegistrationComplete(
-                    exercise,
-                    drafts[exercise.id],
-                  );
+                  const isComplete = isRegistrationComplete(exercise);
 
                   return (
                     <button
@@ -427,6 +447,7 @@ export function ActiveWorkoutSheetBoundary({
           onObservationChange={(value) => updateSelectedExerciseDraft({ observation: value })}
           onCommitRegistration={commitExerciseRegistration}
           onClose={closeExerciseSheet}
+          advancedExecution={activeAdvancedExercise ?? undefined}
         />
       ) : null}
     </>
