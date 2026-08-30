@@ -617,8 +617,8 @@ security invoker
 set search_path = ''
 as $function$
 declare
-  v_database_routine_name text := pg_catalog.coalesce(
-    pg_catalog.nullif(pg_catalog.btrim(p_routine_name), ''),
+  v_database_routine_name text := coalesce(
+    nullif(pg_catalog.btrim(p_routine_name), ''),
     'Rutina ' || p_day_code
   );
   v_routine_id uuid;
@@ -797,9 +797,9 @@ begin
   if p_source_version_id is not null then
     update public.training_cycle_exercises as exercise
     set notes = case
-      when pg_catalog.strpos(pg_catalog.coalesce(exercise.notes, ''), v_retired_marker) > 0
+      when pg_catalog.strpos(coalesce(exercise.notes, ''), v_retired_marker) > 0
         then exercise.notes
-      when pg_catalog.nullif(pg_catalog.btrim(exercise.notes), '') is null
+      when nullif(pg_catalog.btrim(exercise.notes), '') is null
         then v_retired_marker
       else exercise.notes || E'\n' || v_retired_marker
     end
@@ -910,7 +910,7 @@ begin
       returning id into v_cycle_exercise_id;
 
       update public.training_exercise_lineages as lineage
-      set origin_training_cycle_exercise_id = pg_catalog.coalesce(
+      set origin_training_cycle_exercise_id = coalesce(
         lineage.origin_training_cycle_exercise_id,
         v_cycle_exercise_id
       )
@@ -1226,7 +1226,7 @@ set search_path = ''
 as $function$
   select pg_catalog.jsonb_build_object(
     'days',
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'snapshotId', day.id,
@@ -1244,7 +1244,7 @@ as $function$
   from (
     select
       plan_day.*,
-      pg_catalog.coalesce(
+      coalesce(
         (
           select pg_catalog.jsonb_agg(
             pg_catalog.jsonb_build_object(
@@ -1258,7 +1258,7 @@ as $function$
               'technique', exercise.technique,
               'videoUrl', exercise.video_url_snapshot,
               'legacyCycleExerciseId', exercise.legacy_cycle_exercise_id,
-              'sets', pg_catalog.coalesce(
+              'sets', coalesce(
                 (
                   select pg_catalog.jsonb_agg(
                     pg_catalog.jsonb_build_object(
@@ -1267,7 +1267,7 @@ as $function$
                       'targetReps', set_row.target_reps,
                       'targetKg', set_row.target_kg,
                       'toFailure', set_row.to_failure,
-                      'drops', pg_catalog.coalesce(
+                      'drops', coalesce(
                         (
                           select pg_catalog.jsonb_agg(
                             pg_catalog.jsonb_build_object(
@@ -1397,7 +1397,7 @@ begin
   perform private.lock_training_cycle_portal(p_user_id, p_portal_scope);
 
   update public.training_cycle_notifications as notification
-  set materialized_at = pg_catalog.coalesce(notification.materialized_at, p_now)
+  set materialized_at = coalesce(notification.materialized_at, p_now)
   from public.training_cycles as cycle
   where cycle.id = notification.cycle_id
     and cycle.user_id = p_user_id
@@ -1449,7 +1449,7 @@ begin
     ended_at = p_now,
     closed_at = p_now,
     closed_reason = 'expired',
-    summary_snapshot = pg_catalog.coalesce(
+    summary_snapshot = coalesce(
       cycle.summary_snapshot,
       pg_catalog.jsonb_build_object(
         'source', 'cycle-redesign-auto-close',
@@ -1464,7 +1464,7 @@ begin
 
   if v_closed_cycle_id is not null then
     update public.training_cycle_notifications as notification
-    set materialized_at = pg_catalog.coalesce(notification.materialized_at, p_now)
+    set materialized_at = coalesce(notification.materialized_at, p_now)
     where notification.user_id = p_user_id
       and notification.portal_scope = p_portal_scope
       and notification.cycle_id = v_closed_cycle_id
@@ -2083,7 +2083,7 @@ begin
     on version.draft_id = draft.id
    and version.user_id = draft.user_id
    and version.portal_scope = draft.portal_scope
-   and version.version = pg_catalog.coalesce(p_version, draft.current_version)
+   and version.version = coalesce(p_version, draft.current_version)
   where draft.id = p_draft_id
     and draft.user_id = p_user_id
     and draft.portal_scope = p_portal_scope;
@@ -2268,7 +2268,7 @@ set statement_timeout = '5s'
 as $function$
 declare
   v_user_id uuid := auth.uid();
-  v_query text := pg_catalog.lower(pg_catalog.btrim(pg_catalog.coalesce(p_query, '')));
+  v_query text := pg_catalog.lower(pg_catalog.btrim(coalesce(p_query, '')));
   v_cursor_rank integer := case p_after_source_kind
     when 'catalog' then 0
     when 'custom' then 1
@@ -2371,7 +2371,7 @@ begin
   )
   select pg_catalog.jsonb_build_object(
     'items',
-    pg_catalog.coalesce(
+    coalesce(
       (
         select pg_catalog.jsonb_agg(
           pg_catalog.jsonb_build_object(
@@ -2440,7 +2440,7 @@ as $function$
 declare
   v_user_id uuid := auth.uid();
   v_name text := pg_catalog.btrim(p_name);
-  v_video_url text := pg_catalog.nullif(pg_catalog.btrim(p_video_url), '');
+  v_video_url text := nullif(pg_catalog.btrim(p_video_url), '');
   v_payload jsonb;
   v_custom_id uuid;
   v_receipt_version integer;
@@ -3307,7 +3307,7 @@ begin
     raise exception using errcode = '54000', message = 'training cycle limit reached';
   end if;
 
-  select pg_catalog.coalesce(pg_catalog.max(cycle.cycle_number), 0) + 1
+  select coalesce(pg_catalog.max(cycle.cycle_number), 0) + 1
     into v_cycle_number
   from public.training_cycles as cycle
   where cycle.user_id = v_user_id
@@ -3317,7 +3317,7 @@ begin
     raise exception using errcode = '54000', message = 'training cycle number limit reached';
   end if;
 
-  v_duration_weeks := pg_catalog.greatest(
+  v_duration_weeks := greatest(
     1,
     pg_catalog.ceil(
       ((v_draft_version.end_date - v_draft_version.start_date) + 1)::numeric / 7
@@ -3700,7 +3700,7 @@ begin
     v_current_snapshot.id
   );
 
-  v_duration_weeks := pg_catalog.greatest(
+  v_duration_weeks := greatest(
     1,
     pg_catalog.ceil(
       ((p_new_end_date - v_cycle.planned_start_date) + 1)::numeric / 7
@@ -4512,7 +4512,7 @@ begin
   )
   select pg_catalog.jsonb_build_object(
     'items',
-    pg_catalog.coalesce(
+    coalesce(
       (
         select pg_catalog.jsonb_agg(
           pg_catalog.jsonb_build_object(
@@ -4618,7 +4618,7 @@ begin
   )
   select pg_catalog.jsonb_build_object(
     'items',
-    pg_catalog.coalesce(
+    coalesce(
       (
         select pg_catalog.jsonb_agg(
           pg_catalog.jsonb_build_object(
@@ -4774,7 +4774,7 @@ begin
   )
   select pg_catalog.jsonb_build_object(
     'items',
-    pg_catalog.coalesce(
+    coalesce(
       (
         select pg_catalog.jsonb_agg(
           pg_catalog.jsonb_build_object(
@@ -4885,7 +4885,7 @@ begin
   end if;
 
   update public.training_cycle_notifications as notification
-  set read_at = pg_catalog.coalesce(notification.read_at, v_now)
+  set read_at = coalesce(notification.read_at, v_now)
   where notification.user_id = v_user_id
     and notification.portal_scope = p_portal_scope
     and notification.id = any(p_notification_ids)

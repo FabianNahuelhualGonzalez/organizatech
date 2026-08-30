@@ -7,7 +7,7 @@ export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260829200846_cycle_redesign_schema.sql":
     "fc6b89d7f610a2a188a2b2f98b3971325aabdaaf8868c1dda7c9c7c1057aa681",
   "20260829200847_cycle_redesign_api.sql":
-    "b978ebb0b669a5cbb9715f60242b90c3054fc7b2c3d3d6e8e954e4557697b23e",
+    "5a27383ded59ba3f54dfdda4fa01f92fea96f5b902939bff55d10a1ba1215141",
 } as const;
 
 const schemaPath =
@@ -1098,10 +1098,13 @@ test("migration ownership hashes match the two exact forward-only files", () => 
 });
 
 test("API migration uses parser-safe string search and locking clause order", () => {
-  assert.doesNotMatch(apiSql, /pg_catalog\.position\s*\(/);
+  assert.doesNotMatch(
+    apiSql,
+    /pg_catalog\.(?:coalesce|nullif|greatest|least|position)\s*\(/,
+  );
   assert.match(
     apiSql,
-    /pg_catalog\.strpos\(pg_catalog\.coalesce\(exercise\.notes, ''\), v_retired_marker\) > 0/,
+    /pg_catalog\.strpos\(coalesce\(exercise\.notes, ''\), v_retired_marker\) > 0/,
   );
   assert.match(
     apiSql,
