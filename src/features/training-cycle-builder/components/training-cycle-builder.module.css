@@ -676,6 +676,13 @@
   font-weight: 600;
 }
 
+.dateFields label {
+  width: 100%;
+  max-width: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
 .dateFields input,
 .stackField input,
 .routineNameField input,
@@ -692,6 +699,30 @@
   color: var(--cycle-text);
   background: transparent;
   font-size: 16px;
+}
+
+.dateFields input[type="date"] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  padding-inline: clamp(7px, 2.5vw, 11px);
+  color-scheme: dark;
+  -webkit-appearance: none;
+  appearance: none;
+  text-align: center;
+}
+
+.dateFields input[type="date"]::-webkit-date-and-time-value {
+  min-width: 0;
+  height: 1.5em;
+  margin: 0;
+  font-size: clamp(14px, 3.65vw, 16px);
+  line-height: 1.5;
+  text-align: center;
 }
 
 .durationBox {
@@ -2481,6 +2512,11 @@
 }
 
 @media (max-width: 389px) {
+  .dateFields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
   .dayPicker > div {
     gap: 2px;
   }

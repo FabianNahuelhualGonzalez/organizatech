@@ -34,13 +34,68 @@ export interface ApplyTechniqueOptions {
   readonly limits?: TrainingCycleBuilderLimits;
 }
 
+type PyramidTechnique = Extract<TrainingTechnique, "ascending" | "descending">;
+
+export interface PyramidSetTargets {
+  readonly targetKg: number;
+  readonly targetReps: number;
+}
+
+/** Fuente única para las sugerencias piramidales del dominio y del reducer visible. */
+export function suggestPyramidSetTargets(
+  referenceKg: number,
+  referenceReps: number,
+  index: number,
+  technique: PyramidTechnique,
+  policy: TechniquePresetPolicy = DEFAULT_TECHNIQUE_PRESET_POLICY,
+  limits: TrainingCycleBuilderLimits = DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS,
+): PyramidSetTargets {
+  const normalizedIndex = Math.max(0, Math.trunc(index));
+  const baseKg = clampNumber(referenceKg, 0, limits.maxTargetKg);
+  const baseReps = Math.trunc(clampNumber(referenceReps, 1, limits.maxTargetReps));
+  if (normalizedIndex === 0) return { targetKg: baseKg, targetReps: baseReps };
+
+  const multiplier = technique === "ascending"
+    ? 1 + policy.pyramidLoadStepRatio * normalizedIndex
+    : 1 - policy.pyramidLoadStepRatio * normalizedIndex;
+  const targetKg = clampNumber(
+    roundToIncrement(
+      clampNumber(baseKg * multiplier, 0, limits.maxTargetKg),
+      policy.loadIncrementKg,
+    ),
+    0,
+    limits.maxTargetKg,
+  );
+  const targetReps = technique === "ascending"
+    ? Math.max(1, baseReps - policy.pyramidRepsStep * normalizedIndex)
+    : Math.min(limits.maxTargetReps, baseReps + policy.pyramidRepsStep * normalizedIndex);
+  return { targetKg, targetReps };
+}
+
+/** Un descenso siempre parte de la carga de su misma serie o del descenso anterior. */
+export function suggestDropTargetKg(
+  referenceKg: number,
+  policy: TechniquePresetPolicy = DEFAULT_TECHNIQUE_PRESET_POLICY,
+  limits: TrainingCycleBuilderLimits = DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS,
+): number {
+  return clampNumber(
+    roundToIncrement(
+      clampNumber(referenceKg * policy.dropLoadRatio, 0, limits.maxTargetKg),
+      policy.loadIncrementKg,
+      "down",
+    ),
+    0,
+    limits.maxTargetKg,
+  );
+}
+
 export function applyTechniqueToExercise(
   exercise: ExerciseDraft,
   technique: TrainingTechnique,
   options: ApplyTechniqueOptions = {},
 ): { readonly ok: true; readonly exercise: ExerciseDraft } | {
   readonly ok: false;
-  readonly reason: "exercise_without_sets" | "missing_drop_id_namespace" | "invalid_policy";
+  readonly reason: "exercise_without_sets" | "missing_drop_id_namespace" | "invalid_drop_reference" | "invalid_policy";
 } {
   if (exercise.sets.length === 0) return { ok: false, reason: "exercise_without_sets" };
   const policy = options.policy ?? DEFAULT_TECHNIQUE_PRESET_POLICY;
@@ -57,42 +112,35 @@ export function applyTechniqueToExercise(
       sets = exercise.sets.map((set, index) => ({
         ...set,
         order: index + 1,
-        targetKg: roundToIncrement(baseKg, policy.loadIncrementKg),
+        targetKg: baseKg,
         targetReps: baseReps,
         toFailure: false,
         drops: [],
       }));
       break;
     case "ascending":
-      sets = exercise.sets.map((set, index) => ({
-        ...set,
-        order: index + 1,
-        targetKg: roundToIncrement(
-          clampNumber(baseKg * (1 + policy.pyramidLoadStepRatio * index), 0, limits.maxTargetKg),
-          policy.loadIncrementKg,
-        ),
-        targetReps: Math.max(1, baseReps - policy.pyramidRepsStep * index),
-        toFailure: false,
-        drops: [],
-      }));
+      sets = exercise.sets.map((set, index) => {
+        const targets = suggestPyramidSetTargets(baseKg, baseReps, index, technique, policy, limits);
+        return {
+          ...set,
+          order: index + 1,
+          ...targets,
+          toFailure: false,
+          drops: [],
+        };
+      });
       break;
     case "descending": {
-      const finalIndex = exercise.sets.length - 1;
-      sets = exercise.sets.map((set, index) => ({
-        ...set,
-        order: index + 1,
-        targetKg: roundToIncrement(
-          clampNumber(
-            baseKg * (1 + policy.pyramidLoadStepRatio * (finalIndex - index)),
-            0,
-            limits.maxTargetKg,
-          ),
-          policy.loadIncrementKg,
-        ),
-        targetReps: Math.min(limits.maxTargetReps, baseReps + policy.pyramidRepsStep * index),
-        toFailure: false,
-        drops: [],
-      }));
+      sets = exercise.sets.map((set, index) => {
+        const targets = suggestPyramidSetTargets(baseKg, baseReps, index, technique, policy, limits);
+        return {
+          ...set,
+          order: index + 1,
+          ...targets,
+          toFailure: false,
+          drops: [],
+        };
+      });
       break;
     }
     case "drop_set": {
@@ -100,20 +148,23 @@ export function applyTechniqueToExercise(
       const namespace = options.dropIdNamespace?.trim();
       if (!hasAnyDrop && !namespace) return { ok: false, reason: "missing_drop_id_namespace" };
       const finalIndex = exercise.sets.length - 1;
+      if (!hasAnyDrop && exercise.sets[finalIndex].targetKg <= 0) {
+        return { ok: false, reason: "invalid_drop_reference" };
+      }
       sets = exercise.sets.map((set, index) => {
-        if (hasAnyDrop || index !== finalIndex) return { ...set, order: index + 1 };
+        if (hasAnyDrop) {
+          return { ...set, order: index + 1, toFailure: set.drops.length > 0 };
+        }
+        if (index !== finalIndex) return { ...set, order: index + 1, toFailure: false };
         return {
           ...set,
           order: index + 1,
+          toFailure: true,
           drops: [{
             id: `${namespace}:drop:1`,
             sourceDropId: null,
             order: 1,
-            kg: roundToIncrement(
-              clampNumber(set.targetKg * policy.dropLoadRatio, 0, limits.maxTargetKg),
-              policy.loadIncrementKg,
-              "down",
-            ),
+            kg: suggestDropTargetKg(set.targetKg, policy, limits),
             reps: Math.min(limits.maxTargetReps, policy.defaultDropReps),
           }],
         };
@@ -124,7 +175,8 @@ export function applyTechniqueToExercise(
       sets = exercise.sets.map((set, index) => ({
         ...set,
         order: index + 1,
-        toFailure: index === exercise.sets.length - 1,
+        targetKg: baseKg,
+        toFailure: true,
         drops: [],
       }));
       break;

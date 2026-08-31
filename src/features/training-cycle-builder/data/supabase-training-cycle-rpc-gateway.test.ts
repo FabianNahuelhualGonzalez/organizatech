@@ -33,10 +33,14 @@ const plan: TrainingCycleRpcPlan = {
   }],
 };
 
-function principal(counter?: { value: number }): TrainingCycleRpcPrincipalClient {
+function principal(counters?: {
+  readonly user?: { value: number };
+  readonly session?: { value: number };
+}): TrainingCycleRpcPrincipalClient {
   return {
     auth: {
       async getSession() {
+        if (counters?.session) counters.session.value += 1;
         return {
           data: {
             session: {
@@ -49,7 +53,7 @@ function principal(counter?: { value: number }): TrainingCycleRpcPrincipalClient
       },
       async getUser(accessToken?: string) {
         assert.equal(accessToken, "captured-token");
-        if (counter) counter.value += 1;
+        if (counters?.user) counters.user.value += 1;
         return {
           data: { user: { id: USER_ID } },
           error: null,
@@ -63,6 +67,7 @@ function gateway(input: {
   readonly dataClient: TrainingCycleRpcDataClient;
   readonly requestIds?: readonly string[];
   readonly userChecks?: { value: number };
+  readonly sessionChecks?: { value: number };
   readonly isCurrent?: () => boolean;
 }) {
   const ids = [...(input.requestIds ?? [REQUEST_ID])];
@@ -70,7 +75,7 @@ function gateway(input: {
     expectedUserId: USER_ID,
     portalScope: "usuario",
     isCurrent: input.isCurrent ?? (() => true),
-    principal: principal(input.userChecks),
+    principal: principal({ user: input.userChecks, session: input.sessionChecks }),
     createPinnedClient(accessToken) {
       assert.equal(accessToken, "captured-token");
       return input.dataClient;
@@ -95,12 +100,14 @@ test("request IDs sobreviven un retry incierto y rotan después del acknowledgem
   assert.equal(owner.get("draft_save", "usuario", payload), REQUEST_ID_2);
 });
 
-test("save usa cliente fijado, verifica usuario antes/después y rota request UUID tras cada ACK", async () => {
+test("save valida el token una vez, confirma sesión local y rota request UUID tras cada ACK", async () => {
   const calls: Readonly<Record<string, unknown>>[] = [];
-  const checks = { value: 0 };
+  const userChecks = { value: 0 };
+  const sessionChecks = { value: 0 };
   const repo = gateway({
     requestIds: [REQUEST_ID, REQUEST_ID_2],
-    userChecks: checks,
+    userChecks,
+    sessionChecks,
     dataClient: {
       async rpc(name, args) {
         assert.equal(name, "save_own_training_cycle_draft");
@@ -133,7 +140,235 @@ test("save usa cliente fijado, verifica usuario antes/después y rota request UU
   assert.equal(calls[1]!.p_request_id, REQUEST_ID_2);
   assert.equal(calls[0]!.p_portal_scope, "usuario");
   assert.equal("user_id" in calls[0]!, false);
-  assert.ok(checks.value >= 6);
+  assert.equal(userChecks.value, 2);
+  assert.equal(sessionChecks.value, 6);
+});
+
+test("un fallo Auth posterior no puede convertir un commit RPC aceptado en FAIL", async () => {
+  let userChecks = 0;
+  let rpcCalls = 0;
+  const repo = new TrainingCycleRpcGateway({
+    expectedUserId: USER_ID,
+    portalScope: "usuario",
+    isCurrent: () => true,
+    principal: {
+      auth: {
+        async getSession() {
+          return {
+            data: {
+              session: {
+                access_token: "captured-token",
+                user: { id: USER_ID },
+              },
+            },
+            error: null,
+          } as unknown as Awaited<ReturnType<TrainingCycleRpcPrincipalClient["auth"]["getSession"]>>;
+        },
+        async getUser(accessToken?: string) {
+          assert.equal(accessToken, "captured-token");
+          userChecks += 1;
+          if (userChecks > 1) {
+            return {
+              data: { user: null },
+              error: { message: "transient auth failure" },
+            } as unknown as Awaited<ReturnType<TrainingCycleRpcPrincipalClient["auth"]["getUser"]>>;
+          }
+          return {
+            data: { user: { id: USER_ID } },
+            error: null,
+          } as unknown as Awaited<ReturnType<TrainingCycleRpcPrincipalClient["auth"]["getUser"]>>;
+        },
+      },
+    },
+    createPinnedClient() {
+      return {
+        async rpc(name, args) {
+          assert.equal(name, "save_own_training_cycle_draft");
+          rpcCalls += 1;
+          return {
+            data: {
+              responseKind: "accepted_operation",
+              requestId: args.p_request_id,
+              operationKind: "draft_save",
+              aggregateId: DRAFT_ID,
+              resultVersion: 2,
+            },
+            error: null,
+          };
+        },
+      };
+    },
+    createRequestId: () => REQUEST_ID,
+  });
+
+  const result = await repo.saveDraft({
+    draftId: DRAFT_ID,
+    expectedVersion: 1,
+    goal: "strength",
+    startDate: "2026-09-01",
+    endDate: "2026-10-01",
+    plan,
+  });
+
+  assert.equal(result.resultVersion, 2);
+  assert.equal(rpcCalls, 1);
+  assert.equal(userChecks, 1);
+});
+
+test("autosave y activación secuencial usan una validación Auth remota por RPC", async () => {
+  const calls: string[] = [];
+  const userChecks = { value: 0 };
+  const sessionChecks = { value: 0 };
+  const repo = gateway({
+    requestIds: [REQUEST_ID, REQUEST_ID_2],
+    userChecks,
+    sessionChecks,
+    dataClient: {
+      async rpc(name, args) {
+        calls.push(name);
+        if (name === "save_own_training_cycle_draft") {
+          return {
+            data: {
+              responseKind: "accepted_operation",
+              requestId: args.p_request_id,
+              operationKind: "draft_save",
+              aggregateId: DRAFT_ID,
+              resultVersion: 2,
+            },
+            error: null,
+          };
+        }
+        assert.equal(name, "activate_own_training_cycle_draft");
+        return {
+          data: {
+            responseKind: "accepted_operation",
+            requestId: args.p_request_id,
+            operationKind: "cycle_activate",
+            aggregateId: CYCLE_ID,
+            resultVersion: 1,
+          },
+          error: null,
+        };
+      },
+    },
+  });
+
+  await repo.saveDraft({
+    draftId: DRAFT_ID,
+    expectedVersion: 1,
+    goal: "strength",
+    startDate: "2026-09-01",
+    endDate: "2026-10-01",
+    plan,
+  });
+  await repo.activateDraft(DRAFT_ID, 2);
+
+  assert.deepEqual(calls, [
+    "save_own_training_cycle_draft",
+    "activate_own_training_cycle_draft",
+  ]);
+  assert.equal(userChecks.value, 2);
+  assert.equal(sessionChecks.value, 6);
+});
+
+test("un cambio local de sesión falla cerrado antes de despachar el RPC", async () => {
+  let sessionChecks = 0;
+  let rpcCalls = 0;
+  const repo = new TrainingCycleRpcGateway({
+    expectedUserId: USER_ID,
+    portalScope: "usuario",
+    isCurrent: () => true,
+    principal: {
+      auth: {
+        async getSession() {
+          sessionChecks += 1;
+          const changed = sessionChecks > 1;
+          return {
+            data: {
+              session: {
+                access_token: changed ? "other-token" : "captured-token",
+                user: { id: changed ? DRAFT_ID : USER_ID },
+              },
+            },
+            error: null,
+          } as unknown as Awaited<ReturnType<TrainingCycleRpcPrincipalClient["auth"]["getSession"]>>;
+        },
+        async getUser() {
+          return {
+            data: { user: { id: USER_ID } },
+            error: null,
+          } as unknown as Awaited<ReturnType<TrainingCycleRpcPrincipalClient["auth"]["getUser"]>>;
+        },
+      },
+    },
+    createPinnedClient() {
+      return {
+        async rpc() {
+          rpcCalls += 1;
+          return { data: null, error: null };
+        },
+      };
+    },
+  });
+
+  await assert.rejects(
+    repo.getActiveCycle(),
+    (error) => error instanceof TrainingCycleTransportError && error.code === "session_mismatch",
+  );
+  assert.equal(rpcCalls, 0);
+});
+
+test("un cambio local de sesión posterior al RPC falla cerrado sin repetir Auth remoto", async () => {
+  let sessionChecks = 0;
+  let userChecks = 0;
+  let rpcCalls = 0;
+  const repo = new TrainingCycleRpcGateway({
+    expectedUserId: USER_ID,
+    portalScope: "usuario",
+    isCurrent: () => true,
+    principal: {
+      auth: {
+        async getSession() {
+          sessionChecks += 1;
+          const changed = sessionChecks > 2;
+          return {
+            data: {
+              session: {
+                access_token: changed ? "other-token" : "captured-token",
+                user: { id: changed ? DRAFT_ID : USER_ID },
+              },
+            },
+            error: null,
+          } as unknown as Awaited<ReturnType<TrainingCycleRpcPrincipalClient["auth"]["getSession"]>>;
+        },
+        async getUser(accessToken?: string) {
+          assert.equal(accessToken, "captured-token");
+          userChecks += 1;
+          return {
+            data: { user: { id: USER_ID } },
+            error: null,
+          } as unknown as Awaited<ReturnType<TrainingCycleRpcPrincipalClient["auth"]["getUser"]>>;
+        },
+      },
+    },
+    createPinnedClient() {
+      return {
+        async rpc(name) {
+          assert.equal(name, "get_own_active_training_cycle");
+          rpcCalls += 1;
+          return { data: null, error: null };
+        },
+      };
+    },
+  });
+
+  await assert.rejects(
+    repo.getActiveCycle(),
+    (error) => error instanceof TrainingCycleTransportError && error.code === "session_mismatch",
+  );
+  assert.equal(rpcCalls, 1);
+  assert.equal(userChecks, 1);
+  assert.equal(sessionChecks, 3);
 });
 
 test("un resultado incierto conserva request UUID sólo hasta recibir un ACK", async () => {
@@ -331,10 +566,16 @@ test("cursor keyset que no avanza falla cerrado", async () => {
 
 test("owner epoch obsoleto detiene la operación antes de exponer resultados", async () => {
   let current = true;
+  const userChecks = { value: 0 };
+  const sessionChecks = { value: 0 };
+  let rpcCalls = 0;
   const repo = gateway({
     isCurrent: () => current,
+    userChecks,
+    sessionChecks,
     dataClient: {
       async rpc() {
+        rpcCalls += 1;
         current = false;
         return { data: null, error: null };
       },
@@ -344,4 +585,7 @@ test("owner epoch obsoleto detiene la operación antes de exponer resultados", a
     repo.getActiveCycle(),
     (error) => error instanceof TrainingCycleTransportError && error.code === "stale_operation",
   );
+  assert.equal(rpcCalls, 1);
+  assert.equal(userChecks.value, 1);
+  assert.equal(sessionChecks.value, 2);
 });

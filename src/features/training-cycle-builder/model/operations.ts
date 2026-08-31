@@ -8,6 +8,10 @@ import {
 import { normalizeDisplayName } from "./catalog";
 import { roundDecimal } from "./numbers";
 import {
+  DEFAULT_TECHNIQUE_PRESET_POLICY,
+  suggestPyramidSetTargets,
+} from "./techniques";
+import {
   DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS,
   type DropDraft,
   type ExerciseDraft,
@@ -272,12 +276,23 @@ export function addSetToExercise(
     }
     const previous = exercise.sets.at(-1);
     if (!previous) return { ok: false, reason: "minimum_one_set" } as const;
+    const first = exercise.sets[0];
+    const pyramidTargets = exercise.technique === "ascending" || exercise.technique === "descending"
+      ? suggestPyramidSetTargets(
+          first.targetKg,
+          first.targetReps,
+          exercise.sets.length,
+          exercise.technique,
+          DEFAULT_TECHNIQUE_PRESET_POLICY,
+          limits,
+        )
+      : null;
     const set: SetDraft = {
       id: newSetId.trim(),
       sourceSetId: null,
       order: exercise.sets.length + 1,
-      targetReps: previous.targetReps,
-      targetKg: previous.targetKg,
+      targetReps: pyramidTargets?.targetReps ?? previous.targetReps,
+      targetKg: pyramidTargets?.targetKg ?? previous.targetKg,
       toFailure: false,
       drops: [],
     };
@@ -422,15 +437,59 @@ export function addDropToSet(
       || drop.kg < 0
       || drop.kg > limits.maxTargetKg
     ) return { ok: false, reason: "invalid_value" } as const;
+    const normalizedKg = roundDecimal(drop.kg, 3);
+    const previousKg = set.drops.at(-1)?.kg ?? set.targetKg;
+    if (normalizedKg >= previousKg) return { ok: false, reason: "invalid_value" } as const;
     const nextDrop: DropDraft = {
       id: drop.id.trim(),
       sourceDropId: null,
       order: set.drops.length + 1,
-      kg: roundDecimal(drop.kg, 3),
+      kg: normalizedKg,
       reps: drop.reps,
     };
     const sets = exercise.sets.map((candidate, index) => index === setIndex
-      ? { ...candidate, drops: [...candidate.drops, nextDrop] }
+      ? { ...candidate, toFailure: true, drops: [...candidate.drops, nextDrop] }
+      : candidate);
+    return { ok: true, exercise: { ...exercise, sets } } as const;
+  });
+}
+
+export function updateDropTargets(
+  draft: TrainingCycleDraft,
+  day: Weekday,
+  exerciseId: string,
+  setId: string,
+  dropId: string,
+  targets: Pick<DropDraft, "kg" | "reps">,
+  limits: TrainingCycleBuilderLimits = DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS,
+): DraftOperationResult {
+  return updateExercise(draft, day, exerciseId, (exercise) => {
+    if (exercise.technique !== "drop_set") return { ok: false, reason: "invalid_value" } as const;
+    const set = exercise.sets.find((candidate) => candidate.id === setId);
+    if (!set) return { ok: false, reason: "set_not_found" } as const;
+    const dropIndex = set.drops.findIndex((drop) => drop.id === dropId);
+    if (dropIndex < 0) return { ok: false, reason: "drop_not_found" } as const;
+    const normalizedKg = roundDecimal(targets.kg, 3);
+    const previousKg = dropIndex === 0 ? set.targetKg : set.drops[dropIndex - 1].kg;
+    const nextKg = set.drops[dropIndex + 1]?.kg;
+    if (
+      !Number.isSafeInteger(targets.reps)
+      || targets.reps < 1
+      || targets.reps > limits.maxTargetReps
+      || !Number.isFinite(targets.kg)
+      || normalizedKg < 0
+      || normalizedKg > limits.maxTargetKg
+      || normalizedKg >= previousKg
+      || (nextKg !== undefined && normalizedKg <= nextKg)
+    ) return { ok: false, reason: "invalid_value" } as const;
+
+    const sets = exercise.sets.map((candidate) => candidate.id === setId
+      ? {
+          ...candidate,
+          drops: candidate.drops.map((drop, index) => index === dropIndex
+            ? { ...drop, kg: normalizedKg, reps: targets.reps }
+            : drop),
+        }
       : candidate);
     return { ok: true, exercise: { ...exercise, sets } } as const;
   });
@@ -456,6 +515,7 @@ export function removeDropFromSet(
         drops: candidate.drops
           .filter((drop) => drop.id !== dropId)
           .map((drop, dropIndex) => ({ ...drop, order: dropIndex + 1 })),
+        toFailure: candidate.drops.length > 1,
       }
       : candidate);
     return { ok: true, exercise: { ...exercise, sets } } as const;

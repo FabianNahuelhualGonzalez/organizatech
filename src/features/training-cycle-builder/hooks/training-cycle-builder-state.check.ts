@@ -19,6 +19,9 @@ import {
   type TrainingCycleBuilderAction,
   type TrainingCycleBuilderState,
 } from "@/features/training-cycle-builder/hooks/training-cycle-builder-state";
+import { applyTechniqueToExercise } from "@/features/training-cycle-builder/model/techniques";
+import { createFixtureExercise, createFixtureSet } from "@/features/training-cycle-builder/model/test-fixtures";
+import { DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS } from "@/features/training-cycle-builder/model/types";
 
 function createState() {
   return createTrainingCycleBuilderState(createTrainingCycleBuilderTestViewModel());
@@ -98,6 +101,324 @@ test("un ejercicio nunca baja de una serie y las cinco técnicas permanecen edit
 
   state = reduce(state, { type: "set_technique", technique: "drop_set" });
   assert.equal(state.draft.routines.monday.exercises[0].sets.at(-1)?.drops.length, 1);
+  assert.equal(state.draft.routines.monday.exercises[0].sets.at(-1)?.toFailure, true);
+});
+
+test("alternar pirámides conserva la primera serie y nunca multiplica los valores", () => {
+  let state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_exercise_mode", mode: "per_set" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "100" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetReps", value: "12" },
+  );
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    state = reduce(state, { type: "set_technique", technique: "ascending" });
+    let sets = state.draft.routines.monday.exercises[0].sets;
+    assert.deepEqual(sets.map((set) => set.targetKg), ["100", "110", "120", "130"]);
+    assert.deepEqual(sets.map((set) => set.targetReps), ["12", "10", "8", "6"]);
+
+    state = reduce(state, { type: "set_technique", technique: "descending" });
+    sets = state.draft.routines.monday.exercises[0].sets;
+    assert.deepEqual(sets.map((set) => set.targetKg), ["100", "90", "80", "70"]);
+    assert.deepEqual(sets.map((set) => set.targetReps), ["12", "14", "16", "18"]);
+  }
+});
+
+test("reducer y dominio comparten incrementos de 0,5 kg para ambas pirámides", () => {
+  const domainSource = createFixtureExercise({
+    sets: Array.from({ length: 4 }, (_, index) => createFixtureSet({
+      id: `parity-${index + 1}`,
+      order: index + 1,
+      targetKg: index === 0 ? 44 : 999,
+      targetReps: index === 0 ? 10 : 99,
+    })),
+  });
+  const domainAscending = applyTechniqueToExercise(domainSource, "ascending");
+  assert.equal(domainAscending.ok, true);
+  if (!domainAscending.ok) return;
+
+  let state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "44" },
+    { type: "set_technique", technique: "ascending" },
+  );
+  let visibleSets = state.draft.routines.monday.exercises[0].sets;
+  assert.deepEqual(visibleSets.map((set) => Number(set.targetKg)),
+    domainAscending.exercise.sets.map((set) => set.targetKg));
+  assert.deepEqual(visibleSets.map((set) => set.targetKg), ["44", "48.5", "53", "57"]);
+
+  const domainDescending = applyTechniqueToExercise(domainAscending.exercise, "descending");
+  assert.equal(domainDescending.ok, true);
+  if (!domainDescending.ok) return;
+  state = reduce(state, { type: "set_technique", technique: "descending" });
+  visibleSets = state.draft.routines.monday.exercises[0].sets;
+  assert.deepEqual(visibleSets.map((set) => Number(set.targetKg)),
+    domainDescending.exercise.sets.map((set) => set.targetKg));
+  assert.deepEqual(visibleSets.map((set) => set.targetKg), ["44", "39.5", "35", "31"]);
+});
+
+test("la coma decimal es referencia piramidal estable y llega normalizada al payload", () => {
+  let state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "100,5" },
+    { type: "set_technique", technique: "ascending" },
+  );
+  let sets = state.draft.routines.monday.exercises[0].sets;
+  assert.deepEqual(sets.map((set) => set.targetKg), ["100,5", "110.5", "120.5", "130.5"]);
+  assert.equal(getTrainingCycleDraftValidation(state.draft).canActivate, true);
+  assert.equal(
+    buildTrainingCycleSaveDraftInput(state.draft, "duplicate").days[0].exercises[0].sets[0].targetKg,
+    100.5,
+  );
+
+  state = reduce(state, { type: "set_technique", technique: "descending" });
+  sets = state.draft.routines.monday.exercises[0].sets;
+  assert.deepEqual(sets.map((set) => set.targetKg), ["100,5", "90.5", "80.5", "70.5"]);
+  state = reduce(state, { type: "set_technique", technique: "ascending" });
+  sets = state.draft.routines.monday.exercises[0].sets;
+  assert.deepEqual(sets.map((set) => set.targetKg), ["100,5", "110.5", "120.5", "130.5"]);
+});
+
+test("las series nuevas reciben referencia piramidal sin pisar ediciones existentes", () => {
+  const ascendingState = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "100" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetReps", value: "12" },
+    { type: "set_technique", technique: "ascending" },
+    { type: "edit_set", setId: "press-flat-set-2", field: "targetKg", value: "108.5" },
+    { type: "add_set" },
+  );
+  let sets = ascendingState.draft.routines.monday.exercises[0].sets;
+  assert.equal(sets[1]?.targetKg, "108.5");
+  assert.equal(sets.at(-1)?.targetKg, "140");
+  assert.equal(sets.at(-1)?.targetReps, "4");
+
+  let state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "100" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetReps", value: "12" },
+    { type: "set_technique", technique: "descending" },
+    { type: "edit_set", setId: "press-flat-set-2", field: "targetKg", value: "88.5" },
+    { type: "add_set" },
+  );
+  sets = state.draft.routines.monday.exercises[0].sets;
+  assert.equal(sets[1]?.targetKg, "88.5");
+  assert.deepEqual(sets.at(-1), {
+    id: "set-1",
+    targetKg: "60",
+    targetReps: "20",
+    toFailure: false,
+    drops: [],
+  });
+
+  state = reduce(state, { type: "change_set_count", delta: 1 });
+  sets = state.draft.routines.monday.exercises[0].sets;
+  assert.equal(sets[1]?.targetKg, "88.5");
+  assert.deepEqual(sets.at(-1), {
+    id: "set-2",
+    targetKg: "50",
+    targetReps: "22",
+    toFailure: false,
+    drops: [],
+  });
+});
+
+test("fallo mantiene el peso de referencia y drop set baja dentro de la misma serie", () => {
+  let state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "100" },
+    { type: "set_technique", technique: "failure" },
+  );
+  let sets = state.draft.routines.monday.exercises[0].sets;
+  assert.deepEqual(sets.map((set) => set.targetKg), ["100", "100", "100", "100"]);
+  assert.deepEqual(sets.map((set) => set.toFailure), [true, true, true, true]);
+
+  state = reduce(
+    state,
+    { type: "edit_set", setId: "press-flat-set-4", field: "targetKg", value: "70" },
+    { type: "set_technique", technique: "drop_set" },
+  );
+  sets = state.draft.routines.monday.exercises[0].sets;
+  assert.equal(sets.length, 4, "el descenso no se convierte en una serie independiente");
+  assert.deepEqual(sets[3]?.drops, [{
+    id: "press-flat-set-4-drop-1",
+    targetKg: "56",
+    targetReps: "8",
+  }]);
+  assert.equal(sets[3]?.toFailure, true);
+
+  state = reduce(state, { type: "add_drop", setId: "press-flat-set-4" });
+  sets = state.draft.routines.monday.exercises[0].sets;
+  assert.equal(sets.length, 4);
+  assert.deepEqual(sets[3]?.drops.map((drop) => drop.targetKg), ["56", "44.5"]);
+
+  state = reduce(
+    state,
+    { type: "add_drop", setId: "press-flat-set-1" },
+    { type: "toggle_set_failure", setId: "press-flat-set-1" },
+    { type: "toggle_set_failure", setId: "press-flat-set-4" },
+    { type: "set_technique", technique: "drop_set" },
+  );
+  sets = state.draft.routines.monday.exercises[0].sets;
+  assert.deepEqual(sets.map((set) => set.toFailure), [true, false, false, true]);
+});
+
+test("las sugerencias visibles respetan los máximos del payload", () => {
+  let state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "99999.99" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetReps", value: "999" },
+    { type: "set_technique", technique: "ascending" },
+  );
+  let sets = state.draft.routines.monday.exercises[0].sets;
+  assert.deepEqual(sets.map((set) => set.targetKg), ["99999.99", "99999.99", "99999.99", "99999.99"]);
+
+  state = reduce(state, { type: "set_technique", technique: "descending" });
+  sets = state.draft.routines.monday.exercises[0].sets;
+  assert.deepEqual(sets.map((set) => set.targetReps), ["999", "1000", "1000", "1000"]);
+});
+
+test("el reducer aplica los mismos máximos de series y descensos del dominio", () => {
+  let state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_technique", technique: "drop_set" },
+  );
+  while (state.draft.routines.monday.exercises[0].sets.length
+    < DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS.maxSetsPerExercise) {
+    state = reduce(state, { type: "add_set" });
+  }
+  state = reduce(state, { type: "add_set" });
+  assert.equal(
+    state.draft.routines.monday.exercises[0].sets.length,
+    DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS.maxSetsPerExercise,
+  );
+
+  const targetSetId = state.draft.routines.monday.exercises[0].sets[3]?.id ?? "";
+  while ((state.draft.routines.monday.exercises[0].sets[3]?.drops.length ?? 0)
+    < DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS.maxDropsPerSet) {
+    state = reduce(state, { type: "add_drop", setId: targetSetId });
+  }
+  state = reduce(state, { type: "add_drop", setId: targetSetId });
+  assert.equal(
+    state.draft.routines.monday.exercises[0].sets[3]?.drops.length,
+    DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS.maxDropsPerSet,
+  );
+  assert.equal(state.draft.routines.monday.exercises[0].sets[3]?.toFailure, true);
+
+  const nextEntityNumber = state.nextEntityNumber;
+  state = reduce(state, {
+    type: "duplicate_set",
+    setId: state.draft.routines.monday.exercises[0].sets[0]?.id ?? "",
+  });
+  assert.equal(state.draft.routines.monday.exercises[0].sets.length, 20);
+  assert.equal(state.nextEntityNumber, nextEntityNumber, "un duplicado rechazado no consume IDs");
+});
+
+test("duplicar una serie conserva la técnica bajo el tope", () => {
+  const state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_technique", technique: "ascending" },
+    { type: "duplicate_set", setId: "press-flat-set-2" },
+  );
+  const exercise = state.draft.routines.monday.exercises[0];
+  assert.equal(exercise.technique, "ascending");
+  assert.equal(exercise.sets.length, 5);
+  assert.equal(exercise.sets[2]?.targetKg, exercise.sets[1]?.targetKg);
+  assert.equal(state.nextEntityNumber, 2);
+});
+
+test("editar o agregar drops fail-closed y eliminar el último limpia fallo", () => {
+  let state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_technique", technique: "drop_set" },
+  );
+  const setId = "press-flat-set-4";
+  const firstDropId = state.draft.routines.monday.exercises[0].sets[3]?.drops[0]?.id ?? "";
+  const beforeInvalidEdit = state;
+  state = reduce(state, {
+    type: "edit_drop",
+    setId,
+    dropId: firstDropId,
+    field: "targetKg",
+    value: "80",
+  });
+  assert.equal(state, beforeInvalidEdit);
+
+  state = reduce(state, { type: "add_drop", setId });
+  const secondDropId = state.draft.routines.monday.exercises[0].sets[3]?.drops[1]?.id ?? "";
+  const beforeAscendingEdit = state;
+  state = reduce(state, {
+    type: "edit_drop",
+    setId,
+    dropId: secondDropId,
+    field: "targetKg",
+    value: "70",
+  });
+  assert.equal(state, beforeAscendingEdit);
+
+  state = reduce(
+    state,
+    { type: "remove_drop", setId, dropId: secondDropId },
+    { type: "remove_drop", setId, dropId: firstDropId },
+  );
+  assert.equal(state.draft.routines.monday.exercises[0].sets[3]?.drops.length, 0);
+  assert.equal(state.draft.routines.monday.exercises[0].sets[3]?.toFailure, false);
+});
+
+test("drop set con carga cero falla cerrado sin introducir 0→0", () => {
+  const state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "edit_set", setId: "press-flat-set-4", field: "targetKg", value: "0" },
+  );
+  const rejected = reduce(state, { type: "set_technique", technique: "drop_set" });
+  assert.equal(rejected, state);
+  assert.equal(rejected.draft.routines.monday.exercises[0].technique, "linear");
+  assert.equal(rejected.draft.routines.monday.exercises[0].sets[3]?.drops.length, 0);
+});
+
+test("validación visible rechaza drops iguales o ascendentes", () => {
+  const state = reduce(
+    createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_technique", technique: "drop_set" },
+  );
+  const set = state.draft.routines.monday.exercises[0].sets[3];
+  const invalidDraft = {
+    ...state.draft,
+    routines: {
+      ...state.draft.routines,
+      monday: {
+        ...state.draft.routines.monday,
+        exercises: state.draft.routines.monday.exercises.map((exercise) => exercise.id === "press-flat"
+          ? {
+              ...exercise,
+              sets: exercise.sets.map((candidate) => candidate.id === set?.id
+                ? {
+                    ...candidate,
+                    drops: [
+                      { id: "invalid-1", targetKg: candidate.targetKg, targetReps: "8" },
+                      { id: "invalid-2", targetKg: "999", targetReps: "8" },
+                    ],
+                  }
+                : candidate),
+            }
+          : exercise),
+      },
+    },
+  };
+  assert.equal(getTrainingCycleDraftValidation(invalidDraft).seriesValid, false);
 });
 
 test("las recomendaciones se pueden aceptar, modificar e ignorar sin aplicar solas", () => {

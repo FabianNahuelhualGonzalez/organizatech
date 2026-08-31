@@ -55,6 +55,7 @@ export type DraftValidationCode =
   | "invalid_drop_order"
   | "invalid_drop_reps"
   | "invalid_drop_kg"
+  | "invalid_drop_sequence"
   | "duplicate_exercise_in_day"
   | "muscle_group_single_exercise";
 
@@ -209,6 +210,10 @@ export function validateTrainingCycleDraft(
           }
           if (!isBoundedNumber(drop.kg, 0, limits.maxTargetKg)) {
             add("invalid_drop_kg", "blocking", `${dropPath}.kg`);
+          }
+          const previousKg = dropIndex === 0 ? set.targetKg : set.drops[dropIndex - 1].kg;
+          if (Number.isFinite(drop.kg) && Number.isFinite(previousKg) && drop.kg >= previousKg) {
+            add("invalid_drop_sequence", "blocking", `${dropPath}.kg`);
           }
         });
       });

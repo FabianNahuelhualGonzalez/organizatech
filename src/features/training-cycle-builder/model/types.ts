@@ -194,10 +194,10 @@ export const DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS: TrainingCycleBuilderLimits =
   maxRoutineNameLength: 120,
   maxExerciseNameLength: 120,
   maxExercisesPerDay: 50,
-  maxSetsPerExercise: 30,
-  maxDropsPerSet: 10,
+  maxSetsPerExercise: 20,
+  maxDropsPerSet: 8,
   maxTargetReps: 1_000,
-  maxTargetKg: 5_000,
+  maxTargetKg: 99_999.99,
   maxAliasesPerExercise: 20,
 });
 

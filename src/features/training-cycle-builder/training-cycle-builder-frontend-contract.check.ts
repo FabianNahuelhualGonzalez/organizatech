@@ -164,6 +164,45 @@ assert.match(cssSource, /font-family: "Roboto Mono"/);
 assert.match(cssSource, /min-width: 44px;/);
 assert.match(cssSource, /min-height: 44px;/);
 assert.match(cssSource, /:focus-visible/);
+
+const baseDateFieldsRule = cssSource.match(/\.dateFields\s*\{([^}]*)\}/)?.[1] ?? "";
+const sharedDateLabelRule = cssSource.match(
+  /\.dateFields label,\s*[\s\S]*?\.routineNameField\s*\{([^}]*)\}/,
+)?.[1] ?? "";
+const dateLabelRule = cssSource.match(/\.dateFields label\s*\{([^}]*)\}/)?.[1] ?? "";
+const sharedDateInputRule = cssSource.match(
+  /\.dateFields input,\s*[\s\S]*?\.videoCard input\s*\{([^}]*)\}/,
+)?.[1] ?? "";
+const dateInputRule = cssSource.match(/\.dateFields input\[type="date"\]\s*\{([^}]*)\}/)?.[1] ?? "";
+const webkitDateValueRule = cssSource.match(
+  /\.dateFields input\[type="date"\]::-webkit-date-and-time-value\s*\{([^}]*)\}/,
+)?.[1] ?? "";
+
+assert.match(baseDateFieldsRule, /\bgrid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
+assert.match(sharedDateLabelRule, /\bmin-width: 0;/);
+assert.match(dateLabelRule, /\bwidth: 100%;/);
+assert.match(dateLabelRule, /\bmax-width: 100%;/);
+assert.match(dateLabelRule, /\bmin-inline-size: 0;/);
+assert.match(dateLabelRule, /\bmax-inline-size: 100%;/);
+assert.match(sharedDateInputRule, /\bwidth: 100%;/);
+assert.match(sharedDateInputRule, /\bmin-width: 0;/);
+assert.match(sharedDateInputRule, /\bheight: 48px;/);
+assert.match(sharedDateInputRule, /\bfont-size: 16px;/);
+assert.match(dateInputRule, /\binline-size: 100%;/);
+assert.match(dateInputRule, /\bmax-inline-size: 100%;/);
+assert.match(dateInputRule, /\bmin-inline-size: 0;/);
+assert.match(dateInputRule, /\bmax-width: 100%;/);
+assert.match(dateInputRule, /\bmin-width: 0;/);
+assert.match(dateInputRule, /-webkit-appearance: none;/);
+assert.match(webkitDateValueRule, /\bmin-width: 0;/);
+assert.match(webkitDateValueRule, /\bheight: 1\.5em;/);
+assert.match(webkitDateValueRule, /\bfont-size:\s*clamp\(14px,\s*3\.65vw,\s*16px\);/);
+assert.match(webkitDateValueRule, /\bline-height: 1\.5;/);
+assert.match(webkitDateValueRule, /\btext-align: center;/);
+assert.match(
+  cssSource,
+  /@media \(max-width: 389px\)[\s\S]*?\.dateFields\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/,
+);
 assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)/);
 
 // Sólo archivos focales nuevos dentro del owner autorizado.

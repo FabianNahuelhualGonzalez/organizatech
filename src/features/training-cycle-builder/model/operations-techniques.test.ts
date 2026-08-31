@@ -18,10 +18,13 @@ import {
   setSelectedTrainingDays,
   toggleSelectedTrainingDay,
   toggleSetFailure,
+  updateDropTargets,
   updateSetTargets,
 } from "./operations";
 import { applyTechniqueToDraft, applyTechniqueToExercise } from "./techniques";
 import { createFixtureDay, createFixtureDraft, createFixtureExercise, createFixtureSet } from "./test-fixtures";
+import { DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS } from "./types";
+import { validateTrainingCycleDraft } from "./validation";
 
 function draftWithTwoDays() {
   const row = createFixtureExercise({
@@ -184,6 +187,35 @@ test("drops sólo operan en drop set, tienen límite e IDs únicos", () => {
   });
   assert.equal(added.changed, true);
   assert.equal(added.draft.routines.monday?.exercises[0]?.sets[0]?.drops.length, 2);
+  assert.equal(added.draft.routines.monday?.exercises[0]?.sets[0]?.toFailure, true);
+  const rejectedAscending = addDropToSet(added.draft, "monday", "exercise-1", setId, {
+    id: "drop-invalid",
+    kg: 55,
+    reps: 10,
+  });
+  assert.equal(rejectedAscending.changed, false);
+  assert.equal(rejectedAscending.reason, "invalid_value");
+
+  const invalidEdit = updateDropTargets(
+    added.draft,
+    "monday",
+    "exercise-1",
+    setId,
+    "drop-b",
+    { kg: 64, reps: 10 },
+  );
+  assert.equal(invalidEdit.changed, false, "un drop no puede igualar al anterior");
+  const validEdit = updateDropTargets(
+    added.draft,
+    "monday",
+    "exercise-1",
+    setId,
+    "drop-b",
+    { kg: 48.5, reps: 11 },
+  );
+  assert.equal(validEdit.changed, true);
+  assert.equal(validEdit.draft.routines.monday?.exercises[0]?.sets[0]?.drops[1]?.kg, 48.5);
+
   const removed = removeDropFromSet(added.draft, "monday", "exercise-1", setId, "preset:drop:1");
   assert.deepEqual(removed.draft.routines.monday?.exercises[0]?.sets[0]?.drops, [{
     id: "drop-b",
@@ -192,6 +224,35 @@ test("drops sólo operan en drop set, tienen límite e IDs únicos", () => {
     kg: 50,
     reps: 10,
   }]);
+  const removedLast = removeDropFromSet(removed.draft, "monday", "exercise-1", setId, "drop-b");
+  assert.equal(removedLast.draft.routines.monday?.exercises[0]?.sets[0]?.toFailure, false);
+});
+
+test("agregar una serie piramidal usa la primera referencia sin pisar ediciones", () => {
+  for (const technique of ["ascending", "descending"] as const) {
+    const exercise = createFixtureExercise({
+      sets: [
+        createFixtureSet({ id: "pyramid-1", order: 1, targetKg: 44, targetReps: 10 }),
+        createFixtureSet({ id: "pyramid-2", order: 2, targetKg: 80, targetReps: 20 }),
+      ],
+    });
+    let draft = createFixtureDraft({ routines: { monday: createFixtureDay({ exercises: [exercise] }) } });
+    const applied = applyTechniqueToDraft(draft, "monday", "exercise-1", technique);
+    assert.equal(applied.changed, true);
+    draft = applied.draft;
+    const edited = updateSetTargets(draft, "monday", "exercise-1", "pyramid-2", {
+      targetKg: 41.5,
+      targetReps: 9,
+    });
+    draft = edited.draft;
+    const added = addSetToExercise(draft, "monday", "exercise-1", `${technique}-set-3`);
+    assert.equal(added.changed, true);
+    const sets = added.draft.routines.monday?.exercises[0]?.sets ?? [];
+    assert.equal(sets[1]?.targetKg, 41.5);
+    assert.deepEqual([sets[2]?.targetKg, sets[2]?.targetReps], technique === "ascending"
+      ? [53, 6]
+      : [35, 14]);
+  }
 });
 
 test("cinco técnicas precargan de forma editable, limitada y sin mutar el ejercicio fuente", () => {
@@ -224,7 +285,7 @@ test("cinco técnicas precargan de forma editable, limitada y sin mutar el ejerc
   assert.equal(descending.ok, true);
   if (descending.ok) {
     assert.deepEqual(descending.exercise.sets.map((set) => [set.targetKg, set.targetReps]), [
-      [96, 10], [88, 12], [80, 14],
+      [80, 10], [72, 12], [64, 14],
     ]);
   }
 
@@ -238,12 +299,126 @@ test("cinco técnicas precargan de forma editable, limitada y sin mutar el ejerc
       kg: 48,
       reps: 8,
     }]);
+    assert.deepEqual(drop.exercise.sets.map((set) => set.toFailure), [false, false, true]);
   }
 
   const failure = applyTechniqueToExercise(source, "failure");
   assert.equal(failure.ok, true);
-  if (failure.ok) assert.deepEqual(failure.exercise.sets.map((set) => set.toFailure), [false, false, true]);
+  if (failure.ok) {
+    assert.deepEqual(failure.exercise.sets.map((set) => set.targetKg), [80, 80, 80]);
+    assert.deepEqual(failure.exercise.sets.map((set) => set.toFailure), [true, true, true]);
+  }
   assert.deepEqual(source, sourceCopy, "los presets no mutan el ejercicio original");
+});
+
+test("las pirámides siempre recomponen desde la primera serie sin acumular cargas", () => {
+  const source = createFixtureExercise({
+    sets: Array.from({ length: 6 }, (_, index) => createFixtureSet({
+      id: `stable-${index + 1}`,
+      order: index + 1,
+      targetKg: index === 0 ? 100.25 : 999,
+      targetReps: index === 0 ? 12 : 99,
+    })),
+  });
+
+  let current = source;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const ascending = applyTechniqueToExercise(current, "ascending");
+    assert.equal(ascending.ok, true);
+    if (!ascending.ok) return;
+    assert.equal(ascending.exercise.sets[0]?.targetKg, 100.25);
+    assert.equal(ascending.exercise.sets[0]?.targetReps, 12);
+    assert.deepEqual(ascending.exercise.sets.map((set) => set.targetKg), [
+      100.25, 110.5, 120.5, 130.5, 140.5, 150.5,
+    ]);
+    assert.deepEqual(ascending.exercise.sets.map((set) => set.targetReps), [12, 10, 8, 6, 4, 2]);
+
+    const descending = applyTechniqueToExercise(ascending.exercise, "descending");
+    assert.equal(descending.ok, true);
+    if (!descending.ok) return;
+    assert.equal(descending.exercise.sets[0]?.targetKg, 100.25);
+    assert.equal(descending.exercise.sets[0]?.targetReps, 12);
+    assert.deepEqual(descending.exercise.sets.map((set) => set.targetKg), [
+      100.25, 90, 80, 70, 60, 50,
+    ]);
+    assert.deepEqual(descending.exercise.sets.map((set) => set.targetReps), [12, 14, 16, 18, 20, 22]);
+    current = descending.exercise;
+  }
+});
+
+test("las sugerencias piramidales quedan dentro de los límites del modelo", () => {
+  const source = createFixtureExercise({
+    sets: Array.from({ length: 4 }, (_, index) => createFixtureSet({
+      id: `bounded-${index + 1}`,
+      order: index + 1,
+      targetKg: index === 0 ? 99_999 : 0,
+      targetReps: index === 0 ? 999 : 1,
+    })),
+  });
+  const ascending = applyTechniqueToExercise(source, "ascending");
+  assert.equal(ascending.ok, true);
+  if (ascending.ok) {
+    assert.deepEqual(ascending.exercise.sets.map((set) => set.targetKg), [
+      99_999, 99_999.99, 99_999.99, 99_999.99,
+    ]);
+  }
+  const descending = applyTechniqueToExercise(source, "descending");
+  assert.equal(descending.ok, true);
+  if (descending.ok) {
+    assert.deepEqual(descending.exercise.sets.map((set) => set.targetReps), [999, 1_000, 1_000, 1_000]);
+  }
+});
+
+test("los límites del dominio coinciden con el contrato persistible", () => {
+  assert.deepEqual({
+    sets: DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS.maxSetsPerExercise,
+    drops: DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS.maxDropsPerSet,
+    reps: DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS.maxTargetReps,
+    kg: DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS.maxTargetKg,
+  }, { sets: 20, drops: 8, reps: 1_000, kg: 99_999.99 });
+});
+
+test("drop set normaliza el fallo sólo en series que contienen descensos", () => {
+  const source = createFixtureExercise({
+    technique: "failure",
+    sets: [
+      createFixtureSet({ id: "normal-1", order: 1, toFailure: true }),
+      createFixtureSet({
+        id: "normal-2",
+        order: 2,
+        toFailure: false,
+        drops: [{ id: "existing-drop", sourceDropId: null, order: 1, kg: 60, reps: 8 }],
+      }),
+      createFixtureSet({ id: "normal-3", order: 3, toFailure: true }),
+    ],
+  });
+  const normalized = applyTechniqueToExercise(source, "drop_set");
+  assert.equal(normalized.ok, true);
+  if (normalized.ok) {
+    assert.deepEqual(normalized.exercise.sets.map((set) => set.toFailure), [false, true, false]);
+  }
+});
+
+test("validación bloquea cualquier secuencia de drops no estrictamente descendente", () => {
+  const invalid = createFixtureDraft({
+    routines: {
+      monday: createFixtureDay({
+        exercises: [createFixtureExercise({
+          technique: "drop_set",
+          sets: [createFixtureSet({
+            targetKg: 80,
+            drops: [
+              { id: "bad-drop-1", sourceDropId: null, order: 1, kg: 80, reps: 8 },
+              { id: "bad-drop-2", sourceDropId: null, order: 2, kg: 81, reps: 8 },
+            ],
+          })],
+        })],
+      }),
+    },
+  });
+  const result = validateTrainingCycleDraft(invalid);
+  assert.equal(result.valid, false);
+  assert.equal(result.blockingIssues.some((issue) => issue.code === "invalid_drop_sequence"), true);
 });
 
 test("drop set exige namespace sólo al crear el primer descenso", () => {
@@ -258,4 +433,13 @@ test("drop set exige namespace sólo al crear el primer descenso", () => {
   const reapplied = applyTechniqueToExercise(first.exercise, "drop_set");
   assert.equal(reapplied.ok, true);
   if (reapplied.ok) assert.deepEqual(reapplied.exercise.sets[0]?.drops, first.exercise.sets[0]?.drops);
+});
+
+test("drop set rechaza una referencia cero en vez de crear 0→0", () => {
+  const source = createFixtureExercise({ sets: [createFixtureSet({ targetKg: 0 })] });
+  assert.deepEqual(applyTechniqueToExercise(source, "drop_set", { dropIdNamespace: "zero" }), {
+    ok: false,
+    reason: "invalid_drop_reference",
+  });
+  assert.deepEqual(source.sets[0]?.drops, []);
 });

@@ -163,6 +163,23 @@ async function verifyTokenOwner(input: {
   }
 }
 
+async function verifyCurrentSessionOwner(input: {
+  readonly principal: TrainingCycleRpcPrincipalClient;
+  readonly accessToken: string;
+  readonly expectedUserId: string;
+  readonly isCurrent: () => boolean;
+}) {
+  const result = await guardedAwait(input.principal.auth.getSession(), input.isCurrent);
+  if (
+    result.error
+    || !result.data.session?.access_token
+    || result.data.session.user.id !== input.expectedUserId
+    || result.data.session.access_token !== input.accessToken
+  ) {
+    throw new TrainingCycleTransportError("session_mismatch", "La sesión cambió. Vuelve a intentarlo.");
+  }
+}
+
 export async function captureTrainingCycleRpcOperation(input: {
   readonly principal: TrainingCycleRpcPrincipalClient;
   readonly expectedUserId: string;
@@ -183,7 +200,11 @@ export async function captureTrainingCycleRpcOperation(input: {
   await guardedAwait(verifyTokenOwner({ ...input, accessToken }), input.isCurrent);
   return {
     dataClient: (input.createPinnedClient ?? defaultPinnedClient)(accessToken),
-    verifyExpectedUser: () => verifyTokenOwner({ ...input, accessToken }),
+    // El token capturado ya fue validado contra Auth antes de construir el
+    // cliente pinned. Después del RPC sólo comprobamos que la sesión visible
+    // continúa perteneciendo al mismo owner; repetir GET /user aquí convierte
+    // un commit válido en un falso fallo si Auth sufre un error transitorio.
+    verifyExpectedUser: () => verifyCurrentSessionOwner({ ...input, accessToken }),
   };
 }
 
