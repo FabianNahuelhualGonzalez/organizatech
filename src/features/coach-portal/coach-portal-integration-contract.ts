@@ -48,6 +48,10 @@ const CALENDAR_RESOURCE_BOUNDS_MIGRATION_PATH =
   "supabase/migrations/20260828192434_sec_calendar_resource_bounds.sql";
 const READINESS_RESOURCE_BOUNDS_MIGRATION_PATH =
   "supabase/migrations/20260828192436_sec_readiness_resource_bounds.sql";
+const CYCLE_REDESIGN_SCHEMA_MIGRATION_PATH =
+  "supabase/migrations/20260829200846_cycle_redesign_schema.sql";
+const CYCLE_REDESIGN_API_MIGRATION_PATH =
+  "supabase/migrations/20260829200847_cycle_redesign_api.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -538,6 +542,8 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== NOTIFICATIONS_PORTAL_SEPARATION_MIGRATION_PATH
         && path !== CALENDAR_RESOURCE_BOUNDS_MIGRATION_PATH
         && path !== READINESS_RESOURCE_BOUNDS_MIGRATION_PATH
+        && path !== CYCLE_REDESIGN_SCHEMA_MIGRATION_PATH
+        && path !== CYCLE_REDESIGN_API_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
