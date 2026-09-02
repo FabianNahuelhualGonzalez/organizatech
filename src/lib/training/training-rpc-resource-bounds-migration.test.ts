@@ -6,6 +6,8 @@ import path from "node:path";
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260902163716_sec_training_rpc_resource_bounds.sql":
     "95b7821dae127f59f11cbd5458a1f36cd1380e0b5be2411fa424fb874afd5a04",
+  "20260902183335_sec_training_integer_cast_fix.sql":
+    "be8ca612be6d586c191b0e873a1f7d6f43cbe91d3f2c1fb815ed8363a0c15340",
 } as const;
 
 const migrationPath = path.join(
@@ -13,6 +15,13 @@ const migrationPath = path.join(
   "supabase/migrations/20260902163716_sec_training_rpc_resource_bounds.sql",
 );
 const migration = readFileSync(migrationPath, "utf8");
+const integerCastFix = readFileSync(
+  path.join(
+    process.cwd(),
+    "supabase/migrations/20260902183335_sec_training_integer_cast_fix.sql",
+  ),
+  "utf8",
+);
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -100,6 +109,18 @@ function assertCoreResourceBoundary(source: string) {
 
 test("la migracion aplica los limites antes de expandir o persistir payloads", () => {
   assertCoreResourceBoundary(migration);
+});
+
+test("el parche forward-only reemplaza los casts integer que fallan en runtime", () => {
+  assert.match(integerCastFix, /^-- SEC-TRAIN-01 forward fix:/);
+  assert.match(integerCastFix, /begin;[\s\S]*commit;/);
+  assert.match(integerCastFix, /'private\.enforce_training_cycle_exercise_resource_bounds\(\)'::text,\s*2/);
+  assert.match(integerCastFix, /'private\.enforce_exercise_entry_resource_bounds\(\)'::text,\s*1/);
+  assert.match(integerCastFix, /'public\.apply_training_cycle_day_exercise_changes\(uuid,uuid,uuid\[],jsonb,jsonb\)'::text,\s*8/);
+  assert.match(integerCastFix, /pg_catalog\.replace\(\s*v_definition,\s*'::pg_catalog\.integer',\s*'::pg_catalog\.int4'/);
+  assert.match(integerCastFix, /v_invalid_cast_count <> v_target\.expected_cast_count/);
+  assert.match(integerCastFix, /SEC-TRAIN cast fix postcheck failed/);
+  assert.doesNotMatch(integerCastFix, /\b(?:grant|revoke|drop|alter)\b/i);
 });
 
 test("los payloads usan allowlists exactas y conservan observation opcional", () => {

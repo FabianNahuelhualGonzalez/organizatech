@@ -50,6 +50,8 @@ const READINESS_RESOURCE_BOUNDS_MIGRATION_PATH =
   "supabase/migrations/20260828192436_sec_readiness_resource_bounds.sql";
 const TRAINING_RESOURCE_BOUNDS_MIGRATION_PATH =
   "supabase/migrations/20260902163716_sec_training_rpc_resource_bounds.sql";
+const TRAINING_INTEGER_CAST_FIX_MIGRATION_PATH =
+  "supabase/migrations/20260902183335_sec_training_integer_cast_fix.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -541,6 +543,7 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== CALENDAR_RESOURCE_BOUNDS_MIGRATION_PATH
         && path !== READINESS_RESOURCE_BOUNDS_MIGRATION_PATH
         && path !== TRAINING_RESOURCE_BOUNDS_MIGRATION_PATH
+        && path !== TRAINING_INTEGER_CAST_FIX_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
