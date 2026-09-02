@@ -221,7 +221,7 @@ function auditDestinations(sources: Sources) {
   const userText = userClauses.map((clause) => clause.getText(sourceFile)).join("\n");
   assertContract(
     userClauses.length === 1
-    && /continueAuthenticatedSession\(\s*authState,\s*intent,\s*clearCompletedAuthForm,\s*false,\s*\)/.test(userText),
+    && /continueAuthenticatedSession\(\s*authState,\s*intent,\s*clearCompletedAuthForm,\s*\)/.test(userText),
     FAILURE.destinationsShared,
   );
 

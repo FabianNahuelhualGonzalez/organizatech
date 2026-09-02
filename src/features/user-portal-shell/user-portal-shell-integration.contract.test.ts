@@ -1759,36 +1759,34 @@ function assertAuthorizationBoundary(sources: Sources) {
   assert.equal(
     publications.filter((publication) => publication.pos < awaitContinuations[0].pos).length,
     2,
-    "[UI-NAV-01.proof-publication] ambas rutas publican autorización antes de esperar datos secundarios",
+    "[UI-NAV-01.proof-publication] ambas rutas publican autorización antes de esperar datos críticos",
   );
   assert.equal(
     publications.filter((publication) => publication.pos > awaitContinuations[0].pos).length,
     0,
-    "[UI-NAV-01.proof-publication] ninguna ruta retiene el portal hasta completar datos secundarios",
+    "[UI-NAV-01.proof-publication] ninguna ruta fabrica autorización después de cargar datos",
   );
   const foregroundPublication = publications
     .filter((publication) => publication.pos < awaitContinuations[0].pos)
     .sort((left, right) => right.pos - left.pos)[0];
-  assert.ok(foregroundPublication, "[UI-NAV-01.fast-resume] bootstrap/login publica su prueba antes de la carga");
+  assert.ok(foregroundPublication, "[UI-NAV-01.splash-readiness] bootstrap/login publica su prueba antes de la carga");
   const foregroundPrefix = compact(
     continuation.sourceFile.text.slice(foregroundPublication.getStart(), awaitContinuations[0].getStart()),
   );
-  assert.ok(
-    foregroundPrefix.includes("setIsAuthLoading(false)")
-    && foregroundPrefix.includes("clearCompletedAuthForm()")
-    && foregroundPrefix.includes("restoreActiveFlowForSession")
-    && foregroundPrefix.includes('createAuthNavigationReset("dashboard","session-established")'),
-    "[UI-NAV-01.fast-resume] el portal autorizado reemplaza el splash antes de esperar datos secundarios",
+  assert.doesNotMatch(
+    foregroundPrefix,
+    /setIsAuthLoading\(false\)|clearCompletedAuthForm\(\)|restoreActiveFlowForSession|createAuthNavigationReset/,
+    "[UI-NAV-01.splash-readiness] el Dashboard no reemplaza el splash antes de completar datos críticos",
   );
   const foregroundContinuationCall = awaitContinuations[0].expression;
   assert.ok(
     ts.isCallExpression(foregroundContinuationCall),
-    "[UI-NAV-01.fast-resume] continuación identificable",
+    "[UI-NAV-01.splash-readiness] continuación identificable",
   );
   assert.equal(
-    compact(foregroundContinuationCall.arguments[3]?.getText(continuation.sourceFile) ?? ""),
-    "false",
-    "[UI-NAV-01.fast-resume] la carga secundaria no repite la presentación del portal",
+    foregroundContinuationCall.arguments.length,
+    3,
+    "[UI-NAV-01.splash-readiness] la presentación queda en el completion de la carga crítica",
   );
 }
 

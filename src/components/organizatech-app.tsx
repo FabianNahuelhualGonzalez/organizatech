@@ -1811,19 +1811,10 @@ export function OrganizatechApp({
           return;
         }
         replaceUserPortalAuthorizationProof(authorizationProof);
-        setIsAuthLoading(false);
-        clearCompletedAuthForm();
-        if (
-          intent !== "restore-active-flow"
-          || !restoreActiveFlowForSession(authState.dataMode, authState.user?.id)
-        ) {
-          navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
-        }
         const continuation = await continueAuthenticatedSession(
           authState,
           intent,
           clearCompletedAuthForm,
-          false,
         );
         if (continuation.kind === "stale" || !isAuthorizationCurrent()) return;
         return;
@@ -1855,7 +1846,6 @@ export function OrganizatechApp({
     authState: SupabaseSessionState,
     intent: AuthenticatedSessionIntent,
     clearCompletedAuthForm: () => void = clearAuthForms,
-    publishPresentationOnComplete = true,
   ) {
     const requestToken = captureSessionDataRequestToken();
     if (!authState.session || !authState.user || requestToken.userId !== authState.user.id) {
@@ -1869,7 +1859,6 @@ export function OrganizatechApp({
         isCurrent: isSessionDataRequestCurrent,
         onStart: () => setStatusMessage(""),
         onComplete: (completedIntent) => {
-          if (!publishPresentationOnComplete) return;
           setIsAuthLoading(false);
           clearCompletedAuthForm();
           if (

@@ -2174,8 +2174,8 @@ function auditIntegration(sources: Sources) {
   assert.match(root, /event === "SIGNED_OUT"[\s\S]*interactiveAuthAttemptRef\.current = false/);
   assert.match(
     root,
-    /case "user_authorized": \{[\s\S]*createUserPortalAuthorizationProof\(\{[\s\S]*replaceCoachPortalSession\(null\);[\s\S]*replaceUserPortalAuthorizationProof\(authorizationProof\);[\s\S]*setIsAuthLoading\(false\);[\s\S]*const continuation = await continueAuthenticatedSession\(\s*authState,\s*intent,\s*clearCompletedAuthForm,\s*false,\s*\);[\s\S]*continuation\.kind === "stale"/,
-    "[AUTH-COACH-01.USER.root.user-destination] Usuario publica autorización y conserva su carga productiva en segundo plano",
+    /case "user_authorized": \{[\s\S]*createUserPortalAuthorizationProof\(\{[\s\S]*replaceCoachPortalSession\(null\);[\s\S]*replaceUserPortalAuthorizationProof\(authorizationProof\);[\s\S]*const continuation = await continueAuthenticatedSession\(\s*authState,\s*intent,\s*clearCompletedAuthForm,\s*\);[\s\S]*continuation\.kind === "stale"/,
+    "[AUTH-COACH-01.USER.root.user-destination] Usuario conserva el splash hasta completar su carga productiva",
   );
   assert.match(
     root,
