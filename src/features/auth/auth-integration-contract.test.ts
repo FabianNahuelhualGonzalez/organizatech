@@ -168,6 +168,37 @@ assert.match(root, /loginSubmitOwnerController\.acquire\(\)/);
 assert.match(root, /resetPasswordForEmail\(email, \{ redirectTo \}\)/);
 assert.doesNotMatch(root, /className="login-shell"|Validando sesión<\/h2>/);
 assert.match(root, /<AuthLoadingScreen \/>/);
+assert.doesNotMatch(
+  authScreen,
+  /Validando sesión|Estamos revisando si ya tienes una sesión activa/,
+  "el bootstrap Auth no debe comunicar ni explicar una espera técnica",
+);
+assert.match(authScreen, /aria-label="Cargando Organizatech"[\s\S]*?role="status"/);
+const loadingScreenSource = authScreen.slice(
+  authScreen.indexOf("export function AuthLoadingScreen"),
+  authScreen.indexOf("interface PasswordRecoveryScreenProps"),
+);
+assert.match(loadingScreenSource, /className=\{styles\.loadingSplash\}/);
+assert.match(
+  loadingScreenSource,
+  /<Image[\s\S]*?className=\{styles\.loadingSplashLogo\}[\s\S]*?src="\/icon\.svg"[\s\S]*?priority/,
+  "el splash debe mostrar únicamente el isotipo prioritario de Organizatech",
+);
+assert.doesNotMatch(
+  loadingScreenSource,
+  /AuthFrame|styles\.card|loadingCard|LoaderCircle|loadingIcon|organizatech<|Evoluciona tu rendimiento/,
+  "el splash no debe montar tarjeta, spinner, wordmark ni texto promocional",
+);
+assert.match(
+  authStyles,
+  /\.loadingSplash\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?inset:\s*0;[\s\S]*?min-height:\s*100dvh;[\s\S]*?place-items:\s*center;[\s\S]*?background-color:\s*var\(--background\);/,
+  "el gate centra únicamente el isotipo sobre el canvas global",
+);
+assert.doesNotMatch(
+  loadingScreenSource,
+  /setTimeout|animation|transition/,
+  "el splash no introduce una duración mínima artificial",
+);
 for (const flowScreen of ["PasswordRecoveryScreen", "RecoveryExpiredScreen", "NewPasswordScreen"]) {
   assert.ok(authScreen.includes(`export function ${flowScreen}`));
 }

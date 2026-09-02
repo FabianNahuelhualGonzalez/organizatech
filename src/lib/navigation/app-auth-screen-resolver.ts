@@ -41,7 +41,7 @@ export function resolveInitialAuthScreen(
 export function resolveInitialAuthStatusMessage(routeState: PasswordRecoveryRouteState): string {
   if (routeState === "expired") return "El enlace de recuperación expiró o ya fue utilizado.";
   if (routeState === "active") return "Crea una nueva contraseña para continuar.";
-  return "Validando sesión...";
+  return "";
 }
 
 /** Mantiene el gate de carga hasta que Supabase confirme una recuperación activa. */

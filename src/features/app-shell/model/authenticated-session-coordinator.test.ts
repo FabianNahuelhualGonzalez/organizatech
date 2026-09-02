@@ -10,6 +10,20 @@ import {
   type AuthenticatedSessionIntent,
 } from "@/features/app-shell/model/authenticated-session-coordinator";
 import {
+  resolveSignedOutSessionPolicy,
+  resolveSignedOutStorageScope,
+} from "@/features/app-shell/model/signed-out-session-policy";
+import {
+  BROWSER_STORAGE_PREFIXES,
+  clearBrowserStorageScope,
+  getScopedBrowserStorageKey,
+  type BrowserStorageLike,
+} from "@/lib/storage/browser-storage";
+import {
+  consumeAuthoritativeRefreshRejection,
+  recordAuthoritativeRefreshRejection,
+} from "@/lib/supabase/client";
+import {
   activeWorkoutControllerReducer,
   createInitialActiveWorkoutControllerState,
 } from "@/features/active-workout/model/active-workout-controller-state";
@@ -73,6 +87,98 @@ async function withWatchdog<T>(promise: Promise<T>, label: string): Promise<T> {
 
 after(() => {
   assert.equal(unsettledDeferreds, 0, "todos los deferred async deben finalizar");
+});
+
+test("SIGNED_OUT inesperado bloquea la sesión sin purgar el scope durable", () => {
+  assert.deepEqual(resolveSignedOutSessionPolicy({
+    isExplicitLogoutInFlight: false,
+    hasAuthoritativeRefreshRejection: false,
+  }), {
+    purgeDurableStorage: false,
+    message: "La sesión dejó de estar disponible. Tus datos locales se conservaron.",
+    statusTone: "error",
+  });
+});
+
+test("SIGNED_OUT purga sólo ante logout explícito o rechazo refresh autoritativo", () => {
+  assert.equal(resolveSignedOutSessionPolicy({
+    isExplicitLogoutInFlight: true,
+    hasAuthoritativeRefreshRejection: false,
+  }).purgeDurableStorage, true);
+  assert.equal(resolveSignedOutSessionPolicy({
+    isExplicitLogoutInFlight: false,
+    hasAuthoritativeRefreshRejection: true,
+  }).purgeDurableStorage, true);
+});
+
+test("ROOT bootstrap 401 con refs null purga sólo el scope exacto A", () => {
+  const userA = "11111111-1111-4111-8111-111111111111";
+  const userB = "22222222-2222-4222-8222-222222222222";
+  const scopeA = `supabase:${userA}` as const;
+  const scopeB = `supabase:${userB}` as const;
+  const values = new Map<string, string>();
+  const storage: BrowserStorageLike = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); },
+    removeItem: (key) => { values.delete(key); },
+  };
+  const keyA = getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, scopeA);
+  const keyB = getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.trainingPlan, scopeB);
+  storage.setItem(keyA, "A");
+  storage.setItem(keyB, "B");
+
+  const refreshScopeA = { userId: userA, sessionEpoch: 901 };
+  recordAuthoritativeRefreshRejection(refreshScopeA, Date.now() + 60_000);
+  const exactMarkerConsumed = consumeAuthoritativeRefreshRejection(refreshScopeA);
+  const exactStorageScope = resolveSignedOutStorageScope({
+    previousStorageScope: null,
+    hasAuthoritativeRefreshRejection: exactMarkerConsumed,
+    signedOutUserId: refreshScopeA.userId,
+  });
+  const policy = resolveSignedOutSessionPolicy({
+    isExplicitLogoutInFlight: false,
+    hasAuthoritativeRefreshRejection: exactMarkerConsumed,
+  });
+  if (policy.purgeDurableStorage) clearBrowserStorageScope(exactStorageScope, storage);
+
+  assert.equal(storage.getItem(keyA), null);
+  assert.equal(storage.getItem(keyB), "B");
+
+  storage.setItem(keyA, "A-restored");
+  const markerAForMismatch = { userId: userA, sessionEpoch: 902 };
+  const signedOutScopeB = { userId: userB, sessionEpoch: 903 };
+  recordAuthoritativeRefreshRejection(markerAForMismatch, Date.now() + 60_000);
+  const mismatchConsumed = consumeAuthoritativeRefreshRejection(signedOutScopeB);
+  const mismatchStorageScope = resolveSignedOutStorageScope({
+    previousStorageScope: null,
+    hasAuthoritativeRefreshRejection: mismatchConsumed,
+    signedOutUserId: signedOutScopeB.userId,
+  });
+  const mismatchPolicy = resolveSignedOutSessionPolicy({
+    isExplicitLogoutInFlight: false,
+    hasAuthoritativeRefreshRejection: mismatchConsumed,
+  });
+  if (mismatchPolicy.purgeDurableStorage) {
+    clearBrowserStorageScope(mismatchStorageScope, storage);
+  }
+  assert.equal(mismatchConsumed, false);
+  assert.equal(mismatchStorageScope, null);
+  assert.equal(storage.getItem(keyA), "A-restored");
+  assert.equal(storage.getItem(keyB), "B");
+
+  const root = readFileSync("src/components/organizatech-app.tsx", "utf8");
+  const authListenerStart = root.indexOf("const authSubscription = supabase?.auth.onAuthStateChange");
+  const signedOutStart = root.indexOf('if (event === "SIGNED_OUT")', authListenerStart);
+  const signedOutEnd = root.indexOf("const authEventResult", signedOutStart);
+  const signedOut = root.slice(signedOutStart, signedOutEnd);
+  assert.match(signedOut, /const hasAuthoritativeRefreshRejection = [\s\S]*consumeAuthoritativeRefreshRejection\(signedOutIdentityScope\)/);
+  assert.match(signedOut, /resolveSignedOutStorageScope\(\{\s*previousStorageScope,\s*hasAuthoritativeRefreshRejection,\s*signedOutUserId: signedOutIdentityScope\?\.userId \?\? null/);
+  assert.match(signedOut, /clearUserSessionState\(signedOutPolicy\.message, signedOutStorageScope/);
+  const clearStart = root.indexOf("function clearUserSessionState");
+  const clearEnd = root.indexOf("function clearBrowserStorageScope", clearStart);
+  const clear = root.slice(clearStart, clearEnd);
+  assert.match(clear, /hasExactDurableStoragePurge/);
+  assert.match(clear, /sessionBoundary\.clearClosingStorageScope \|\| hasExactDurableStoragePurge/);
 });
 
 function createPorts(input: {

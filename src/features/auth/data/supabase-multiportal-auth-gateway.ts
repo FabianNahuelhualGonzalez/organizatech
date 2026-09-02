@@ -21,6 +21,7 @@ import {
   getBrowserAuthCallbackUrl,
 } from "@/features/auth/model/auth-callback";
 import { translateAuthError } from "@/lib/supabase/auth-errors";
+import { runSupabasePrincipalIdentityOperation } from "@/lib/supabase/auth-identity-operation";
 import type { SupabaseSessionState } from "@/lib/supabase/session";
 import type {
   CoachRegistrationOwner,
@@ -68,7 +69,11 @@ export interface SupabaseMultiportalAuthGatewayOptions {
 }
 
 export class MultiportalAuthRepositoryError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+    public readonly authFailureKind?: "authoritative_rejection",
+  ) {
     super(message);
     this.name = "MultiportalAuthRepositoryError";
   }
@@ -241,17 +246,19 @@ export function createSupabaseMultiportalAuthGateway(
     },
 
     async signOutAfterSignupConfirmation(expectedUserId, owner) {
-      if (!owner.isCurrent() || owner.expectedUserId !== expectedUserId) return "stale";
-      const identity = await getAuthoritativeIdentity(supabase, expectedUserId, owner);
-      if (!owner.isCurrent() || !identity || identity.userId !== expectedUserId) return "stale";
-      const { error } = await supabase.auth.signOut({ scope: "local" });
-      if (error) {
-        throw new MultiportalAuthRepositoryError(
-          "No pudimos cerrar la sesión de confirmación.",
-          error,
-        );
-      }
-      return "signed_out";
+      return runSupabasePrincipalIdentityOperation(async () => {
+        if (!owner.isCurrent() || owner.expectedUserId !== expectedUserId) return "stale";
+        const identity = await getAuthoritativeIdentity(supabase, expectedUserId, owner);
+        if (!owner.isCurrent() || !identity || identity.userId !== expectedUserId) return "stale";
+        const { error } = await supabase.auth.signOut({ scope: "local" });
+        if (error) {
+          throw new MultiportalAuthRepositoryError(
+            "No pudimos cerrar la sesión de confirmación.",
+            error,
+          );
+        }
+        return "signed_out";
+      });
     },
 
     async hasUserRegistration(expectedUserId, owner) {
@@ -286,51 +293,56 @@ export function createSupabaseMultiportalAuthGateway(
     },
 
     async activateUserRegistrationIdentity(identity, owner) {
-      return activateRegistrationIdentity(supabase, identity, owner);
+      return runSupabasePrincipalIdentityOperation(() => (
+        activateRegistrationIdentity(supabase, identity, owner)
+      ));
     },
 
     async activateCoachRegistrationIdentity(identity, owner) {
-      if (!ownsRegistration(owner, identity.userId)) return null;
-      const currentIdentity = await getAuthoritativeIdentity(supabase, undefined, owner);
-      if (!owner.isCurrent()) return null;
-      if (currentIdentity) {
-        return currentIdentity.userId === identity.userId ? currentIdentity : null;
-      }
+      return runSupabasePrincipalIdentityOperation(async () => {
+        if (!ownsRegistration(owner, identity.userId)) return null;
+        const currentIdentity = await getAuthoritativeIdentity(supabase, undefined, owner);
+        if (!owner.isCurrent()) return null;
+        if (currentIdentity) {
+          return currentIdentity.userId === identity.userId ? currentIdentity : null;
+        }
 
-      const session = identity.authState.session;
-      if (!session?.access_token || !session.refresh_token) return null;
-      if (!ownsRegistration(owner, identity.userId)) return null;
-      const { data, error } = await supabase.auth.setSession({
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
+        const session = identity.authState.session;
+        if (!session?.access_token || !session.refresh_token) return null;
+        if (!ownsRegistration(owner, identity.userId)) return null;
+        const { data, error } = await supabase.auth.setSession({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        });
+        if (error) throw new MultiportalAuthRepositoryError("No pudimos activar la sesión Coach.", error);
+        if (!ownsRegistration(owner, identity.userId)) return null;
+        const activatedIdentity = mapAuthenticatedIdentity(data.session, data.user);
+        if (!activatedIdentity || activatedIdentity.userId !== identity.userId) return null;
+        return getAuthoritativeIdentity(supabase, identity.userId, owner);
       });
-      if (error) throw new MultiportalAuthRepositoryError("No pudimos activar la sesión Coach.", error);
-      if (!ownsRegistration(owner, identity.userId)) return null;
-      const activatedIdentity = mapAuthenticatedIdentity(data.session, data.user);
-      if (!activatedIdentity || activatedIdentity.userId !== identity.userId) return null;
-      return getAuthoritativeIdentity(supabase, identity.userId, owner);
     },
 
     async signOut(reason, owner: PortalResolutionOwner | CoachRegistrationOwner) {
       const expectedUserId = owner.expectedUserId;
       if (!expectedUserId || !owner.isCurrent()) return "stale";
-      const identity = await getAuthoritativeIdentity(supabase, expectedUserId, owner);
-      if (
-        !identity
-        || identity.userId !== expectedUserId
-        || owner.expectedUserId !== expectedUserId
-        || !owner.isCurrent()
-      ) {
-        return "stale";
-      }
+      return runSupabasePrincipalIdentityOperation(async () => {
+        const localSessionUserId = await getLocalSessionUserId(supabase, owner);
+        if (
+          localSessionUserId !== expectedUserId
+          || owner.expectedUserId !== expectedUserId
+          || !owner.isCurrent()
+        ) {
+          return "stale";
+        }
 
-      options.onBeforeSignOut?.(reason, owner);
-      const { error } = await supabase.auth.signOut({ scope: "local" });
-      if (error) {
-        options.onSignOutError?.(reason, owner);
-        throw new MultiportalAuthRepositoryError("No pudimos cerrar la sesión.", error);
-      }
-      return "signed_out";
+        options.onBeforeSignOut?.(reason, owner);
+        const { error } = await supabase.auth.signOut({ scope: "local" });
+        if (error) {
+          options.onSignOutError?.(reason, owner);
+          throw new MultiportalAuthRepositoryError("No pudimos cerrar la sesión.", error);
+        }
+        return "signed_out";
+      });
     },
 
   };
@@ -356,6 +368,9 @@ async function getAuthoritativeIdentity(
   if (owner && !owner.isCurrent()) return null;
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (owner && !owner.isCurrent()) return null;
+  if (userError && isTerminalAuthResponseError(userError)) {
+    throw authoritativeAuthRejection(userError);
+  }
   if (userError && isMissingSessionError(userError)) return null;
   if (userError) {
     throw new MultiportalAuthRepositoryError("No pudimos validar la sesión.", userError);
@@ -369,6 +384,9 @@ async function getAuthoritativeIdentity(
 
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (owner && !owner.isCurrent()) return null;
+  if (sessionError && isTerminalAuthResponseError(sessionError)) {
+    throw authoritativeAuthRejection(sessionError);
+  }
   if (sessionError) {
     throw new MultiportalAuthRepositoryError("No pudimos validar la sesión.", sessionError);
   }
@@ -380,6 +398,24 @@ async function getAuthoritativeIdentity(
   return mapAuthenticatedIdentity(session, user);
 }
 
+async function getLocalSessionUserId(
+  supabase: SupabaseClient,
+  owner: { isCurrent(): boolean },
+): Promise<string | null> {
+  if (!owner.isCurrent()) return null;
+  const { data, error } = await supabase.auth.getSession();
+  if (!owner.isCurrent() || error) return null;
+  return data.session?.user.id ?? null;
+}
+
+function authoritativeAuthRejection(error: unknown) {
+  return new MultiportalAuthRepositoryError(
+    "La sesión fue rechazada por el servidor.",
+    error,
+    "authoritative_rejection",
+  );
+}
+
 async function requireAuthoritativeIdentity(
   supabase: SupabaseClient,
   expectedUserId: string,
@@ -387,7 +423,11 @@ async function requireAuthoritativeIdentity(
 ) {
   const identity = await getAuthoritativeIdentity(supabase, expectedUserId, owner);
   if (!identity || identity.userId !== expectedUserId) {
-    throw new MultiportalAuthRepositoryError("La identidad autenticada cambió.");
+    throw new MultiportalAuthRepositoryError(
+      "La identidad autenticada cambió.",
+      undefined,
+      "authoritative_rejection",
+    );
   }
   return identity;
 }
@@ -435,7 +475,11 @@ async function readOwnUserRegistration(
 
   const row = mapUserRegistrationRow(data);
   if (row && row.userId !== expectedUserId) {
-    throw new MultiportalAuthRepositoryError("La autorización Usuario no pertenece a la sesión.");
+    throw new MultiportalAuthRepositoryError(
+      "La autorización Usuario no pertenece a la sesión.",
+      undefined,
+      "authoritative_rejection",
+    );
   }
   await requireAuthoritativeIdentity(supabase, expectedUserId, owner);
   return row;
@@ -458,7 +502,11 @@ async function readOwnCoachRegistration(
 
   const row = mapCoachRegistrationRow(data);
   if (row && row.userId !== expectedUserId) {
-    throw new MultiportalAuthRepositoryError("La autorización Coach no pertenece a la sesión.");
+    throw new MultiportalAuthRepositoryError(
+      "La autorización Coach no pertenece a la sesión.",
+      undefined,
+      "authoritative_rejection",
+    );
   }
   await requireAuthoritativeIdentity(supabase, expectedUserId, owner);
   return row;
@@ -579,6 +627,13 @@ function readErrorCode(error: unknown): string {
 function readErrorMessage(error: unknown): string {
   if (!error || typeof error !== "object" || !("message" in error)) return "";
   return String(error.message ?? "").toLowerCase();
+}
+
+function isTerminalAuthResponseError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { status?: unknown; statusCode?: unknown };
+  const status = Number(candidate.status ?? candidate.statusCode);
+  return status === 400 || status === 401 || status === 403;
 }
 
 function isInvalidCredentialsError(error: unknown): boolean {

@@ -10,6 +10,7 @@ import {
 import {
   FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
   resolveUserPortalSessionRevalidation,
+  shouldPreserveUserPortalAfterRetryableRevalidation,
 } from "@/features/auth/model/user-portal-session-revalidation";
 import type { AuthorizedPortalAccess } from "@/features/auth/model/multiportal-auth-controller";
 
@@ -228,6 +229,71 @@ test("resultado autoritativo válido renueva la prueba e inválido bloquea el po
   });
   assert.equal(rejectedProof, null);
   assert.equal(shouldMountAuthorizedUserPortal(mountInput(rejectedProof)), false);
+});
+
+test("fallo retryable A→A conserva únicamente una prueba Usuario vigente", () => {
+  const proof = createUserPortalAuthorizationProof({
+    access: USER_ACCESS,
+    sessionUserId: USER_ID,
+    authenticatedUserId: USER_ID,
+  });
+  assert.ok(proof);
+  const sessionRevalidation = resolveUserPortalSessionRevalidation(
+    revalidationInput(proof, { event: "TOKEN_REFRESHED" }),
+  );
+
+  assert.equal(shouldPreserveUserPortalAfterRetryableRevalidation({
+    access: {
+      state: "error",
+      requestedPortal: "usuario",
+      message: "La conexión está inestable. Tu sesión se conserva; intenta nuevamente.",
+      retryable: true,
+    },
+    sessionRevalidation,
+    expectedUserId: USER_ID,
+    nextSessionUserId: USER_ID,
+    nextAuthenticatedUserId: USER_ID,
+    isResolutionCurrent: true,
+  }), true);
+});
+
+test("rechazo real, owner stale, ausencia y A→B nunca conservan la prueba", () => {
+  const proof = createUserPortalAuthorizationProof({
+    access: USER_ACCESS,
+    sessionUserId: USER_ID,
+    authenticatedUserId: USER_ID,
+  });
+  assert.ok(proof);
+  const silentRevalidation = resolveUserPortalSessionRevalidation(revalidationInput(proof));
+  const retryableAccess = {
+    state: "error",
+    requestedPortal: "usuario",
+    message: "La conexión está inestable. Tu sesión se conserva; intenta nuevamente.",
+    retryable: true,
+  } as const;
+  const baseInput = {
+    access: retryableAccess,
+    sessionRevalidation: silentRevalidation,
+    expectedUserId: USER_ID,
+    nextSessionUserId: USER_ID,
+    nextAuthenticatedUserId: USER_ID,
+    isResolutionCurrent: true,
+  };
+
+  for (const candidate of [
+    { name: "rechazo autoritativo", input: { ...baseInput, access: { ...retryableAccess, retryable: false } } },
+    { name: "owner stale", input: { ...baseInput, isResolutionCurrent: false } },
+    { name: "sesión ausente", input: { ...baseInput, nextSessionUserId: null } },
+    { name: "usuario ausente", input: { ...baseInput, nextAuthenticatedUserId: null } },
+    { name: "sesión B", input: { ...baseInput, nextSessionUserId: "user-b", nextAuthenticatedUserId: "user-b" } },
+    { name: "proof fail-closed", input: { ...baseInput, sessionRevalidation: FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION } },
+  ]) {
+    assert.equal(
+      shouldPreserveUserPortalAfterRetryableRevalidation(candidate.input),
+      false,
+      candidate.name,
+    );
+  }
 });
 
 test("bootstrap, identidad nueva y condiciones de seguridad fallan cerradas", () => {

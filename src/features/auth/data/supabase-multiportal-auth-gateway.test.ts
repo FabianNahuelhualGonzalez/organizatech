@@ -16,13 +16,22 @@ import {
 import {
   createMultiportalAuthController,
   MULTIPORTAL_AUTH_ERROR_MESSAGE,
+  MULTIPORTAL_AUTH_RETRYABLE_MESSAGE,
 } from "@/features/auth/model/multiportal-auth-controller";
 import {
   createCoachRegistrationOwnerController,
   createPortalResolutionOwnerController,
   createUserRegistrationOwnerController,
 } from "@/features/auth/model/portal-resolution-owner";
-import type { SupabaseSessionState } from "@/lib/supabase/session";
+import {
+  getInitialSupabaseSession,
+  type SupabaseSessionState,
+} from "@/lib/supabase/session";
+import {
+  SupabasePrincipalIdentityCoordinationUnavailableError,
+  runSupabasePrincipalIdentityOperation,
+} from "@/lib/supabase/auth-identity-operation";
+import { initializeSupabaseBrowserAuthIfCoordinated } from "@/lib/supabase/client";
 
 const users = {
   "user-a": { id: "user-a", email: "coach-a@example.com" } as User,
@@ -104,6 +113,7 @@ interface StatefulFakeInput {
   rows?: ReadonlyArray<ReturnType<typeof registrationRow>>;
   userRows?: ReadonlyArray<{ user_id: TestUserId }>;
   beforeGetUser?(): void | Promise<void>;
+  beforeGetSession?(): void | Promise<void>;
   beforeRpc?(): void | Promise<void>;
   onFilterAttempt?(): void;
   selectError?: unknown;
@@ -144,6 +154,7 @@ function createStatefulFakeClient(input: StatefulFakeInput = {}) {
     },
     getSession: async () => {
       sessionReads += 1;
+      await input.beforeGetSession?.();
       const user = currentUser();
       const session = user
         ? { user, access_token: `test-${user.id}`, refresh_token: `test-${user.id}` } as Session
@@ -320,6 +331,71 @@ function beginPortalOwner(userId: TestUserId) {
   const owners = createPortalResolutionOwnerController();
   owners.acceptIdentity(userId);
   return { owners, owner: owners.begin(userId) };
+}
+
+function createPortalAuthFailureClient(input: {
+  failureSource: "getUser" | "getSession";
+  status: number;
+  localUserId?: TestUserId | null;
+}) {
+  let localUserId: TestUserId | null = input.localUserId ?? "user-a";
+  let getUserCalls = 0;
+  let getSessionCalls = 0;
+  const signOutOptions: unknown[] = [];
+  const terminalError = Object.assign(new Error(`Auth ${input.status}`), {
+    status: input.status,
+  });
+
+  const auth = {
+    getUser: async () => {
+      getUserCalls += 1;
+      if (input.failureSource === "getUser" && getUserCalls === 1) {
+        return { data: { user: null }, error: terminalError };
+      }
+      return {
+        data: { user: localUserId ? users[localUserId] : null },
+        error: null,
+      };
+    },
+    getSession: async () => {
+      getSessionCalls += 1;
+      if (input.failureSource === "getSession" && getSessionCalls === 1) {
+        return { data: { session: null }, error: terminalError };
+      }
+      const user = localUserId ? users[localUserId] : null;
+      return {
+        data: {
+          session: user
+            ? {
+              user,
+              access_token: `local-${user.id}`,
+              refresh_token: `local-refresh-${user.id}`,
+            } as Session
+            : null,
+        },
+        error: null,
+      };
+    },
+    signOut: async (options: unknown) => {
+      signOutOptions.push(options);
+      localUserId = null;
+      return { error: null };
+    },
+  };
+
+  return {
+    client: { auth } as unknown as SupabaseClient,
+    signOutOptions,
+    get getUserCalls() {
+      return getUserCalls;
+    },
+    get getSessionCalls() {
+      return getSessionCalls;
+    },
+    get localUserId() {
+      return localUserId;
+    },
+  };
 }
 
 test("payload Coach focal conserva sólo datos profesionales allowlisted", () => {
@@ -1139,6 +1215,88 @@ test("signOut stale de A no toca la sesión vigente de B ni publica motivo", asy
   assert.equal(fake.activeUserId, "user-b");
 });
 
+test("rechazos Auth 401/403 cierran localmente sólo la identidad esperada", async (context) => {
+  for (const candidate of [
+    { name: "getUser 401", failureSource: "getUser", status: 401 },
+    { name: "getSession 403", failureSource: "getSession", status: 403 },
+  ] as const) {
+    await context.test(candidate.name, async () => {
+      const fake = createPortalAuthFailureClient(candidate);
+      const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+      const controller = createMultiportalAuthController<SupabaseSessionState>();
+      const { owner } = beginPortalOwner("user-a");
+
+      const result = await controller.resolvePortalAccess({
+        requestedPortal: "usuario",
+        expectedUserId: "user-a",
+        owner,
+      }, gateway);
+
+      assert.deepEqual(result, {
+        state: "error",
+        requestedPortal: "usuario",
+        message: MULTIPORTAL_AUTH_ERROR_MESSAGE,
+      });
+      assert.deepEqual(fake.signOutOptions, [{ scope: "local" }]);
+      assert.equal(fake.localUserId, null);
+      assert.equal(fake.getUserCalls, 1, "el rechazo terminal no se consulta de nuevo");
+      assert.equal(
+        fake.getSessionCalls,
+        candidate.failureSource === "getSession" ? 2 : 1,
+        "el cierre revalida únicamente la sesión local actual",
+      );
+    });
+  }
+});
+
+test("fallo Auth 503 conserva la sesión y nunca invoca signOut", async () => {
+  const fake = createPortalAuthFailureClient({
+    failureSource: "getUser",
+    status: 503,
+  });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const controller = createMultiportalAuthController<SupabaseSessionState>();
+  const { owner } = beginPortalOwner("user-a");
+
+  const result = await controller.resolvePortalAccess({
+    requestedPortal: "usuario",
+    expectedUserId: "user-a",
+    owner,
+  }, gateway);
+
+  assert.deepEqual(result, {
+    state: "error",
+    requestedPortal: "usuario",
+    message: MULTIPORTAL_AUTH_RETRYABLE_MESSAGE,
+    retryable: true,
+  });
+  assert.deepEqual(fake.signOutOptions, []);
+  assert.equal(fake.localUserId, "user-a");
+  assert.equal(fake.getSessionCalls, 0);
+});
+
+test("rechazo Auth tardío de A nunca cierra la sesión local de B", async () => {
+  const fake = createPortalAuthFailureClient({
+    failureSource: "getUser",
+    status: 401,
+    localUserId: "user-b",
+  });
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+  const controller = createMultiportalAuthController<SupabaseSessionState>();
+  const { owner } = beginPortalOwner("user-a");
+
+  const result = await controller.resolvePortalAccess({
+    requestedPortal: "usuario",
+    expectedUserId: "user-a",
+    owner,
+  }, gateway);
+
+  assert.deepEqual(result, { state: "stale", requestedPortal: "usuario" });
+  assert.deepEqual(fake.signOutOptions, []);
+  assert.equal(fake.localUserId, "user-b");
+  assert.equal(fake.getSessionCalls, 1);
+});
+
 test("signOut con owner Coach vigente revalida A y cierra exactamente la sesión local", async () => {
   const fake = createStatefulFakeClient({ activeUserId: "user-a" });
   const { owner } = beginRegistrationOwner("user-a");
@@ -1150,7 +1308,7 @@ test("signOut con owner Coach vigente revalida A y cierra exactamente la sesión
   assert.equal(await gateway.signOut("authorization_error", owner), "signed_out");
   assert.deepEqual(fake.signOutOptions, [{ scope: "local" }]);
   assert.deepEqual(reasons, ["authorization_error"]);
-  assert.equal(fake.identityReads, 1);
+  assert.equal(fake.identityReads, 0);
   assert.equal(fake.sessionReads, 1);
   assert.equal(fake.activeUserId, null);
 });
@@ -1172,7 +1330,7 @@ test("signOut Coach tardío de A nunca cierra la sesión vigente B", async () =>
   const releaseIdentityRead = createDeferred<void>();
   const fake = createStatefulFakeClient({
     activeUserId: "user-a",
-    beforeGetUser: async () => {
+    beforeGetSession: async () => {
       identityReadStarted.resolve();
       await releaseIdentityRead.promise;
     },
@@ -1193,6 +1351,101 @@ test("signOut Coach tardío de A nunca cierra la sesión vigente B", async () =>
   assert.deepEqual(fake.signOutOptions, []);
   assert.deepEqual(reasons, []);
   assert.equal(fake.activeUserId, "user-b");
+});
+
+test("TOCTOU A→B: login B espera la revalidación y cierre atómico de A", async () => {
+  const sessionReadStarted = createDeferred<void>();
+  const releaseSessionRead = createDeferred<void>();
+  const fake = createStatefulFakeClient({
+    activeUserId: "user-a",
+    beforeGetSession: async () => {
+      sessionReadStarted.resolve();
+      await releaseSessionRead.promise;
+    },
+  });
+  const { owner } = beginRegistrationOwner("user-a");
+  const gateway = createSupabaseMultiportalAuthGateway(fake.client);
+
+  const pendingSignOutA = gateway.signOut("authorization_error", owner);
+  await sessionReadStarted.promise;
+
+  let loginBEntered = false;
+  const pendingLoginB = runSupabasePrincipalIdentityOperation(async () => {
+    loginBEntered = true;
+    fake.setActiveUserId("user-b");
+  });
+  await Promise.resolve();
+  assert.equal(loginBEntered, false, "B no puede entrar entre getSession(A) y signOut(A)");
+
+  releaseSessionRead.resolve();
+  assert.equal(await pendingSignOutA, "signed_out");
+  await pendingLoginB;
+
+  assert.equal(loginBEntered, true);
+  assert.equal(fake.activeUserId, "user-b", "B inicia después y nunca es revocada por A");
+  assert.deepEqual(fake.signOutOptions, [{ scope: "local" }]);
+});
+
+test("browser sin Web Locks falla cerrado antes de cualquier mutación de identidad", async () => {
+  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  let operationCalls = 0;
+  let authInitializationCalls = 0;
+  let storageReads = 0;
+  let refreshStarts = 0;
+  let bootstrapSessionReads = 0;
+  try {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {},
+    });
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: {},
+    });
+
+    const client = initializeSupabaseBrowserAuthIfCoordinated(() => {
+      authInitializationCalls += 1;
+      storageReads += 1;
+      refreshStarts += 1;
+      return {
+        auth: {
+          getSession: async () => {
+            bootstrapSessionReads += 1;
+            return { data: { session: null }, error: null };
+          },
+        },
+      };
+    });
+    assert.equal(client, null);
+
+    await assert.rejects(
+      getInitialSupabaseSession({
+        configured: () => true,
+        getBrowserClient: () => null,
+      }),
+      SupabasePrincipalIdentityCoordinationUnavailableError,
+    );
+
+    await assert.rejects(
+      runSupabasePrincipalIdentityOperation(async () => {
+        operationCalls += 1;
+      }),
+      SupabasePrincipalIdentityCoordinationUnavailableError,
+    );
+    assert.equal(operationCalls, 0);
+    assert.deepEqual({ authInitializationCalls, storageReads, refreshStarts, bootstrapSessionReads }, {
+      authInitializationCalls: 0,
+      storageReads: 0,
+      refreshStarts: 0,
+      bootstrapSessionReads: 0,
+    });
+  } finally {
+    if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+    else Reflect.deleteProperty(globalThis, "navigator");
+  }
 });
 
 test("fallo de signOut Coach local no declara éxito y conserva la sesión", async () => {

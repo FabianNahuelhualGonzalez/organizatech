@@ -801,8 +801,8 @@ const mutations = [
     expectedFailure: FAILURE.logoutRetainsState,
     apply: (value: string) => replaceExactlyOnce(
       value,
-      "  ) {\n    replaceUserPortalAuthorizationProof(null);\n    replaceCoachPortalSession(null);\n    if (\n",
-      "  ) {\n    replaceUserPortalAuthorizationProof(null);\n    void coachPortalSessionRef.current;\n    if (\n",
+      "  ) {\n    replaceUserPortalAuthorizationProof(null);\n    replaceCoachPortalSession(null);\n    const hasExactDurableStoragePurge = options.purgeDurableStorage === true\n",
+      "  ) {\n    replaceUserPortalAuthorizationProof(null);\n    void coachPortalSessionRef.current;\n    const hasExactDurableStoragePurge = options.purgeDurableStorage === true\n",
       "M16",
     ),
   },

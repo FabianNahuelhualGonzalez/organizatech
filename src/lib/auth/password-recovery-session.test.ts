@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
+import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
+
 import {
   executePasswordRecoveryUpdate,
   getPasswordRecoveryClearedHref,
   hasPasswordRecoveryCallbackError,
   resolvePasswordRecoverySessionDecision,
+  signOutPasswordRecoveryIdentityLocally,
 } from "@/lib/auth/password-recovery-session";
 import { createPasswordRecoveryPortalGuard } from "@/features/auth/model/password-recovery-portal-guard";
 import {
@@ -22,11 +25,34 @@ import {
   isSessionDataRequestTokenCurrent,
 } from "@/lib/session/session-data-epoch";
 import { translateAuthError } from "@/lib/supabase/auth-errors";
+import { runSupabasePrincipalIdentityOperation } from "@/lib/supabase/auth-identity-operation";
+import {
+  recordSupabaseAuthIdentity,
+  signOutSupabaseAuthIdentityLocallyIfCurrent,
+} from "@/lib/supabase/client";
+import type { SupabaseAuthRefreshIdentityScope } from "@/lib/supabase/auth-resilience";
 
 const RECOVERY_USER = "11111111-1111-4111-8111-111111111111";
 const RECOVERY_USER_UPPER = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
 const RECOVERY_USER_LOWER = RECOVERY_USER_UPPER.toLowerCase();
 const DIFFERENT_USER = "22222222-2222-4222-8222-222222222222";
+const RECOVERY_SCOPE: SupabaseAuthRefreshIdentityScope = Object.freeze({
+  userId: RECOVERY_USER,
+  sessionEpoch: 1,
+});
+const RECOVERY_LOWER_SCOPE: SupabaseAuthRefreshIdentityScope = Object.freeze({
+  userId: RECOVERY_USER_LOWER,
+  sessionEpoch: 1,
+});
+
+function recoveryIdentityScopeFields(
+  scope: SupabaseAuthRefreshIdentityScope = RECOVERY_SCOPE,
+) {
+  return {
+    expectedIdentityScope: scope,
+    getCurrentIdentityScope: () => scope,
+  };
+}
 
 type DecisionInput = Parameters<typeof resolvePasswordRecoverySessionDecision>[0];
 
@@ -282,6 +308,190 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
+function createAtomicRecoverySignOutHarness(options: {
+  rotateToA2BeforeLock?: boolean;
+  attemptA2WhenSignOutStarts?: boolean;
+  lockAcquireTimeout?: unknown;
+} = {}) {
+  function createSession(epoch: number): Session {
+    return {
+      access_token: `access-token-${epoch}`,
+      refresh_token: `refresh-token-${epoch}`,
+      expires_in: 3_600,
+      token_type: "bearer",
+      user: { id: RECOVERY_USER } as Session["user"],
+    };
+  }
+
+  let storedSession: Session | null = createSession(1);
+  let currentScope = recordSupabaseAuthIdentity(storedSession);
+  assert.ok(currentScope);
+  const scopeA1 = currentScope;
+  let lockHeld = false;
+  let beforeLockHookPending = options.rotateToA2BeforeLock === true;
+  let queuedA2 = false;
+  let signOutCalls = 0;
+  let publicSignOutCalls = 0;
+  const closedRefreshTokens: string[] = [];
+  const attemptA2WhenSignOutStarts = options.attemptA2WhenSignOutStarts === true;
+  const expectedLockAcquireTimeout = Object.prototype.hasOwnProperty.call(
+    options,
+    "lockAcquireTimeout",
+  )
+    ? options.lockAcquireTimeout
+    : undefined;
+
+  function installA2() {
+    storedSession = createSession(2);
+    currentScope = recordSupabaseAuthIdentity(storedSession);
+  }
+
+  const atomicAuth = {
+    initializePromise: Promise.resolve(),
+    lockAcquireTimeout: expectedLockAcquireTimeout,
+    async signOut() {
+      publicSignOutCalls += 1;
+      installA2();
+      if (storedSession) closedRefreshTokens.push(storedSession.refresh_token);
+      storedSession = null;
+      currentScope = null;
+      recordSupabaseAuthIdentity(null);
+      return { error: null };
+    },
+    async _acquireLock<T>(_timeout: number | undefined, operation: () => Promise<T>): Promise<T> {
+      assert.equal(
+        _timeout,
+        expectedLockAcquireTimeout,
+        "se conserva exactamente el timeout interno de auth-js sin inventar otro valor",
+      );
+      assert.equal(lockHeld, false, "el helper no debe adquirir dos veces el lock auth-js");
+      if (beforeLockHookPending) {
+        beforeLockHookPending = false;
+        installA2();
+      }
+      lockHeld = true;
+      try {
+        return await operation();
+      } finally {
+        lockHeld = false;
+        if (queuedA2) installA2();
+      }
+    },
+    async _useSession<T>(operation: (result: {
+      data: { session: Session | null };
+      error: unknown | null;
+    }) => Promise<T>): Promise<T> {
+      assert.equal(lockHeld, true, "la lectura autoritativa ocurre dentro del lock auth-js");
+      return operation({ data: { session: storedSession }, error: null });
+    },
+    async _signOut(options: { scope: "local" }) {
+      assert.deepEqual(options, { scope: "local" });
+      assert.equal(lockHeld, true, "la mutación ocurre dentro del mismo lock auth-js");
+      signOutCalls += 1;
+      if (options.scope === "local" && attemptA2WhenSignOutStarts) {
+        queuedA2 = true;
+      }
+      if (storedSession) closedRefreshTokens.push(storedSession.refresh_token);
+      storedSession = null;
+      currentScope = null;
+      recordSupabaseAuthIdentity(null);
+      return { error: null };
+    },
+  };
+
+  const authPort = {
+    getSession: async () => ({
+      data: { session: storedSession ? { user: { id: storedSession.user.id } } : null },
+      error: null,
+    }),
+    updateUser: async (_attributes: { password: string }) => ({ error: null }),
+    signOut: (
+      _signOutOptions: { scope: "local" },
+      expectedIdentityScope: SupabaseAuthRefreshIdentityScope,
+    ) => signOutSupabaseAuthIdentityLocallyIfCurrent(
+      atomicAuth as unknown as SupabaseClient["auth"],
+      expectedIdentityScope,
+    ),
+  };
+
+  return {
+    authPort,
+    atomicAuth,
+    scopeA1,
+    currentScope: () => currentScope,
+    closedRefreshTokens: () => [...closedRefreshTokens],
+    publicSignOutCalls: () => publicSignOutCalls,
+    signOutCalls: () => signOutCalls,
+    cleanup: () => recordSupabaseAuthIdentity(null),
+  };
+}
+
+function createInstalledSupabaseAuthHarness() {
+  const storageKey = "auth-js-installed-runtime-test";
+  const session = {
+    access_token: "installed-access-token",
+    refresh_token: "installed-refresh-token",
+    expires_at: Math.floor(Date.now() / 1_000) + 3_600,
+    expires_in: 3_600,
+    token_type: "bearer",
+    user: { id: RECOVERY_USER },
+  } as Session;
+  const values = new Map<string, string>([[storageKey, JSON.stringify(session)]]);
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+    removeItem: (key: string) => {
+      values.delete(key);
+    },
+  };
+  let logoutRequests = 0;
+  const client = createClient(
+    "https://abcdefghijklmnopqrst.supabase.co",
+    "installed-runtime-anon-key",
+    {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: true,
+        storage,
+        storageKey,
+      },
+      global: {
+        fetch: async (input) => {
+          const url = input instanceof Request ? input.url : String(input);
+          if (url.endsWith("/auth/v1/logout?scope=local")) logoutRequests += 1;
+          return new Response(null, { status: 204 });
+        },
+      },
+    },
+  );
+  const runtimeAuth = client.auth as unknown as {
+    lockAcquireTimeout: unknown;
+  };
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(runtimeAuth, "lockAcquireTimeout"),
+    true,
+  );
+  assert.equal(
+    runtimeAuth.lockAcquireTimeout,
+    undefined,
+    "supabase-js 2.57/auth-js 2.105.4 entrega undefined al cliente real instalado",
+  );
+  const scope = recordSupabaseAuthIdentity(session);
+  assert.ok(scope);
+
+  return {
+    auth: client.auth,
+    scope,
+    session,
+    storedSession: () => values.get(storageKey) ?? null,
+    logoutRequests: () => logoutRequests,
+    cleanup: () => recordSupabaseAuthIdentity(null),
+  };
+}
+
 async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -326,6 +536,7 @@ test("update error keeps every portal permit blocked until the local recovery se
   const result = await executePasswordRecoveryUpdate({
     password: "Password123",
     confirmedUserId: RECOVERY_USER,
+    ...recoveryIdentityScopeFields(),
     auth: harness.auth,
     isRecoveryCurrent: () => guard.isBlocked(),
     isOperationCurrent: () => true,
@@ -350,6 +561,8 @@ test("invalid or mismatched recovery performs zero writes", async () => {
   assert.deepEqual(await executePasswordRecoveryUpdate({
     password: "Password123",
     confirmedUserId: null,
+    expectedIdentityScope: null,
+    getCurrentIdentityScope: () => null,
     auth: missingConfirmation.auth,
     isRecoveryCurrent: () => false,
     isOperationCurrent: () => true,
@@ -362,6 +575,7 @@ test("invalid or mismatched recovery performs zero writes", async () => {
   assert.deepEqual(await executePasswordRecoveryUpdate({
     password: "Password123",
     confirmedUserId: RECOVERY_USER,
+    ...recoveryIdentityScopeFields(),
     auth: mismatch.auth,
     isRecoveryCurrent: () => true,
     isOperationCurrent: () => true,
@@ -379,6 +593,7 @@ test("successful update keeps the write allowlist and one signOut", async () => 
   const result = await executePasswordRecoveryUpdate({
     password: "Password123",
     confirmedUserId: RECOVERY_USER_LOWER,
+    ...recoveryIdentityScopeFields(RECOVERY_LOWER_SCOPE),
     auth: harness.auth,
     isRecoveryCurrent: (userId) => userId === RECOVERY_USER_LOWER,
     isOperationCurrent: () => true,
@@ -387,13 +602,375 @@ test("successful update keeps the write allowlist and one signOut", async () => 
   });
   assert.deepEqual(result, { kind: "success" });
   assert.deepEqual(harness.calls(), {
-    getSessionCalls: 1,
+    getSessionCalls: 2,
     updateUserCalls: 1,
     signOutCalls: 1,
     updatedPassword: "Password123",
   });
   assert.equal(publishedUpdates, 1);
   completedAsyncTests += 1;
+});
+
+test("recovery A mantiene revalidación y cierre atómicos antes de permitir login B", async () => {
+  const updateStarted = createDeferred<void>();
+  const releaseUpdate = createDeferred<void>();
+  let activeUserId: string | null = RECOVERY_USER;
+  let loginBEntered = false;
+  let signOutCalls = 0;
+
+  const pendingRecoveryA = executePasswordRecoveryUpdate({
+    password: "Password123",
+    confirmedUserId: RECOVERY_USER,
+    ...recoveryIdentityScopeFields(),
+    auth: {
+      getSession: async () => ({
+        data: { session: activeUserId ? { user: { id: activeUserId } } : null },
+        error: null,
+      }),
+      updateUser: async () => {
+        updateStarted.resolve();
+        await releaseUpdate.promise;
+        return { error: null };
+      },
+      signOut: async () => {
+        signOutCalls += 1;
+        assert.equal(activeUserId, RECOVERY_USER);
+        activeUserId = null;
+        return { error: null };
+      },
+    },
+    isRecoveryCurrent: (userId) => userId === RECOVERY_USER,
+    isOperationCurrent: () => true,
+    isTerminalOperationCurrent: () => true,
+    onPasswordUpdated: () => undefined,
+  });
+  await updateStarted.promise;
+
+  const pendingLoginB = runSupabasePrincipalIdentityOperation(async () => {
+    loginBEntered = true;
+    activeUserId = DIFFERENT_USER;
+  });
+  await Promise.resolve();
+  assert.equal(loginBEntered, false, "B no entra antes de la revalidación y cierre de recovery A");
+
+  releaseUpdate.resolve();
+  assert.deepEqual(await pendingRecoveryA, { kind: "success" });
+  await pendingLoginB;
+  assert.equal(signOutCalls, 1);
+  assert.equal(activeUserId, DIFFERENT_USER, "el cierre A nunca revoca la sesión B posterior");
+});
+
+test("revalidación final detecta B aunque cambie fuera del coordinador y no ejecuta signOut", async () => {
+  let activeUserId: string | null = RECOVERY_USER;
+  let sessionReads = 0;
+  let signOutCalls = 0;
+
+  const result = await executePasswordRecoveryUpdate({
+    password: "Password123",
+    confirmedUserId: RECOVERY_USER,
+    ...recoveryIdentityScopeFields(),
+    auth: {
+      getSession: async () => {
+        sessionReads += 1;
+        return {
+          data: { session: activeUserId ? { user: { id: activeUserId } } : null },
+          error: null,
+        };
+      },
+      updateUser: async () => {
+        activeUserId = DIFFERENT_USER;
+        return { error: null };
+      },
+      signOut: async () => {
+        signOutCalls += 1;
+        return { error: null };
+      },
+    },
+    isRecoveryCurrent: (userId) => userId === RECOVERY_USER,
+    isOperationCurrent: () => true,
+    isTerminalOperationCurrent: () => true,
+    onPasswordUpdated: () => undefined,
+  });
+
+  assert.deepEqual(result, { kind: "stale" });
+  assert.equal(sessionReads, 2);
+  assert.equal(signOutCalls, 0);
+  assert.equal(activeUserId, DIFFERENT_USER);
+});
+
+test("recovery A1 no cierra A2 del mismo usuario si cambia la época después del update", async () => {
+  const recoveryScopeA1 = Object.freeze({ userId: RECOVERY_USER, sessionEpoch: 41 });
+  const recoveryScopeA2 = Object.freeze({ userId: RECOVERY_USER, sessionEpoch: 42 });
+  let currentScope: SupabaseAuthRefreshIdentityScope = recoveryScopeA1;
+  let updateUserCalls = 0;
+  let signOutCalls = 0;
+
+  const result = await executePasswordRecoveryUpdate({
+    password: "Password123",
+    confirmedUserId: RECOVERY_USER,
+    expectedIdentityScope: recoveryScopeA1,
+    getCurrentIdentityScope: () => currentScope,
+    auth: {
+      getSession: async () => ({
+        data: { session: { user: { id: RECOVERY_USER } } },
+        error: null,
+      }),
+      updateUser: async () => {
+        updateUserCalls += 1;
+        currentScope = recoveryScopeA2;
+        return { error: null };
+      },
+      signOut: async () => {
+        signOutCalls += 1;
+        return { error: null };
+      },
+    },
+    isRecoveryCurrent: () => true,
+    isOperationCurrent: () => true,
+    isTerminalOperationCurrent: () => true,
+    onPasswordUpdated: () => assert.fail("A1 stale no publica éxito para A2"),
+  });
+
+  assert.deepEqual(result, { kind: "stale" });
+  assert.equal(updateUserCalls, 1);
+  assert.equal(signOutCalls, 0);
+  assert.equal(currentScope, recoveryScopeA2);
+});
+
+test("cancel/back de recovery A1 no cierra A2 del mismo usuario", async () => {
+  const recoveryScopeA1 = Object.freeze({ userId: RECOVERY_USER, sessionEpoch: 51 });
+  const recoveryScopeA2 = Object.freeze({ userId: RECOVERY_USER, sessionEpoch: 52 });
+  let currentScope: SupabaseAuthRefreshIdentityScope = recoveryScopeA1;
+  let sessionReads = 0;
+  let signOutCalls = 0;
+
+  const result = await signOutPasswordRecoveryIdentityLocally({
+    expectedIdentityScope: recoveryScopeA1,
+    getCurrentIdentityScope: () => currentScope,
+    auth: {
+      getSession: async () => {
+        sessionReads += 1;
+        currentScope = recoveryScopeA2;
+        return {
+          data: { session: { user: { id: RECOVERY_USER } } },
+          error: null,
+        };
+      },
+      signOut: async () => {
+        signOutCalls += 1;
+        return { error: null };
+      },
+    },
+  });
+
+  assert.equal(sessionReads, 1);
+  assert.equal(signOutCalls, 0);
+  assert.match(String(result.error), /identity changed/i);
+  assert.equal(currentScope, recoveryScopeA2);
+});
+
+for (const scenario of [
+  {
+    name: "A2 gana antes del lock interno",
+    options: { rotateToA2BeforeLock: true },
+    expectedUpdateKind: "stale",
+    expectedCloseError: true,
+    expectedSignOutCalls: 0,
+    expectedClosedRefreshTokens: [],
+    expectedCurrentIdentity: "a2",
+  },
+  {
+    name: "A2 intenta entrar al comenzar el cierre",
+    options: { attemptA2WhenSignOutStarts: true },
+    expectedUpdateKind: "success",
+    expectedCloseError: false,
+    expectedSignOutCalls: 1,
+    expectedClosedRefreshTokens: ["refresh-token-1"],
+    expectedCurrentIdentity: "a2",
+  },
+  {
+    name: "A1 sano",
+    options: {},
+    expectedUpdateKind: "success",
+    expectedCloseError: false,
+    expectedSignOutCalls: 1,
+    expectedClosedRefreshTokens: ["refresh-token-1"],
+    expectedCurrentIdentity: "none",
+  },
+] as const) {
+  test(`cierre atómico post-update · ${scenario.name} nunca elimina A2`, async () => {
+    const harness = createAtomicRecoverySignOutHarness(scenario.options);
+    try {
+      const result = await executePasswordRecoveryUpdate({
+        password: "Password123",
+        confirmedUserId: RECOVERY_USER,
+        expectedIdentityScope: harness.scopeA1,
+        getCurrentIdentityScope: harness.currentScope,
+        auth: harness.authPort,
+        isRecoveryCurrent: () => true,
+        isOperationCurrent: () => true,
+        isTerminalOperationCurrent: () => true,
+        onPasswordUpdated: () => undefined,
+      });
+
+      assert.equal(result.kind, scenario.expectedUpdateKind);
+      assert.equal(harness.publicSignOutCalls(), 0, "el cierre público vulnerable nunca se invoca");
+      assert.equal(harness.signOutCalls(), scenario.expectedSignOutCalls);
+      assert.deepEqual(harness.closedRefreshTokens(), scenario.expectedClosedRefreshTokens);
+      if (scenario.expectedCurrentIdentity === "a2") {
+        assert.equal(harness.currentScope()?.userId, RECOVERY_USER);
+        assert.notEqual(harness.currentScope()?.sessionEpoch, harness.scopeA1.sessionEpoch);
+      } else {
+        assert.equal(harness.currentScope(), null);
+      }
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test(`cierre atómico cancel/back · ${scenario.name} nunca elimina A2`, async () => {
+    const harness = createAtomicRecoverySignOutHarness(scenario.options);
+    try {
+      const result = await signOutPasswordRecoveryIdentityLocally({
+        expectedIdentityScope: harness.scopeA1,
+        getCurrentIdentityScope: harness.currentScope,
+        auth: harness.authPort,
+      });
+
+      assert.equal(Boolean(result.error), scenario.expectedCloseError);
+      assert.equal(harness.publicSignOutCalls(), 0, "el cierre público vulnerable nunca se invoca");
+      assert.equal(harness.signOutCalls(), scenario.expectedSignOutCalls);
+      assert.deepEqual(harness.closedRefreshTokens(), scenario.expectedClosedRefreshTokens);
+      if (scenario.expectedCurrentIdentity === "a2") {
+        assert.equal(harness.currentScope()?.userId, RECOVERY_USER);
+        assert.notEqual(harness.currentScope()?.sessionEpoch, harness.scopeA1.sessionEpoch);
+      } else {
+        assert.equal(harness.currentScope(), null);
+      }
+    } finally {
+      harness.cleanup();
+    }
+  });
+}
+
+for (const recoveryPath of ["update", "cancel"] as const) {
+  test(`cliente Supabase instalado con timeout undefined cierra A1 sano en ${recoveryPath}`, async () => {
+    const harness = createInstalledSupabaseAuthHarness();
+    try {
+      if (recoveryPath === "update") {
+        const result = await executePasswordRecoveryUpdate({
+          password: "Password123",
+          confirmedUserId: RECOVERY_USER,
+          expectedIdentityScope: harness.scope,
+          getCurrentIdentityScope: () => harness.scope,
+          auth: {
+            getSession: () => harness.auth.getSession(),
+            updateUser: async () => ({ error: null }),
+            signOut: (_options, expectedIdentityScope) => (
+              signOutSupabaseAuthIdentityLocallyIfCurrent(harness.auth, expectedIdentityScope)
+            ),
+          },
+          isRecoveryCurrent: () => true,
+          isOperationCurrent: () => true,
+          isTerminalOperationCurrent: () => true,
+          onPasswordUpdated: () => undefined,
+        });
+        assert.deepEqual(result, { kind: "success" });
+      } else {
+        const result = await signOutPasswordRecoveryIdentityLocally({
+          expectedIdentityScope: harness.scope,
+          getCurrentIdentityScope: () => harness.scope,
+          auth: {
+            getSession: () => harness.auth.getSession(),
+            signOut: (_options, expectedIdentityScope) => (
+              signOutSupabaseAuthIdentityLocallyIfCurrent(harness.auth, expectedIdentityScope)
+            ),
+          },
+        });
+        assert.equal(result.error, null);
+      }
+
+      assert.equal(harness.logoutRequests(), 1);
+      assert.equal(harness.storedSession(), null, "sólo A1 se elimina del storage instalado");
+    } finally {
+      harness.cleanup();
+    }
+  });
+}
+
+for (const [label, invalidTimeout] of [
+  ["null", null],
+  ["NaN", Number.NaN],
+  ["Infinity", Number.POSITIVE_INFINITY],
+  ["string", "5000"],
+] as const) {
+  test(`timeout auth-js inválido (${label}) falla cerrado antes del lock`, async () => {
+    const session = {
+      refresh_token: `invalid-timeout-${label}`,
+      user: { id: RECOVERY_USER },
+    } as Pick<Session, "refresh_token" | "user">;
+    const expectedScope = recordSupabaseAuthIdentity(session);
+    assert.ok(expectedScope);
+    let acquireLockCalls = 0;
+    let signOutCalls = 0;
+    const incompatibleAuth = {
+      initializePromise: Promise.resolve(),
+      lockAcquireTimeout: invalidTimeout,
+      async _acquireLock<T>(_timeout: unknown, operation: () => Promise<T>): Promise<T> {
+        acquireLockCalls += 1;
+        return operation();
+      },
+      async _useSession<T>(operation: (result: {
+        data: { session: Session | null };
+        error: unknown | null;
+      }) => Promise<T>): Promise<T> {
+        return operation({ data: { session: session as Session }, error: null });
+      },
+      async _signOut() {
+        signOutCalls += 1;
+        return { error: null };
+      },
+    };
+
+    try {
+      const result = await signOutSupabaseAuthIdentityLocallyIfCurrent(
+        incompatibleAuth as unknown as SupabaseClient["auth"],
+        expectedScope,
+      );
+      assert.equal(result.identityChanged, false);
+      assert.ok(result.error instanceof Error);
+      assert.equal(acquireLockCalls, 0);
+      assert.equal(signOutCalls, 0);
+      assert.equal(recordSupabaseAuthIdentity(session), expectedScope);
+    } finally {
+      recordSupabaseAuthIdentity(null);
+    }
+  });
+}
+
+test("seam auth-js incompatible falla cerrado sin mutar la sesión", async () => {
+  const session = {
+    refresh_token: "refresh-token-control",
+    user: { id: RECOVERY_USER },
+  } as Pick<Session, "refresh_token" | "user">;
+  const expectedScope = recordSupabaseAuthIdentity(session);
+  assert.ok(expectedScope);
+  try {
+    const result = await signOutSupabaseAuthIdentityLocallyIfCurrent(
+      {} as SupabaseClient["auth"],
+      expectedScope,
+    );
+    assert.equal(result.identityChanged, false);
+    assert.ok(result.error instanceof Error);
+    assert.equal(
+      translateAuthError(result.error),
+      "No pudimos completar la acción. Intenta nuevamente.",
+      "la UI no expone detalles del seam privado",
+    );
+    assert.equal(recordSupabaseAuthIdentity(session), expectedScope, "la identidad A1 sigue intacta");
+  } finally {
+    recordSupabaseAuthIdentity(null);
+  }
 });
 
 test("double submit owns one awaited operation and cannot exit with pending work", async () => {
@@ -403,6 +980,7 @@ test("double submit owns one awaited operation and cannot exit with pending work
     data: { session: { user: { id: string } } | null };
     error: unknown | null;
   }>();
+  const sessionReadStarted = createDeferred<void>();
   let getSessionCalls = 0;
   let updateUserCalls = 0;
   let signOutCalls = 0;
@@ -415,9 +993,11 @@ test("double submit owns one awaited operation and cannot exit with pending work
       return await executePasswordRecoveryUpdate({
         password: "Password123",
         confirmedUserId: RECOVERY_USER,
+        ...recoveryIdentityScopeFields(),
         auth: {
           getSession: () => {
             getSessionCalls += 1;
+            sessionReadStarted.resolve();
             return sessionDeferred.promise;
           },
           updateUser: async () => {
@@ -450,6 +1030,7 @@ test("double submit owns one awaited operation and cannot exit with pending work
 
   const firstSubmit = submit();
   assert.deepEqual(await submit(), { kind: "locked" });
+  await sessionReadStarted.promise;
   assert.equal(getSessionCalls, 1);
   assert.equal(updateUserCalls, 0);
   assert.equal(signOutCalls, 0);
@@ -459,7 +1040,7 @@ test("double submit owns one awaited operation and cannot exit with pending work
   });
   assert.deepEqual(await withTimeout(firstSubmit, "first password update"), { kind: "success" });
   assert.deepEqual({ getSessionCalls, updateUserCalls, signOutCalls }, {
-    getSessionCalls: 1,
+    getSessionCalls: 2,
     updateUserCalls: 1,
     signOutCalls: 1,
   });
@@ -473,6 +1054,7 @@ test("identity or epoch stale before updateUser performs zero writes", async () 
   const result = await executePasswordRecoveryUpdate({
     password: "Password123",
     confirmedUserId: RECOVERY_USER,
+    ...recoveryIdentityScopeFields(),
     auth: harness.auth,
     isRecoveryCurrent: () => true,
     isOperationCurrent: () => operationCurrent,
@@ -491,6 +1073,7 @@ test("stale before signOut stops after the single password write", async () => {
   const result = await executePasswordRecoveryUpdate({
     password: "Password123",
     confirmedUserId: RECOVERY_USER,
+    ...recoveryIdentityScopeFields(),
     auth: harness.auth,
     isRecoveryCurrent: () => true,
     isOperationCurrent: () => operationCurrent,
@@ -509,6 +1092,7 @@ test("signOut error is not a false success and its UI translation is sanitized",
   const result = await executePasswordRecoveryUpdate({
     password: "Password123",
     confirmedUserId: RECOVERY_USER,
+    ...recoveryIdentityScopeFields(),
     auth: harness.auth,
     isRecoveryCurrent: () => true,
     isOperationCurrent: () => true,
@@ -567,6 +1151,7 @@ test("own SIGNED_OUT may advance epoch before signOut resolves and still complet
   const result = await executePasswordRecoveryUpdate({
     password: "Password123",
     confirmedUserId: RECOVERY_USER,
+    ...recoveryIdentityScopeFields(),
     auth: {
       getSession: async () => ({
         data: { session: { user: { id: RECOVERY_USER } } },

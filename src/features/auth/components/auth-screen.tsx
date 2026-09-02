@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Eye, EyeOff, LoaderCircle, LogIn, Mail, Save, UserPlus } from "lucide-react";
+import { Eye, EyeOff, LogIn, Mail, Save, UserPlus } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import {
@@ -338,13 +338,21 @@ export function AuthScreen({
 
 export function AuthLoadingScreen() {
   return (
-    <AuthFrame>
-      <div className={`${styles.card} ${styles.flowCard} ${styles.loadingCard}`} aria-busy="true" aria-live="polite">
-        <LoaderCircle className={styles.loadingIcon} aria-hidden="true" size={30} />
-        <h2>Validando sesión...</h2>
-        <p className={styles.helperText}>Estamos revisando si ya tienes una sesión activa.</p>
-      </div>
-    </AuthFrame>
+    <div
+      className={styles.loadingSplash}
+      aria-busy="true"
+      aria-label="Cargando Organizatech"
+      role="status"
+    >
+      <Image
+        className={styles.loadingSplashLogo}
+        src="/icon.svg"
+        width={96}
+        height={96}
+        alt=""
+        priority
+      />
+    </div>
   );
 }
 
