@@ -11,6 +11,10 @@ import type {
   PortalResolutionOwner,
   UserRegistrationOwner,
 } from "@/features/auth/model/portal-resolution-owner";
+import {
+  isAuthoritativeSupabaseAuthRejection,
+  isTransientSupabaseAuthError,
+} from "@/lib/supabase/auth-resilience";
 
 export const USER_REGISTRATION_REQUIRED_MESSAGE =
   "Cuenta Usuario no registrada. Crea una cuenta Usuario para iniciar sesión.";
@@ -28,6 +32,8 @@ export const SIGNUP_CONFIRMATION_INVALID_MESSAGE =
   "El enlace de confirmación es inválido, venció o ya fue utilizado.";
 export const MULTIPORTAL_AUTH_ERROR_MESSAGE =
   "No pudimos completar la acción. Intenta nuevamente.";
+export const MULTIPORTAL_AUTH_RETRYABLE_MESSAGE =
+  "La conexión está inestable. Tu sesión se conserva; intenta nuevamente.";
 export const USER_REGISTRATION_IDENTITY_MISMATCH_MESSAGE =
   "El correo debe coincidir con la sesión activa.";
 
@@ -185,7 +191,10 @@ export type PortalAccessResult =
   | {
     state: "error";
     requestedPortal: AuthAccountType;
-    message: typeof MULTIPORTAL_AUTH_ERROR_MESSAGE;
+    message:
+      | typeof MULTIPORTAL_AUTH_ERROR_MESSAGE
+      | typeof MULTIPORTAL_AUTH_RETRYABLE_MESSAGE;
+    retryable?: boolean;
   }
   | {
     state: "stale";
@@ -438,9 +447,14 @@ async function resolvePortalAccess<TAuthState>(
     }
 
     return rejectPortalSession(input, gateway, "coach_registration_required");
-  } catch {
+  } catch (error) {
     if (!ownsPortalResolution(input)) return stalePortalResolution(input.requestedPortal);
-    return rejectPortalSession(input, gateway, "authorization_error");
+    if (isAuthoritativeSupabaseAuthRejection(error)) {
+      return rejectPortalSession(input, gateway, "authorization_error");
+    }
+    return isTransientSupabaseAuthError(error)
+      ? retryablePortalError(input.requestedPortal)
+      : controlledPortalError(input.requestedPortal);
   }
 }
 
@@ -834,6 +848,15 @@ function controlledPortalError(requestedPortal: AuthAccountType): PortalAccessRe
     state: "error",
     requestedPortal,
     message: MULTIPORTAL_AUTH_ERROR_MESSAGE,
+  };
+}
+
+function retryablePortalError(requestedPortal: AuthAccountType): PortalAccessResult {
+  return {
+    state: "error",
+    requestedPortal,
+    message: MULTIPORTAL_AUTH_RETRYABLE_MESSAGE,
+    retryable: true,
   };
 }
 

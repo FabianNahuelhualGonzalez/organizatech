@@ -95,6 +95,7 @@ import {
 import {
   FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
   resolveUserPortalSessionRevalidation,
+  shouldPreserveUserPortalAfterRetryableRevalidation,
   type UserPortalSessionRevalidation,
 } from "@/features/auth/model/user-portal-session-revalidation";
 import { CoachPortalBoundary } from "@/features/coach-portal/components/coach-portal";
@@ -125,6 +126,10 @@ import {
   type LoginSubmitOwner,
   type LoginSubmitOwnerController,
 } from "@/features/app-shell/model/login-submit-owner";
+import {
+  resolveSignedOutSessionPolicy,
+  resolveSignedOutStorageScope,
+} from "@/features/app-shell/model/signed-out-session-policy";
 import type { ComparisonScreenV2Props } from "@/features/progress/components/comparison-screen-v2";
 import { useTrainingDataController } from "@/features/training-data/hooks/useTrainingDataController";
 import type { TrainingDataRefreshResult } from "@/features/training-data/model/training-data-controller";
@@ -226,7 +231,16 @@ import {
   resolveRoutineBuilderVariant,
 } from "@/lib/navigation/app-screen-resolver";
 import { isSessionExpiredError, translateAuthError, translatePersistenceError } from "@/lib/supabase/auth-errors";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { runSupabasePrincipalIdentityOperation } from "@/lib/supabase/auth-identity-operation";
+import {
+  consumeAuthoritativeRefreshRejection,
+  getActiveSupabaseAuthIdentityScope,
+  getSupabaseBrowserClient,
+  isSupabaseConfigured,
+  recordSupabaseAuthIdentity,
+  signOutSupabaseAuthIdentityLocallyIfCurrent,
+} from "@/lib/supabase/client";
+import type { SupabaseAuthRefreshIdentityScope } from "@/lib/supabase/auth-resilience";
 import {
   getInitialSupabaseSession,
   getMissingSupabaseMessage,
@@ -490,6 +504,7 @@ export function OrganizatechApp({
   const [isBusy, setIsBusy] = useState(false);
   const passwordUpdateSuccessRef = useRef(false);
   const passwordRecoveryUserIdRef = useRef<string | null>(null);
+  const passwordRecoveryIdentityScopeRef = useRef<SupabaseAuthRefreshIdentityScope | null>(null);
   const passwordRecoveryUpdateOwnerRef = useRef<SessionOperationOwner | null>(null);
   const passwordRecoveryStateRef = useRef<"none" | "pending" | "confirmed" | "invalid">("none");
   const signupConfirmationStateRef = useRef<"none" | "pending" | "completed" | "invalid">(
@@ -508,6 +523,7 @@ export function OrganizatechApp({
   const interactiveAuthAttemptRef = useRef(false);
   const loginSubmitOwnerRef = useRef<LoginSubmitOwnerController | null>(null);
   const logoutInFlightRef = useRef(false);
+  const supabaseAuthIdentityScopeRef = useRef<SupabaseAuthRefreshIdentityScope | null>(null);
 
   const captureSessionDataRequestToken = useCallback((): SessionDataRequestToken => {
     return createSessionDataRequestToken(sessionDataEpochRef.current);
@@ -810,7 +826,10 @@ export function OrganizatechApp({
   ) {
     signupConfirmationStateRef.current = result.state === "confirmed" ? "completed" : "invalid";
     clearSignupConfirmationUrl();
-    clearUserSessionState("", storageScope, { navigate: false });
+    clearUserSessionState("", storageScope, {
+      navigate: false,
+      purgeDurableStorage: true,
+    });
     clearAuthForms();
     authRouteController.replace({
       mode: "login",
@@ -867,7 +886,17 @@ export function OrganizatechApp({
       return;
     }
 
+    const recoveryIdentityScope = recordSupabaseAuthIdentity(session);
+    if (
+      !recoveryIdentityScope
+      || normalizePasswordRecoveryUserId(recoveryIdentityScope.userId) !== recoveryUserId
+    ) {
+      invalidatePasswordRecoverySession();
+      return;
+    }
+    supabaseAuthIdentityScopeRef.current = recoveryIdentityScope;
     passwordRecoveryUserIdRef.current = recoveryUserId;
+    passwordRecoveryIdentityScopeRef.current = recoveryIdentityScope;
     passwordRecoveryStateRef.current = "confirmed";
     setIsPasswordRecoveryConfirmed(true);
     confirmPasswordRecoveryFlow();
@@ -879,6 +908,7 @@ export function OrganizatechApp({
   function invalidatePasswordRecoverySession() {
     beginPasswordRecoveryPortalSession();
     passwordRecoveryUserIdRef.current = null;
+    passwordRecoveryIdentityScopeRef.current = null;
     passwordRecoveryUpdateOwnerRef.current = null;
     passwordRecoveryStateRef.current = "invalid";
     setIsPasswordRecoveryConfirmed(false);
@@ -897,10 +927,14 @@ export function OrganizatechApp({
   ) {
     multiportalAuth.releasePasswordRecoveryPortalGuard();
     clearPasswordRecoveryUrl();
-    const clearedSession = clearUserSessionState(message, storageScope, { statusTone });
+    const clearedSession = clearUserSessionState(message, storageScope, {
+      statusTone,
+      purgeDurableStorage: true,
+    });
     if (clearedSession) return;
 
     passwordRecoveryUserIdRef.current = null;
+    passwordRecoveryIdentityScopeRef.current = null;
     passwordRecoveryUpdateOwnerRef.current = null;
     passwordRecoveryStateRef.current = "none";
     setIsPasswordRecoveryConfirmed(false);
@@ -919,7 +953,9 @@ export function OrganizatechApp({
     storageScope = activeBrowserStorageScopeRef.current,
   ): Promise<boolean> {
     clearPasswordRecoveryUrl();
-    const { error } = await multiportalAuth.signOutPasswordRecoveryLocally();
+    const { error } = await multiportalAuth.signOutPasswordRecoveryLocally(
+      passwordRecoveryIdentityScopeRef.current,
+    );
     if (error) {
       setIsBusy(false);
       setIsAuthLoading(false);
@@ -1020,6 +1056,7 @@ export function OrganizatechApp({
         beginPasswordRecoveryPortalSession();
         markPasswordRecoveryFlow();
         passwordRecoveryUserIdRef.current = null;
+        passwordRecoveryIdentityScopeRef.current = null;
         passwordRecoveryStateRef.current = "pending";
         setIsPasswordRecoveryConfirmed(false);
         setIsAuthLoading(true);
@@ -1292,6 +1329,19 @@ export function OrganizatechApp({
       if (event === "SIGNED_OUT") {
         loginSubmitOwnerRef.current?.invalidate();
         interactiveAuthAttemptRef.current = false;
+        const signedOutIdentityScope = supabaseAuthIdentityScopeRef.current
+          ?? getActiveSupabaseAuthIdentityScope();
+        const hasAuthoritativeRefreshRejection = !logoutInFlightRef.current
+          && consumeAuthoritativeRefreshRejection(signedOutIdentityScope);
+        const signedOutPolicy = resolveSignedOutSessionPolicy({
+          isExplicitLogoutInFlight: logoutInFlightRef.current,
+          hasAuthoritativeRefreshRejection,
+        });
+        const signedOutStorageScope = resolveSignedOutStorageScope({
+          previousStorageScope,
+          hasAuthoritativeRefreshRejection,
+          signedOutUserId: signedOutIdentityScope?.userId ?? null,
+        });
         const portalSignOutMessage = multiportalAuth.consumePortalSignOutMessage();
         if (portalSignOutMessage) {
           const sharedCoachLoginSignOut = registrationForm.controller.getState()
@@ -1301,6 +1351,7 @@ export function OrganizatechApp({
             preserveAuthForms: sharedCoachLoginSignOut,
             statusTone: "error",
             forceSessionBoundary: sharedCoachLoginSignOut,
+            purgeDurableStorage: true,
           });
           setIsBusy(false);
           setIsAuthLoading(false);
@@ -1320,7 +1371,10 @@ export function OrganizatechApp({
           return;
         }
         passwordRecoveryUpdateOwnerRef.current = null;
-        clearUserSessionState("Sesión cerrada correctamente.", previousStorageScope, { statusTone: "success" });
+        clearUserSessionState(signedOutPolicy.message, signedOutStorageScope, {
+          statusTone: signedOutPolicy.statusTone,
+          purgeDurableStorage: signedOutPolicy.purgeDurableStorage,
+        });
         return;
       }
 
@@ -1701,7 +1755,16 @@ export function OrganizatechApp({
       || access.state === "coach_registration_required"
       || access.state === "error"
     ) {
-      replaceUserPortalAuthorizationProof(null);
+      const preserveAuthorizedUserPortal = shouldPreserveUserPortalAfterRetryableRevalidation({
+        access,
+        sessionRevalidation,
+        expectedUserId: resolutionOwner.expectedUserId,
+        nextSessionUserId: authState.session?.user.id,
+        nextAuthenticatedUserId: authState.user?.id,
+        isResolutionCurrent: multiportalAuth.isPortalResolutionCurrent(resolutionOwner),
+      });
+      if (preserveAuthorizedUserPortal) applySessionState(authState);
+      else replaceUserPortalAuthorizationProof(null);
       const rejectionMessage = multiportalAuth.settlePortalSignOutMessage(access.message);
       setIsAuthLoading(false);
       if (rejectionMessage) setAuthStatus(rejectionMessage, "error");
@@ -1816,6 +1879,7 @@ export function OrganizatechApp({
       replaceCoachPortalSession(null);
     }
     const effectiveSession = authenticatedUser ? authState.session : null;
+    supabaseAuthIdentityScopeRef.current = recordSupabaseAuthIdentity(effectiveSession);
     const effectiveDataMode: DataMode = effectiveSession ? authState.dataMode : "demo";
     const nextStorageScope = getBrowserStorageScope(effectiveDataMode, authenticatedUser?.id);
     const nextIdentity = {
@@ -1876,15 +1940,19 @@ export function OrganizatechApp({
       preserveAuthForms?: boolean;
       statusTone?: AuthStatusTone;
       forceSessionBoundary?: boolean;
+      purgeDurableStorage?: boolean;
     } = {},
   ) {
     replaceUserPortalAuthorizationProof(null);
     replaceCoachPortalSession(null);
+    const hasExactDurableStoragePurge = options.purgeDurableStorage === true
+      && storageScope !== null;
     if (
       activeBrowserStorageScopeRef.current === null &&
       sessionDataEpochRef.current.userId === null &&
       sessionDataEpochRef.current.scope === null &&
-      !options.forceSessionBoundary
+      !options.forceSessionBoundary &&
+      !hasExactDurableStoragePurge
     ) return false;
 
     authenticatedSessionCoordinatorRef.current.reset();
@@ -1907,16 +1975,21 @@ export function OrganizatechApp({
     }
     if (options.preserveAuthForms) resetUserScopedTransientStatePreservingAuthForms();
     else resetUserScopedTransientState();
-    if (sessionBoundary.clearClosingStorageScope) {
+    if (
+      options.purgeDurableStorage === true
+      && (sessionBoundary.clearClosingStorageScope || hasExactDurableStoragePurge)
+    ) {
       clearBrowserStorageScope(storageScope);
     }
     passwordRecoveryUserIdRef.current = null;
+    passwordRecoveryIdentityScopeRef.current = null;
     passwordRecoveryStateRef.current = "none";
     setIsPasswordRecoveryConfirmed(false);
     clearPasswordRecoveryFlow();
     activeBrowserStorageScopeRef.current = null;
     setSupabaseSession(null);
     setSupabaseUser(null);
+    supabaseAuthIdentityScopeRef.current = recordSupabaseAuthIdentity(null);
     setSessionName("");
     setDataMode("demo");
     setIsBusy(false);
@@ -2173,7 +2246,10 @@ export function OrganizatechApp({
       dataMode === "supabase" &&
       (isSessionExpiredError(error) || message.includes("iniciar sesión"))
     ) {
-      clearUserSessionState(message, activeBrowserStorageScopeRef.current, { statusTone: "error" });
+      clearUserSessionState(message, activeBrowserStorageScopeRef.current, {
+        statusTone: "error",
+        purgeDurableStorage: true,
+      });
     }
     return message;
   }
@@ -2252,6 +2328,10 @@ export function OrganizatechApp({
     let portalResolutionOwner: PortalResolutionOwner | null = null;
 
     if (!supabase) {
+      if (isSupabaseConfigured()) {
+        setAuthStatus("No pudimos iniciar una sesión segura en este navegador.", "error");
+        return;
+      }
       if (requestedPortal === "coach") {
         setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
         return;
@@ -2401,7 +2481,9 @@ export function OrganizatechApp({
       if (mode !== "login") return;
       const settlement = await loginSubmitOwnerController!.settle(
         loginSubmitOwner!,
-        supabase.auth.signInWithPassword({ email, password }),
+        runSupabasePrincipalIdentityOperation(() => (
+          supabase.auth.signInWithPassword({ email, password })
+        )),
       );
       if (settlement.kind === "stale") return;
       if (settlement.kind === "error") throw settlement.error;
@@ -2582,8 +2664,10 @@ export function OrganizatechApp({
     setAuthStatus("", "info");
 
     const confirmedUserId = passwordRecoveryUserIdRef.current;
+    const expectedIdentityScope = passwordRecoveryIdentityScopeRef.current;
     if (
       !confirmedUserId ||
+      !expectedIdentityScope ||
       !isPasswordRecoveryConfirmed ||
       passwordRecoveryStateRef.current !== "confirmed"
     ) {
@@ -2599,10 +2683,14 @@ export function OrganizatechApp({
       const result = await executePasswordRecoveryUpdate({
         password,
         confirmedUserId,
+        expectedIdentityScope,
+        getCurrentIdentityScope: getActiveSupabaseAuthIdentityScope,
         auth: {
           getSession: () => supabase.auth.getSession(),
           updateUser: (attributes) => supabase.auth.updateUser(attributes),
-          signOut: () => multiportalAuth.signOutPasswordRecoveryLocally(),
+          signOut: (_options, identityScope) => (
+            signOutSupabaseAuthIdentityLocallyIfCurrent(supabase.auth, identityScope)
+          ),
         },
         isRecoveryCurrent: (userId) => (
           passwordRecoveryStateRef.current === "confirmed"
@@ -3197,11 +3285,24 @@ export function OrganizatechApp({
     try {
       const supabase = getSupabaseBrowserClient();
       if (supabase) {
-        const { error } = await supabase.auth.signOut({ scope: "local" });
-        if (error) throw error;
+        const signOutResult = await runSupabasePrincipalIdentityOperation(async () => {
+          if (!requestToken.userId) return { kind: "stale" as const };
+          const sessionResult = await supabase.auth.getSession();
+          if (sessionResult.error) throw sessionResult.error;
+          if (sessionResult.data.session?.user.id !== requestToken.userId) {
+            return { kind: "stale" as const };
+          }
+          const { error } = await supabase.auth.signOut({ scope: "local" });
+          if (error) throw error;
+          return { kind: "signed_out" as const };
+        });
+        if (signOutResult.kind === "stale") return;
       }
       if (isSessionDataRequestCurrent(requestToken)) {
-        clearUserSessionState("Sesión cerrada correctamente.", currentStorageScope, { statusTone: "success" });
+        clearUserSessionState("Sesión cerrada correctamente.", currentStorageScope, {
+          statusTone: "success",
+          purgeDurableStorage: true,
+        });
       }
     } catch (error) {
       if (isSessionDataRequestCurrent(requestToken)) setStatusMessage(translateAuthError(error));
@@ -3421,7 +3522,10 @@ export function OrganizatechApp({
         if (error instanceof TrainingCycleRepositoryError) {
           setStatusMessage(translateTrainingCycleRepositoryError(error));
         } else if (isSessionExpiredError(error)) {
-          clearUserSessionState("Tu sesión expiró. Inicia sesión nuevamente.", activeBrowserStorageScopeRef.current, { statusTone: "error" });
+          clearUserSessionState("Tu sesión expiró. Inicia sesión nuevamente.", activeBrowserStorageScopeRef.current, {
+            statusTone: "error",
+            purgeDurableStorage: true,
+          });
         } else {
           setStatusMessage(translatePersistenceError(error));
         }
@@ -4206,6 +4310,7 @@ export function OrganizatechApp({
 
   function switchAuthScreen(nextScreen: "login" | "registro" | "recuperar-password") {
     passwordRecoveryUserIdRef.current = null;
+    passwordRecoveryIdentityScopeRef.current = null;
     passwordRecoveryUpdateOwnerRef.current = null;
     passwordRecoveryStateRef.current = "none";
     setIsPasswordRecoveryConfirmed(false);

@@ -5,6 +5,7 @@ import type {
   CoachRegistrationWritePayload,
   GoogleUserRegistrationWritePayload,
 } from "@/features/auth/model/auth-form";
+import { runSupabasePrincipalIdentityOperation } from "@/lib/supabase/auth-identity-operation";
 import { getBrowserSessionStorage } from "@/lib/storage/browser-storage";
 
 import {
@@ -218,29 +219,31 @@ function createPendingOperation(input: {
         throw sessionResult.error ?? new Error("OAuth session is unavailable.");
       }
 
-      const principalUserId = await readPrincipalUserId(principal, guard);
-      assertCurrent(guard);
-      if (principalUserId && principalUserId !== userId) {
-        throw new GoogleOAuthStaleOperationError();
-      }
-      if (principalUserId === userId) return;
+      await runSupabasePrincipalIdentityOperation(async () => {
+        const principalUserId = await readPrincipalUserId(principal, guard);
+        assertCurrent(guard);
+        if (principalUserId && principalUserId !== userId) {
+          throw new GoogleOAuthStaleOperationError();
+        }
+        if (principalUserId === userId) return;
 
-      const activation = principal.auth.setSession({
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
+        const activation = principal.auth.setSession({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        });
+        const activated = await activation;
+        assertCurrent(guard);
+        if (
+          activated.error
+          || activated.data.user?.id !== userId
+          || activated.data.session?.user.id !== userId
+        ) {
+          throw activated.error ?? new Error("OAuth session transfer failed.");
+        }
+        assertGoogleIdentityEvidence(activated.data.user, userId);
+        const activatedUserId = await readPrincipalUserId(principal, guard);
+        if (activatedUserId !== userId) throw new GoogleOAuthStaleOperationError();
       });
-      const activated = await activation;
-      assertCurrent(guard);
-      if (
-        activated.error
-        || activated.data.user?.id !== userId
-        || activated.data.session?.user.id !== userId
-      ) {
-        throw activated.error ?? new Error("OAuth session transfer failed.");
-      }
-      assertGoogleIdentityEvidence(activated.data.user, userId);
-      const activatedUserId = await readPrincipalUserId(principal, guard);
-      if (activatedUserId !== userId) throw new GoogleOAuthStaleOperationError();
     },
   });
 }

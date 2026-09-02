@@ -339,10 +339,13 @@ export function AuthScreen({
 export function AuthLoadingScreen() {
   return (
     <AuthFrame>
-      <div className={`${styles.card} ${styles.flowCard} ${styles.loadingCard}`} aria-busy="true" aria-live="polite">
+      <div
+        className={`${styles.card} ${styles.flowCard} ${styles.loadingCard}`}
+        aria-busy="true"
+        aria-label="Cargando"
+        role="status"
+      >
         <LoaderCircle className={styles.loadingIcon} aria-hidden="true" size={30} />
-        <h2>Validando sesión...</h2>
-        <p className={styles.helperText}>Estamos revisando si ya tienes una sesión activa.</p>
       </div>
     </AuthFrame>
   );

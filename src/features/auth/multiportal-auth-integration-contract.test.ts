@@ -2049,8 +2049,27 @@ function auditIntegration(sources: Sources) {
   );
   assert.match(
     signOutText,
-    /const identity = await getAuthoritativeIdentity\(supabase, expectedUserId, owner\);[\s\S]*?identity\.userId !== expectedUserId[\s\S]*?owner\.expectedUserId !== expectedUserId[\s\S]*?!owner\.isCurrent\(\)/,
-    "[AUTH-COACH-01.gateway.signout-fresh-identity] signOut revalida expectedUserId",
+    /const localSessionUserId = await getLocalSessionUserId\(supabase, owner\);/,
+    "[AUTH-COACH-01.gateway.signout-local-session-read] signOut lee la sesión local vigente",
+  );
+  assert.match(
+    signOutText,
+    /localSessionUserId !== expectedUserId/,
+    "[AUTH-COACH-01.gateway.signout-local-identity-match] signOut compara la identidad local exacta",
+  );
+  assert.match(
+    signOutText,
+    /owner\.expectedUserId !== expectedUserId[\s\S]*?!owner\.isCurrent\(\)/,
+    "[AUTH-COACH-01.gateway.signout-post-read-owner-guard] signOut revalida owner tras la lectura local",
+  );
+  const localSessionIdentityFunction = findNamedFunction(
+    gatewaySourceFile,
+    "getLocalSessionUserId",
+  ).getText(gatewaySourceFile);
+  assert.match(
+    localSessionIdentityFunction,
+    /if \(!owner\.isCurrent\(\)\) return null;[\s\S]*?await supabase\.auth\.getSession\(\);[\s\S]*?if \(!owner\.isCurrent\(\) \|\| error\) return null;[\s\S]*?data\.session\?\.user\.id \?\? null/,
+    "[AUTH-COACH-01.gateway.local-session-owner-guard] helper local falla cerrado antes y después del await",
   );
   assert.match(signOutText, /supabase\.auth\.signOut\(\{ scope: "local" \}\)/);
   assert.doesNotMatch(
@@ -3832,18 +3851,52 @@ const mutations = [
     ),
   },
   {
-    name: "gateway omite identidad fresca antes de signOut",
+    name: "gateway omite lectura de sesión local antes de signOut",
     file: "gateway" as const,
     path: GATEWAY_PATH,
-    expectedFailure: "[AUTH-COACH-01.gateway.signout-fresh-identity]",
+    expectedFailure: "[AUTH-COACH-01.gateway.signout-local-session-read]",
     apply(source: string) {
       const sourceFile = parseTypeScript(source, GATEWAY_PATH);
       const method = findNamedMethod(sourceFile, "signOut");
       const mutatedMethod = replaceExactlyOnce(
         method.getText(sourceFile),
-        "      const identity = await getAuthoritativeIdentity(supabase, expectedUserId, owner);",
-        "      const identity = { userId: expectedUserId };",
-        "gateway omite identidad fresca antes de signOut",
+        "      const localSessionUserId = await getLocalSessionUserId(supabase, owner);",
+        "      const localSessionUserId = expectedUserId;",
+        "gateway omite lectura de sesión local antes de signOut",
+      );
+      return replaceNodeText(source, sourceFile, method, mutatedMethod);
+    },
+  },
+  {
+    name: "gateway omite comparar sesión local antes de signOut",
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-COACH-01.gateway.signout-local-identity-match]",
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const method = findNamedMethod(sourceFile, "signOut");
+      const mutatedMethod = replaceExactlyOnce(
+        method.getText(sourceFile),
+        "        localSessionUserId !== expectedUserId",
+        "        false",
+        "gateway omite comparar sesión local antes de signOut",
+      );
+      return replaceNodeText(source, sourceFile, method, mutatedMethod);
+    },
+  },
+  {
+    name: "gateway omite guard owner posterior a lectura local",
+    file: "gateway" as const,
+    path: GATEWAY_PATH,
+    expectedFailure: "[AUTH-COACH-01.gateway.signout-post-read-owner-guard]",
+    apply(source: string) {
+      const sourceFile = parseTypeScript(source, GATEWAY_PATH);
+      const method = findNamedMethod(sourceFile, "signOut");
+      const mutatedMethod = replaceExactlyOnce(
+        method.getText(sourceFile),
+        "        || !owner.isCurrent()",
+        "        || false",
+        "gateway omite guard owner posterior a lectura local",
       );
       return replaceNodeText(source, sourceFile, method, mutatedMethod);
     },
@@ -4321,7 +4374,7 @@ const mutations = [
   },
 ] as const;
 
-const EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT = 100;
+const EXPECTED_INTEGRATION_MUTATION_PROBE_COUNT = 102;
 const EXPECTED_AC039_MUTATION_PROBE_COUNT = 4;
 const EXPECTED_R2_MUTATION_PROBE_COUNT = 7;
 const EXPECTED_IDENTITY_SWITCH_MUTATION_PROBE_COUNT = 26;

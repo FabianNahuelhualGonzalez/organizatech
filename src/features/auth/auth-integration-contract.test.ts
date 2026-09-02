@@ -168,6 +168,12 @@ assert.match(root, /loginSubmitOwnerController\.acquire\(\)/);
 assert.match(root, /resetPasswordForEmail\(email, \{ redirectTo \}\)/);
 assert.doesNotMatch(root, /className="login-shell"|Validando sesión<\/h2>/);
 assert.match(root, /<AuthLoadingScreen \/>/);
+assert.doesNotMatch(
+  authScreen,
+  /Validando sesión|Estamos revisando si ya tienes una sesión activa/,
+  "el bootstrap Auth debe usar una espera visual neutral",
+);
+assert.match(authScreen, /aria-label="Cargando"[\s\S]*?role="status"/);
 for (const flowScreen of ["PasswordRecoveryScreen", "RecoveryExpiredScreen", "NewPasswordScreen"]) {
   assert.ok(authScreen.includes(`export function ${flowScreen}`));
 }
