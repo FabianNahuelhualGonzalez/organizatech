@@ -1284,11 +1284,11 @@ export function OrganizatechApp({
         portalEventDecision === "authorize_user" ||
         portalEventDecision === "authorize_coach"
       ) {
-        setIsAuthLoading(false);
         if (
           portalEventDecision === "hold_user_registration"
           || portalEventDecision === "hold_coach_registration"
         ) {
+          setIsAuthLoading(false);
           holdAuthenticatedSessionWithoutContinuation(event, nextState);
           setAuthStatus("", "info");
           return;
@@ -1746,6 +1746,7 @@ export function OrganizatechApp({
     resolutionOwner: PortalResolutionOwner,
     sessionRevalidation: UserPortalSessionRevalidation,
   ): Promise<AuthorizedPortalAccess | null> {
+    if (sessionRevalidation.kind !== "silent_revalidation") setIsAuthLoading(true);
     const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);
     if (access.state === "stale" || !multiportalAuth.isPortalResolutionCurrent(resolutionOwner)) {
       return null;
@@ -1809,13 +1810,22 @@ export function OrganizatechApp({
           replaceUserPortalAuthorizationProof(authorizationProof);
           return;
         }
+        replaceUserPortalAuthorizationProof(authorizationProof);
+        setIsAuthLoading(false);
+        clearCompletedAuthForm();
+        if (
+          intent !== "restore-active-flow"
+          || !restoreActiveFlowForSession(authState.dataMode, authState.user?.id)
+        ) {
+          navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
+        }
         const continuation = await continueAuthenticatedSession(
           authState,
           intent,
           clearCompletedAuthForm,
+          false,
         );
         if (continuation.kind === "stale" || !isAuthorizationCurrent()) return;
-        replaceUserPortalAuthorizationProof(authorizationProof);
         return;
       }
       case "coach_authorized": {
@@ -1845,6 +1855,7 @@ export function OrganizatechApp({
     authState: SupabaseSessionState,
     intent: AuthenticatedSessionIntent,
     clearCompletedAuthForm: () => void = clearAuthForms,
+    publishPresentationOnComplete = true,
   ) {
     const requestToken = captureSessionDataRequestToken();
     if (!authState.session || !authState.user || requestToken.userId !== authState.user.id) {
@@ -1858,6 +1869,7 @@ export function OrganizatechApp({
         isCurrent: isSessionDataRequestCurrent,
         onStart: () => setStatusMessage(""),
         onComplete: (completedIntent) => {
+          if (!publishPresentationOnComplete) return;
           setIsAuthLoading(false);
           clearCompletedAuthForm();
           if (

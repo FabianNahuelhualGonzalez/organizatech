@@ -1415,6 +1415,11 @@ function assertSilentSessionRevalidationBoundary(sources: Sources) {
     sources.root,
     "authorizeAndContinuePortalSession",
   );
+  assert.match(
+    compact(authorization.declaration.getText(authorization.sourceFile)),
+    /if\(sessionRevalidation\.kind!=="silent_revalidation"\)setIsAuthLoading\(true\)/,
+    `${SILENT_REVALIDATION_VISUAL_BARRIER} login/bootstrap muestran splash sin interrumpir TOKEN_REFRESHED`,
+  );
   assert.equal(
     authorization.declaration.parameters.length,
     5,
@@ -1726,7 +1731,7 @@ function assertAuthorizationBoundary(sources: Sources) {
   );
   assert.ok(
     continuationCode.includes('continuation.kind==="stale"||!isAuthorizationCurrent()'),
-    "[UI-NAV-01.proof-stale] stale o owner reemplazado no publica",
+    "[UI-NAV-01.proof-stale] stale o owner reemplazado no continúa después de la carga",
   );
   assert.equal(
     countCalls(continuation.declaration, continuation.sourceFile, "isAuthorizationCurrent"),
@@ -1753,13 +1758,37 @@ function assertAuthorizationBoundary(sources: Sources) {
   assert.equal(publications.length, 2, "[UI-NAV-01.proof-publication] publicaciones por lifecycle exactas");
   assert.equal(
     publications.filter((publication) => publication.pos < awaitContinuations[0].pos).length,
-    1,
-    "[UI-NAV-01.proof-publication] revalidación silenciosa publica antes de omitir continuación",
+    2,
+    "[UI-NAV-01.proof-publication] ambas rutas publican autorización antes de esperar datos secundarios",
   );
   assert.equal(
     publications.filter((publication) => publication.pos > awaitContinuations[0].pos).length,
-    1,
-    "[UI-NAV-01.proof-publication] bootstrap/login publica después de continuación vigente",
+    0,
+    "[UI-NAV-01.proof-publication] ninguna ruta retiene el portal hasta completar datos secundarios",
+  );
+  const foregroundPublication = publications
+    .filter((publication) => publication.pos < awaitContinuations[0].pos)
+    .sort((left, right) => right.pos - left.pos)[0];
+  assert.ok(foregroundPublication, "[UI-NAV-01.fast-resume] bootstrap/login publica su prueba antes de la carga");
+  const foregroundPrefix = compact(
+    continuation.sourceFile.text.slice(foregroundPublication.getStart(), awaitContinuations[0].getStart()),
+  );
+  assert.ok(
+    foregroundPrefix.includes("setIsAuthLoading(false)")
+    && foregroundPrefix.includes("clearCompletedAuthForm()")
+    && foregroundPrefix.includes("restoreActiveFlowForSession")
+    && foregroundPrefix.includes('createAuthNavigationReset("dashboard","session-established")'),
+    "[UI-NAV-01.fast-resume] el portal autorizado reemplaza el splash antes de esperar datos secundarios",
+  );
+  const foregroundContinuationCall = awaitContinuations[0].expression;
+  assert.ok(
+    ts.isCallExpression(foregroundContinuationCall),
+    "[UI-NAV-01.fast-resume] continuación identificable",
+  );
+  assert.equal(
+    compact(foregroundContinuationCall.arguments[3]?.getText(continuation.sourceFile) ?? ""),
+    "false",
+    "[UI-NAV-01.fast-resume] la carga secundaria no repite la presentación del portal",
   );
 }
 
@@ -2471,9 +2500,11 @@ const mutationProbes: Array<{
     mutate: (source) => replaceExactlyOnce(
       source,
       `  ): Promise<AuthorizedPortalAccess | null> {
+    if (sessionRevalidation.kind !== "silent_revalidation") setIsAuthLoading(true);
     const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);`,
       `  ): Promise<AuthorizedPortalAccess | null> {
     replaceUserPortalAuthorizationProof(sessionRevalidation.authorizationProof);
+    if (sessionRevalidation.kind !== "silent_revalidation") setIsAuthLoading(true);
     const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);`,
       "Deferred callback republishes captured proof",
     ),
@@ -2495,12 +2526,8 @@ const mutationProbes: Array<{
     barrier: SILENT_REVALIDATION_VISUAL_BARRIER,
     mutate: (source) => replaceExactlyOnce(
       source,
-      `        portalEventDecision === "authorize_coach"
-      ) {
-        setIsAuthLoading(false);`,
-      `        portalEventDecision === "authorize_coach"
-      ) {
-        setIsAuthLoading(true);`,
+      `    if (sessionRevalidation.kind !== "silent_revalidation") setIsAuthLoading(true);`,
+      `    setIsAuthLoading(true);`,
       "Redundant event activates auth loading",
     ),
   },

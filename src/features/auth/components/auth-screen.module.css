@@ -400,22 +400,19 @@
   text-align: center;
 }
 
-.loadingCard {
-  justify-items: center;
-  min-height: 240px;
-  align-content: center;
-  text-align: center;
+.loadingSplash {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  width: 100%;
+  min-height: 100dvh;
+  place-items: center;
+  background-color: var(--background);
 }
 
-.loadingIcon {
-  color: var(--primary);
-  animation: auth-spin 900ms linear infinite;
-}
-
-@keyframes auth-spin {
-  to {
-    transform: rotate(360deg);
-  }
+.loadingSplashLogo {
+  width: clamp(76px, 24vw, 96px);
+  height: auto;
 }
 
 .segmentedControl button:hover,
@@ -462,7 +459,4 @@
     transition-duration: 0.01ms !important;
   }
 
-  .loadingIcon {
-    animation: none;
-  }
 }
