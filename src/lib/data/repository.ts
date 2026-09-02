@@ -14,6 +14,12 @@ import {
   type LegacyExerciseLineageRow,
 } from "@/lib/training/legacy-exercise-lineage-hydration";
 import {
+  MAX_TRAINING_EXERCISES_PER_DAY,
+  MAX_TRAINING_SERIES_PER_EXERCISE,
+  exceedsTrainingExerciseLimit,
+  exceedsTrainingSeriesLimit,
+} from "@/lib/training/training-resource-bounds";
+import {
   BROWSER_STORAGE_PREFIXES,
   getScopedBrowserStorageKey,
   migrateLegacyBrowserStorageToDemo,
@@ -247,6 +253,21 @@ export async function saveTrainingSessionWithEntries(
   expectedUserId: string,
   getClient: typeof getSupabaseBrowserClient = getSupabaseBrowserClient,
 ): Promise<TrainingSession> {
+  if (input.status === "completed" && exceedsTrainingExerciseLimit(input.entries.length)) {
+    throw new Error(
+      `Cada entrenamiento admite hasta ${MAX_TRAINING_EXERCISES_PER_DAY} ejercicios.`,
+    );
+  }
+
+  if (
+    input.status === "completed" &&
+    input.entries.some((entry) => exceedsTrainingSeriesLimit(entry.reps.length))
+  ) {
+    throw new Error(
+      `Cada ejercicio admite hasta ${MAX_TRAINING_SERIES_PER_EXERCISE} series.`,
+    );
+  }
+
   const auth = await getRepositoryAuth(mode, expectedUserId, getClient);
   const routineId = createIdFromRoutine(input.routine);
   const sessionId = crypto.randomUUID();

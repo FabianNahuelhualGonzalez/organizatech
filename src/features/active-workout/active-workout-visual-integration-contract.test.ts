@@ -601,7 +601,7 @@ const globalStyles = readSource("src/app/globals.css");
 
 const protectedFileHashes = {
   "AGENTS.md": "f0c3ef88979a0ab085551a656ebb1843bfa56138d948ca4236bce6fcd1fa9dd0",
-  "package.json": "e47c643b9efd6537713447e78b27a1c410e4762e9e988df807df83ad3d701f80",
+  "package.json": "15880abfb9ca61eb27b14901f602e8ac9190a9063fcee80a7cbc2a4425e6da64",
   "package-lock.json": "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5",
   "src/components/organizatech-app.tsx": "7cb97d30639b300aac99d1d5e5ff197727581eae7c52cc257dc9c3a596b2f6aa",
   "src/features/progress/components/comparison-screen-v2.tsx": "bff390e44cf5a04fe59b0f2a594fcb53fb2a50602c850362f1a88ca136765743",
