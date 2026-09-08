@@ -10,6 +10,7 @@ import type {
 } from "../components/training-cycle-builder-contracts";
 import {
   mapBuilderDaysToRpcPlan,
+  mapBuilderDraftDaysToRpcPlan,
   rpcMuscleToUi,
   uiMuscleToRpc,
 } from "../data/training-cycle-rpc-mappers";
@@ -111,6 +112,19 @@ class ProductMutationQueue {
   }
 }
 
+// El RPC ya está fijado a identidad/generación. Sus adapters pueden recrearse
+// cuando React recibe una nueva versión del borrador, sin liberar la cola/latch.
+const productMutationQueues = new WeakMap<ProductRpc, ProductMutationQueue>();
+
+function queueFor(rpc: ProductRpc) {
+  let queue = productMutationQueues.get(rpc);
+  if (!queue) {
+    queue = new ProductMutationQueue();
+    productMutationQueues.set(rpc, queue);
+  }
+  return queue;
+}
+
 /**
  * Adapta el contrato visual cerrado al RPC productivo. Conserva los IDs y la
  * revisión remotos fuera del formulario para que un borrador local nunca pueda
@@ -122,9 +136,10 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
   private activeCycleId: string | null;
   private activeCycleVersion: number | null;
   private newDraftSourceCycleId: string | null;
-  private readonly queue = new ProductMutationQueue();
+  private readonly queue: ProductMutationQueue;
 
   constructor(private readonly input: CreateTrainingCycleProductGatewayInput) {
+    this.queue = queueFor(input.rpc);
     this.remoteDraftId = input.remoteDraftReference?.draftId ?? input.remoteDraft?.draftId ?? null;
     this.remoteDraftVersion = input.remoteDraftReference?.version ?? input.remoteDraft?.version ?? null;
     this.activeCycleId = input.activeCycle?.cycleId ?? null;
@@ -141,7 +156,7 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
   }
 
   private async persistNewDraft(input: TrainingCycleSaveDraftInput) {
-    const plan = mapBuilderDaysToRpcPlan(input.days);
+    const plan = mapBuilderDraftDaysToRpcPlan(input.days);
     if (input.origin === "duplicate") {
       if (!this.newDraftSourceCycleId) {
         throw new TrainingCycleTransportError("invalid_state", "No encontramos el ciclo que quieres duplicar.");
@@ -183,7 +198,7 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
           goal: input.goal,
           startDate: input.startDate,
           endDate: input.endDate,
-          plan: mapBuilderDaysToRpcPlan(input.days),
+          plan: mapBuilderDraftDaysToRpcPlan(input.days),
         }));
       }
       return { status: "saved" as const, savedAtLabel: savedAtLabel() };

@@ -431,7 +431,7 @@ export function buildTrainingCycleProductViewModel(
     recoveredDraftLabel: input.draft
       ? `${input.draft.goal} · ${input.draft.startDate} – ${input.draft.endDate}`
       : undefined,
-    saveState: "saved",
+    saveState: input.draft || input.activeCycle ? "saved" : "pending",
     activeCycleDaysRemaining: input.activeCycle?.daysUntilEnd,
     activeCycleElapsedDays: input.activeCycle
       ? Math.max(0, cycleDurationDays(input.activeCycle.startDate, input.todayIsoDate))

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { TRAINING_CYCLE_AUTH_DEADLINE_MS, TRAINING_CYCLE_RPC_DEADLINE_MS } from "./training-cycle-transport-deadline";
 
 import {
   StableTrainingCycleRequestIds,
@@ -21,6 +22,74 @@ const DRAFT_ID = "30000000-0000-4000-8000-000000000001";
 const DRAFT_ID_2 = "30000000-0000-4000-8000-000000000002";
 const CYCLE_ID = "40000000-0000-4000-8000-000000000001";
 const CATALOG_ID = "50000000-0000-4000-8000-000000000001";
+
+test("create/save de borrador permite Objetivo sin ejercicios y devuelve sus versiones reales", async () => {
+  const calls: string[] = [];
+  const emptyPlan: TrainingCycleRpcPlan = { days: [{ day: "tuesday", name: "", order: 0, exercises: [] }] };
+  const repo = gateway({ requestIds: [REQUEST_ID, REQUEST_ID_2], dataClient: {
+    async rpc(name, args) {
+      calls.push(name);
+      assert.deepEqual(args.p_plan, emptyPlan);
+      return { data: {
+        responseKind: "accepted_operation", requestId: args.p_request_id,
+        operationKind: name === "create_own_training_cycle_draft" ? "draft_create" : "draft_save",
+        aggregateId: DRAFT_ID, resultVersion: calls.length,
+      }, error: null };
+    },
+  } });
+  const input = { goal: "volume" as const, startDate: "2026-09-09", endDate: "2026-10-21", plan: emptyPlan };
+  assert.equal((await repo.createDraft({ ...input, origin: "manual" })).resultVersion, 1);
+  assert.equal((await repo.saveDraft({ ...input, draftId: DRAFT_ID, expectedVersion: 1 })).resultVersion, 2);
+  assert.deepEqual(calls, ["create_own_training_cycle_draft", "save_own_training_cycle_draft"]);
+});
+
+test("Auth sin respuesta termina con error acotado y no inicia escrituras tardías", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let resolveSession!: (result: Awaited<ReturnType<TrainingCycleRpcPrincipalClient["auth"]["getSession"]>>) => void;
+  let calls = 0;
+  const base = principal();
+  const repo = new TrainingCycleRpcGateway({
+    expectedUserId: USER_ID, portalScope: "usuario", isCurrent: () => true, createRequestId: () => REQUEST_ID,
+    principal: { auth: { ...base.auth, getSession: () => new Promise((resolve) => { resolveSession = resolve; }) } },
+    createPinnedClient: () => ({ async rpc() { calls++; return { data: null, error: null }; } }),
+  });
+  const result = assert.rejects(repo.createDraft({ origin: "manual", goal: "volume", startDate: "2026-09-01", endDate: "2026-10-01", plan }),
+    (error) => error instanceof TrainingCycleTransportError && error.code === "service_unavailable");
+  await new Promise(setImmediate);
+  t.mock.timers.tick(TRAINING_CYCLE_AUTH_DEADLINE_MS);
+  await result;
+  resolveSession(await base.auth.getSession());
+  await new Promise(setImmediate);
+  assert.equal(calls, 0);
+});
+
+test("RPC colgado aborta transporte y su retry conserva el request ID del resultado incierto", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const ids: unknown[] = [];
+  let signal: AbortSignal | undefined;
+  const repo = gateway({ dataClient: {
+    rpc(_name, args) {
+      ids.push(args.p_request_id);
+      if (ids.length === 1) {
+        const pending = new Promise<{ data: unknown; error: null }>(() => {});
+        return Object.assign(pending, { abortSignal(value: AbortSignal) { signal = value; return pending; } });
+      }
+      return Promise.resolve({ data: {
+        responseKind: "accepted_operation", requestId: args.p_request_id, operationKind: "draft_save",
+        aggregateId: DRAFT_ID, resultVersion: 2,
+      }, error: null });
+    },
+  } });
+  const input = { draftId: DRAFT_ID, expectedVersion: 1, goal: "volume" as const, startDate: "2026-09-01", endDate: "2026-10-01", plan };
+  const failed = assert.rejects(repo.saveDraft(input),
+    (error) => error instanceof TrainingCycleTransportError && error.code === "service_unavailable");
+  await new Promise(setImmediate);
+  t.mock.timers.tick(TRAINING_CYCLE_RPC_DEADLINE_MS);
+  await failed;
+  assert.equal(signal?.aborted, true);
+  assert.equal((await repo.saveDraft(input)).resultVersion, 2);
+  assert.deepEqual(ids, [REQUEST_ID, REQUEST_ID]);
+});
 
 const plan: TrainingCycleRpcPlan = {
   days: [{

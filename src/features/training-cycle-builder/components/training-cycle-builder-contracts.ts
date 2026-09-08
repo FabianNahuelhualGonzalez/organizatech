@@ -44,7 +44,7 @@ export const TRAINING_CYCLE_TECHNIQUES = [
 
 export type TrainingCycleTechnique = (typeof TRAINING_CYCLE_TECHNIQUES)[number];
 export type TrainingCycleBuilderOrigin = "duplicate" | "manual" | "suggested" | "resume";
-export type TrainingCycleSaveState = "loading" | "saving" | "saved" | "offline" | "error";
+export type TrainingCycleSaveState = "pending" | "loading" | "saving" | "saved" | "offline" | "error";
 export type TrainingCycleSuggestionState = "idle" | "loading" | "error";
 export type TrainingCycleActiveEditState = "idle" | "saving" | "error" | "conflict";
 export type TrainingCycleBuilderWorkflow = "draft" | "active" | "active_edit";

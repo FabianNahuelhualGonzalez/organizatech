@@ -253,7 +253,7 @@ export function createTrainingCycleBuilderState(
     activeCycleCloseErrorMessage: null,
     extendOpen: false,
     extendDate: addDaysToIso(viewModel.draft.endDate, 14),
-    saveState: viewModel.saveState ?? "saved",
+    saveState: viewModel.saveState ?? "pending",
     savedAtLabel: "Guardado hace un momento",
     saveErrorMessage: null,
     recoveredDraftBannerOpen: false,
@@ -1357,8 +1357,9 @@ export function formatCycleDate(isoDate: string) {
 
 export function getTrainingCycleDraftValidation(draft: TrainingCycleDraftViewModel) {
   const durationDays = getIsoDayDifference(draft.startDate, draft.endDate);
-  const datesValid = Number.isFinite(durationDays) && durationDays > 0;
+  const datesValid = Number.isFinite(durationDays) && durationDays > 0 && durationDays <= 730;
   const hasDays = draft.selectedDays.length > 0;
+  const hasExercises = hasDays && draft.selectedDays.every((day) => draft.routines[day].exercises.length > 0);
   const seriesValid = draft.selectedDays.every((day) =>
     draft.routines[day].exercises.every((exercise) =>
       exercise.name.trim().length > 0 &&
@@ -1389,10 +1390,12 @@ export function getTrainingCycleDraftValidation(draft: TrainingCycleDraftViewMod
     durationDays,
     datesValid,
     hasDays,
+    hasExercises,
     seriesValid,
     videosValid,
     invalidVideoCount,
-    canActivate: datesValid && hasDays && seriesValid && videosValid,
+    canSave: datesValid && hasDays && seriesValid && videosValid,
+    canActivate: datesValid && hasExercises && seriesValid && videosValid,
   };
 }
 

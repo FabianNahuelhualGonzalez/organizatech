@@ -92,6 +92,9 @@ test("crear rutina propia parte vacío mientras duplicar conserva la fuente", ()
   const manual = reduce(initial, { type: "choose_origin", origin: "manual", screen: "setup" });
   assert.equal(manual.draft.routines.monday.exercises.length, 0);
   assert.equal(manual.draft.routines.monday.name, "");
+  assert.equal(getTrainingCycleDraftValidation(manual.draft).canSave, true);
+  assert.equal(getTrainingCycleDraftValidation(manual.draft).hasExercises, false);
+  assert.equal(getTrainingCycleDraftValidation(manual.draft).canActivate, false);
   const duplicate = reduce(manual, { type: "choose_origin", origin: "duplicate", screen: "duplicate" });
   assert.ok(duplicate.draft.routines.monday.exercises.length > 0);
   assert.equal(duplicate.draft.routines.monday.name, "Empuje");

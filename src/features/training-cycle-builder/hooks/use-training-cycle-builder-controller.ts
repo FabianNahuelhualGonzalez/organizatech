@@ -37,6 +37,7 @@ import {
   type TrainingCycleDraftAutosaveClaim,
 } from "@/features/training-cycle-builder/hooks/training-cycle-draft-autosave";
 import { normalizeOptionalYouTubeVideoUrl } from "@/lib/training/youtube-video-url";
+import { prepareTrainingCycleDraftSave, requestTrainingCycleDraftSave } from "./training-cycle-draft-persistence";
 
 const AUTOSAVE_DELAY_MS = 520;
 
@@ -64,7 +65,7 @@ export function publicOperationError(operation: "save" | "suggest" | "activate" 
   if (error instanceof TrainingCycleCommittedMutationError) {
     return "El cambio se guardó, pero no pudimos actualizar la pantalla. Recarga antes de continuar.";
   }
-  if (operation === "save") return "No pudimos guardar tus cambios. El borrador sigue disponible aquí.";
+  if (operation === "save") return "No pudimos confirmar el guardado. Tus cambios siguen en esta pantalla; reintenta antes de salir.";
   if (operation === "suggest") return "No pudimos generar la rutina sugerida. Revisa tu conexión e inténtalo otra vez.";
   if (operation === "activate") return "No pudimos activar el ciclo. Revisa tu conexión e inténtalo otra vez.";
   if (operation === "active_edit") return "No pudimos guardar los cambios del ciclo activo. Tu edición sigue abierta.";
@@ -229,7 +230,7 @@ export function useTrainingCycleBuilderController({
         dispatch({
           type: "set_save_state",
           state: "error",
-          errorMessage: publicOperationError("save"),
+          errorMessage: publicOperationError("save", event.error),
         });
       },
     });
@@ -261,17 +262,7 @@ export function useTrainingCycleBuilderController({
     draft: TrainingCycleDraftViewModel,
     claim?: TrainingCycleDraftAutosaveClaim,
   ) => {
-    const validation = getTrainingCycleDraftValidation(draft);
-    if (!validation.canActivate) return;
-    try {
-      await autosaveOwner.request(buildTrainingCycleSaveDraftInput(draft, originRef.current), claim);
-    } catch {
-      dispatch({
-        type: "set_save_state",
-        state: "error",
-        errorMessage: "Corrige los enlaces de YouTube antes de guardar. Tus cambios siguen aquí.",
-      });
-    }
+    await requestTrainingCycleDraftSave({ draft, origin: originRef.current, owner: autosaveOwner, dispatch, claim });
   }, [autosaveOwner]);
 
   useEffect(() => {
@@ -282,9 +273,12 @@ export function useTrainingCycleBuilderController({
       state.discardState === "discarding"
     ) return;
     const snapshot = state.draft;
-    if (!getTrainingCycleDraftValidation(snapshot).canActivate) return;
     const claim = autosaveOwner.claim(snapshot.draftId);
     if (!claim) return;
+    if (!prepareTrainingCycleDraftSave(snapshot, originRef.current)) {
+      dispatch({ type: "set_save_state", state: "pending", errorMessage: null });
+      return;
+    }
     dispatch({ type: "set_save_state", state: "saving", errorMessage: null });
     const timeoutId = window.setTimeout(() => {
       void persistDraftSnapshot(snapshot, claim);
@@ -294,7 +288,6 @@ export function useTrainingCycleBuilderController({
 
   const retrySave = useCallback(async () => {
     if (state.committedSyncPending || state.workflow !== "draft" || state.discardState === "discarding") return;
-    dispatch({ type: "set_save_state", state: "saving", errorMessage: null });
     await persistDraftSnapshot(draftRef.current);
   }, [persistDraftSnapshot, state.committedSyncPending, state.discardState, state.workflow]);
 

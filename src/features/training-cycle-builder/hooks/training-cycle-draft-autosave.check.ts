@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createTrainingCycleBuilderTestViewModel } from "./training-cycle-builder-fixtures.check";
+import { createTrainingCycleBuilderState, trainingCycleBuilderReducer } from "./training-cycle-builder-state";
+import { prepareTrainingCycleDraftSave, requestTrainingCycleDraftSave } from "./training-cycle-draft-persistence";
 
 import type {
   TrainingCycleSaveDraftInput,
@@ -19,6 +22,73 @@ function deferred<T>() {
   });
   return { promise, reject, resolve };
 }
+
+test("Objetivo se guarda y Reintentar con campos incompletos nunca deja Guardando ni falso saved", async () => {
+  let state = trainingCycleBuilderReducer(createTrainingCycleBuilderState(createTrainingCycleBuilderTestViewModel()), {
+    type: "choose_origin", origin: "manual", screen: "setup",
+  });
+  let writes = 0;
+  const owner = new TrainingCycleDraftAutosaveOwner({
+    async write(payload) {
+      writes++;
+      assert.equal(payload.days[0].exercises.length, 0);
+      return { status: "saved", savedAtLabel: "Guardado" };
+    },
+    onEvent(event) {
+      assert.equal(event.status, "saved");
+      state = trainingCycleBuilderReducer(state, { type: "set_save_state", state: "saved" });
+    },
+  });
+  const dispatch = (action: Parameters<typeof trainingCycleBuilderReducer>[1]) => { state = trainingCycleBuilderReducer(state, action); };
+  owner.resume(state.draft.draftId);
+  await requestTrainingCycleDraftSave({ owner, draft: state.draft, origin: state.origin, dispatch });
+  assert.equal(state.saveState, "saved");
+  assert.equal(writes, 1);
+  state = trainingCycleBuilderReducer(state, { type: "set_save_state", state: "error", errorMessage: "error anterior" });
+  state = trainingCycleBuilderReducer(state, { type: "set_end_date", value: "" });
+  await requestTrainingCycleDraftSave({ owner, draft: state.draft, origin: state.origin, dispatch });
+  assert.equal(state.saveState, "pending");
+  assert.equal(state.saveErrorMessage, null);
+  assert.equal(writes, 1);
+  assert.equal(prepareTrainingCycleDraftSave(state.draft, state.origin), null);
+});
+
+test("un debounce vencido después de Reintentar no vuelve a mostrar Guardando", async () => {
+  const state = trainingCycleBuilderReducer(createTrainingCycleBuilderState(createTrainingCycleBuilderTestViewModel()), {
+    type: "choose_origin", origin: "manual", screen: "setup",
+  });
+  const states: string[] = [];
+  const owner = new TrainingCycleDraftAutosaveOwner({
+    write: async () => ({ status: "saved", savedAtLabel: "Guardado" }),
+    onEvent: (event) => states.push(event.status),
+  });
+  owner.resume(state.draft.draftId);
+  const oldClaim = owner.claim(state.draft.draftId)!;
+  const input = { owner, draft: state.draft, origin: state.origin, dispatch(action: Parameters<typeof trainingCycleBuilderReducer>[1]) {
+    if (action.type === "set_save_state") states.push(action.state);
+  } };
+  await requestTrainingCycleDraftSave(input);
+  await requestTrainingCycleDraftSave({ ...input, claim: oldClaim });
+  assert.deepEqual(states, ["saving", "saved"]);
+});
+
+test("editar a un dato incompleto invalida el acuse de una escritura anterior", async () => {
+  let state = trainingCycleBuilderReducer(createTrainingCycleBuilderState(createTrainingCycleBuilderTestViewModel()), {
+    type: "choose_origin", origin: "manual", screen: "setup",
+  });
+  const gate = deferred<TrainingCycleSaveDraftResult>();
+  const events: TrainingCycleDraftAutosaveEvent[] = [];
+  const owner = new TrainingCycleDraftAutosaveOwner({ write: () => gate.promise, onEvent: (event) => events.push(event) });
+  owner.resume(state.draft.draftId);
+  const dispatch = (action: Parameters<typeof trainingCycleBuilderReducer>[1]) => { state = trainingCycleBuilderReducer(state, action); };
+  const old = requestTrainingCycleDraftSave({ owner, draft: state.draft, origin: state.origin, dispatch });
+  state = trainingCycleBuilderReducer(state, { type: "set_end_date", value: "" });
+  await requestTrainingCycleDraftSave({ owner, draft: state.draft, origin: state.origin, dispatch });
+  gate.resolve({ status: "saved", savedAtLabel: "Obsoleto" });
+  await old;
+  assert.equal(state.saveState, "pending");
+  assert.deepEqual(events, []);
+});
 
 function input(endDate: string, draftId = "draft-1"): TrainingCycleSaveDraftInput {
   return {

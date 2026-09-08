@@ -74,6 +74,7 @@ export function SaveChip({
   readonly savedAtLabel: string;
 }) {
   const labels: Record<TrainingCycleSaveState, string> = {
+    pending: "Completa los campos para guardar",
     loading: "Cargando…",
     saving: "Guardando…",
     saved: savedAtLabel,

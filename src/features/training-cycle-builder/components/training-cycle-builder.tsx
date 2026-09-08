@@ -321,7 +321,7 @@ function ConnectedTrainingCycleBuilder({
             tone="error"
             title={state.saveErrorMessage?.includes("YouTube")
               ? "Revisa los enlaces de YouTube"
-              : "No se pudo guardar en el servidor"}
+              : "No pudimos confirmar el guardado"}
             body={state.saveErrorMessage ?? "Tus cambios siguen disponibles aquí."}
             actionLabel="Reintentar"
             onAction={() => void controller.retrySave()}

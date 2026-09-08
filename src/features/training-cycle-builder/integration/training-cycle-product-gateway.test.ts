@@ -185,6 +185,40 @@ test("false de sincronización post-commit no se presenta como éxito ni se repi
   }
 });
 
+test("autosave de Objetivo guarda días vacíos; el adapter recreado continúa la versión", async () => {
+  const rpc = fakeRpc();
+  const initial = { rpc, catalog: CATALOG, remoteDraft: null, sourceCycleId: null, activeCycle: null };
+  const gateway = createTrainingCycleProductGateway(initial);
+  const input = { ...saveInput("manual"), days: [{ day: "tuesday" as const, name: "", exercises: [] }] };
+  assert.equal((await gateway.saveDraft(input)).status, "saved");
+  const recreated = createTrainingCycleProductGateway({ ...initial, remoteDraftReference: { draftId: DRAFT_ID, version: 1 } });
+  assert.equal((await recreated.saveDraft({ ...input, endDate: "2026-10-21" })).status, "saved");
+  assert.deepEqual(rpc.calls, ["create", "save:1"]);
+});
+
+test("recrear adapter durante postcommit no libera cola ni bloqueo de sincronización", async () => {
+  const rpc = fakeRpc();
+  let finishSync!: (result: boolean) => void;
+  let entered!: () => void;
+  const enteredSync = new Promise<void>((resolve) => { entered = resolve; });
+  const options = {
+    rpc, catalog: CATALOG, remoteDraft: replacementDraft(DRAFT_ID), sourceCycleId: SOURCE_CYCLE_ID,
+    activeCycle: null,
+    onCycleChanged: () => { entered(); return new Promise<boolean>((resolve) => { finishSync = resolve; }); },
+  };
+  const first = createTrainingCycleProductGateway(options);
+  const activation = assert.rejects(first.activateCycle(), TrainingCycleCommittedMutationError);
+  await enteredSync;
+  const recreated = createTrainingCycleProductGateway(options);
+  const next = assert.rejects(recreated.discardDraft(), TrainingCycleCommittedMutationError);
+  await new Promise(setImmediate);
+  assert.deepEqual(rpc.calls, ["activate:1"]);
+  finishSync(false);
+  await Promise.all([activation, next]);
+  assert.deepEqual(rpc.calls, ["activate:1"]);
+  await assert.rejects(recreated.saveDraft(saveInput()), TrainingCycleCommittedMutationError);
+});
+
 test("duplica una vez, guarda la edición sobre versión 1 y activa la última versión", async () => {
   const rpc = fakeRpc();
   const gateway = createTrainingCycleProductGateway({ rpc, catalog: CATALOG, remoteDraft: null, sourceCycleId: SOURCE_CYCLE_ID, activeCycle: null });

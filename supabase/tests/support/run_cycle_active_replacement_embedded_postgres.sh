@@ -85,6 +85,8 @@ query_file "$ROOT_DIR/supabase/tests/support/cycle_legacy_youtube_backfill_fixtu
 echo "APPLY_EXACT=20260905201420_cycle_legacy_compatibility_expiry_youtube.sql"
 query_file "$ROOT_DIR/supabase/migrations/20260905201420_cycle_legacy_compatibility_expiry_youtube.sql" >/dev/null
 echo "APPLY_SUPPORT=pgtap-1.3.4"
+echo "APPLY_EXACT=20260908162143_cycle_legacy_generated_metadata_compatibility.sql"
+query_file "$ROOT_DIR/supabase/migrations/20260908162143_cycle_legacy_generated_metadata_compatibility.sql" >/dev/null
 printf '%s\n' 'create extension pgtap with schema extensions;' > "$RUNTIME_DIR/create-pgtap.sql"
 query_file "$RUNTIME_DIR/create-pgtap.sql" >/dev/null
 echo "RUN_PGTAP=20260831213114_cycle_active_replacement_test.sql"
@@ -117,3 +119,13 @@ fi
 printf '%s\n' "$DISPATCH_OUTPUT" | grep -Fq '1..28'
 test "$(printf '%s\n' "$DISPATCH_OUTPUT" | grep -Ec '^ok [0-9]+')" = "28"
 echo "EMBEDDED_POSTGRES_DISPATCH_AUTHORIZATION=PASS"
+echo "RUN_PGTAP=20260908162143_cycle_legacy_generated_metadata_compatibility_test.sql"
+METADATA_OUTPUT=$(query_file "$ROOT_DIR/supabase/tests/20260908162143_cycle_legacy_generated_metadata_compatibility_test.sql")
+printf '%s\n' "$METADATA_OUTPUT"
+if printf '%s\n' "$METADATA_OUTPUT" | grep -Eq '^(not ok|Bail out!)'; then
+  echo "EMBEDDED_POSTGRES_GENERATED_METADATA=FAIL" >&2
+  exit 1
+fi
+printf '%s\n' "$METADATA_OUTPUT" | grep -Fq '1..59'
+test "$(printf '%s\n' "$METADATA_OUTPUT" | grep -Ec '^ok [0-9]+')" = "59"
+echo "EMBEDDED_POSTGRES_GENERATED_METADATA=PASS"

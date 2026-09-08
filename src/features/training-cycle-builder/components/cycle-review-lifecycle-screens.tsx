@@ -81,7 +81,7 @@ export function CycleReviewScreen({
     }
   }
   const isActiveEdit = state.workflow === "active_edit";
-  const saveBlocksActivation = !isActiveEdit && (state.saveState === "loading" || state.saveState === "saving" || state.saveState === "offline" || state.saveState === "error");
+  const saveBlocksActivation = !isActiveEdit && state.saveState !== "saved";
   const activating = state.activationState === "activating";
   const savingActive = state.activeEditState === "saving";
   const activeConflict = state.activeEditState === "conflict";
@@ -98,12 +98,16 @@ export function CycleReviewScreen({
       ? "Elige al menos un día"
       : !validation.datesValid
         ? "Revisa las fechas"
+        : !validation.hasExercises
+          ? "Agrega ejercicios a cada día"
         : !validation.seriesValid
           ? "Revisa las series"
           : !validation.videosValid
             ? "Revisa los enlaces de YouTube"
           : !isActiveEdit && state.saveState === "offline"
             ? "Conéctate para activar"
+            : !isActiveEdit && state.saveState === "pending"
+              ? "Completa los campos para guardar"
             : !isActiveEdit && state.saveState === "error"
               ? "Guarda antes de activar"
               : !isActiveEdit && (state.saveState === "loading" || state.saveState === "saving")

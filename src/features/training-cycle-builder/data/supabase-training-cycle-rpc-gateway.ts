@@ -2,6 +2,7 @@ import { createClient, type Session, type User } from "@supabase/supabase-js";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeOptionalYouTubeVideoUrl } from "@/lib/training/youtube-video-url";
+import { TRAINING_CYCLE_RPC_DEADLINE_MS, waitForTrainingCycleTransport } from "./training-cycle-transport-deadline";
 
 import {
   assertNonAdvancingCursor,
@@ -9,6 +10,7 @@ import {
   isUuid,
   parseAcceptedOperation,
   parsePreparedDraftOperation,
+  parseTrainingCycleRpcPlan,
   parseActiveCycleGuard,
   parseCatalogCursor,
   parseCatalogPage,
@@ -62,12 +64,16 @@ import {
 } from "./training-cycle-rpc-types";
 
 type RpcError = { readonly code?: string; readonly message?: string } | null;
+type RpcResponse = { readonly data: unknown; readonly error: RpcError };
+type RpcRequest = PromiseLike<RpcResponse> & {
+  abortSignal?(signal: AbortSignal): PromiseLike<RpcResponse>;
+};
 
 export interface TrainingCycleRpcDataClient {
   rpc(
     name: string,
     args: Readonly<Record<string, unknown>>,
-  ): Promise<{ readonly data: unknown; readonly error: RpcError }>;
+  ): RpcRequest;
 }
 
 export interface TrainingCycleRpcPrincipalClient {
@@ -128,9 +134,19 @@ function assertCurrent(isCurrent: () => boolean) {
 
 async function guardedAwait<T>(promise: Promise<T>, isCurrent: () => boolean): Promise<T> {
   assertCurrent(isCurrent);
-  const result = await promise;
+  const result = await waitForTrainingCycleTransport(promise);
   assertCurrent(isCurrent);
   return result;
+}
+
+async function boundedRpc(client: TrainingCycleRpcDataClient, name: string, args: Readonly<Record<string, unknown>>) {
+  const controller = new AbortController();
+  const request = client.rpc(name, args);
+  return waitForTrainingCycleTransport(
+    request.abortSignal ? request.abortSignal(controller.signal) : request,
+    TRAINING_CYCLE_RPC_DEADLINE_MS,
+    () => controller.abort(),
+  );
 }
 
 function committedMutationFailure(error: unknown): never {
@@ -408,7 +424,8 @@ export class TrainingCycleRpcGateway {
       createPinnedClient: this.input.createPinnedClient,
     }), this.input.isCurrent);
     await guardedAwait(operation.verifyExpectedUser(), this.input.isCurrent);
-    const result = await guardedAwait(operation.dataClient.rpc(name, args), this.input.isCurrent);
+    const result = await boundedRpc(operation.dataClient, name, args);
+    assertCurrent(this.input.isCurrent);
     await guardedAwait(operation.verifyExpectedUser(), this.input.isCurrent);
     if (result.error) throw sanitizeRpcError(result.error);
     return result.data;
@@ -426,7 +443,7 @@ export class TrainingCycleRpcGateway {
     }), this.input.isCurrent);
     await guardedAwait(operation.verifyExpectedUser(), this.input.isCurrent);
     assertCurrent(this.input.isCurrent);
-    const result = await operation.dataClient.rpc(name, args);
+    const result = await boundedRpc(operation.dataClient, name, args);
     if (result.error) throw sanitizeRpcError(result.error);
     return afterCommitted(async () => {
       assertCurrent(this.input.isCurrent);
@@ -521,7 +538,7 @@ export class TrainingCycleRpcGateway {
   }
 
   createDraft(input: CreateTrainingCycleDraftInput): Promise<TrainingCycleAcceptedOperation> {
-    const plan = parseCallerInput(() => assertRpcPlanActivable(input.plan));
+    const plan = parseCallerInput(() => parseTrainingCycleRpcPlan(input.plan));
     const origin = parseCallerInput(() => parseDraftCreateOrigin(input.origin));
     const goal = parseCallerInput(() => parseGoal(input.goal));
     assertDateRange(input.startDate, input.endDate);
@@ -552,7 +569,7 @@ export class TrainingCycleRpcGateway {
   }
 
   saveDraft(input: SaveTrainingCycleDraftInput): Promise<TrainingCycleAcceptedOperation> {
-    const plan = parseCallerInput(() => assertRpcPlanActivable(input.plan));
+    const plan = parseCallerInput(() => parseTrainingCycleRpcPlan(input.plan));
     const goal = parseCallerInput(() => parseGoal(input.goal));
     assertDateRange(input.startDate, input.endDate);
     const payload = {

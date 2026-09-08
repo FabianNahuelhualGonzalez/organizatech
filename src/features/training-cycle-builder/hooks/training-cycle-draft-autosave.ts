@@ -100,10 +100,7 @@ export class TrainingCycleDraftAutosaveOwner {
     }
 
     const claim = existingClaim ?? this.claim(input.draftId);
-    if (!claim ||
-      claim.generation !== this.generation ||
-      claim.scopeKey !== this.scopeKey ||
-      claim.sequence !== this.latestSequence) {
+    if (!claim || !this.ownsClaim(claim)) {
       return Promise.resolve({ status: "superseded" });
     }
     const promise = new Promise<TrainingCycleDraftAutosaveOutcome>((resolve) => {
@@ -121,6 +118,11 @@ export class TrainingCycleDraftAutosaveOwner {
       }
     });
     return promise;
+  }
+
+  ownsClaim(claim: TrainingCycleDraftAutosaveClaim) {
+    return !this.paused && claim.generation === this.generation
+      && claim.scopeKey === this.scopeKey && claim.sequence === this.latestSequence;
   }
 
   whenIdle(): Promise<void> {

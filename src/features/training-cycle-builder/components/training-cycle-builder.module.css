@@ -702,7 +702,9 @@
 }
 
 .dateFields input[type="date"] {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -717,8 +719,11 @@
 }
 
 .dateFields input[type="date"]::-webkit-date-and-time-value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-width: 0;
-  height: 1.5em;
+  height: 100%;
   margin: 0;
   font-size: clamp(14px, 3.65vw, 16px);
   line-height: 1.5;

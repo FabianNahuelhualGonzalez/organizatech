@@ -18,6 +18,8 @@ export const POST_PERF_06_MIGRATION_OWNERSHIP = {
     "7a2933c53a81d404af97a8108baf018bc28517e1cc772fddac92916323489c64",
   "20260905201420_cycle_legacy_compatibility_expiry_youtube.sql":
     "f57bcf4fd4ecbda74c608c8a300ac49b504cdf0279ca82b88952c1f9f5bb76c5",
+  "20260908162143_cycle_legacy_generated_metadata_compatibility.sql":
+    "e05889892666a9872824eeaaafe81f75e75e488df3bbf72cd973be6c6eb5280f",
 } as const;
 
 const schemaPath =
@@ -38,6 +40,8 @@ const legacyCompatibilityPath =
   "supabase/migrations/20260905201420_cycle_legacy_compatibility_expiry_youtube.sql";
 const legacyCompatibilityDbTestPath =
   "supabase/tests/20260905201420_cycle_legacy_compatibility_expiry_youtube_test.sql";
+const generatedMetadataCompatibilityPath =
+  "supabase/migrations/20260908162143_cycle_legacy_generated_metadata_compatibility.sql";
 const activeReplacementBootstrapPath =
   "supabase/tests/support/cycle_active_replacement_embedded_bootstrap.sql";
 const activeReplacementRunnerPath =
@@ -434,6 +438,8 @@ function validateCoachMigrationAllowlist(candidateCoachContract: string) {
   assert.equal(countOccurrences(candidateCoachContract, activeReplacementSnapshotMigration), 1);
   assert.equal(countOccurrences(candidateCoachContract, activeReplacementDescriptorsMigration), 1);
   assert.equal(countOccurrences(candidateCoachContract, legacyCompatibilityMigration), 1);
+  assert.equal(countOccurrences(candidateCoachContract, generatedMetadataCompatibilityPath), 1);
+  assert.match(normalized, /path !== cycle_generated_metadata_compatibility_migration_path/);
   assert.match(
     normalized,
     /const cycle_redesign_schema_migration_path = "supabase\/migrations\/20260829200846_cycle_redesign_schema\.sql"/,
@@ -1164,7 +1170,7 @@ test("cycle redesign schema is forward-only, relationally scoped, and private", 
   validateSecurityContract(schema, api);
 });
 
-test("migration ownership hashes match the seven exact forward-only files", () => {
+test("migration ownership hashes match the eight exact forward-only files", () => {
   assert.equal(
     sha256(schema),
     POST_PERF_06_MIGRATION_OWNERSHIP["20260829200846_cycle_redesign_schema.sql"],
@@ -1193,6 +1199,10 @@ test("migration ownership hashes match the seven exact forward-only files", () =
     sha256(legacyCompatibility),
     POST_PERF_06_MIGRATION_OWNERSHIP["20260905201420_cycle_legacy_compatibility_expiry_youtube.sql"],
   );
+  assert.equal(
+    sha256(readFileSync(generatedMetadataCompatibilityPath, "utf8")),
+    POST_PERF_06_MIGRATION_OWNERSHIP["20260908162143_cycle_legacy_generated_metadata_compatibility.sql"],
+  );
 });
 
 test("embedded replacement harness applies exact owned migrations over a pre-846 baseline", () => {
@@ -1204,6 +1214,7 @@ test("embedded replacement harness applies exact owned migrations over a pre-846
     "20260831233757_cycle_active_replacement_snapshot_response.sql",
     "20260901002250_cycle_active_replacement_exercise_descriptors.sql",
     "20260905201420_cycle_legacy_compatibility_expiry_youtube.sql",
+    "20260908162143_cycle_legacy_generated_metadata_compatibility.sql",
   ];
   let previous = -1;
   for (const migration of ordered) {
@@ -1521,7 +1532,7 @@ test("all required lifecycle operations are exposed through bounded RPCs", () =>
   assert.match(apiSql, /cardinality\(p_notification_ids\) not between 1 and 50/);
 });
 
-test("Coach contract allowlists only the seven owned redesign migrations", () => {
+test("Coach contract allowlists only the eight owned redesign migrations", () => {
   validateCoachMigrationAllowlist(coachContract);
 });
 

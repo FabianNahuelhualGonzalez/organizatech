@@ -7,6 +7,8 @@ import {
   canonicalMuscleToUi,
   isBackendCompatibleYoutubeUrl,
   mapBuilderDaysToRpcPlan,
+  mapBuilderDraftDaysToRpcPlan,
+  assertRpcPlanActivable,
   mapUiExecutionToRpc,
   rpcMuscleToCanonical,
   rpcMuscleToUi,
@@ -20,6 +22,16 @@ import {
 } from "./training-cycle-rpc-types";
 
 const CATALOG_ID = "10000000-0000-4000-8000-000000000001";
+
+test("guardar Objetivo conserva días vacíos sin convertirlos en un plan activable", () => {
+  const days: TrainingCyclePlanDayInput[] = [{ day: "monday", name: "", exercises: [] }];
+  const result = mapBuilderDraftDaysToRpcPlan(days);
+  assert.deepEqual(result, { days: [{ day: "monday", name: "", order: 0, exercises: [] }] });
+  assert.throws(() => mapBuilderDaysToRpcPlan(days), TrainingCycleTransportError);
+  assert.throws(() => assertRpcPlanActivable(result), TrainingCycleTransportError);
+  assert.throws(() => mapBuilderDraftDaysToRpcPlan([]), TrainingCycleTransportError);
+  assert.throws(() => mapBuilderDraftDaysToRpcPlan(plan({ targetKg: null })), TrainingCycleTransportError);
+});
 const DAY_ID = "20000000-0000-4000-8000-000000000001";
 const EXERCISE_ID = "30000000-0000-4000-8000-000000000001";
 const SET_ID = "40000000-0000-4000-8000-000000000001";

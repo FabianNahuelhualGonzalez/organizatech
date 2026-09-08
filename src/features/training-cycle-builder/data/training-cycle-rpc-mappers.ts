@@ -166,6 +166,21 @@ export function mapBuilderDaysToRpcPlan(
   days: readonly TrainingCyclePlanDayInput[],
   resolveSource: TrainingCycleSourceResolver = (exercise) => exercise.source,
 ): TrainingCycleRpcPlan {
+  return mapBuilderPlan(days, resolveSource, true);
+}
+
+/** Un borrador puede conservar días vacíos; nunca completa series ni fuentes inventadas. */
+export function mapBuilderDraftDaysToRpcPlan(
+  days: readonly TrainingCyclePlanDayInput[],
+): TrainingCycleRpcPlan {
+  return mapBuilderPlan(days, (exercise) => exercise.source, false);
+}
+
+function mapBuilderPlan(
+  days: readonly TrainingCyclePlanDayInput[],
+  resolveSource: TrainingCycleSourceResolver,
+  requireExercises: boolean,
+): TrainingCycleRpcPlan {
   if (days.length < 1 || days.length > 7) incompletePlan("Selecciona al menos un día de entrenamiento.");
   let totalExercises = 0;
   let totalSets = 0;
@@ -177,7 +192,7 @@ export function mapBuilderDaysToRpcPlan(
     seenDays.add(day.day);
     const name = day.name.trim();
     if (name.length > 120 || CONTROL.test(name)) invalidInput();
-    if (day.exercises.length < 1) incompletePlan("Cada día seleccionado necesita al menos un ejercicio.");
+    if (requireExercises && day.exercises.length < 1) incompletePlan("Cada día seleccionado necesita al menos un ejercicio.");
     if (day.exercises.length > 50) invalidInput();
 
     const exerciseOrders = new Set<number>();
@@ -264,7 +279,7 @@ export function isBuilderPlanActivable(
   }
 }
 
-/** Última compuerta antes de cualquier RPC de create/save/edit. */
+/** La activación/edición exige un plan completo; los borradores admiten días vacíos. */
 export function assertRpcPlanActivable(plan: TrainingCycleRpcPlan): TrainingCycleRpcPlan {
   const parsed = parseTrainingCycleRpcPlan(plan);
   if (parsed.days.some((day) => day.exercises.length === 0)) {
