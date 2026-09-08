@@ -1492,12 +1492,18 @@
   margin-top: 4px;
 }
 
+.techniquePicker .choiceChip {
+  min-height: 46px;
+  border-radius: 11px;
+}
+
 .techniquePicker > p {
   margin: 9px 0 0;
   padding: 10px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--cycle-blue);
   border-radius: 11px;
-  color: var(--cycle-muted);
+  color: var(--cycle-text);
+  background: linear-gradient(135deg, rgba(60, 122, 255, 0.24), rgba(60, 122, 255, 0.1));
   font-size: 10px;
   line-height: 1.55;
 }

@@ -38,6 +38,20 @@ const catalogScreenSource = read(`${FEATURE_ROOT}/components/cycle-catalog-scree
 const catalogNoticeSource = read(`${FEATURE_ROOT}/components/cycle-catalog-addition-notice.tsx`);
 const routineScreensSource = read(`${FEATURE_ROOT}/components/cycle-routine-screens.tsx`);
 
+// Detalle de series: nombres solicitados y cambios de forma/color acotados a técnicas.
+assert.match(routineScreensSource, />Series lineales<\/button>/);
+assert.match(routineScreensSource, />Modificar por series<\/button>/);
+assert.doesNotMatch(routineScreensSource, />Rápido<|>Por serie</);
+const techniqueChipRule = cssSource.match(/\.techniquePicker \.choiceChip\s*\{([^}]*)\}/)?.[1] ?? "";
+const exerciseModeRule = cssSource.match(/\.segmentedControl button\s*\{([^}]*)\}/)?.[1] ?? "";
+assert.equal(techniqueChipRule.match(/border-radius: ([^;]+)/)?.[1], exerciseModeRule.match(/border-radius: ([^;]+)/)?.[1]);
+assert.match(techniqueChipRule, /min-height: 46px/);
+const techniqueHelpRule = cssSource.match(/\.techniquePicker > p\s*\{([^}]*)\}/)?.[1] ?? "";
+assert.match(techniqueHelpRule, /border: 1px solid var\(--cycle-blue\)/);
+assert.match(techniqueHelpRule, /background: linear-gradient/);
+assert.match(techniqueHelpRule, /color: var\(--cycle-text\)/);
+assert.match(stateSource, /editTrainingCycleSet\(exercise, action\)/);
+
 // UX aprobada: información neutral en Rutina; el catálogo acusa la adición al
 // borrador, nunca un guardado remoto. Su región persistente no roba foco.
 const routineScreenSource = routineScreensSource.split("export { CycleCatalogScreen }")[0];

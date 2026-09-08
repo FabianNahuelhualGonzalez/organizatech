@@ -334,8 +334,8 @@ export function CycleExerciseScreen({
         <span className={styles.groupTag}>{exercise.muscleGroup}</span>
       </header>
       <div className={styles.segmentedControl} role="group" aria-label="Modo de configuración">
-        <button type="button" data-selected={state.exerciseMode === "quick"} aria-pressed={state.exerciseMode === "quick"} onClick={() => dispatch({ type: "set_exercise_mode", mode: "quick" })}>Rápido</button>
-        <button type="button" data-selected={state.exerciseMode === "per_set"} aria-pressed={state.exerciseMode === "per_set"} onClick={() => dispatch({ type: "set_exercise_mode", mode: "per_set" })}>Por serie</button>
+        <button type="button" data-selected={state.exerciseMode === "quick"} aria-pressed={state.exerciseMode === "quick"} onClick={() => dispatch({ type: "set_exercise_mode", mode: "quick" })}>Series lineales</button>
+        <button type="button" data-selected={state.exerciseMode === "per_set"} aria-pressed={state.exerciseMode === "per_set"} onClick={() => dispatch({ type: "set_exercise_mode", mode: "per_set" })}>Modificar por series</button>
       </div>
       {state.exerciseMode === "quick" ? (
         <section className={styles.quickConfig}>

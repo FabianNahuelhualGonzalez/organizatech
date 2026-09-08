@@ -277,6 +277,114 @@ test("un ejercicio nunca baja de una serie y las cinco técnicas permanecen edit
   assert.equal(state.draft.routines.monday.exercises[0].sets.at(-1)?.toFailure, true);
 });
 
+test("editar el primer kg recalcula ambas pirámides de inmediato y guarda el snapshot actualizado", () => {
+  for (const technique of ["ascending", "descending"] as const) {
+    let state = reduce(createState(),
+      { type: "open_exercise", exerciseId: "press-flat" },
+      { type: "set_exercise_mode", mode: "per_set" },
+      { type: "set_technique", technique },
+    );
+    const before = state;
+    const otherExercise = before.draft.routines.monday.exercises[1];
+    const otherDay = before.draft.routines.wednesday;
+    state = reduce(state,
+      { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "200" },
+    );
+    const exercise = state.draft.routines.monday.exercises[0];
+    const expected = technique === "ascending" ? [200, 220, 240, 260] : [200, 180, 160, 140];
+    assert.deepEqual(exercise.sets.map((set) => Number(set.targetKg)), expected);
+    assert.equal(state.revision, before.revision + 1, "un gesto genera una sola revisión de autoguardado");
+    assert.equal(exercise.technique, technique);
+    assert.equal(exercise.recommendationDecision, "modified");
+    assert.equal(state.draft.routines.monday.exercises[1], otherExercise);
+    assert.equal(state.draft.routines.wednesday, otherDay);
+    assert.deepEqual(buildTrainingCycleSaveDraftInput(state.draft, state.origin)
+      .days[0].exercises[0].sets.map((set) => set.targetKg), expected);
+    assert.notDeepEqual(before.draft.routines.monday.exercises[0].sets.map((set) => Number(set.targetKg)), expected);
+  }
+});
+
+test("teclear y volver a cambiar la referencia no acumula porcentajes", () => {
+  let state = reduce(createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_technique", technique: "ascending" },
+  );
+  for (const value of ["2", "20", "200", "100,5", "200", "200", "0"]) {
+    state = reduce(state, { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value });
+    const kg = state.draft.routines.monday.exercises[0].sets.map((set) => set.targetKg);
+    if (value === "100,5") assert.deepEqual(kg, ["100,5", "110.5", "120.5", "130.5"]);
+    if (value === "200") assert.deepEqual(kg, ["200", "220", "240", "260"]);
+    if (value === "0") assert.deepEqual(kg, ["0", "0", "0", "0"]);
+  }
+});
+
+test("la carga lineal y al fallo sigue la primera serie sin alterar reps ni marcas", () => {
+  for (const technique of ["linear", "failure"] as const) {
+    let state = reduce(createState(),
+      { type: "open_exercise", exerciseId: "press-flat" },
+      { type: "set_technique", technique },
+      { type: "edit_set", setId: "press-flat-set-2", field: "targetReps", value: "17" },
+      { type: "toggle_set_failure", setId: "press-flat-set-3" },
+    );
+    const previous = state.draft.routines.monday.exercises[0];
+    state = reduce(state, { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "44,5" });
+    const exercise = state.draft.routines.monday.exercises[0];
+    assert.deepEqual(exercise.sets.map((set) => set.targetKg), ["44,5", "44.5", "44.5", "44.5"]);
+    assert.deepEqual(exercise.sets.map((set) => set.targetReps), previous.sets.map((set) => set.targetReps));
+    assert.deepEqual(exercise.sets.map((set) => set.toFailure), previous.sets.map((set) => set.toFailure));
+  }
+});
+
+test("entradas incompletas o fuera de límites no propagan cargas inventadas", () => {
+  for (const value of ["", " ", ",", "-2", "NaN", "Infinity", "0x20", "1e2", "100000", "2,3,4"]) {
+    const before = reduce(createState(),
+      { type: "open_exercise", exerciseId: "press-flat" },
+      { type: "set_technique", technique: "ascending" },
+    );
+    let state = reduce(before, { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value });
+    const sets = state.draft.routines.monday.exercises[0].sets;
+    assert.equal(sets[0].targetKg, value, "no secuestrar la edición de la casilla");
+    assert.deepEqual(sets.slice(1), before.draft.routines.monday.exercises[0].sets.slice(1));
+    state = reduce(state, { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "200" });
+    assert.deepEqual(state.draft.routines.monday.exercises[0].sets.map((set) => set.targetKg), ["200", "220", "240", "260"]);
+  }
+});
+
+test("editar una serie posterior sigue siendo individual; reps y descensos no se reescriben", () => {
+  let state = reduce(createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_technique", technique: "ascending" },
+  );
+  const original = state.draft.routines.monday.exercises[0];
+  state = reduce(state, { type: "edit_set", setId: "press-flat-set-2", field: "targetKg", value: "108.5" });
+  const individuallyEdited = state.draft.routines.monday.exercises[0];
+  assert.equal(individuallyEdited.sets[1].targetKg, "108.5");
+  for (const index of [0, 2, 3]) assert.equal(individuallyEdited.sets[index], original.sets[index]);
+  state = reduce(state, { type: "edit_set", setId: "press-flat-set-1", field: "targetReps", value: "13" });
+  assert.deepEqual(state.draft.routines.monday.exercises[0].sets.slice(1), individuallyEdited.sets.slice(1));
+  state = reduce(state, { type: "set_technique", technique: "drop_set" });
+  const dropExercise = state.draft.routines.monday.exercises[0];
+  state = reduce(state, { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "200" });
+  const after = state.draft.routines.monday.exercises[0];
+  assert.deepEqual(after.sets.slice(1), dropExercise.sets.slice(1));
+  assert.deepEqual(after.sets.map((set) => set.drops), dropExercise.sets.map((set) => set.drops));
+});
+
+test("recálculo conserva ignorar sugerencia y respeta el límite al generar pesos", () => {
+  let state = reduce(createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_technique", technique: "ascending" },
+    { type: "ignore_recommendation" },
+    { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "99999.99" },
+  );
+  const exercise = state.draft.routines.monday.exercises[0];
+  assert.equal(exercise.recommendationDecision, "ignored");
+  assert.ok(exercise.sets.every((set) => Number(set.targetKg) <= DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS.maxTargetKg));
+  assert.equal(reduce(state, { type: "edit_set", setId: "missing", field: "targetKg", value: "200" }), state);
+  state = reduce(state, { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "200" });
+  assert.equal(reduce(state, { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "200" }), state);
+});
+
 test("alternar pirámides conserva la primera serie y nunca multiplica los valores", () => {
   let state = reduce(
     createState(),

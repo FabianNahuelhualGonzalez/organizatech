@@ -31,6 +31,7 @@ import {
   suggestPyramidSetTargets,
 } from "@/features/training-cycle-builder/model/techniques";
 import { DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS } from "@/features/training-cycle-builder/model/types";
+import { editTrainingCycleSet } from "./training-cycle-set-editing";
 
 export type TrainingCycleExerciseMode = "quick" | "per_set";
 export type TrainingCycleCopyMode = "exercises" | "day";
@@ -866,12 +867,7 @@ export function trainingCycleBuilderReducer(
     case "set_technique":
       return updateCurrentExercise(state, (exercise) => applyTechnique(exercise, action.technique));
     case "edit_set":
-      return updateCurrentExercise(state, (exercise) => ({
-        ...exercise,
-        recommendationDecision: exercise.recommendationDecision === "ignored" ? "ignored" : "modified",
-        sets: exercise.sets.map((set) =>
-          set.id === action.setId ? { ...set, [action.field]: action.value } : set),
-      }));
+      return updateCurrentExercise(state, (exercise) => editTrainingCycleSet(exercise, action));
     case "toggle_set_failure":
       return updateCurrentExercise(state, (exercise) => ({
         ...exercise,
