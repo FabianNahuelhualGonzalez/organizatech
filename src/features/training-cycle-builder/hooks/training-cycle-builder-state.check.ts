@@ -22,6 +22,9 @@ import {
 import { applyTechniqueToExercise } from "@/features/training-cycle-builder/model/techniques";
 import { createFixtureExercise, createFixtureSet } from "@/features/training-cycle-builder/model/test-fixtures";
 import { DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS } from "@/features/training-cycle-builder/model/types";
+import type { TrainingCycleExerciseDraft, TrainingCycleSaveDraftInput, TrainingCycleSaveDraftResult } from "@/features/training-cycle-builder/components/training-cycle-builder-contracts";
+import { TrainingCycleDraftAutosaveOwner } from "./training-cycle-draft-autosave";
+import { requestTrainingCycleDraftSave } from "./training-cycle-draft-persistence";
 import {
   CYCLE_CATALOG_TABS,
   filterCycleCatalog,
@@ -49,6 +52,263 @@ function catalogAddAction(): Extract<TrainingCycleBuilderAction, { type: "add_ca
     recommendation: { hasHistory: false, title: "Referencia inicial", body: "Editable", source: "Inicial" },
   };
 }
+
+function withFirstExercise(
+  state: TrainingCycleBuilderState,
+  update: (exercise: TrainingCycleExerciseDraft) => TrainingCycleExerciseDraft,
+): TrainingCycleBuilderState {
+  const monday = state.draft.routines.monday;
+  return {
+    ...state,
+    draft: {
+      ...state.draft,
+      routines: {
+        ...state.draft.routines,
+        monday: { ...monday, exercises: monday.exercises.map((exercise, index) => index === 0 ? update(exercise) : exercise) },
+      },
+    },
+  };
+}
+
+test("abrir y rehidratar técnicas avanzadas o series heterogéneas elige por-series sin mutación", () => {
+  const advanced: readonly ((exercise: TrainingCycleExerciseDraft) => TrainingCycleExerciseDraft)[] = [
+    ...(["ascending", "descending", "drop_set", "failure"] as const).map((technique) =>
+      (exercise: TrainingCycleExerciseDraft) => ({ ...exercise, technique })),
+    (exercise) => ({ ...exercise, sets: exercise.sets.map((set, index) => index === 1 ? { ...set, targetReps: "7" } : set) }),
+    (exercise) => ({ ...exercise, sets: exercise.sets.map((set, index) => index === 1 ? { ...set, targetKg: "72" } : set) }),
+    (exercise) => ({ ...exercise, sets: exercise.sets.map((set, index) => index === 1 ? { ...set, toFailure: true } : set) }),
+    (exercise) => ({ ...exercise, sets: exercise.sets.map((set, index) => index === 1 ? { ...set, drops: [{ id: "preserved-drop", targetKg: "60", targetReps: "6" }] } : set) }),
+  ];
+  for (const update of advanced) {
+    const configured = withFirstExercise(createState(), update);
+    const hydrated = createTrainingCycleBuilderState({ ...createTrainingCycleBuilderTestViewModel(), draft: configured.draft });
+    const opened = reduce(hydrated, { type: "open_exercise", exerciseId: "press-flat" });
+    const reopened = reduce(opened, { type: "return_to", screen: "routine" }, { type: "open_exercise", exerciseId: "press-flat" });
+    for (const state of [opened, reopened]) {
+      assert.equal(state.exerciseMode, "per_set");
+      assert.equal(state.draft, hydrated.draft);
+      assert.equal(state.revision, hydrated.revision);
+      assert.equal(state.quickKg, "80");
+      assert.equal(state.quickReps, "10");
+      assert.deepEqual(buildTrainingCycleSaveDraftInput(state.draft, state.origin), buildTrainingCycleSaveDraftInput(hydrated.draft, hydrated.origin));
+    }
+  }
+  const initial = createState();
+  const linear = reduce(initial, { type: "open_exercise", exerciseId: "press-flat" });
+  assert.equal(linear.exerciseMode, "quick");
+  assert.equal(linear.draft, initial.draft);
+  assert.equal(linear.revision, initial.revision);
+});
+
+test("elegir Series lineales convierte desde la primera serie actual en una sola revisión", () => {
+  for (const technique of ["ascending", "descending", "drop_set", "failure", "linear"] as const) {
+    const before = reduce(createState(),
+      { type: "open_exercise", exerciseId: "press-flat" },
+      { type: "set_exercise_mode", mode: "per_set" },
+      { type: "set_technique", technique },
+      { type: "edit_set", setId: "press-flat-set-2", field: "targetReps", value: "7" },
+      { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "100,5" },
+      { type: "edit_set", setId: "press-flat-set-1", field: "targetReps", value: "13" },
+      { type: "toggle_set_open", setId: "press-flat-set-2" },
+    );
+    assert.equal(before.quickKg, "80", "el buffer anterior no es fuente para convertir");
+    const converted = reduce(before, { type: "set_exercise_mode", mode: "quick" });
+    const exercise = converted.draft.routines.monday.exercises[0];
+    assert.equal(converted.exerciseMode, "quick");
+    assert.equal(converted.quickKg, "100,5");
+    assert.equal(converted.quickReps, "13");
+    assert.equal(converted.openSetId, null);
+    assert.equal(converted.revision, before.revision + 1);
+    assert.equal(exercise.technique, "linear");
+    assert.equal(exercise.recommendationDecision, "modified");
+    assert.equal(exercise.videoUrl, before.draft.routines.monday.exercises[0].videoUrl);
+    assert.deepEqual(exercise.sets.map((set) => set.id), before.draft.routines.monday.exercises[0].sets.map((set) => set.id));
+    assert.ok(exercise.sets.every((set) => set.targetKg === "100,5" && set.targetReps === "13" && !set.toFailure && !set.drops.length));
+    assert.equal(converted.draft.routines.monday.exercises[1], before.draft.routines.monday.exercises[1]);
+    assert.equal(converted.draft.routines.wednesday, before.draft.routines.wednesday);
+    const payload = buildTrainingCycleSaveDraftInput(converted.draft, converted.origin).days[0].exercises[0];
+    assert.equal(payload.technique, "linear");
+    assert.ok(payload.sets.every((set) => set.targetKg === 100.5 && set.targetReps === 13 && !set.toFailure && !set.drops.length));
+    const reopened = reduce(converted, { type: "return_to", screen: "routine" }, { type: "open_exercise", exerciseId: "press-flat" });
+    assert.equal(reopened.exerciseMode, "quick");
+    assert.equal(reopened.draft, converted.draft);
+    assert.equal(reopened.revision, converted.revision);
+  }
+});
+
+test("el modo ya activo es no-op y entrar por-series no aplica buffers pendientes", () => {
+  const pending = reduce(createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_quick_reps", value: "17" },
+    { type: "set_quick_kg", value: "999" },
+  );
+  assert.equal(reduce(pending, { type: "set_exercise_mode", mode: "quick" }), pending);
+  const perSet = reduce(pending, { type: "set_exercise_mode", mode: "per_set" });
+  assert.equal(perSet.draft, pending.draft);
+  assert.equal(perSet.revision, pending.revision);
+  assert.equal(reduce(perSet, { type: "set_exercise_mode", mode: "per_set" }), perSet);
+  const returned = reduce(perSet, { type: "set_exercise_mode", mode: "quick" });
+  assert.equal(returned.quickKg, "80");
+  assert.equal(returned.quickReps, "10");
+  assert.equal(returned.draft, pending.draft, "series ya uniformes no requieren convertir ni autoguardar");
+  assert.equal(returned.revision, pending.revision);
+});
+
+test("Aplicar valores rápidos persiste linear real sin metadata avanzada oculta", () => {
+  for (const technique of ["ascending", "descending", "drop_set", "failure"] as const) {
+    // Simula un estado antiguo cuyo modo compacto no correspondía a su técnica.
+    const legacy = reduce(createState(),
+      { type: "open_exercise", exerciseId: "press-flat" },
+      { type: "set_technique", technique },
+      { type: "ignore_recommendation" },
+      { type: "set_quick_reps", value: "12" },
+      { type: "set_quick_kg", value: "92,5" },
+    );
+    const applied = reduce(legacy, { type: "apply_quick_values" });
+    assert.equal(applied.revision, legacy.revision + 1);
+    const exercise = applied.draft.routines.monday.exercises[0];
+    assert.equal(exercise.technique, "linear");
+    assert.equal(exercise.recommendationDecision, "ignored");
+    const payload = buildTrainingCycleSaveDraftInput(applied.draft, applied.origin).days[0].exercises[0];
+    assert.equal(payload.technique, "linear");
+    assert.ok(payload.sets.every((set) => set.targetKg === 92.5 && set.targetReps === 12 && !set.toFailure && !set.drops.length));
+    assert.equal(reduce(applied, { type: "apply_quick_values" }), applied);
+    const increased = reduce(applied, { type: "change_set_count", delta: 1 });
+    assert.equal(increased.draft.routines.monday.exercises[0].sets.length, exercise.sets.length + 1);
+    assert.ok(increased.draft.routines.monday.exercises[0].sets.every((set) => set.targetKg === "92,5" && set.targetReps === "12" && !set.toFailure && !set.drops.length));
+  }
+});
+
+test("convertir y aplicar preserva entradas vacías o inválidas sin inventar cargas o reps", () => {
+  for (const value of ["", " ", "inválido", "-1", "999999"]) {
+    const before = reduce(createState(),
+      { type: "open_exercise", exerciseId: "press-flat" },
+      { type: "set_exercise_mode", mode: "per_set" },
+      { type: "set_technique", technique: "failure" },
+      { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value },
+      { type: "edit_set", setId: "press-flat-set-1", field: "targetReps", value },
+    );
+    const converted = reduce(before, { type: "set_exercise_mode", mode: "quick" });
+    assert.equal(converted.quickKg, value);
+    assert.equal(converted.quickReps, value);
+    assert.ok(converted.draft.routines.monday.exercises[0].sets.every((set) => set.targetKg === value && set.targetReps === value));
+    assert.equal(getTrainingCycleDraftValidation(converted.draft).canSave, false);
+    const quick = reduce(createState(),
+      { type: "open_exercise", exerciseId: "press-flat" },
+      { type: "set_quick_kg", value },
+      { type: "set_quick_reps", value },
+      { type: "apply_quick_values" },
+    );
+    assert.ok(quick.draft.routines.monday.exercises[0].sets.every((set) => set.targetKg === value && set.targetReps === value));
+    assert.equal(getTrainingCycleDraftValidation(quick.draft).canSave, false);
+  }
+});
+
+test("quitar la primera serie usa la nueva referencia al volver a lineales", () => {
+  const before = reduce(createState(),
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_exercise_mode", mode: "per_set" },
+    { type: "edit_set", setId: "press-flat-set-2", field: "targetKg", value: "72" },
+    { type: "edit_set", setId: "press-flat-set-2", field: "targetReps", value: "8" },
+    { type: "remove_set", setId: "press-flat-set-1" },
+  );
+  const returned = reduce(before, { type: "set_exercise_mode", mode: "quick" });
+  assert.equal(returned.quickKg, "72");
+  assert.equal(returned.quickReps, "8");
+  assert.ok(returned.draft.routines.monday.exercises[0].sets.every((set) => set.targetKg === "72" && set.targetReps === "8"));
+});
+
+test("aceptar recomendación sincroniza el bloque lineal sin sobrescribir sugerencias heterogéneas", () => {
+  const before = reduce(createState(), { type: "open_exercise", exerciseId: "press-flat" });
+  const uniform = reduce(before, { type: "accept_recommendation" });
+  assert.equal(uniform.exerciseMode, "quick");
+  assert.equal(uniform.quickKg, "84");
+  assert.equal(uniform.quickReps, "10");
+  assert.equal(uniform.revision, before.revision + 1);
+  const applied = reduce(uniform, { type: "apply_quick_values" });
+  assert.equal(applied, uniform, "Aplicar no restaura la carga anterior a la sugerencia ni modifica su decisión");
+  const heterogeneous = withFirstExercise(before, (exercise) => ({
+    ...exercise,
+    recommendation: { ...exercise.recommendation, suggestedSets: [{ order: 1, targetReps: 10, suggestedKg: "82" }, { order: 2, targetReps: 10, suggestedKg: "86" }] },
+  }));
+  const accepted = reduce(heterogeneous, { type: "accept_recommendation" });
+  assert.equal(accepted.exerciseMode, "per_set");
+  assert.equal(accepted.quickKg, "82");
+  assert.equal(accepted.revision, heterogeneous.revision + 1);
+  assert.equal(accepted.draft.routines.monday.exercises[0].recommendationDecision, "accepted");
+  assert.deepEqual(accepted.draft.routines.monday.exercises[0].sets.map((set) => set.targetKg), ["82", "86", "84", "84"]);
+  const explicitPerSet = reduce(before, { type: "set_exercise_mode", mode: "per_set" }, { type: "accept_recommendation" });
+  assert.equal(explicitPerSet.exerciseMode, "per_set", "aceptar no revoca una elección explícita del editor por-series");
+});
+
+test("la conversión respeta bloqueos active/sync y persiste dentro de active_edit", () => {
+  const advanced = reduce(createState(), { type: "open_exercise", exerciseId: "press-military" });
+  for (const blocked of [{ ...advanced, workflow: "active" as const }, { ...advanced, committedSyncPending: true }]) {
+    assert.equal(reduce(blocked, { type: "set_exercise_mode", mode: "quick" }, { type: "apply_quick_values" }), blocked);
+  }
+  const activeLinear = { ...reduce(createState(), { type: "open_exercise", exerciseId: "press-flat" }), workflow: "active" as const };
+  const inspect = reduce(activeLinear, { type: "set_exercise_mode", mode: "per_set" });
+  assert.equal(inspect.exerciseMode, "per_set", "el guard de escritura no bloquea la inspección visual que ya estaba permitida");
+  assert.equal(inspect.draft, activeLinear.draft);
+  assert.equal(inspect.revision, activeLinear.revision);
+  assert.equal(reduce(inspect, { type: "set_exercise_mode", mode: "per_set" }), inspect);
+  const compact = reduce(inspect, { type: "set_exercise_mode", mode: "quick" });
+  assert.equal(compact.exerciseMode, "quick", "volver a un bloque ya uniforme también es navegación sin write");
+  assert.equal(compact.draft, activeLinear.draft);
+  assert.equal(compact.revision, activeLinear.revision);
+  const editing = { ...advanced, workflow: "active_edit" as const };
+  const converted = reduce(editing, { type: "set_exercise_mode", mode: "quick" });
+  assert.equal(converted.workflow, "active_edit");
+  assert.equal(converted.revision, editing.revision + 1);
+  const payload = buildTrainingCycleSaveActiveInput(converted.draft, "cycle-test", "revision-test").days[0].exercises[2];
+  assert.equal(payload.technique, "linear");
+  assert.ok(payload.sets.every((set) => set.targetKg === 45 && set.targetReps === 10 && !set.toFailure && !set.drops.length));
+});
+
+test("autosave serializa el cambio a lineales y sólo confirma el último snapshot aplicado", async () => {
+  let state = reduce(createState(),
+    { type: "choose_origin", origin: "manual", screen: "routine" },
+    { ...catalogAddAction(), source: { kind: "catalog", id: "10000000-0000-4000-8000-000000000001" } },
+  );
+  state = reduce(state,
+    { type: "open_exercise", exerciseId: state.draft.routines.monday.exercises[0].id },
+    { type: "set_exercise_mode", mode: "per_set" },
+    { type: "set_technique", technique: "drop_set" },
+  );
+  let release!: (result: TrainingCycleSaveDraftResult) => void;
+  const pendingWrite = new Promise<TrainingCycleSaveDraftResult>((resolve) => { release = resolve; });
+  const writes: TrainingCycleSaveDraftInput[] = [];
+  const events: string[] = [];
+  const owner = new TrainingCycleDraftAutosaveOwner({
+    write: async (payload) => {
+      writes.push(payload);
+      return writes.length === 1 ? pendingWrite : { status: "saved", savedAtLabel: "Lineales" };
+    },
+    onEvent: (event) => { events.push(event.status); },
+  });
+  owner.resume(state.draft.draftId);
+  const dispatch = (action: TrainingCycleBuilderAction) => { state = trainingCycleBuilderReducer(state, action); };
+  const request = () => requestTrainingCycleDraftSave({ owner, draft: state.draft, origin: state.origin, dispatch });
+  const advancedRequest = request();
+  state = reduce(state, { type: "set_exercise_mode", mode: "quick" });
+  const convertedRequest = request();
+  state = reduce(state,
+    { type: "set_quick_kg", value: "97,5" },
+    { type: "set_quick_reps", value: "11" },
+    { type: "apply_quick_values" },
+  );
+  const latestRequest = request();
+  assert.equal(writes.length, 1, "la conversión no solapa el write avanzado en vuelo");
+  release({ status: "saved", savedAtLabel: "Avanzado obsoleto" });
+  await Promise.all([advancedRequest, convertedRequest, latestRequest]);
+  await owner.whenIdle();
+  assert.equal(writes.length, 2, "el snapshot intermedio se sustituye por el último aplicado");
+  assert.equal(writes[0].days[0].exercises[0].technique, "drop_set");
+  const persisted = writes[1].days[0].exercises[0];
+  assert.equal(persisted.technique, "linear");
+  assert.ok(persisted.sets.every((set) => set.targetKg === 97.5 && set.targetReps === 11 && !set.toFailure && !set.drops.length));
+  assert.deepEqual(events, ["saved"], "el write avanzado obsoleto nunca publica un guardado actual");
+});
 
 test("Todos es la primera pestaña y cada apertura desde rutina muestra el catálogo completo", () => {
   const initial = createState();

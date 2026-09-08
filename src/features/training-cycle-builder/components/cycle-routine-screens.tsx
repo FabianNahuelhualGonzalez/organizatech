@@ -347,59 +347,62 @@ export function CycleExerciseScreen({
           </div>
           <SecondaryAction onClick={() => dispatch({ type: "apply_quick_values" })}>Aplicar a las {exercise.sets.length} series</SecondaryAction>
         </section>
-      ) : null}
-      <fieldset className={styles.techniquePicker}>
-        <legend>TÉCNICA DE ENTRENAMIENTO</legend>
-        <div>
-          {TRAINING_CYCLE_TECHNIQUES.map((technique) => (
-            <ChoiceChip key={technique} selected={exercise.technique === technique} onClick={() => dispatch({ type: "set_technique", technique })}>
-              {TRAINING_CYCLE_TECHNIQUE_LABELS[technique]}
-            </ChoiceChip>
-          ))}
-        </div>
-        <p>{TECHNIQUE_HELP[exercise.technique]}</p>
-      </fieldset>
-      <div className={styles.sectionTitleRow}><h3>Series</h3><span>{setSummary}</span></div>
-      <div className={styles.setTable}>
-        <div className={styles.setTableHead}><span>#</span><span>REPS</span><span>KG</span><span>FALLO</span><span /></div>
-        {exercise.sets.map((set, index) => {
-          const open = state.openSetId === set.id;
-          return (
-            <div className={styles.setBlock} key={set.id} data-open={open}>
-              <div className={styles.setRow}>
-                <strong>{index + 1}</strong>
-                <label><span className={styles.srOnly}>Repeticiones serie {index + 1}</span><input inputMode="numeric" value={set.targetReps} onChange={(event) => dispatch({ type: "edit_set", setId: set.id, field: "targetReps", value: event.target.value })} /></label>
-                <label><span className={styles.srOnly}>Kilogramos serie {index + 1}</span><input inputMode="decimal" value={set.targetKg} onChange={(event) => dispatch({ type: "edit_set", setId: set.id, field: "targetKg", value: event.target.value })} /></label>
-                <button className={styles.failureButton} type="button" aria-label={`Serie ${index + 1} al fallo muscular`} aria-pressed={set.toFailure} data-selected={set.toFailure} onClick={() => dispatch({ type: "toggle_set_failure", setId: set.id })}>F</button>
-                <button className={styles.touchIconButton} type="button" aria-label={`Acciones de la serie ${index + 1}`} aria-expanded={open} onClick={() => dispatch({ type: "toggle_set_open", setId: set.id })}><ChevronDown size={16} aria-hidden="true" /></button>
-              </div>
-              {open ? (
-                <div className={styles.setDetails}>
-                  {exercise.technique === "drop_set" ? (
-                    <section className={styles.dropEditor}>
-                      <small>DESCENSOS DE CARGA</small>
-                      {set.drops.map((drop, dropIndex) => (
-                        <div key={drop.id}>
-                          <b>↓{dropIndex + 1}</b>
-                          <label><span className={styles.srOnly}>Kg descenso {dropIndex + 1}</span><input inputMode="decimal" value={drop.targetKg} onChange={(event) => dispatch({ type: "edit_drop", setId: set.id, dropId: drop.id, field: "targetKg", value: event.target.value })} /></label><span>kg</span>
-                          <label><span className={styles.srOnly}>Reps descenso {dropIndex + 1}</span><input inputMode="numeric" value={drop.targetReps} onChange={(event) => dispatch({ type: "edit_drop", setId: set.id, dropId: drop.id, field: "targetReps", value: event.target.value })} /></label><span>reps</span>
-                          <button className={styles.touchIconButton} type="button" aria-label={`Quitar descenso ${dropIndex + 1}`} onClick={() => dispatch({ type: "remove_drop", setId: set.id, dropId: drop.id })}><X size={15} aria-hidden="true" /></button>
-                        </div>
-                      ))}
-                      <button type="button" onClick={() => dispatch({ type: "add_drop", setId: set.id })}><Plus size={13} aria-hidden="true" />Agregar descenso</button>
-                    </section>
-                  ) : null}
-                  <div className={styles.setActions}>
-                    <button type="button" onClick={() => dispatch({ type: "duplicate_set", setId: set.id })}>Duplicar serie</button>
-                    <button type="button" disabled={exercise.sets.length <= 1} onClick={() => dispatch({ type: "remove_set", setId: set.id })}>Eliminar serie</button>
-                  </div>
-                </div>
-              ) : null}
+      ) : (
+        <>
+          <fieldset className={styles.techniquePicker}>
+            <legend>TÉCNICA DE ENTRENAMIENTO</legend>
+            <div>
+              {TRAINING_CYCLE_TECHNIQUES.map((technique) => (
+                <ChoiceChip key={technique} selected={exercise.technique === technique} onClick={() => dispatch({ type: "set_technique", technique })}>
+                  {TRAINING_CYCLE_TECHNIQUE_LABELS[technique]}
+                </ChoiceChip>
+              ))}
             </div>
-          );
-        })}
-        <button className={styles.addSetButton} type="button" onClick={() => dispatch({ type: "add_set" })}><Plus size={14} aria-hidden="true" />Agregar serie</button>
-      </div>
+            <p>{TECHNIQUE_HELP[exercise.technique]}</p>
+          </fieldset>
+          <div className={styles.sectionTitleRow}><h3>Series</h3><span>{setSummary}</span></div>
+          <div className={styles.setTable}>
+            <div className={styles.setTableHead}><span>#</span><span>REPS</span><span>KG</span><span>FALLO</span><span /></div>
+            {exercise.sets.map((set, index) => {
+              const open = state.openSetId === set.id;
+              return (
+                <div className={styles.setBlock} key={set.id} data-open={open}>
+                  <div className={styles.setRow}>
+                    <strong>{index + 1}</strong>
+                    <label><span className={styles.srOnly}>Repeticiones serie {index + 1}</span><input inputMode="numeric" value={set.targetReps} onChange={(event) => dispatch({ type: "edit_set", setId: set.id, field: "targetReps", value: event.target.value })} /></label>
+                    <label><span className={styles.srOnly}>Kilogramos serie {index + 1}</span><input inputMode="decimal" value={set.targetKg} onChange={(event) => dispatch({ type: "edit_set", setId: set.id, field: "targetKg", value: event.target.value })} /></label>
+                    <button className={styles.failureButton} type="button" aria-label={`Serie ${index + 1} al fallo muscular`} aria-pressed={set.toFailure} data-selected={set.toFailure} onClick={() => dispatch({ type: "toggle_set_failure", setId: set.id })}>F</button>
+                    <button className={styles.touchIconButton} type="button" aria-label={`Acciones de la serie ${index + 1}`} aria-expanded={open} onClick={() => dispatch({ type: "toggle_set_open", setId: set.id })}><ChevronDown size={16} aria-hidden="true" /></button>
+                  </div>
+                  {open ? (
+                    <div className={styles.setDetails}>
+                      {exercise.technique === "drop_set" ? (
+                        <section className={styles.dropEditor}>
+                          <small>DESCENSOS DE CARGA</small>
+                          {set.drops.map((drop, dropIndex) => (
+                            <div key={drop.id}>
+                              <b>↓{dropIndex + 1}</b>
+                              <label><span className={styles.srOnly}>Kg descenso {dropIndex + 1}</span><input inputMode="decimal" value={drop.targetKg} onChange={(event) => dispatch({ type: "edit_drop", setId: set.id, dropId: drop.id, field: "targetKg", value: event.target.value })} /></label><span>kg</span>
+                              <label><span className={styles.srOnly}>Reps descenso {dropIndex + 1}</span><input inputMode="numeric" value={drop.targetReps} onChange={(event) => dispatch({ type: "edit_drop", setId: set.id, dropId: drop.id, field: "targetReps", value: event.target.value })} /></label><span>reps</span>
+                              <button className={styles.touchIconButton} type="button" aria-label={`Quitar descenso ${dropIndex + 1}`} onClick={() => dispatch({ type: "remove_drop", setId: set.id, dropId: drop.id })}><X size={15} aria-hidden="true" /></button>
+                            </div>
+                          ))}
+                          <button type="button" onClick={() => dispatch({ type: "add_drop", setId: set.id })}><Plus size={13} aria-hidden="true" />Agregar descenso</button>
+                        </section>
+                      ) : null}
+                      <div className={styles.setActions}>
+                        <button type="button" onClick={() => dispatch({ type: "duplicate_set", setId: set.id })}>Duplicar serie</button>
+                        <button type="button" disabled={exercise.sets.length <= 1} onClick={() => dispatch({ type: "remove_set", setId: set.id })}>Eliminar serie</button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            <button className={styles.addSetButton} type="button" onClick={() => dispatch({ type: "add_set" })}><Plus size={14} aria-hidden="true" />Agregar serie</button>
+          </div>
+        </>
+      )}
       <RecommendationCard exercise={exercise} dispatch={dispatch} />
       <section className={styles.videoCard}>
         <header><Video size={16} aria-hidden="true" /><strong>Video de referencia</strong><small>Opcional</small></header>

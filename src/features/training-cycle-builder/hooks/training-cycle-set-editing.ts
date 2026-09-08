@@ -10,6 +10,38 @@ interface SetEdit {
   readonly value: string;
 }
 
+/** Only uniform linear sets can be represented by the compact editor. */
+export function hasUniformLinearSets(exercise: TrainingCycleExerciseDraft): boolean {
+  const firstSet = exercise.sets[0];
+  return exercise.technique === "linear" && Boolean(firstSet) && exercise.sets.every((set) =>
+    !set.toFailure && set.drops.length === 0
+    && set.targetReps === firstSet.targetReps && set.targetKg === firstSet.targetKg);
+}
+
+/** Called only for an explicit linear-mode selection or quick-value application. */
+export function applyLinearSetValues(
+  exercise: TrainingCycleExerciseDraft,
+  targetReps: string,
+  targetKg: string,
+): TrainingCycleExerciseDraft {
+  if (hasUniformLinearSets(exercise)
+    && exercise.sets[0].targetReps === targetReps
+    && exercise.sets[0].targetKg === targetKg) return exercise;
+
+  return {
+    ...exercise,
+    technique: "linear",
+    recommendationDecision: exercise.recommendationDecision === "ignored" ? "ignored" : "modified",
+    sets: exercise.sets.map((set) => ({
+      ...set,
+      targetReps,
+      targetKg,
+      toFailure: false,
+      drops: [],
+    })),
+  };
+}
+
 /** Edit the draft once; changing the reference load refreshes only load suggestions. */
 export function editTrainingCycleSet(
   exercise: TrainingCycleExerciseDraft,

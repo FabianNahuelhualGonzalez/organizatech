@@ -31,7 +31,7 @@ import {
   suggestPyramidSetTargets,
 } from "@/features/training-cycle-builder/model/techniques";
 import { DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS } from "@/features/training-cycle-builder/model/types";
-import { editTrainingCycleSet } from "./training-cycle-set-editing";
+import { applyLinearSetValues, editTrainingCycleSet, hasUniformLinearSets } from "./training-cycle-set-editing";
 
 export type TrainingCycleExerciseMode = "quick" | "per_set";
 export type TrainingCycleCopyMode = "exercises" | "day";
@@ -615,7 +615,10 @@ export function trainingCycleBuilderReducer(
   }
   // A confirmed mutation needs a fresh authoritative view, not another edit.
   if (state.committedSyncPending) return state;
-  if (state.workflow === "active" && PLAN_EDIT_ACTIONS.has(action.type)) return state;
+  const convertsToLinear = action.type === "set_exercise_mode" && action.mode === "quick" && state.exerciseMode === "per_set"
+    && state.draft.routines[state.currentDay].exercises.some((exercise) =>
+      exercise.id === state.selectedExerciseId && !hasUniformLinearSets(exercise));
+  if (state.workflow === "active" && (PLAN_EDIT_ACTIONS.has(action.type) || convertsToLinear)) return state;
   switch (action.type) {
     case "navigate":
       if (action.screen === state.screen) return state;
@@ -760,7 +763,7 @@ export function trainingCycleBuilderReducer(
         history: [...state.history, state.screen],
         screen: "exercise",
         selectedExerciseId: exercise.id,
-        exerciseMode: "quick",
+        exerciseMode: hasUniformLinearSets(exercise) ? "quick" : "per_set",
         quickReps: exercise.sets[0]?.targetReps ?? "10",
         quickKg: exercise.sets[0]?.targetKg ?? "20",
         openSetId: null,
@@ -837,8 +840,19 @@ export function trainingCycleBuilderReducer(
         },
       );
     }
-    case "set_exercise_mode":
-      return { ...state, exerciseMode: action.mode };
+    case "set_exercise_mode": {
+      if (state.exerciseMode === action.mode) return state;
+      if (action.mode === "per_set") return { ...state, exerciseMode: "per_set", openSetId: null };
+      const exercise = state.draft.routines[state.currentDay].exercises.find(
+        (candidate) => candidate.id === state.selectedExerciseId,
+      );
+      if (!exercise) return state;
+      // Converting to linear is an explicit gesture, never an opening/hydration effect.
+      const quickReps = exercise.sets[0]?.targetReps ?? "";
+      const quickKg = exercise.sets[0]?.targetKg ?? "";
+      const updated = updateCurrentExercise(state, (current) => applyLinearSetValues(current, quickReps, quickKg));
+      return { ...updated, exerciseMode: "quick", quickReps, quickKg, openSetId: null };
+    }
     case "set_quick_reps":
       return { ...state, quickReps: action.value };
     case "set_quick_kg":
@@ -855,15 +869,7 @@ export function trainingCycleBuilderReducer(
         : updated;
     }
     case "apply_quick_values":
-      return updateCurrentExercise(state, (exercise) => ({
-        ...exercise,
-        recommendationDecision: exercise.recommendationDecision === "ignored" ? "ignored" : "modified",
-        sets: exercise.sets.map((set) => ({
-          ...set,
-          targetReps: state.quickReps,
-          targetKg: state.quickKg,
-        })),
-      }));
+      return updateCurrentExercise(state, (exercise) => applyLinearSetValues(exercise, state.quickReps, state.quickKg));
     case "set_technique":
       return updateCurrentExercise(state, (exercise) => applyTechnique(exercise, action.technique));
     case "edit_set":
@@ -985,8 +991,8 @@ export function trainingCycleBuilderReducer(
       }));
     case "set_video_url":
       return updateCurrentExercise(state, (exercise) => ({ ...exercise, videoUrl: action.value }));
-    case "accept_recommendation":
-      return updateCurrentExercise(state, (exercise) => {
+    case "accept_recommendation": {
+      const updated = updateCurrentExercise(state, (exercise) => {
         const suggestedKg = exercise.recommendation.suggestedKg ?? exercise.sets[0]?.targetKg ?? "20";
         const suggestedSets = new Map(
           (exercise.recommendation.suggestedSets ?? []).map((suggestion) => [suggestion.order, suggestion]),
@@ -1000,6 +1006,17 @@ export function trainingCycleBuilderReducer(
           })),
         };
       });
+      const exercise = updated.draft.routines[updated.currentDay].exercises.find(
+        (candidate) => candidate.id === updated.selectedExerciseId,
+      );
+      if (!exercise || updated === state) return state;
+      return {
+        ...updated,
+        exerciseMode: state.exerciseMode === "quick" && !hasUniformLinearSets(exercise) ? "per_set" : state.exerciseMode,
+        quickReps: exercise.sets[0]?.targetReps ?? "",
+        quickKg: exercise.sets[0]?.targetKg ?? "",
+      };
+    }
     case "modify_recommendation": {
       const modified = updateSelectedExerciseDecision(state, "modified");
       return { ...modified, exerciseMode: "per_set" };

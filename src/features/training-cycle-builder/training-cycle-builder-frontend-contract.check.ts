@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import test from "node:test";
+import { runInNewContext } from "node:vm";
+import { createElement, isValidElement, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import * as jsxRuntime from "react/jsx-runtime";
+import * as icons from "lucide-react";
+import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import * as cycleContracts from "./components/training-cycle-builder-contracts";
+import * as cycleState from "./hooks/training-cycle-builder-state";
+import * as videoUrl from "./hooks/training-cycle-video-url";
+import { createTrainingCycleBuilderTestViewModel } from "./hooks/training-cycle-builder-fixtures.check";
 
 const FEATURE_ROOT = "src/features/training-cycle-builder";
 
@@ -37,6 +48,118 @@ const modalShellSource = read("src/ui/modals/modal-shell.tsx");
 const catalogScreenSource = read(`${FEATURE_ROOT}/components/cycle-catalog-screen.tsx`);
 const catalogNoticeSource = read(`${FEATURE_ROOT}/components/cycle-catalog-addition-notice.tsx`);
 const routineScreensSource = read(`${FEATURE_ROOT}/components/cycle-routine-screens.tsx`);
+
+// Ejecuta el TSX real de esta pantalla en Node. Sólo los primitives y CSS se
+// sustituyen; no es un navegador ni una prueba de layout, foco o estilos.
+function loadExerciseScreen() {
+  const Button = ({ children, selected, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { selected?: boolean }) =>
+    createElement("button", { ...props, ...(selected === undefined ? {} : { "aria-pressed": selected }) }, children);
+  const dependencies: Record<string, unknown> = {
+    "react/jsx-runtime": jsxRuntime,
+    "lucide-react": icons,
+    "@/features/training-cycle-builder/components/training-cycle-builder-contracts": cycleContracts,
+    "@/features/training-cycle-builder/hooks/training-cycle-builder-state": cycleState,
+    "@/features/training-cycle-builder/hooks/training-cycle-video-url": videoUrl,
+    "@/features/training-cycle-builder/components/training-cycle-builder.module.css": {},
+    "@/features/training-cycle-builder/components/training-cycle-builder-ui": {
+      PrimaryAction: Button, SecondaryAction: Button, ChoiceChip: Button,
+    },
+    "./cycle-catalog-screen": {},
+  };
+  const exports: { CycleExerciseScreen?: typeof import("./components/cycle-routine-screens").CycleExerciseScreen } = {};
+  const { outputText } = transpileModule(routineScreensSource, {
+    compilerOptions: { jsx: JsxEmit.ReactJSX, module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: true },
+  });
+  runInNewContext(outputText, {
+    exports,
+    require: (id: string) => {
+      assert.ok(Object.hasOwn(dependencies, id), `dependencia inesperada en el contrato de pantalla: ${id}`);
+      return dependencies[id];
+    },
+  });
+  assert.ok(exports.CycleExerciseScreen);
+  return exports.CycleExerciseScreen;
+}
+
+function elementsIn(node: ReactNode): ReactElement<Record<string, unknown>>[] {
+  if (Array.isArray(node)) return node.flatMap(elementsIn);
+  if (!isValidElement<{ children?: ReactNode }>(node)) return [];
+  return [node, ...elementsIn(node.props.children)];
+}
+
+test("Series lineales sólo monta el bloque común; por-series monta técnicas, filas y descensos", () => {
+  const Screen = loadExerciseScreen();
+  let state = cycleState.trainingCycleBuilderReducer(
+    cycleState.createTrainingCycleBuilderState(createTrainingCycleBuilderTestViewModel()),
+    { type: "open_exercise", exerciseId: "press-flat" },
+  );
+  const actions: cycleState.TrainingCycleBuilderAction[] = [];
+  const dispatch = (action: cycleState.TrainingCycleBuilderAction) => {
+    actions.push(action);
+    state = cycleState.trainingCycleBuilderReducer(state, action);
+  };
+  const render = () => Screen({ state, dispatch });
+  const html = () => renderToStaticMarkup(render());
+  const click = (label: string) => {
+    const button = elementsIn(render()).find((node) => node.props.children === label && typeof node.props.onClick === "function");
+    assert.ok(button, `falta botón ${label}`);
+    (button.props.onClick as () => void)();
+  };
+  assert.match(html(), /MISMO VALOR EN TODAS LAS SERIES/);
+  assert.match(html(), /Aplicar a las 4 series/);
+  assert.doesNotMatch(html(), /TÉCNICA DE ENTRENAMIENTO|Repeticiones serie|Kilogramos serie|al fallo muscular|Acciones de la serie|Agregar descenso|Duplicar serie|Eliminar serie/);
+  const initialRevision = state.revision;
+  click("Modificar por series");
+  assert.equal(state.exerciseMode, "per_set");
+  assert.equal(state.revision, initialRevision);
+  assert.doesNotMatch(html(), /MISMO VALOR EN TODAS LAS SERIES|Aplicar a las/);
+  assert.match(html(), /TÉCNICA DE ENTRENAMIENTO/);
+  for (const technique of cycleContracts.TRAINING_CYCLE_TECHNIQUES) {
+    const label = cycleContracts.TRAINING_CYCLE_TECHNIQUE_LABELS[technique];
+    click(label);
+    assert.equal(state.draft.routines.monday.exercises[0].technique, technique);
+    assert.match(html(), /Repeticiones serie 1/);
+    assert.match(html(), /Kilogramos serie 1/);
+    assert.match(html(), /Serie 1 al fallo muscular/);
+  }
+  click(cycleContracts.TRAINING_CYCLE_TECHNIQUE_LABELS.drop_set);
+  const current = state.draft.routines.monday.exercises[0];
+  const index = current.sets.length;
+  const expand = elementsIn(render()).find((node) => node.props["aria-label"] === `Acciones de la serie ${index}`);
+  assert.ok(expand);
+  (expand.props.onClick as () => void)();
+  assert.match(html(), /DESCENSOS DE CARGA/);
+  assert.match(html(), /Kg descenso 1/);
+  assert.match(html(), /Agregar descenso/);
+  assert.match(html(), /Duplicar serie/);
+  assert.match(html(), /Eliminar serie/);
+  const beforeConversion = state.revision;
+  click("Series lineales");
+  assert.equal(state.revision, beforeConversion + 1);
+  assert.doesNotMatch(html(), /TÉCNICA DE ENTRENAMIENTO|Repeticiones serie|Kilogramos serie|al fallo muscular|Acciones de la serie|DESCENSOS|Duplicar serie|Eliminar serie/);
+  assert.ok(state.draft.routines.monday.exercises[0].sets.every((set) => !set.toFailure && !set.drops.length));
+  assert.equal(actions.at(-1)?.type, "set_exercise_mode");
+});
+
+test("el handler de Aplicar enlaza ambos buffers con todas las series sin controles individuales", () => {
+  const Screen = loadExerciseScreen();
+  let state = cycleState.trainingCycleBuilderReducer(
+    cycleState.createTrainingCycleBuilderState(createTrainingCycleBuilderTestViewModel()),
+    { type: "open_exercise", exerciseId: "press-flat" },
+  );
+  const dispatch = (action: cycleState.TrainingCycleBuilderAction) => { state = cycleState.trainingCycleBuilderReducer(state, action); };
+  const render = () => Screen({ state, dispatch });
+  const inputs = elementsIn(render()).filter((node) => node.type === "input" && node.props.type !== "url");
+  assert.equal(inputs.length, 2, "sólo reps/kg globales, sin inputs individuales ocultos");
+  (inputs[0].props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "14" } });
+  (inputs[1].props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "95" } });
+  const apply = elementsIn(render()).find((node) => Array.isArray(node.props.children) && node.props.children[0] === "Aplicar a las ");
+  assert.ok(apply);
+  (apply.props.onClick as () => void)();
+  assert.equal(state.draft.routines.monday.exercises[0].technique, "linear");
+  assert.ok(state.draft.routines.monday.exercises[0].sets.every((set) => set.targetKg === "95" && set.targetReps === "14" && !set.toFailure && !set.drops.length));
+  assert.match(renderToStaticMarkup(render()), /value="95"/);
+});
 
 // Detalle de series: nombres solicitados y cambios de forma/color acotados a técnicas.
 assert.match(routineScreensSource, />Series lineales<\/button>/);
