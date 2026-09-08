@@ -6,6 +6,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 type RepositoryError = { readonly message?: string } | null;
 
 export type TrainingCycleNotificationEventKind =
+  | "expires_t7"
   | "expires_t3"
   | "expires_t2"
   | "expires_t1"
@@ -58,6 +59,7 @@ const PAGE_LIMIT = 50;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
 const EVENT_KINDS = new Set<TrainingCycleNotificationEventKind>([
+  "expires_t7",
   "expires_t3",
   "expires_t2",
   "expires_t1",

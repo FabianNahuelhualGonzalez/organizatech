@@ -9,24 +9,32 @@ Este documento describe el cableado técnico preparado en el repositorio. No reg
 - Fechas de inicio y término, edición optimista, extensión exclusiva de la fecha de término y cierre automático posterior al vencimiento.
 - Catálogo y ejercicios personalizados con UUID reales, grupos musculares, URL opcional de YouTube y técnicas lineal, pirámide ascendente, pirámide descendente, drop set y fallo.
 - Plan versionado, lineage de ejercicio, métricas, recomendaciones por serie opt-in y ejecución avanzada append-only.
-- Notificaciones de término en T-3, T-2, T-1, T0 y cierre en T+1, visibles en la campana y con entrega de correo preparada.
+- Notificaciones de término en T-7, T-3, T-1, T0 y cierre en T+1, visibles en la campana y con entrega de correo preparada. Los eventos T-2 históricos se conservan sólo para poder leer registros anteriores.
+- Adaptación no destructiva de ciclos legacy representables: conserva el mismo ciclo activo y su historial, infiere un término inclusivo cuando falta y mantiene el flujo legacy cuando los datos no se pueden representar de forma segura.
 - Aislamiento del portal Usuario respecto del portal Coach.
 - Fallback legacy cuando el backend versionado todavía no está instalado. No se cambia el esquema ni el write existente de `training_sessions` o `exercise_entries`.
 
 ## Orden obligatorio para QA
 
 1. Verificar que el commit/branch autorizado contiene únicamente el inventario aprobado y que Preview compila.
-2. Hacer dry-run contra el proyecto QA y confirmar que las únicas migraciones pendientes son, en este orden:
+2. Hacer dry-run contra el proyecto QA y comprobar que toda migración pendiente pertenece a esta lista cerrada, respetando el orden cronológico:
    - `20260829200846_cycle_redesign_schema.sql`
    - `20260829200847_cycle_redesign_api.sql`
-3. Aplicar únicamente esas dos migraciones en QA y repetir el dry-run hasta obtener “Remote database is up to date”.
+   - `20260831213114_cycle_active_replacement.sql`
+   - `20260831230440_cycle_active_atomic_replacement.sql`
+   - `20260831233757_cycle_active_replacement_snapshot_response.sql`
+   - `20260901002250_cycle_active_replacement_exercise_descriptors.sql`
+   - `20260902163716_sec_training_rpc_resource_bounds.sql`
+   - `20260902183335_sec_training_integer_cast_fix.sql`
+   - `20260905201420_cycle_legacy_compatibility_expiry_youtube.sql`
+3. Aplicar únicamente el subconjunto que el historial remoto marque como pendiente, siempre en ese orden. No reaplicar ni reparar manualmente una migración ya registrada. Repetir el dry-run hasta obtener “Remote database is up to date”.
 4. Configurar los secretos Edge y la capacidad de Vault indicados abajo sin mostrar valores.
 5. Desplegar `process-training-cycle-lifecycle` en QA.
 6. Crear el scheduler QA sólo después de verificar que el endpoint, el proyecto y la capacidad pertenecen a QA.
 7. Ejecutar la QA manual/visual/funcional del dueño de producto.
 8. Sólo con QA PASS repetir el mismo orden en PROD mediante una autorización separada y explícita.
 
-No se debe aplicar la migración API sin la migración de esquema precedente. Ningún agente debe enlazar un proyecto, ejecutar SQL, crear secretos, desplegar funciones o programar el worker automáticamente.
+No se debe aplicar una migración sin todas sus predecesoras. Cualquier operación remota exige autorización explícita, verificación inequívoca del proyecto QA y un dry-run previo; PROD requiere una autorización posterior y separada.
 
 ## Secretos y Vault
 
@@ -62,10 +70,11 @@ Validar al menos:
 5. Activación: un único ciclo activo, revisión optimista y conflicto visible sin sobrescritura.
 6. Fechas: inicio inmutable después de activar; sólo el término se puede extender.
 7. Entrenemos: los datos legacy terminan de guardarse; la ejecución avanzada muestra sincronizando, éxito o error reintentable sin duplicar ni corromper el entrenamiento.
-8. Video: abrir YouTube no elimina el borrador de ejecución al volver a la aplicación.
-9. Lifecycle: campana T-3/T-2/T-1/T0/T+1 y correos esperados; mañana de T0 el ciclo queda cerrado y puede originar el siguiente.
-10. Separación de portales: Coach no monta ni escribe el constructor Usuario.
-11. Fallback: ante RPC inexistentes (`PGRST202`), el flujo legacy continúa disponible.
+8. Video: “Ver técnica en YouTube” aparece en Entrenemos sólo cuando el ejercicio tiene un enlace válido; abre la técnica sin eliminar el borrador de ejecución al volver a la aplicación.
+9. Compatibilidad legacy: un ciclo representable ya activo conserva su identidad, días, ejercicios e historial al habilitar las funciones nuevas; un ciclo no representable continúa en el flujo anterior sin datos parciales.
+10. Lifecycle: campana T-7/T-3/T-1/T0/T+1 y correos esperados; mañana de T0 el ciclo queda cerrado y puede originar el siguiente.
+11. Separación de portales: Coach no monta ni escribe el constructor Usuario.
+12. Fallback: ante RPC inexistentes (`PGRST202`), el flujo legacy continúa disponible.
 
 ## Limitación documental
 

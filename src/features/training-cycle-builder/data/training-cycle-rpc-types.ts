@@ -80,6 +80,8 @@ export const TRAINING_CYCLE_OPERATION_KINDS = [
   "draft_renewal",
   "draft_discard",
   "cycle_activate",
+  "cycle_legacy_adapt",
+  "cycle_close",
   "cycle_edit",
   "cycle_extend",
   "cycle_execution_record",
@@ -170,6 +172,16 @@ export interface TrainingCycleDraftSnapshot {
   readonly updatedAt: string;
 }
 
+export interface TrainingCyclePreparedDraftOperation {
+  readonly responseKind: "prepared_draft";
+  readonly requestId: string;
+  readonly operationKind: "draft_duplicate";
+  readonly aggregateId: string;
+  readonly resultVersion: number;
+  readonly draft: TrainingCycleDraftSnapshot;
+  readonly exerciseSources: readonly TrainingCycleCatalogItem[];
+}
+
 export interface TrainingCycleSnapshotDrop extends TrainingCycleRpcDropPlan {
   readonly snapshotId: string;
 }
@@ -233,6 +245,20 @@ export interface TrainingCycleLifecycleRefresh {
   readonly refreshedAt: string;
 }
 
+export interface TrainingCycleActiveGuard {
+  readonly cycleId: string;
+  readonly hasCanonicalPlan: boolean;
+}
+
+export interface TrainingCycleLegacyCompatibility {
+  readonly responseKind: "legacy_compatibility";
+  readonly requestId: string;
+  readonly cycleId: string;
+  readonly status: "adapted" | "already_canonical" | "legacy_fallback";
+  readonly version: number | null;
+  readonly reason: "unsupported_dates" | "unsupported_plan" | null;
+}
+
 export interface TrainingCycleListCursor {
   readonly beforeCreatedAt: string;
   readonly beforeId: string;
@@ -285,6 +311,7 @@ export interface TrainingCycleVersionSnapshot extends TrainingCycleVersionItem {
 }
 
 export type TrainingCycleNotificationEvent =
+  | "expires_t7"
   | "expires_t3"
   | "expires_t2"
   | "expires_t1"
@@ -385,5 +412,15 @@ export class TrainingCycleTransportError extends Error {
     super(message);
     this.name = "TrainingCycleTransportError";
     this.code = code;
+  }
+}
+
+/** The database transaction committed, but its response could not be adopted. */
+export class TrainingCycleCommittedMutationError extends Error {
+  readonly committed = true;
+
+  constructor() {
+    super("El ciclo anterior terminó, pero falta sincronizar el nuevo borrador.");
+    this.name = "TrainingCycleCommittedMutationError";
   }
 }

@@ -56,6 +56,8 @@ test("la captura incluye series, fallo y drops; el video abre con aislamiento", 
   assert.match(fields, /target="_blank"/);
   assert.match(fields, /rel="noopener noreferrer"/);
   assert.match(fields, /href=\{resolved\.plan\.safeVideoUrl\}/);
+  assert.match(fields, />\s*Ver técnica en YouTube\s*</);
+  assert.match(fields, /aria-label=\{`Ver técnica en YouTube: \$\{resolved\.legacyExercise\.name\}`\}/);
 });
 
 test("cada cambio avanzado se proyecta al draft legacy y el payload precede al write legacy", () => {

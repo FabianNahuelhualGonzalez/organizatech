@@ -52,6 +52,16 @@ const CYCLE_REDESIGN_SCHEMA_MIGRATION_PATH =
   "supabase/migrations/20260829200846_cycle_redesign_schema.sql";
 const CYCLE_REDESIGN_API_MIGRATION_PATH =
   "supabase/migrations/20260829200847_cycle_redesign_api.sql";
+const CYCLE_ACTIVE_REPLACEMENT_MIGRATION_PATH =
+  "supabase/migrations/20260831213114_cycle_active_replacement.sql";
+const CYCLE_ACTIVE_ATOMIC_REPLACEMENT_MIGRATION_PATH =
+  "supabase/migrations/20260831230440_cycle_active_atomic_replacement.sql";
+const CYCLE_ACTIVE_REPLACEMENT_SNAPSHOT_MIGRATION_PATH =
+  "supabase/migrations/20260831233757_cycle_active_replacement_snapshot_response.sql";
+const CYCLE_ACTIVE_REPLACEMENT_DESCRIPTORS_MIGRATION_PATH =
+  "supabase/migrations/20260901002250_cycle_active_replacement_exercise_descriptors.sql";
+const CYCLE_LEGACY_COMPATIBILITY_MIGRATION_PATH =
+  "supabase/migrations/20260905201420_cycle_legacy_compatibility_expiry_youtube.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -544,6 +554,11 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== READINESS_RESOURCE_BOUNDS_MIGRATION_PATH
         && path !== CYCLE_REDESIGN_SCHEMA_MIGRATION_PATH
         && path !== CYCLE_REDESIGN_API_MIGRATION_PATH
+        && path !== CYCLE_ACTIVE_REPLACEMENT_MIGRATION_PATH
+        && path !== CYCLE_ACTIVE_ATOMIC_REPLACEMENT_MIGRATION_PATH
+        && path !== CYCLE_ACTIVE_REPLACEMENT_SNAPSHOT_MIGRATION_PATH
+        && path !== CYCLE_ACTIVE_REPLACEMENT_DESCRIPTORS_MIGRATION_PATH
+        && path !== CYCLE_LEGACY_COMPATIBILITY_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH

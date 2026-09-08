@@ -168,10 +168,10 @@ export function createTrainingCycleBuilderTestViewModel(): TrainingCycleBuilderI
     activeCycleTotalDays: 42,
     registeredSessions: 32,
     expiryAlerts: [
+      { offsetDays: 7, whenLabel: "7 días antes", title: "Queda 1 semana de ciclo", body: "Tu ciclo termina en una semana. Puedes mantener la fecha o extenderla.", emailEnabled: true },
       { offsetDays: 3, whenLabel: "3 días antes", title: "Quedan 3 días de ciclo", body: "Tu ciclo termina pronto. Si quieres seguir con esta rutina, extiéndelo.", emailEnabled: true },
-      { offsetDays: 2, whenLabel: "2 días antes", title: "Quedan 2 días de ciclo", body: "Después del último día el ciclo se cierra y podrás crear el siguiente.", emailEnabled: true },
       { offsetDays: 1, whenLabel: "1 día antes", title: "Mañana termina tu ciclo", body: "Última oportunidad de extenderlo antes de que se cierre.", emailEnabled: true },
-      { offsetDays: 0, whenLabel: "El mismo día", title: "Hoy es el último día", body: "Hoy entrenas normal. Mañana el ciclo se cierra automáticamente.", emailEnabled: true },
+      { offsetDays: 0, whenLabel: "El mismo día", title: "Hoy es el último día", body: "Hoy entrenas normal. El cierre se procesa desde mañana sin interrumpir un entrenamiento en curso.", emailEnabled: true },
     ],
     closedSummary: { cycleLabel: "Volumen · 14 jul – 29 ago", completedSessions: 32, plannedSessions: 35 },
     nextSessionLabel: "Mañana · Lunes",
@@ -248,6 +248,12 @@ export const trainingCycleBuilderTestGateway: TrainingCycleBuilderGateway = {
       muscleGroup: input.muscleGroup,
       sources: ["all"],
     };
+  },
+  async getActiveCycleGuard() {
+    return null;
+  },
+  async completeActiveCycle() {
+    return createTrainingCycleBuilderTestViewModel().draft;
   },
   async activateCycle() {
     return { cycleId: "cycle-local-active", revision: "revision-local-1", status: "activated" };

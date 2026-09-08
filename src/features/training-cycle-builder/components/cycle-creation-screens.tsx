@@ -70,11 +70,14 @@ function StartOption({
 export function CycleStartScreen({
   state,
   viewModel,
-  dispatch,
+  onChooseOrigin,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly viewModel: TrainingCycleBuilderInitialViewModel;
-  readonly dispatch: BuilderDispatch;
+  readonly onChooseOrigin: (
+    origin: "duplicate" | "manual" | "suggested" | "resume",
+    screen: "duplicate" | "setup",
+  ) => void;
 }) {
   const sourceDraft = state.sourceDraft;
   const metrics = getTrainingCycleMetrics(sourceDraft);
@@ -95,7 +98,7 @@ export function CycleStartScreen({
             time="~2 MIN"
             title="Duplicar mi último ciclo"
             description="Copia días, rutinas, ejercicios, series, cargas, técnicas y videos. Ajustas lo que quieras antes de activar."
-            onClick={() => dispatch({ type: "choose_origin", origin: "duplicate", screen: "duplicate" })}
+            onClick={() => onChooseOrigin("duplicate", "duplicate")}
           >
             <span className={styles.optionMetrics}>
               <span><small>CICLO</small>{TRAINING_CYCLE_GOAL_LABELS[sourceDraft.goal]} · {Math.max(1, Math.round(duration / 7))} sem</span>
@@ -109,13 +112,13 @@ export function CycleStartScreen({
           time="~15 MIN"
           title="Crear mi propia rutina"
           description="Eliges día por día desde el catálogo o escribes tus propios ejercicios."
-          onClick={() => dispatch({ type: "choose_origin", origin: "manual", screen: "setup" })}
+          onClick={() => onChooseOrigin("manual", "setup")}
         />
         <StartOption
           time="~5 MIN"
           title="Recibir una rutina sugerida"
           description="Con tu objetivo, días y fechas preparamos un borrador completo que podrás editar."
-          onClick={() => dispatch({ type: "choose_origin", origin: "suggested", screen: "setup" })}
+          onClick={() => onChooseOrigin("suggested", "setup")}
         />
       </div>
       {viewModel.hasRecoverableDraft ? (
@@ -124,7 +127,7 @@ export function CycleStartScreen({
             <strong>Tienes un borrador sin terminar</strong>
             <p>{viewModel.recoveredDraftLabel ?? "Borrador guardado automáticamente"}</p>
           </div>
-          <button type="button" onClick={() => dispatch({ type: "resume_draft" })}>Retomar</button>
+          <button type="button" onClick={() => onChooseOrigin("resume", "setup")}>Retomar</button>
         </section>
       ) : null}
     </div>

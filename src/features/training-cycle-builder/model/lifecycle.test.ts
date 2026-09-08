@@ -14,10 +14,10 @@ import {
 } from "./lifecycle";
 import { createFixtureDraft } from "./test-fixtures";
 
-test("ciclo activo emite avisos exactamente a 3, 2, 1 y 0 días", () => {
+test("ciclo activo emite avisos exactamente a 7, 3, 1 y 0 días", () => {
   const dates = [
+    ["2026-10-06", 7],
     ["2026-10-10", 3],
-    ["2026-10-11", 2],
     ["2026-10-12", 1],
     ["2026-10-13", 0],
   ] as const;

@@ -3,10 +3,13 @@ import test from "node:test";
 
 import {
   parseAcceptedOperation,
+  parseActiveCycleGuard,
   parseCatalogPage,
   parseCycleSnapshot,
   parseDraftSnapshot,
+  parseLegacyCompatibility,
   parseNotificationPage,
+  parsePreparedDraftOperation,
   parseRpcExecution,
   parseTrainingCycleRpcPlan,
 } from "./training-cycle-rpc-parsers";
@@ -53,6 +56,108 @@ test("accepted_operation exige shape exacto, UUID y versión acotada", () => {
     operationKind: "draft_save",
     aggregateId: ID2,
     resultVersion: 2,
+    userId: ID3,
+  }), TrainingCycleTransportError);
+});
+
+test("prepared_draft exige snapshot inline exacto y metadatos coherentes", () => {
+  const draft = {
+    draftId: ID2,
+    origin: "duplicate",
+    sourceCycleId: ID3,
+    state: "draft",
+    version: 1,
+    goal: "strength",
+    startDate: "2026-09-01",
+    endDate: "2026-10-01",
+    plan,
+    activatedCycleId: null,
+    createdAt: "2026-08-30T01:00:00Z",
+    updatedAt: "2026-08-30T01:00:00Z",
+  };
+  const response = {
+    responseKind: "prepared_draft",
+    requestId: ID,
+    operationKind: "draft_duplicate",
+    aggregateId: ID2,
+    resultVersion: 1,
+    draft,
+    exerciseSources: [{
+      kind: "catalog",
+      id: ID,
+      name: "Press",
+      muscleGroup: "pectoral",
+      videoUrl: null,
+    }],
+  };
+  assert.deepEqual(parsePreparedDraftOperation(response).draft, draft);
+  assert.throws(() => parsePreparedDraftOperation({ ...response, aggregateId: ID4 }), TrainingCycleTransportError);
+  assert.throws(() => parsePreparedDraftOperation({ ...response, resultVersion: 2 }), TrainingCycleTransportError);
+  assert.throws(() => parsePreparedDraftOperation({ ...response, userId: ID5 }), TrainingCycleTransportError);
+  assert.throws(() => parsePreparedDraftOperation({ ...response, exerciseSources: [] }), TrainingCycleTransportError);
+});
+
+test("el guard del ciclo activo acepta legacy/canónico sin exponer ownership", () => {
+  assert.deepEqual(parseActiveCycleGuard({
+    cycleId: ID,
+    hasCanonicalPlan: false,
+  }), {
+    cycleId: ID,
+    hasCanonicalPlan: false,
+  });
+  assert.deepEqual(parseActiveCycleGuard({
+    cycleId: ID2,
+    hasCanonicalPlan: true,
+  }), {
+    cycleId: ID2,
+    hasCanonicalPlan: true,
+  });
+  assert.throws(() => parseActiveCycleGuard({
+    cycleId: ID,
+    hasCanonicalPlan: false,
+    userId: ID3,
+  }), TrainingCycleTransportError);
+});
+
+test("la adaptación legacy exige una respuesta cerrada y coherente", () => {
+  assert.deepEqual(parseLegacyCompatibility({
+    responseKind: "legacy_compatibility",
+    requestId: ID,
+    cycleId: ID2,
+    status: "adapted",
+    version: 1,
+    reason: null,
+  }), {
+    responseKind: "legacy_compatibility",
+    requestId: ID,
+    cycleId: ID2,
+    status: "adapted",
+    version: 1,
+    reason: null,
+  });
+  assert.deepEqual(parseLegacyCompatibility({
+    responseKind: "legacy_compatibility",
+    requestId: ID,
+    cycleId: ID2,
+    status: "legacy_fallback",
+    version: null,
+    reason: "unsupported_plan",
+  }).status, "legacy_fallback");
+  assert.throws(() => parseLegacyCompatibility({
+    responseKind: "legacy_compatibility",
+    requestId: ID,
+    cycleId: ID2,
+    status: "adapted",
+    version: null,
+    reason: "unsupported_plan",
+  }), TrainingCycleTransportError);
+  assert.throws(() => parseLegacyCompatibility({
+    responseKind: "legacy_compatibility",
+    requestId: ID,
+    cycleId: ID2,
+    status: "legacy_fallback",
+    version: null,
+    reason: "unsupported_plan",
     userId: ID3,
   }), TrainingCycleTransportError);
 });
@@ -201,16 +306,16 @@ test("notificaciones validan evento, texto, fechas y cursor keyset", () => {
     items: [{
       notificationId: ID,
       cycleId: ID2,
-      eventKind: "expires_t3",
-      scheduledOn: "2026-09-28",
-      title: "Quedan 3 días",
+      eventKind: "expires_t7",
+      scheduledOn: "2026-09-24",
+      title: "Quedan 7 días",
       body: "Puedes extender tu ciclo.",
       materializedAt: "2026-09-28T12:00:00Z",
       readAt: null,
     }],
     nextCursor: { beforeMaterializedAt: "2026-09-28T12:00:00Z", beforeId: ID },
   });
-  assert.equal(result.items[0]!.eventKind, "expires_t3");
+  assert.equal(result.items[0]!.eventKind, "expires_t7");
   assert.throws(() => parseNotificationPage({
     items: [{
       notificationId: ID,

@@ -38,6 +38,7 @@ type DeliveryOutcome = "sent" | "failed" | "rejected" | "ambiguous";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL = /^[^\s@\u0000-\u001F\u007F]+@[^\s@\u0000-\u001F\u007F]+\.[^\s@\u0000-\u001F\u007F]+$/;
 const EVENTS = new Set<TrainingCycleLifecycleEvent>([
+  "expires_t7",
   "expires_t3",
   "expires_t2",
   "expires_t1",

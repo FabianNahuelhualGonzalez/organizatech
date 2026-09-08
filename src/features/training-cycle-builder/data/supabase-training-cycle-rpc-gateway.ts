@@ -1,12 +1,15 @@
 import { createClient, type Session, type User } from "@supabase/supabase-js";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { normalizeOptionalYouTubeVideoUrl } from "@/lib/training/youtube-video-url";
 
 import {
   assertNonAdvancingCursor,
   assertResultMatchesOperation,
   isUuid,
   parseAcceptedOperation,
+  parsePreparedDraftOperation,
+  parseActiveCycleGuard,
   parseCatalogCursor,
   parseCatalogPage,
   parseCycleListPage,
@@ -16,6 +19,7 @@ import {
   parseGoal,
   parseListCursor,
   parseLifecycleRefresh,
+  parseLegacyCompatibility,
   parseNotificationPage,
   parseNotificationCursor,
   parsePortalScope,
@@ -31,7 +35,10 @@ import {
 } from "./training-cycle-rpc-mappers";
 import {
   TrainingCycleTransportError,
+  TrainingCycleCommittedMutationError,
   type TrainingCycleAcceptedOperation,
+  type TrainingCyclePreparedDraftOperation,
+  type TrainingCycleActiveGuard,
   type TrainingCycleCatalogCursor,
   type TrainingCycleCatalogPage,
   type TrainingCycleDraftSnapshot,
@@ -39,6 +46,7 @@ import {
   type TrainingCycleListCursor,
   type TrainingCycleListPage,
   type TrainingCycleLifecycleRefresh,
+  type TrainingCycleLegacyCompatibility,
   type TrainingCycleNotificationCursor,
   type TrainingCycleNotificationPage,
   type TrainingCycleOperationKind,
@@ -123,6 +131,19 @@ async function guardedAwait<T>(promise: Promise<T>, isCurrent: () => boolean): P
   const result = await promise;
   assertCurrent(isCurrent);
   return result;
+}
+
+function committedMutationFailure(error: unknown): never {
+  if (error instanceof TrainingCycleCommittedMutationError) throw error;
+  throw new TrainingCycleCommittedMutationError();
+}
+
+async function afterCommitted<T>(operation: () => T | Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    return committedMutationFailure(error);
+  }
 }
 
 function defaultPinnedClient(accessToken: string): TrainingCycleRpcDataClient {
@@ -393,6 +414,27 @@ export class TrainingCycleRpcGateway {
     return result.data;
   }
 
+  private async callWithCommittedResponse(
+    name: string,
+    args: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
+    const operation = await guardedAwait(captureTrainingCycleRpcOperation({
+      principal: this.principal,
+      expectedUserId: this.input.expectedUserId,
+      isCurrent: this.input.isCurrent,
+      createPinnedClient: this.input.createPinnedClient,
+    }), this.input.isCurrent);
+    await guardedAwait(operation.verifyExpectedUser(), this.input.isCurrent);
+    assertCurrent(this.input.isCurrent);
+    const result = await operation.dataClient.rpc(name, args);
+    if (result.error) throw sanitizeRpcError(result.error);
+    return afterCommitted(async () => {
+      assertCurrent(this.input.isCurrent);
+      await guardedAwait(operation.verifyExpectedUser(), this.input.isCurrent);
+      return result.data;
+    });
+  }
+
   private mutate(
     operationKind: TrainingCycleOperationKind,
     name: string,
@@ -405,7 +447,9 @@ export class TrainingCycleRpcGateway {
       try {
         const result = parseAcceptedOperation(await this.call(name, args(requestId)));
         assertResultMatchesOperation(result, { requestId, operationKind });
-        const isUnversioned = operationKind === "custom_exercise_create" || operationKind === "notifications_mark_read";
+        const isUnversioned = operationKind === "custom_exercise_create"
+          || operationKind === "cycle_close"
+          || operationKind === "notifications_mark_read";
         if (isUnversioned !== (result.resultVersion === null)) {
           throw new TrainingCycleTransportError("invalid_response", "El servidor devolvió una respuesta inválida.");
         }
@@ -455,13 +499,16 @@ export class TrainingCycleRpcGateway {
     readonly videoUrl: string | null;
   }): Promise<TrainingCycleExerciseSource> {
     const name = input.name.trim();
-    const videoUrl = input.videoUrl?.trim() || null;
+    const rawVideoUrl = input.videoUrl?.trim() || null;
     if (!name || name.length > 120 || /[\u0000-\u001f\u007f]/.test(name)) {
       return Promise.reject(new TrainingCycleTransportError("invalid_input", "El nombre del ejercicio no es válido."));
     }
-    if (!isBackendCompatibleYoutubeUrl(videoUrl)) {
+    if (!isBackendCompatibleYoutubeUrl(rawVideoUrl)) {
       return Promise.reject(new TrainingCycleTransportError("invalid_input", "El enlace de YouTube no es válido."));
     }
+    const videoUrl = rawVideoUrl === null
+      ? null
+      : normalizeOptionalYouTubeVideoUrl(rawVideoUrl);
     const muscleGroup = parseCallerInput(() => parseRpcMuscle(input.muscleGroup));
     const payload = { name, muscleGroup, videoUrl };
     return this.mutate("custom_exercise_create", "create_own_training_custom_exercise", payload, (requestId) => ({
@@ -575,6 +622,46 @@ export class TrainingCycleRpcGateway {
     }));
   }
 
+  replaceActiveCycleToDraft(input: {
+    readonly expectedActiveCycleId: string;
+    readonly startDate: string;
+    readonly endDate: string;
+  }): Promise<TrainingCyclePreparedDraftOperation> {
+    assertDateRange(input.startDate, input.endDate);
+    const payload = {
+      sourceCycleId: assertUuid(input.expectedActiveCycleId),
+      startDate: assertDate(input.startDate),
+      endDate: assertDate(input.endDate),
+    };
+    return this.mutations.run(async () => {
+      const operationKind = "draft_duplicate" as const;
+      const requestId = this.requestIds.get(operationKind, this.input.portalScope, payload);
+      try {
+        const response = await this.callWithCommittedResponse(
+          "replace_own_active_training_cycle_to_draft",
+          {
+            p_request_id: requestId,
+            p_portal_scope: this.input.portalScope,
+            p_expected_active_cycle_id: input.expectedActiveCycleId,
+            p_start_date: input.startDate,
+            p_end_date: input.endDate,
+          },
+        );
+        return await afterCommitted(() => {
+          const result = parsePreparedDraftOperation(response);
+          assertResultMatchesOperation(result, { requestId, operationKind });
+          this.requestIds.acknowledge(operationKind, this.input.portalScope, payload, requestId);
+          return result;
+        });
+      } catch (error) {
+        if (isDefinitiveMutationFailure(error)) {
+          this.requestIds.acknowledge(operationKind, this.input.portalScope, payload, requestId);
+        }
+        throw error;
+      }
+    });
+  }
+
   editActiveCycle(input: {
     readonly cycleId: string;
     readonly expectedVersion: number;
@@ -658,6 +745,41 @@ export class TrainingCycleRpcGateway {
   async getActiveCycle(): Promise<TrainingCycleRpcSnapshot | null> {
     const data = await this.call("get_own_active_training_cycle", { p_portal_scope: this.input.portalScope });
     return data === null ? null : parseCycleSnapshot(data);
+  }
+
+  async getActiveCycleGuard(): Promise<TrainingCycleActiveGuard | null> {
+    const data = await this.call("get_own_active_training_cycle_guard", {
+      p_portal_scope: this.input.portalScope,
+    });
+    return data === null ? null : parseActiveCycleGuard(data);
+  }
+
+  adaptActiveLegacyCycle(expectedCycleId: string): Promise<TrainingCycleLegacyCompatibility> {
+    const payload = { expectedCycleId: assertUuid(expectedCycleId) };
+    return this.mutations.run(async () => {
+      const operationKind = "cycle_legacy_adapt" as const;
+      const requestId = this.requestIds.get(operationKind, this.input.portalScope, payload);
+      try {
+        const result = parseLegacyCompatibility(await this.callWithCommittedResponse(
+          "adapt_own_active_legacy_training_cycle",
+          {
+            p_request_id: requestId,
+            p_portal_scope: this.input.portalScope,
+            p_expected_cycle_id: expectedCycleId,
+          },
+        ));
+        if (result.requestId !== requestId || result.cycleId !== expectedCycleId) {
+          throw new TrainingCycleTransportError("invalid_response", "El servidor devolvió una respuesta inválida.");
+        }
+        this.requestIds.acknowledge(operationKind, this.input.portalScope, payload, requestId);
+        return result;
+      } catch (error) {
+        if (isDefinitiveMutationFailure(error)) {
+          this.requestIds.acknowledge(operationKind, this.input.portalScope, payload, requestId);
+        }
+        throw error;
+      }
+    });
   }
 
   async listCycles(input: TrainingCycleListInput = {}): Promise<TrainingCycleListPage> {

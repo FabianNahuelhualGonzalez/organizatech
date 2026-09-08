@@ -1,22 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { TrainingCycleCatalogCursor } from "../data";
+import type { TrainingCycleCatalogCursor, TrainingCycleLegacyCompatibility } from "../data";
 import { TrainingCycleTransportError } from "../data";
 import {
+  closeActiveTrainingCycleProductData,
   clearDiscardedTrainingCycleProductData,
   loadTrainingCycleProductData,
   selectOwnedTrainingCycleProductSnapshot,
 } from "./use-training-cycle-product-controller";
 import { createTrainingCycleProductLifecycleController } from "../integration/training-cycle-product-lifecycle";
 
-function fakeRpc(input: { readonly pages?: number; readonly draftSource?: string | null } = {}) {
+function fakeRpc(input: {
+  readonly pages?: number;
+  readonly draftSource?: string | null;
+  readonly activeGuard?: { readonly cycleId: string; readonly hasCanonicalPlan: boolean } | null;
+} = {}) {
   const sourceId = input.draftSource ?? null;
   const pageCount = input.pages ?? 1;
   let page = 0;
   const cycleLoads: string[] = [];
   return {
     cycleLoads,
+    getActiveCycleGuard: async () => input.activeGuard ?? null,
+    adaptActiveLegacyCycle: async (
+      expectedCycleId: string,
+    ): Promise<TrainingCycleLegacyCompatibility> => ({
+      responseKind: "legacy_compatibility",
+      requestId: "10000000-0000-4000-8000-000000000001",
+      status: "already_canonical",
+      cycleId: expectedCycleId,
+      version: 1,
+      reason: null,
+    }),
     refreshLifecycle: async () => ({ closedCycleId: null, refreshedAt: "2026-08-29T00:00:00Z" }),
     listCatalog: async () => {
       page += 1;
@@ -36,6 +52,68 @@ function fakeRpc(input: { readonly pages?: number; readonly draftSource?: string
     getCycle: async (cycleId: string) => { cycleLoads.push(cycleId); return { cycleId }; },
   };
 }
+
+test("adapta el ciclo legacy antes de refrescar y cargar el producto", async () => {
+  const calls: string[] = [];
+  const rpc = fakeRpc({
+    activeGuard: {
+      cycleId: "20000000-0000-4000-8000-000000000099",
+      hasCanonicalPlan: false,
+    },
+  });
+  rpc.getActiveCycleGuard = async () => {
+    calls.push("guard");
+    return {
+      cycleId: "20000000-0000-4000-8000-000000000099",
+      hasCanonicalPlan: false,
+    };
+  };
+  rpc.adaptActiveLegacyCycle = async (cycleId: string): Promise<TrainingCycleLegacyCompatibility> => {
+    calls.push(`adapt:${cycleId}`);
+    return {
+      responseKind: "legacy_compatibility",
+      requestId: "10000000-0000-4000-8000-000000000001",
+      status: "adapted",
+      cycleId,
+      version: 1,
+      reason: null,
+    };
+  };
+  rpc.refreshLifecycle = async () => {
+    calls.push("refresh");
+    return { closedCycleId: null, refreshedAt: "2026-08-29T00:00:00Z" };
+  };
+
+  await loadTrainingCycleProductData(rpc as never);
+  assert.deepEqual(calls.slice(0, 3), [
+    "guard",
+    "adapt:20000000-0000-4000-8000-000000000099",
+    "refresh",
+  ]);
+});
+
+test("un legacy no representable conserva el flujo anterior sin mostrar un ciclo vacío", async () => {
+  const rpc = fakeRpc({
+    activeGuard: {
+      cycleId: "20000000-0000-4000-8000-000000000099",
+      hasCanonicalPlan: false,
+    },
+  });
+  rpc.adaptActiveLegacyCycle = async (cycleId: string): Promise<TrainingCycleLegacyCompatibility> => ({
+    responseKind: "legacy_compatibility",
+    requestId: "10000000-0000-4000-8000-000000000001",
+    cycleId,
+    status: "legacy_fallback",
+    version: null,
+    reason: "unsupported_plan",
+  });
+
+  await assert.rejects(loadTrainingCycleProductData(rpc as never), (error) => {
+    assert.ok(error instanceof TrainingCycleTransportError);
+    assert.equal(error.code, "not_supported");
+    return true;
+  });
+});
 
 test("carga catálogo keyset acotado y reutiliza una fuente que también es el último ciclo", async () => {
   const cycleId = "20000000-0000-4000-8000-000000000099";
@@ -66,6 +144,22 @@ test("el descarte limpia canónicamente el draft remoto y su referencia", () => 
   assert.equal(cleared.draft, null);
   assert.equal(cleared.draftReference, null);
   assert.equal(cleared.sourceCycle, null);
+});
+
+test("el cierre conserva el ciclo recién terminado como fuente del duplicado", () => {
+  const activeCycle = { cycleId: "cycle-active", plan: { days: [] } };
+  const previousCycle = { cycleId: "cycle-previous", plan: { days: [] } };
+  const closed = closeActiveTrainingCycleProductData({
+    catalog: [],
+    draft: null,
+    activeCycle,
+    sourceCycle: null,
+    lastCycle: previousCycle,
+    draftReference: null,
+  } as never);
+
+  assert.equal(closed.activeCycle, null);
+  assert.equal(closed.lastCycle, activeCycle);
 });
 
 test("A→B oculta el snapshot ready de A antes de que se ejecute el effect de B", () => {

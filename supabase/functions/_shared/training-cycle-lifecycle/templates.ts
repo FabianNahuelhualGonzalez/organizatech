@@ -1,4 +1,5 @@
 export type TrainingCycleLifecycleEvent =
+  | "expires_t7"
   | "expires_t3"
   | "expires_t2"
   | "expires_t1"
@@ -20,6 +21,7 @@ export interface TrainingCycleLifecycleEmailTemplate {
 }
 
 const EVENT_LABELS: Readonly<Record<TrainingCycleLifecycleEvent, string>> = {
+  expires_t7: "CICLO · T-7",
   expires_t3: "CICLO · T-3",
   expires_t2: "CICLO · T-2",
   expires_t1: "CICLO · T-1",

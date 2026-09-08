@@ -7,7 +7,11 @@ import {
   type TrainingCycleRpcDataClient,
   type TrainingCycleRpcPrincipalClient,
 } from "./supabase-training-cycle-rpc-gateway";
-import { TrainingCycleTransportError, type TrainingCycleRpcPlan } from "./training-cycle-rpc-types";
+import {
+  TrainingCycleCommittedMutationError,
+  TrainingCycleTransportError,
+  type TrainingCycleRpcPlan,
+} from "./training-cycle-rpc-types";
 
 const USER_ID = "10000000-0000-4000-8000-000000000001";
 const REQUEST_ID = "20000000-0000-4000-8000-000000000001";
@@ -32,6 +36,37 @@ const plan: TrainingCycleRpcPlan = {
     }],
   }],
 };
+
+function preparedDraftResponse(requestId: unknown) {
+  return {
+    responseKind: "prepared_draft",
+    requestId,
+    operationKind: "draft_duplicate",
+    aggregateId: DRAFT_ID,
+    resultVersion: 1,
+    draft: {
+      draftId: DRAFT_ID,
+      origin: "duplicate",
+      sourceCycleId: CYCLE_ID,
+      state: "draft",
+      version: 1,
+      goal: "volume",
+      startDate: "2026-09-01",
+      endDate: "2026-10-13",
+      plan,
+      activatedCycleId: null,
+      createdAt: "2026-08-31T00:00:00.000Z",
+      updatedAt: "2026-08-31T00:00:00.000Z",
+    },
+    exerciseSources: [{
+      kind: "catalog",
+      id: CATALOG_ID,
+      name: "Press",
+      muscleGroup: "pectoral",
+      videoUrl: null,
+    }],
+  };
+}
 
 function principal(counters?: {
   readonly user?: { value: number };
@@ -98,6 +133,42 @@ test("request IDs sobreviven un retry incierto y rotan después del acknowledgem
   assert.equal(replay, REQUEST_ID);
   owner.acknowledge("draft_save", "usuario", payload, first);
   assert.equal(owner.get("draft_save", "usuario", payload), REQUEST_ID_2);
+});
+
+test("createCustomExercise canoniza youtu.be y elimina tracking en la última frontera", async () => {
+  const calls: Array<Readonly<Record<string, unknown>>> = [];
+  const repo = gateway({
+    dataClient: {
+      async rpc(name, args) {
+        assert.equal(name, "create_own_training_custom_exercise");
+        calls.push(args);
+        return {
+          data: {
+            responseKind: "accepted_operation",
+            requestId: args.p_request_id,
+            operationKind: "custom_exercise_create",
+            aggregateId: CATALOG_ID,
+            resultVersion: null,
+          },
+          error: null,
+        };
+      },
+    },
+  });
+
+  await repo.createCustomExercise({
+    name: "  Press personalizado  ",
+    muscleGroup: "pectoral",
+    videoUrl: " https://youtu.be/AbCdEfGhI_1?si=tracking-value ",
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.p_name, "Press personalizado");
+  assert.equal(
+    calls[0]!.p_video_url,
+    "https://www.youtube.com/watch?v=AbCdEfGhI_1",
+  );
+  assert.equal("user_id" in calls[0]!, false);
 });
 
 test("save valida el token una vez, confirma sesión local y rota request UUID tras cada ACK", async () => {
@@ -269,6 +340,228 @@ test("autosave y activación secuencial usan una validación Auth remota por RPC
   ]);
   assert.equal(userChecks.value, 2);
   assert.equal(sessionChecks.value, 6);
+});
+
+test("el guard detecta ciclos legacy y canónicos con un payload read-only mínimo", async () => {
+  const calls: Array<{ readonly name: string; readonly args: Readonly<Record<string, unknown>> }> = [];
+  const repo = gateway({
+    dataClient: {
+      async rpc(name, args) {
+        calls.push({ name, args });
+        return {
+          data: { cycleId: CYCLE_ID, hasCanonicalPlan: false },
+          error: null,
+        };
+      },
+    },
+  });
+
+  assert.deepEqual(await repo.getActiveCycleGuard(), {
+    cycleId: CYCLE_ID,
+    hasCanonicalPlan: false,
+  });
+  assert.deepEqual(calls, [{
+    name: "get_own_active_training_cycle_guard",
+    args: { p_portal_scope: "usuario" },
+  }]);
+});
+
+test("la adaptación legacy es owner-scoped, idempotente y no envía ownership", async () => {
+  const calls: Array<{ readonly name: string; readonly args: Readonly<Record<string, unknown>> }> = [];
+  const repo = gateway({
+    requestIds: [REQUEST_ID],
+    dataClient: {
+      async rpc(name, args) {
+        calls.push({ name, args });
+        return {
+          data: {
+            responseKind: "legacy_compatibility",
+            requestId: args.p_request_id,
+            cycleId: CYCLE_ID,
+            status: "adapted",
+            version: 1,
+            reason: null,
+          },
+          error: null,
+        };
+      },
+    },
+  });
+
+  const result = await repo.adaptActiveLegacyCycle(CYCLE_ID);
+  assert.equal(result.status, "adapted");
+  assert.deepEqual(calls, [{
+    name: "adapt_own_active_legacy_training_cycle",
+    args: {
+      p_request_id: REQUEST_ID,
+      p_portal_scope: "usuario",
+      p_expected_cycle_id: CYCLE_ID,
+    },
+  }]);
+  assert.equal("user_id" in calls[0]!.args, false);
+});
+
+test("el reemplazo atómico usa sólo request, portal, fechas y el activo confirmado", async () => {
+  const calls: Array<{ readonly name: string; readonly args: Readonly<Record<string, unknown>> }> = [];
+  const repo = gateway({
+    dataClient: {
+      async rpc(name, args) {
+        calls.push({ name, args });
+        return {
+          data: preparedDraftResponse(args.p_request_id),
+          error: null,
+        };
+      },
+    },
+  });
+
+  const result = await repo.replaceActiveCycleToDraft({
+    expectedActiveCycleId: CYCLE_ID,
+    startDate: "2026-09-01",
+    endDate: "2026-10-13",
+  });
+  assert.equal(result.aggregateId, DRAFT_ID);
+  assert.equal(result.resultVersion, 1);
+  assert.deepEqual(Object.keys(calls[0]!.args).sort(), [
+    "p_end_date",
+    "p_expected_active_cycle_id",
+    "p_portal_scope",
+    "p_request_id",
+    "p_start_date",
+  ]);
+  assert.equal(calls[0]!.name, "replace_own_active_training_cycle_to_draft");
+  assert.equal(calls[0]!.args.p_expected_active_cycle_id, CYCLE_ID);
+  assert.equal(calls[0]!.args.p_portal_scope, "usuario");
+  assert.equal("user_id" in calls[0]!.args, false);
+});
+
+test("un retry incierto del reemplazo conserva el mismo request idempotente", async () => {
+  let attempt = 0;
+  const requestIds: unknown[] = [];
+  const repo = gateway({
+    requestIds: [REQUEST_ID, REQUEST_ID_2],
+    dataClient: {
+      async rpc(name, args) {
+        assert.equal(name, "replace_own_active_training_cycle_to_draft");
+        requestIds.push(args.p_request_id);
+        attempt += 1;
+        if (attempt === 1) {
+          return { data: null, error: { code: "08006", message: "private transport detail" } };
+        }
+        return {
+          data: preparedDraftResponse(args.p_request_id),
+          error: null,
+        };
+      },
+    },
+  });
+
+  await assert.rejects(
+    repo.replaceActiveCycleToDraft({ expectedActiveCycleId: CYCLE_ID, startDate: "2026-09-01", endDate: "2026-10-13" }),
+    (error) => error instanceof TrainingCycleTransportError && error.code === "service_unavailable",
+  );
+  await repo.replaceActiveCycleToDraft({ expectedActiveCycleId: CYCLE_ID, startDate: "2026-09-01", endDate: "2026-10-13" });
+  assert.deepEqual(requestIds, [REQUEST_ID, REQUEST_ID]);
+});
+
+test("una respuesta malformada posterior al commit se distingue de un rechazo pre-commit", async () => {
+  const repo = gateway({
+    dataClient: {
+      async rpc(name, args) {
+        assert.equal(name, "replace_own_active_training_cycle_to_draft");
+        const response = preparedDraftResponse(args.p_request_id);
+        return {
+          data: { ...response, exerciseSources: [] },
+          error: null,
+        };
+      },
+    },
+  });
+
+  await assert.rejects(
+    repo.replaceActiveCycleToDraft({
+      expectedActiveCycleId: CYCLE_ID,
+      startDate: "2026-09-01",
+      endDate: "2026-10-13",
+    }),
+    (error) => error instanceof TrainingCycleCommittedMutationError,
+  );
+});
+
+test("stale y verificación de sesión posteriores a la respuesta exitosa son committed", async () => {
+  let current = true;
+  const staleRepo = gateway({
+    isCurrent: () => current,
+    dataClient: {
+      async rpc(_name, args) {
+        current = false;
+        return { data: preparedDraftResponse(args.p_request_id), error: null };
+      },
+    },
+  });
+  await assert.rejects(
+    staleRepo.replaceActiveCycleToDraft({ expectedActiveCycleId: CYCLE_ID, startDate: "2026-09-01", endDate: "2026-10-13" }),
+    (error) => error instanceof TrainingCycleCommittedMutationError,
+  );
+
+  let sessionChecks = 0;
+  const verifyRepo = new TrainingCycleRpcGateway({
+    expectedUserId: USER_ID,
+    portalScope: "usuario",
+    isCurrent: () => true,
+    principal: {
+      auth: {
+        async getSession() {
+          sessionChecks += 1;
+          const valid = sessionChecks < 3;
+          return { data: { session: valid ? { access_token: "captured-token", user: { id: USER_ID } } : null }, error: null } as never;
+        },
+        async getUser() {
+          return { data: { user: { id: USER_ID } }, error: null } as never;
+        },
+      },
+    },
+    createPinnedClient: () => ({
+      async rpc(_name, args) {
+        return { data: preparedDraftResponse(args.p_request_id), error: null };
+      },
+    }),
+    createRequestId: () => REQUEST_ID,
+  });
+  await assert.rejects(
+    verifyRepo.replaceActiveCycleToDraft({ expectedActiveCycleId: CYCLE_ID, startDate: "2026-09-01", endDate: "2026-10-13" }),
+    (error) => error instanceof TrainingCycleCommittedMutationError,
+  );
+});
+
+test("mismatch de request u operación tras respuesta exitosa es committed", async () => {
+  for (const mutation of [
+    { requestId: REQUEST_ID_2 },
+    { operationKind: "draft_save" },
+  ]) {
+    const repo = gateway({
+      dataClient: {
+        async rpc(_name, args) {
+          return { data: { ...preparedDraftResponse(args.p_request_id), ...mutation }, error: null };
+        },
+      },
+    });
+    await assert.rejects(
+      repo.replaceActiveCycleToDraft({ expectedActiveCycleId: CYCLE_ID, startDate: "2026-09-01", endDate: "2026-10-13" }),
+      (error) => error instanceof TrainingCycleCommittedMutationError,
+    );
+  }
+});
+
+test("rechazo RPC previo al commit conserva clasificación no committed", async () => {
+  const repo = gateway({
+    dataClient: { async rpc() { return { data: null, error: { code: "42501", message: "denied" } }; } },
+  });
+  await assert.rejects(
+    repo.replaceActiveCycleToDraft({ expectedActiveCycleId: CYCLE_ID, startDate: "2026-09-01", endDate: "2026-10-13" }),
+    (error) => error instanceof TrainingCycleTransportError
+      && !(error instanceof TrainingCycleCommittedMutationError),
+  );
 });
 
 test("un cambio local de sesión falla cerrado antes de despachar el RPC", async () => {

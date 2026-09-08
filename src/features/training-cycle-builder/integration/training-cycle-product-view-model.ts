@@ -197,7 +197,7 @@ function buildRecommendation(input: {
   };
 }
 
-function projectRpcPlan(input: {
+export function projectTrainingCycleRpcPlan(input: {
   readonly draftId: string;
   readonly goal: TrainingCycleDraftViewModel["goal"];
   readonly startDate: string;
@@ -248,7 +248,9 @@ function projectRpcPlan(input: {
           name,
           muscleGroup: rpcMuscleToUi(muscleGroup),
           technique: exercise.technique,
-          videoUrl: exercise.videoUrl ?? catalogItem?.videoUrl ?? "",
+          videoUrl: snapshotExercise
+            ? (exercise.videoUrl ?? "")
+            : (catalogItem?.videoUrl ?? ""),
           sets,
           recommendation: buildRecommendation({
             exerciseId,
@@ -358,7 +360,7 @@ export function buildTrainingCycleProductViewModel(
   const catalogBySource = new Map(input.catalog.map((item) => [sourceKey(item.source), item]));
   const effectiveSource = input.activeCycle ?? input.sourceCycle ?? input.lastCycle;
   const draft = input.activeCycle
-    ? projectRpcPlan({
+    ? projectTrainingCycleRpcPlan({
         draftId: input.activeCycle.sourceDraftId ?? input.activeCycle.cycleId,
         goal: input.activeCycle.goal,
         startDate: input.activeCycle.startDate,
@@ -370,7 +372,7 @@ export function buildTrainingCycleProductViewModel(
         todayIsoDate: input.todayIsoDate,
       })
     : input.draft
-      ? projectRpcPlan({
+      ? projectTrainingCycleRpcPlan({
           draftId: input.draft.draftId,
           goal: input.draft.goal,
           startDate: input.draft.startDate,
@@ -382,7 +384,7 @@ export function buildTrainingCycleProductViewModel(
           todayIsoDate: input.todayIsoDate,
         })
       : effectiveSource
-        ? projectRpcPlan({
+        ? projectTrainingCycleRpcPlan({
             draftId: `local:${effectiveSource.cycleId}`,
             goal: effectiveSource.goal,
             startDate: addCalendarDays(input.todayIsoDate, 1),
@@ -439,10 +441,10 @@ export function buildTrainingCycleProductViewModel(
       : undefined,
     registeredSessions: sessionsForCycle.size,
     expiryAlerts: [
+      { offsetDays: 7, whenLabel: "7 días antes", title: "Queda 1 semana de ciclo", body: "Tu ciclo termina en una semana. Puedes mantener la fecha o extenderla.", emailEnabled: true },
       { offsetDays: 3, whenLabel: "3 días antes", title: "Quedan 3 días de ciclo", body: "Tu ciclo termina pronto. Si quieres seguir con esta rutina, extiéndelo.", emailEnabled: true },
-      { offsetDays: 2, whenLabel: "2 días antes", title: "Quedan 2 días de ciclo", body: "Después del último día el ciclo se cierra y podrás crear el siguiente.", emailEnabled: true },
       { offsetDays: 1, whenLabel: "1 día antes", title: "Mañana termina tu ciclo", body: "Última oportunidad de extenderlo antes de que se cierre.", emailEnabled: true },
-      { offsetDays: 0, whenLabel: "El mismo día", title: "Hoy es el último día", body: "Hoy entrenas normal. Mañana el ciclo se cierra automáticamente.", emailEnabled: true },
+      { offsetDays: 0, whenLabel: "El mismo día", title: "Hoy es el último día", body: "Hoy entrenas normal. El cierre se procesa desde mañana sin interrumpir un entrenamiento en curso.", emailEnabled: true },
     ],
     closedSummary: {
       cycleLabel: formatCycleLabel(input.lastCycle ?? effectiveSource),

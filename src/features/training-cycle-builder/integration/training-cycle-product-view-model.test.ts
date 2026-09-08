@@ -114,6 +114,30 @@ test("proyecta IDs reales, orden canónico y ciclo activo sin inventar catálogo
   assert.equal(exercise?.muscleGroup, "Pectoral");
 });
 
+test("un snapshot sin video no resucita el enlace actual del catálogo", () => {
+  const source = cycle();
+  const exercise = source.plan.days[0]!.exercises[0]!;
+  const withoutVideo: TrainingCycleRpcSnapshot = {
+    ...source,
+    plan: {
+      days: [{
+        ...source.plan.days[0]!,
+        exercises: [{ ...exercise, videoUrl: null }],
+      }],
+    },
+  };
+  const model = buildTrainingCycleProductViewModel({
+    todayIsoDate: "2026-08-29",
+    catalog,
+    entries: [],
+    activeCycle: withoutVideo,
+    draft: null,
+    sourceCycle: null,
+    lastCycle: null,
+  });
+  assert.equal(model.draft.routines.monday.exercises[0]?.videoUrl, "");
+});
+
 test("no usa nombres como fallback para historial de otra lineage", () => {
   const model = buildTrainingCycleProductViewModel({
     todayIsoDate: "2026-08-29",

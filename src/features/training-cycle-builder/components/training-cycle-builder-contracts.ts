@@ -8,6 +8,10 @@ export const TRAINING_CYCLE_WEEK_DAYS = [
   "sunday",
 ] as const;
 
+export function trainingCycleBuilderInstanceKey(openAlertsRequest?: number) {
+  return `training-cycle-builder:${openAlertsRequest ?? 0}`;
+}
+
 export type TrainingCycleWeekDay = (typeof TRAINING_CYCLE_WEEK_DAYS)[number];
 
 export const TRAINING_CYCLE_GOALS = ["strength", "volume", "definition", "deload"] as const;
@@ -147,7 +151,7 @@ export interface TrainingCycleDuplicateComparisonRowViewModel {
 }
 
 export interface TrainingCycleExpiryAlertViewModel {
-  readonly offsetDays: 3 | 2 | 1 | 0;
+  readonly offsetDays: 7 | 3 | 1 | 0;
   readonly title: string;
   readonly body: string;
   readonly whenLabel: string;
@@ -228,6 +232,16 @@ export interface TrainingCycleActivateInput {
   readonly draftId: string;
 }
 
+export interface TrainingCycleActiveGuard {
+  readonly cycleId: string;
+}
+
+export interface TrainingCycleCompleteActiveInput {
+  readonly expectedActiveCycleId: string;
+  readonly startDate: string;
+  readonly endDate: string;
+}
+
 export interface TrainingCycleExtendInput {
   readonly cycleId: string;
   readonly expectedRevision: string;
@@ -289,6 +303,8 @@ export interface TrainingCycleBuilderGateway {
     readonly muscleGroup: TrainingCycleMuscleGroup;
     readonly videoUrl: string | null;
   }): Promise<TrainingCycleCatalogExerciseViewModel>;
+  getActiveCycleGuard(): Promise<TrainingCycleActiveGuard | null>;
+  completeActiveCycle(input: TrainingCycleCompleteActiveInput): Promise<TrainingCycleDraftViewModel>;
   activateCycle(input: TrainingCycleActivateInput): Promise<TrainingCycleActivationResult>;
   saveActiveCycle(input: TrainingCycleSaveActiveInput): Promise<TrainingCycleSaveActiveResult>;
   extendCycle(input: TrainingCycleExtendInput): Promise<{

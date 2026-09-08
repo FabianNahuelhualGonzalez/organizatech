@@ -1,5 +1,9 @@
 import type { TrainingCyclePlanDayInput } from "../components/training-cycle-builder-contracts";
 import type { PersistedTrainingCyclePlan } from "../model/types";
+import {
+  normalizeOptionalYouTubeVideoUrl,
+  validateOptionalYouTubeVideoUrl,
+} from "@/lib/training/youtube-video-url";
 import { isUuid, parseRpcExecution, parseTrainingCycleRpcPlan } from "./training-cycle-rpc-parsers";
 import {
   TrainingCycleTransportError,
@@ -16,7 +20,6 @@ import {
 } from "./training-cycle-rpc-types";
 
 const CONTROL = /[\u0000-\u001f\u007f]/;
-const YOUTUBE = /^https:\/\/((www\.|m\.)?youtube\.com\/(watch\?[^\s]*v=[A-Za-z0-9_-]{6,64}[^\s]*|shorts\/[A-Za-z0-9_-]{6,64}[^\s]*|embed\/[A-Za-z0-9_-]{6,64}[^\s]*)|youtu\.be\/[A-Za-z0-9_-]{6,64}[^\s]*)$/;
 
 const MUSCLES = [
   ["Pectoral", "chest", "pectoral"],
@@ -122,14 +125,15 @@ export function rpcOrderToUi(value: number, maxRpc: number): number {
 
 export function isBackendCompatibleYoutubeUrl(value: string | null): boolean {
   if (value === null) return true;
-  return value.length >= 19 && value.length <= 500 && !CONTROL.test(value) && !/\s/.test(value) && YOUTUBE.test(value);
+  const validation = validateOptionalYouTubeVideoUrl(value);
+  return value.length <= 500 && !CONTROL.test(value) && validation.valid && validation.normalizedUrl !== null;
 }
 
 function normalizedVideo(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   if (!normalized) return null;
   if (!isBackendCompatibleYoutubeUrl(normalized)) invalidInput("El enlace de YouTube no es válido.");
-  return normalized;
+  return normalizeOptionalYouTubeVideoUrl(normalized);
 }
 
 function assertUuidSource(source: TrainingCycleExerciseSource): TrainingCycleExerciseSource {

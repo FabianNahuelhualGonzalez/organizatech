@@ -26,13 +26,17 @@ import {
 import type {
   TrainingCycleBuilderGateway,
   TrainingCycleBuilderInitialViewModel,
+  TrainingCycleBuilderOrigin,
+  TrainingCycleBuilderScreen,
   TrainingCycleDraftViewModel,
   TrainingCycleWeekDay,
 } from "@/features/training-cycle-builder/components/training-cycle-builder-contracts";
+import { TrainingCycleCommittedMutationError } from "@/features/training-cycle-builder/data/training-cycle-rpc-types";
 import {
   TrainingCycleDraftAutosaveOwner,
   type TrainingCycleDraftAutosaveClaim,
 } from "@/features/training-cycle-builder/hooks/training-cycle-draft-autosave";
+import { normalizeOptionalYouTubeVideoUrl } from "@/lib/training/youtube-video-url";
 
 const AUTOSAVE_DELAY_MS = 520;
 
@@ -41,6 +45,8 @@ export interface TrainingCycleBuilderController {
   readonly dispatch: Dispatch<TrainingCycleBuilderAction>;
   goBack(): boolean;
   retrySave(): Promise<void>;
+  requestNewCycle(origin: TrainingCycleBuilderOrigin, screen: TrainingCycleBuilderScreen): Promise<void>;
+  confirmActiveCycleClose(): Promise<void>;
   generateSuggestion(): Promise<void>;
   activate(): Promise<void>;
   saveActiveCycle(): Promise<void>;
@@ -81,6 +87,102 @@ function hasSuggestedRoutines(
   });
 }
 
+export async function requestTrainingCycleNewCycle(
+  gateway: Pick<TrainingCycleBuilderGateway, "getActiveCycleGuard">,
+  dispatch: Dispatch<TrainingCycleBuilderAction>,
+  origin: TrainingCycleBuilderOrigin,
+  screen: TrainingCycleBuilderScreen,
+) {
+  try {
+    const guard = await gateway.getActiveCycleGuard();
+    if (guard) {
+      dispatch({
+        type: "active_cycle_close_confirmation_required",
+        cycleId: guard.cycleId,
+        origin,
+        screen,
+      });
+      return;
+    }
+    dispatch({ type: "choose_origin", origin, screen });
+  } catch {
+    dispatch({
+      type: "active_cycle_guard_failed",
+      message: "No pudimos comprobar tu ciclo actual. No se modificó ningún entrenamiento.",
+    });
+  }
+}
+
+export async function confirmTrainingCycleActiveClose(
+  gateway: Pick<TrainingCycleBuilderGateway, "completeActiveCycle">,
+  dispatch: Dispatch<TrainingCycleBuilderAction>,
+  state: Pick<
+    TrainingCycleBuilderState,
+    "activeCycleCloseId" | "pendingNewCycleIntent" | "draft"
+  >,
+) {
+  if (!state.activeCycleCloseId || !state.pendingNewCycleIntent) return;
+  dispatch({ type: "active_cycle_close_started" });
+  try {
+    const draft = await gateway.completeActiveCycle({
+      expectedActiveCycleId: state.activeCycleCloseId,
+      startDate: state.draft.startDate,
+      endDate: state.draft.endDate,
+    });
+    dispatch({ type: "active_cycle_close_succeeded", draft });
+  } catch (error) {
+    if (error instanceof TrainingCycleCommittedMutationError) {
+      dispatch({
+        type: "active_cycle_close_committed_sync_failed",
+        message: "El ciclo anterior terminó, pero no pudimos sincronizar el nuevo borrador. Recarga para continuar.",
+      });
+      return;
+    }
+    dispatch({
+      type: "active_cycle_close_failed",
+      message: "No pudimos finalizar el ciclo actual. Sigue activo y no se perdió ningún dato.",
+    });
+  }
+}
+
+export class TrainingCycleNewCycleOperationOwner {
+  private intentRunning = false;
+  private closeRunning = false;
+
+  async request(
+    gateway: Pick<TrainingCycleBuilderGateway, "getActiveCycleGuard">,
+    dispatch: Dispatch<TrainingCycleBuilderAction>,
+    state: Pick<TrainingCycleBuilderState, "activeCycleCloseState">,
+    origin: TrainingCycleBuilderOrigin,
+    screen: TrainingCycleBuilderScreen,
+  ) {
+    if (this.intentRunning || state.activeCycleCloseState === "closing") return;
+    this.intentRunning = true;
+    try {
+      await requestTrainingCycleNewCycle(gateway, dispatch, origin, screen);
+    } finally {
+      this.intentRunning = false;
+    }
+  }
+
+  async confirm(
+    gateway: Pick<TrainingCycleBuilderGateway, "completeActiveCycle">,
+    dispatch: Dispatch<TrainingCycleBuilderAction>,
+    state: Pick<
+      TrainingCycleBuilderState,
+      "activeCycleCloseId" | "activeCycleCloseState" | "pendingNewCycleIntent" | "draft"
+    >,
+  ) {
+    if (this.closeRunning || state.activeCycleCloseState === "closing") return;
+    this.closeRunning = true;
+    try {
+      await confirmTrainingCycleActiveClose(gateway, dispatch, state);
+    } finally {
+      this.closeRunning = false;
+    }
+  }
+}
+
 export function useTrainingCycleBuilderController({
   initialViewModel,
   gateway,
@@ -94,6 +196,11 @@ export function useTrainingCycleBuilderController({
   const draftRef = useRef(state.draft);
   const originRef = useRef(state.origin);
   const activationLockRef = useRef(false);
+  const newCycleOwnerRef = useRef<TrainingCycleNewCycleOperationOwner | null>(null);
+  if (!newCycleOwnerRef.current) {
+    newCycleOwnerRef.current = new TrainingCycleNewCycleOperationOwner();
+  }
+  const newCycleOwner = newCycleOwnerRef.current;
   const suggestionLockRef = useRef(false);
   const activeEditLockRef = useRef(false);
   const discardLockRef = useRef(false);
@@ -186,6 +293,38 @@ export function useTrainingCycleBuilderController({
     dispatch({ type: "set_save_state", state: "saving", errorMessage: null });
     await persistDraftSnapshot(draftRef.current);
   }, [persistDraftSnapshot, state.discardState, state.workflow]);
+
+  const requestNewCycle = useCallback(async (
+    origin: TrainingCycleBuilderOrigin,
+    screen: TrainingCycleBuilderScreen,
+  ) => {
+    await newCycleOwner.request(
+      gatewayRef.current,
+      dispatch,
+      { activeCycleCloseState: state.activeCycleCloseState },
+      origin,
+      screen,
+    );
+  }, [newCycleOwner, state.activeCycleCloseState]);
+
+  const confirmActiveCycleClose = useCallback(async () => {
+    if (
+      !state.activeCycleCloseId
+      || !state.pendingNewCycleIntent
+    ) return;
+    await newCycleOwner.confirm(gatewayRef.current, dispatch, {
+      activeCycleCloseId: state.activeCycleCloseId,
+      activeCycleCloseState: state.activeCycleCloseState,
+      pendingNewCycleIntent: state.pendingNewCycleIntent,
+      draft: state.draft,
+    });
+  }, [
+    newCycleOwner,
+    state.activeCycleCloseId,
+    state.activeCycleCloseState,
+    state.draft,
+    state.pendingNewCycleIntent,
+  ]);
 
   const generateSuggestion = useCallback(async () => {
     if (
@@ -364,10 +503,11 @@ export function useTrainingCycleBuilderController({
     if (!name || !muscleGroup) return;
     dispatch({ type: "custom_exercise_started" });
     try {
+      const normalizedVideoUrl = normalizeOptionalYouTubeVideoUrl(state.customVideoUrl);
       const created = await gatewayRef.current.createCustomExercise({
         name,
         muscleGroup,
-        videoUrl: state.customVideoUrl.trim() || null,
+        videoUrl: normalizedVideoUrl,
       });
       if (created.source.kind !== "custom") throw new TypeError("Invalid custom exercise source");
       dispatch({
@@ -375,7 +515,7 @@ export function useTrainingCycleBuilderController({
         source: created.source,
         name: created.name,
         muscleGroup: created.muscleGroup,
-        videoUrl: state.customVideoUrl.trim(),
+        videoUrl: normalizedVideoUrl ?? "",
         recommendation: created.recommendation ?? {
           hasHistory: false,
           title: "Todavía no tenemos historial de este ejercicio",
@@ -402,6 +542,8 @@ export function useTrainingCycleBuilderController({
     dispatch,
     goBack,
     retrySave,
+    requestNewCycle,
+    confirmActiveCycleClose,
     generateSuggestion,
     activate,
     saveActiveCycle,

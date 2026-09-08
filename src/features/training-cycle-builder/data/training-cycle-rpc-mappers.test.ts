@@ -70,7 +70,7 @@ test("el mapper produce allowlist exacta y convierte órdenes UI 1-based a RPC 0
         catalogExerciseId: CATALOG_ID,
         order: 0,
         technique: "drop_set",
-        videoUrl: "https://youtu.be/abcDEF_1234",
+        videoUrl: "https://www.youtube.com/watch?v=abcDEF_1234",
         sets: [{
           order: 0,
           targetReps: 10,

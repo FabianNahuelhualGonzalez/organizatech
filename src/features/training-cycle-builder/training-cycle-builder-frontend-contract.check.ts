@@ -28,9 +28,10 @@ const productControllerSource = read(`${FEATURE_ROOT}/hooks/use-training-cycle-p
 const rpcGatewaySource = read(`${FEATURE_ROOT}/data/supabase-training-cycle-rpc-gateway.ts`);
 const contractsSource = read(`${FEATURE_ROOT}/components/training-cycle-builder-contracts.ts`);
 const controllerSource = read(`${FEATURE_ROOT}/hooks/use-training-cycle-builder-controller.ts`);
+const lifecycleScreensSource = read(`${FEATURE_ROOT}/components/cycle-review-lifecycle-screens.tsx`);
 const autosaveSource = read(`${FEATURE_ROOT}/hooks/training-cycle-draft-autosave.ts`);
 const stateSource = read(`${FEATURE_ROOT}/hooks/training-cycle-builder-state.ts`);
-const videoUrlSource = read(`${FEATURE_ROOT}/hooks/training-cycle-video-url.ts`);
+const videoUrlSource = read("src/lib/training/youtube-video-url.ts");
 const cssSource = read(`${FEATURE_ROOT}/components/training-cycle-builder.module.css`);
 const modalShellSource = read("src/ui/modals/modal-shell.tsx");
 
@@ -41,6 +42,8 @@ assert.match(rootSource, /const trainingCycleProduct = useTrainingCycleProductCo
 assert.match(rootSource, /<TrainingCycleBuilderProductiveBoundary/);
 assert.match(productiveBoundarySource, /export function TrainingCycleBuilderProductiveBoundary\(/);
 assert.match(productiveBoundarySource, /<TrainingCycleBuilder/);
+assert.match(productiveBoundarySource, /key=\{trainingCycleBuilderInstanceKey\(props\.openAlertsRequest\)\}/);
+assert.doesNotMatch(productiveBoundarySource, /key=\{`[^`]*(?:activeCycleId|draftId)/);
 assert.match(productControllerSource, /createTrainingCycleProductGateway/);
 assert.match(productControllerSource, /buildTrainingCycleProductViewModel/);
 assert.match(featureSource, /export function TrainingCycleBuilder\(/);
@@ -104,6 +107,21 @@ assert.match(autosaveSource, /resume\(scopeKey: string\)/);
 assert.match(autosaveSource, /pause\(\)/);
 assert.match(controllerSource, /generateSuggestedDraft/);
 assert.match(controllerSource, /saveActiveCycle/);
+assert.match(controllerSource, /export class TrainingCycleNewCycleOperationOwner/);
+assert.match(controllerSource, /private intentRunning = false/);
+assert.match(controllerSource, /private closeRunning = false/);
+assert.match(controllerSource, /newCycleOwnerRef = useRef<TrainingCycleNewCycleOperationOwner/);
+assert.match(controllerSource, /newCycleOwner\.request\(/);
+assert.match(controllerSource, /newCycleOwner\.confirm\(/);
+assert.match(controllerSource, /getActiveCycleGuard/);
+assert.match(controllerSource, /completeActiveCycle/);
+assert.match(featureSource, /controller\.requestNewCycle\("duplicate", "duplicate"\)/);
+assert.match(featureSource, /¿Quieres finalizar tu ciclo actual\?/);
+assert.match(featureSource, /No, mantenerlo/);
+assert.match(featureSource, /Sí, finalizar y continuar/);
+assert.match(lifecycleScreensSource, /Editar objetivo, días y rutinas/);
+assert.match(lifecycleScreensSource, /Crear un nuevo ciclo de entrenamiento/);
+assert.doesNotMatch(lifecycleScreensSource, /begin_active_edit[\s\S]{0,200}active_cycle_close/);
 assert.match(controllerSource, /state\.workflow !== "draft"/);
 assert.match(stateSource, /expectedRevision/);
 assert.match(stateSource, /durationDays/);
@@ -148,6 +166,8 @@ for (const host of ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be
 assert.match(videoUrlSource, /url\.username\.length > 0/);
 assert.match(videoUrlSource, /YOUTUBE_VIDEO_ID/);
 assert.match(stateSource, /normalizeOptionalYouTubeVideoUrl\(exercise\.videoUrl\)/);
+assert.match(productControllerSource, /compatibility\.status === "legacy_fallback"/);
+assert.match(productControllerSource, /new TrainingCycleTransportError\(\s*"not_supported"/);
 
 assert.match(contractsSource, /export const TRAINING_CYCLE_TECHNIQUES = \[[\s\S]*"linear"[\s\S]*"ascending"[\s\S]*"descending"[\s\S]*"drop_set"[\s\S]*"failure"/);
 assert.equal((contractsSource.match(/^\s+"(?:Pectoral|Hombros|Tríceps|Dorsal|Bíceps|Trapecio|Cuádriceps|Femoral|Glúteos|Pantorrillas|Pierna completa|Abdomen)",$/gm) ?? []).length, 12);

@@ -61,6 +61,13 @@ export interface TrainingCycleBuilderState {
   readonly copyMode: TrainingCycleCopyMode | null;
   readonly discardOpen: boolean;
   readonly discardState: "idle" | "discarding";
+  readonly pendingNewCycleIntent: {
+    readonly origin: TrainingCycleBuilderOrigin;
+    readonly screen: TrainingCycleBuilderScreen;
+  } | null;
+  readonly activeCycleCloseId: string | null;
+  readonly activeCycleCloseState: "idle" | "closing" | "error";
+  readonly activeCycleCloseErrorMessage: string | null;
   readonly extendOpen: boolean;
   readonly extendDate: string;
   readonly saveState: TrainingCycleSaveState;
@@ -138,6 +145,13 @@ export type TrainingCycleBuilderAction =
   | { readonly type: "discard_started" }
   | { readonly type: "discard_failed" }
   | { readonly type: "discard_complete"; readonly draft: TrainingCycleDraftViewModel }
+  | { readonly type: "active_cycle_close_confirmation_required"; readonly cycleId: string; readonly origin: TrainingCycleBuilderOrigin; readonly screen: TrainingCycleBuilderScreen }
+  | { readonly type: "active_cycle_guard_failed"; readonly message: string }
+  | { readonly type: "cancel_active_cycle_close" }
+  | { readonly type: "active_cycle_close_started" }
+  | { readonly type: "active_cycle_close_failed"; readonly message: string }
+  | { readonly type: "active_cycle_close_committed_sync_failed"; readonly message: string }
+  | { readonly type: "active_cycle_close_succeeded"; readonly draft: TrainingCycleDraftViewModel }
   | { readonly type: "set_save_state"; readonly state: TrainingCycleSaveState; readonly savedAtLabel?: string; readonly errorMessage?: string | null }
   | { readonly type: "activation_started" }
   | { readonly type: "activation_failed"; readonly message: string }
@@ -232,6 +246,10 @@ export function createTrainingCycleBuilderState(
     copyMode: null,
     discardOpen: false,
     discardState: "idle",
+    pendingNewCycleIntent: null,
+    activeCycleCloseId: null,
+    activeCycleCloseState: "idle",
+    activeCycleCloseErrorMessage: null,
     extendOpen: false,
     extendDate: addDaysToIso(viewModel.draft.endDate, 14),
     saveState: viewModel.saveState ?? "saved",
@@ -265,6 +283,39 @@ function markDraftChanged(
     draft,
     revision: state.revision + 1,
     saveErrorMessage: null,
+  };
+}
+
+function applyOriginChoice(
+  state: TrainingCycleBuilderState,
+  origin: TrainingCycleBuilderOrigin,
+  screen: TrainingCycleBuilderScreen,
+): TrainingCycleBuilderState {
+  const draft = origin === "manual" || origin === "suggested"
+    ? {
+        ...state.sourceDraft,
+        routines: createManualRoutines(state.sourceDraft.routines),
+      }
+    : state.sourceDraft;
+  return {
+    ...state,
+    workflow: "draft",
+    origin,
+    screen,
+    history: [...state.history, state.screen],
+    draft,
+    currentDay: firstSelectedDay(draft),
+    suggestionState: "idle",
+    suggestionErrorMessage: null,
+    activeEditSavedMessage: null,
+    recoveredDraftBannerOpen: origin === "resume",
+    activeCycleId: null,
+    activeCycleRevision: null,
+    pendingNewCycleIntent: null,
+    activeCycleCloseId: null,
+    activeCycleCloseState: "idle",
+    activeCycleCloseErrorMessage: null,
+    revision: state.revision + 1,
   };
 }
 
@@ -595,25 +646,7 @@ export function trainingCycleBuilderReducer(
       };
     }
     case "choose_origin": {
-      const draft = action.origin === "manual" || action.origin === "suggested"
-        ? {
-            ...state.sourceDraft,
-            routines: createManualRoutines(state.sourceDraft.routines),
-          }
-        : state.sourceDraft;
-      return {
-        ...state,
-        workflow: "draft",
-        origin: action.origin,
-        screen: action.screen,
-        history: [...state.history, state.screen],
-        draft,
-        currentDay: firstSelectedDay(draft),
-        suggestionState: "idle",
-        suggestionErrorMessage: null,
-        activeEditSavedMessage: null,
-        revision: state.revision + 1,
-      };
+      return applyOriginChoice(state, action.origin, action.screen);
     }
     case "resume_draft":
       return {
@@ -1000,6 +1033,65 @@ export function trainingCycleBuilderReducer(
         recoveredDraftBannerOpen: false,
         revision: 0,
       };
+    case "active_cycle_close_confirmation_required":
+      return {
+        ...state,
+        pendingNewCycleIntent: { origin: action.origin, screen: action.screen },
+        activeCycleCloseId: action.cycleId,
+        activeCycleCloseState: "idle",
+        activeCycleCloseErrorMessage: null,
+      };
+    case "active_cycle_guard_failed":
+      return {
+        ...state,
+        pendingNewCycleIntent: null,
+        activeCycleCloseId: null,
+        activeCycleCloseState: "error",
+        activeCycleCloseErrorMessage: action.message,
+      };
+    case "cancel_active_cycle_close":
+      return state.activeCycleCloseState === "closing"
+        ? state
+        : {
+            ...state,
+            pendingNewCycleIntent: null,
+            activeCycleCloseId: null,
+            activeCycleCloseState: "idle",
+            activeCycleCloseErrorMessage: null,
+          };
+    case "active_cycle_close_started":
+      if (
+        state.activeCycleCloseState === "closing"
+        || !state.pendingNewCycleIntent
+        || !state.activeCycleCloseId
+      ) return state;
+      return {
+        ...state,
+        activeCycleCloseState: "closing",
+        activeCycleCloseErrorMessage: null,
+      };
+    case "active_cycle_close_failed":
+      return {
+        ...state,
+        activeCycleCloseState: "error",
+        activeCycleCloseErrorMessage: action.message,
+      };
+    case "active_cycle_close_committed_sync_failed":
+      return {
+        ...state,
+        activeCycleId: null,
+        activeCycleRevision: null,
+        pendingNewCycleIntent: null,
+        activeCycleCloseId: null,
+        activeCycleCloseState: "error",
+        activeCycleCloseErrorMessage: action.message,
+      };
+    case "active_cycle_close_succeeded": {
+      const intent = state.pendingNewCycleIntent;
+      return intent
+        ? applyOriginChoice({ ...state, sourceDraft: action.draft, draft: action.draft }, intent.origin, intent.screen)
+        : state;
+    }
     case "set_save_state":
       return {
         ...state,

@@ -1,3 +1,5 @@
+import { isSupportedYouTubeVideoUrl } from "@/lib/training/youtube-video-url";
+
 import {
   DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS,
   type ExerciseSource,
@@ -74,20 +76,7 @@ export function normalizeDisplayName(value: string): string {
 }
 
 export function isSupportedYouTubeUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:" || url.username || url.password) return false;
-    const host = url.hostname.toLocaleLowerCase("en").replace(/^www\./, "");
-    if (host === "youtu.be") return url.pathname.length > 1;
-    if (host === "youtube.com" || host === "m.youtube.com") {
-      return (url.pathname === "/watch" && Boolean(url.searchParams.get("v")))
-        || url.pathname.startsWith("/shorts/")
-        || url.pathname.startsWith("/embed/");
-    }
-    return false;
-  } catch {
-    return false;
-  }
+  return isSupportedYouTubeVideoUrl(value);
 }
 
 export function buildExerciseCatalog(

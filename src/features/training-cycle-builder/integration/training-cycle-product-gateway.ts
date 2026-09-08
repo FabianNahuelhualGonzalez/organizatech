@@ -6,6 +6,7 @@ import type {
   TrainingCycleSaveActiveInput,
   TrainingCycleSaveActiveResult,
   TrainingCycleSaveDraftInput,
+  TrainingCycleDraftViewModel,
 } from "../components/training-cycle-builder-contracts";
 import {
   mapBuilderDaysToRpcPlan,
@@ -13,6 +14,7 @@ import {
   uiMuscleToRpc,
 } from "../data/training-cycle-rpc-mappers";
 import {
+  TrainingCycleCommittedMutationError,
   TrainingCycleTransportError,
   type TrainingCycleAcceptedOperation,
   type TrainingCycleCatalogItem,
@@ -21,6 +23,7 @@ import {
 } from "../data/training-cycle-rpc-types";
 import type { TrainingCycleRpcGateway } from "../data/supabase-training-cycle-rpc-gateway";
 import { generateProductTrainingCycleSuggestion } from "./training-cycle-product-suggestion";
+import { projectTrainingCycleRpcPlan } from "./training-cycle-product-view-model";
 
 type ProductRpc = Pick<TrainingCycleRpcGateway,
   | "createCustomExercise"
@@ -28,6 +31,8 @@ type ProductRpc = Pick<TrainingCycleRpcGateway,
   | "saveDraft"
   | "discardDraft"
   | "duplicateCycle"
+  | "getActiveCycleGuard"
+  | "replaceActiveCycleToDraft"
   | "activateDraft"
   | "editActiveCycle"
   | "extendActiveCycle"
@@ -41,9 +46,15 @@ export interface CreateTrainingCycleProductGatewayInput {
   readonly remoteDraftReference?: { readonly draftId: string; readonly version: number } | null;
   readonly sourceCycleId: string | null;
   readonly activeCycle: TrainingCycleRpcSnapshot | null;
+  readonly entries?: readonly import("@/lib/progress/types").ExerciseEntry[];
+  readonly todayIsoDate?: string;
   readonly onDraftPersisted?: (draftId: string, version: number) => void;
   readonly onDraftDiscarded?: () => void;
   readonly onCycleChanged?: (cycle: TrainingCycleRpcSnapshot) => void | Promise<void>;
+  readonly onCycleReplaced?: (
+    cycleId: string,
+    draft: TrainingCycleDraftSnapshot,
+  ) => void | Promise<void>;
 }
 
 function asVersion(value: string) {
@@ -62,7 +73,16 @@ function savedAtLabel() {
   }).format(new Date());
 }
 
-function requiredVersion(result: TrainingCycleAcceptedOperation) {
+async function afterCommitted<T>(operation: () => T | Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof TrainingCycleCommittedMutationError) throw error;
+    throw new TrainingCycleCommittedMutationError();
+  }
+}
+
+function requiredVersion(result: Pick<TrainingCycleAcceptedOperation, "resultVersion">) {
   if (result.resultVersion === null) {
     throw new TrainingCycleTransportError("invalid_response", "El servidor devolvió una respuesta inválida.");
   }
@@ -89,6 +109,7 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
   private remoteDraftVersion: number | null;
   private activeCycleId: string | null;
   private activeCycleVersion: number | null;
+  private newDraftSourceCycleId: string | null;
   private readonly queue = new ProductMutationQueue();
 
   constructor(private readonly input: CreateTrainingCycleProductGatewayInput) {
@@ -96,9 +117,10 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
     this.remoteDraftVersion = input.remoteDraftReference?.version ?? input.remoteDraft?.version ?? null;
     this.activeCycleId = input.activeCycle?.cycleId ?? null;
     this.activeCycleVersion = input.activeCycle?.version ?? null;
+    this.newDraftSourceCycleId = input.sourceCycleId;
   }
 
-  private adoptDraft(result: TrainingCycleAcceptedOperation) {
+  private adoptDraft(result: Pick<TrainingCycleAcceptedOperation, "aggregateId" | "resultVersion">) {
     const version = requiredVersion(result);
     this.remoteDraftId = result.aggregateId;
     this.remoteDraftVersion = version;
@@ -109,11 +131,11 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
   private async persistNewDraft(input: TrainingCycleSaveDraftInput) {
     const plan = mapBuilderDaysToRpcPlan(input.days);
     if (input.origin === "duplicate") {
-      if (!this.input.sourceCycleId) {
+      if (!this.newDraftSourceCycleId) {
         throw new TrainingCycleTransportError("invalid_state", "No encontramos el ciclo que quieres duplicar.");
       }
       const duplicated = this.adoptDraft(await this.input.rpc.duplicateCycle({
-        sourceCycleId: this.input.sourceCycleId,
+        sourceCycleId: this.newDraftSourceCycleId,
         startDate: input.startDate,
         endDate: input.endDate,
       }));
@@ -177,6 +199,56 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
       muscleGroup: rpcMuscleToUi(uiMuscleToRpc(input.muscleGroup)),
       sources: ["all"],
     };
+  }
+
+  async getActiveCycleGuard() {
+    const guard = await this.input.rpc.getActiveCycleGuard();
+    return guard ? { cycleId: guard.cycleId } : null;
+  }
+
+  completeActiveCycle(input: {
+    readonly expectedActiveCycleId: string;
+    readonly startDate: string;
+    readonly endDate: string;
+  }): Promise<TrainingCycleDraftViewModel> {
+    return this.queue.run(async () => {
+      const result = await this.input.rpc.replaceActiveCycleToDraft({
+        expectedActiveCycleId: input.expectedActiveCycleId,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      });
+      return afterCommitted(async () => {
+        const draft = result.draft;
+        if (result.aggregateId !== draft.draftId
+          || result.resultVersion !== draft.version
+          || draft.sourceCycleId !== input.expectedActiveCycleId
+          || draft.origin !== "duplicate"
+          || draft.state !== "draft"
+          || draft.activatedCycleId !== null) {
+          throw new TrainingCycleTransportError("invalid_response", "El servidor devolvió una respuesta inválida.");
+        }
+        const projectedDraft = projectTrainingCycleRpcPlan({
+          draftId: draft.draftId,
+          goal: draft.goal,
+          startDate: draft.startDate,
+          endDate: draft.endDate,
+          plan: draft.plan,
+          catalogBySource: new Map([...this.input.catalog, ...result.exerciseSources].map((item) => [
+            `${item.source.kind}:${item.source.id}`,
+            item,
+          ])),
+          sourceCycle: this.input.activeCycle,
+          entries: this.input.entries ?? [],
+          todayIsoDate: this.input.todayIsoDate ?? draft.startDate,
+        });
+        this.activeCycleId = null;
+        this.activeCycleVersion = null;
+        this.newDraftSourceCycleId = input.expectedActiveCycleId;
+        this.adoptDraft(result);
+        await this.input.onCycleReplaced?.(input.expectedActiveCycleId, draft);
+        return projectedDraft;
+      });
+    });
   }
 
   activateCycle(): Promise<TrainingCycleActivationResult> {

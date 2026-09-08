@@ -103,6 +103,16 @@ export function selectOwnedTrainingCycleProductSnapshot(
 }
 
 export async function loadTrainingCycleProductData(rpc: ProductRpc): Promise<TrainingCycleProductData> {
+  const activeGuard = await rpc.getActiveCycleGuard();
+  if (activeGuard && !activeGuard.hasCanonicalPlan) {
+    const compatibility = await rpc.adaptActiveLegacyCycle(activeGuard.cycleId);
+    if (compatibility.status === "legacy_fallback") {
+      throw new TrainingCycleTransportError(
+        "not_supported",
+        "El ciclo activo conserva temporalmente el flujo compatible anterior.",
+      );
+    }
+  }
   await rpc.refreshLifecycle();
   const catalog: TrainingCycleCatalogItem[] = [];
   let cursor: TrainingCycleCatalogCursor | null = null;
@@ -146,6 +156,22 @@ export function clearDiscardedTrainingCycleProductData(
     draft: null,
     draftReference: null,
     sourceCycle: null,
+  };
+}
+
+export function closeActiveTrainingCycleProductData(
+  data: TrainingCycleProductData,
+  replacementDraft?: TrainingCycleDraftSnapshot,
+): TrainingCycleProductData {
+  return {
+    ...data,
+    activeCycle: null,
+    lastCycle: data.activeCycle ?? data.lastCycle,
+    draft: replacementDraft ?? data.draft,
+    draftReference: replacementDraft
+      ? { draftId: replacementDraft.draftId, version: replacementDraft.version }
+      : data.draftReference,
+    sourceCycle: data.activeCycle ?? data.sourceCycle,
   };
 }
 
@@ -243,6 +269,8 @@ export function useTrainingCycleProductController(input: {
       remoteDraftReference: data.draftReference,
       sourceCycleId: findTrainingCycleSourceCycleId({ draft: data.draft, lastCycle: data.lastCycle }),
       activeCycle: data.activeCycle,
+      entries: input.entries,
+      todayIsoDate: todayInSantiago(),
       onDraftPersisted(draftId, version) {
         if (!ownsCurrentContext()) return;
         setSnapshot((current) => current.status === "ready"
@@ -267,6 +295,15 @@ export function useTrainingCycleProductController(input: {
           ? { ...current, data: { ...current.data, activeCycle: cycle } }
           : current);
         await notifyCycleChanged(cycle.cycleId);
+      },
+      async onCycleReplaced(cycleId, draft) {
+        if (!ownsCurrentContext()) return;
+        setSnapshot((current) => current.status === "ready"
+          && current.ownerContextKey === ownerContextKey
+          && current.rpc === rpc
+          ? { ...current, data: closeActiveTrainingCycleProductData(current.data, draft) }
+          : current);
+        await notifyCycleChanged(cycleId);
       },
     });
     return {

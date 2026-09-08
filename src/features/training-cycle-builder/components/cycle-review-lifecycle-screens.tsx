@@ -270,10 +270,12 @@ export function CycleActiveScreen({
   state,
   viewModel,
   dispatch,
+  onCreateNewCycle,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly viewModel: TrainingCycleBuilderInitialViewModel;
   readonly dispatch: BuilderDispatch;
+  readonly onCreateNewCycle: () => void;
 }) {
   const remaining = viewModel.activeCycleDaysRemaining ?? 0;
   const elapsed = viewModel.activeCycleElapsedDays ?? 0;
@@ -290,7 +292,7 @@ export function CycleActiveScreen({
           onAction={() => dispatch({ type: "dismiss_active_edit_saved" })}
         />
       ) : null}
-      {remaining <= 3 ? (
+      {remaining <= 7 ? (
         <section className={styles.expiryBanner} data-last-day={remaining === 0}>
           <div><Clock3 size={16} aria-hidden="true" /><span><strong>{remaining === 0 ? "Hoy es el último día" : `Tu ciclo termina en ${remaining} ${remaining === 1 ? "día" : "días"}`}</strong><p>{remaining === 0 ? "Hoy entrenas normal. Mañana se cierra si no lo extiendes." : "Puedes extenderlo ahora o dejar que se cierre y crear uno nuevo."}</p></span></div>
           <button type="button" onClick={() => dispatch({ type: "open_extend" })}>Extender ciclo</button>
@@ -302,7 +304,7 @@ export function CycleActiveScreen({
         <dl>
           <div><dt>INICIO</dt><dd>{formatCycleDate(state.draft.startDate)}</dd></div>
           <div><dt>TÉRMINO</dt><dd>{formatCycleDate(state.draft.endDate)}</dd></div>
-          <div><dt>RESTAN</dt><dd data-warning={remaining <= 3}>{remaining === 0 ? "Hoy" : `${remaining} días`}</dd></div>
+          <div><dt>RESTAN</dt><dd data-warning={remaining <= 7}>{remaining === 0 ? "Hoy" : `${remaining} días`}</dd></div>
         </dl>
         <div className={styles.progressTrack} aria-label={`${progress}% del ciclo completado`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }} /></div>
         <p>{elapsed} de {total} días · {viewModel.registeredSessions ?? 0} sesiones registradas</p>
@@ -324,6 +326,7 @@ export function CycleActiveScreen({
         />
       )}
       <SecondaryAction onClick={() => dispatch({ type: "open_extend" })}>Extender la fecha de término</SecondaryAction>
+      <SecondaryAction onClick={onCreateNewCycle}>Crear un nuevo ciclo de entrenamiento</SecondaryAction>
       <SecondaryAction onClick={() => dispatch({ type: "navigate", screen: "alerts" })}>Ver avisos de vencimiento</SecondaryAction>
       <button className={styles.textAction} type="button" onClick={() => dispatch({ type: "navigate", screen: "closing" })}>Ver qué pasa si no lo extiendo</button>
     </div>
@@ -339,7 +342,7 @@ export function CycleAlertsScreen({
 }) {
   return (
     <div className={styles.screen}>
-      <ScreenHeading title="Avisos de vencimiento" description="Los avisos T-3, T-2, T-1 y T0 aparecen dentro del ciclo y en la campana." />
+      <ScreenHeading title="Avisos de vencimiento" description="Los avisos T-7, T-3, T-1 y T0 aparecen dentro del ciclo y en la campana." />
       <div className={styles.alertList}>
         {viewModel.expiryAlerts.map((alert) => (
           <article key={alert.offsetDays} data-last-day={alert.offsetDays === 0}>
@@ -360,7 +363,7 @@ export function CycleClosingScreen({
 }) {
   const steps = [
     ["Hoy", "Último día del ciclo", "El día indicado sigue siendo válido: entrenas y registras como siempre."],
-    ["Mañana, 00:00", "El ciclo se cierra solo", "Pasa al historial con todas las sesiones registradas."],
+    ["Desde el día siguiente", "El ciclo se cierra solo", "El proceso automático lo pasa al historial con todas las sesiones registradas."],
     ["Al abrir la app", "Ciclo cerrado", "Ves el resumen de lo que lograste y el acceso para crear el siguiente."],
     ["Enseguida", "Creación del siguiente", "Te recomendamos duplicar el ciclo recién terminado con tus cargas reales."],
   ] as const;
@@ -378,10 +381,13 @@ export function CycleClosingScreen({
 
 export function CycleNextScreen({
   viewModel,
-  dispatch,
+  onChooseOrigin,
 }: {
   readonly viewModel: TrainingCycleBuilderInitialViewModel;
-  readonly dispatch: BuilderDispatch;
+  readonly onChooseOrigin: (
+    origin: "duplicate" | "manual" | "suggested",
+    screen: "duplicate" | "setup",
+  ) => void;
 }) {
   return (
     <div className={styles.screen}>
@@ -392,9 +398,9 @@ export function CycleNextScreen({
       </section>
       <ScreenHeading title="Listo para el siguiente" description="Lo más rápido es partir del ciclo que acabas de terminar: ya tienes las cargas reales que lograste." />
       <div className={styles.nextOptions}>
-        <button type="button" data-recommended onClick={() => dispatch({ type: "choose_origin", origin: "duplicate", screen: "duplicate" })}><b>RECOMENDADO</b><strong>Duplicar el ciclo que terminaste</strong><p>Con las cargas ajustadas a lo que realmente levantaste.</p></button>
-        <button type="button" onClick={() => dispatch({ type: "choose_origin", origin: "manual", screen: "setup" })}><strong>Crear mi propia rutina</strong><p>Empezar desde cero.</p></button>
-        <button type="button" onClick={() => dispatch({ type: "choose_origin", origin: "suggested", screen: "setup" })}><strong>Recibir una rutina sugerida</strong><p>Cambiar de enfoque con un borrador nuevo.</p></button>
+        <button type="button" data-recommended onClick={() => onChooseOrigin("duplicate", "duplicate")}><b>RECOMENDADO</b><strong>Duplicar el ciclo que terminaste</strong><p>Con las cargas ajustadas a lo que realmente levantaste.</p></button>
+        <button type="button" onClick={() => onChooseOrigin("manual", "setup")}><strong>Crear mi propia rutina</strong><p>Empezar desde cero.</p></button>
+        <button type="button" onClick={() => onChooseOrigin("suggested", "setup")}><strong>Recibir una rutina sugerida</strong><p>Cambiar de enfoque con un borrador nuevo.</p></button>
       </div>
     </div>
   );

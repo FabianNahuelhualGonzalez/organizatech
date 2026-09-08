@@ -8,12 +8,40 @@ export const POST_PERF_06_MIGRATION_OWNERSHIP = {
     "fc6b89d7f610a2a188a2b2f98b3971325aabdaaf8868c1dda7c9c7c1057aa681",
   "20260829200847_cycle_redesign_api.sql":
     "5a27383ded59ba3f54dfdda4fa01f92fea96f5b902939bff55d10a1ba1215141",
+  "20260831213114_cycle_active_replacement.sql":
+    "9f286e415cfaa431ba319365ac5f3669525419cca243148370167d5d03b592bd",
+  "20260831230440_cycle_active_atomic_replacement.sql":
+    "a535070b9cabc74e119fae09262d00ad8b12c1072c1ab1be431fdb6821033848",
+  "20260831233757_cycle_active_replacement_snapshot_response.sql":
+    "06b0d6cebc52d24a0099e8c24848709a4aa38c58f9b208fd0dcfa64837c1c372",
+  "20260901002250_cycle_active_replacement_exercise_descriptors.sql":
+    "7a2933c53a81d404af97a8108baf018bc28517e1cc772fddac92916323489c64",
+  "20260905201420_cycle_legacy_compatibility_expiry_youtube.sql":
+    "3368b40c2dcac88a484a3a826daa7f45c56d771324419f3e104400c82dbc6b65",
 } as const;
 
 const schemaPath =
   "supabase/migrations/20260829200846_cycle_redesign_schema.sql";
 const apiPath =
   "supabase/migrations/20260829200847_cycle_redesign_api.sql";
+const activeReplacementPath =
+  "supabase/migrations/20260831213114_cycle_active_replacement.sql";
+const activeReplacementDbTestPath =
+  "supabase/tests/20260831213114_cycle_active_replacement_test.sql";
+const activeAtomicReplacementPath =
+  "supabase/migrations/20260831230440_cycle_active_atomic_replacement.sql";
+const activeReplacementSnapshotPath =
+  "supabase/migrations/20260831233757_cycle_active_replacement_snapshot_response.sql";
+const activeReplacementDescriptorsPath =
+  "supabase/migrations/20260901002250_cycle_active_replacement_exercise_descriptors.sql";
+const legacyCompatibilityPath =
+  "supabase/migrations/20260905201420_cycle_legacy_compatibility_expiry_youtube.sql";
+const legacyCompatibilityDbTestPath =
+  "supabase/tests/20260905201420_cycle_legacy_compatibility_expiry_youtube_test.sql";
+const activeReplacementBootstrapPath =
+  "supabase/tests/support/cycle_active_replacement_embedded_bootstrap.sql";
+const activeReplacementRunnerPath =
+  "supabase/tests/support/run_cycle_active_replacement_embedded_postgres.sh";
 const coachContractPath =
   "src/features/coach-portal/coach-portal-integration-contract.ts";
 const supabaseConfigPath = "supabase/config.toml";
@@ -26,6 +54,15 @@ const lifecycleTemplatePath =
 
 const schema = readFileSync(schemaPath, "utf8");
 const api = readFileSync(apiPath, "utf8");
+const activeReplacement = readFileSync(activeReplacementPath, "utf8");
+const activeReplacementDbTest = readFileSync(activeReplacementDbTestPath, "utf8");
+const activeAtomicReplacement = readFileSync(activeAtomicReplacementPath, "utf8");
+const activeReplacementSnapshot = readFileSync(activeReplacementSnapshotPath, "utf8");
+const activeReplacementDescriptors = readFileSync(activeReplacementDescriptorsPath, "utf8");
+const legacyCompatibility = readFileSync(legacyCompatibilityPath, "utf8");
+const legacyCompatibilityDbTest = readFileSync(legacyCompatibilityDbTestPath, "utf8");
+const activeReplacementBootstrap = readFileSync(activeReplacementBootstrapPath, "utf8");
+const activeReplacementRunner = readFileSync(activeReplacementRunnerPath, "utf8");
 const coachContract = readFileSync(coachContractPath, "utf8");
 const supabaseConfig = readFileSync(supabaseConfigPath, "utf8");
 const lifecycleWorker = readFileSync(lifecycleWorkerPath, "utf8");
@@ -37,6 +74,12 @@ const normalize = (source: string) =>
 
 const schemaSql = normalize(schema);
 const apiSql = normalize(api);
+const activeReplacementSql = normalize(activeReplacement);
+const activeReplacementDbTestSql = normalize(activeReplacementDbTest);
+const activeAtomicReplacementSql = normalize(activeAtomicReplacement);
+const activeReplacementSnapshotSql = normalize(activeReplacementSnapshot);
+const legacyCompatibilitySql = normalize(legacyCompatibility);
+const legacyCompatibilityDbTestSql = normalize(legacyCompatibilityDbTest);
 
 const sha256 = (source: string) =>
   createHash("sha256").update(source).digest("hex");
@@ -373,9 +416,24 @@ function validateCoachMigrationAllowlist(candidateCoachContract: string) {
     "supabase/migrations/20260829200846_cycle_redesign_schema.sql";
   const apiMigration =
     "supabase/migrations/20260829200847_cycle_redesign_api.sql";
+  const activeReplacementMigration =
+    "supabase/migrations/20260831213114_cycle_active_replacement.sql";
+  const activeAtomicReplacementMigration =
+    "supabase/migrations/20260831230440_cycle_active_atomic_replacement.sql";
+  const activeReplacementSnapshotMigration =
+    "supabase/migrations/20260831233757_cycle_active_replacement_snapshot_response.sql";
+  const activeReplacementDescriptorsMigration =
+    "supabase/migrations/20260901002250_cycle_active_replacement_exercise_descriptors.sql";
+  const legacyCompatibilityMigration =
+    "supabase/migrations/20260905201420_cycle_legacy_compatibility_expiry_youtube.sql";
 
   assert.equal(countOccurrences(candidateCoachContract, schemaMigration), 1);
   assert.equal(countOccurrences(candidateCoachContract, apiMigration), 1);
+  assert.equal(countOccurrences(candidateCoachContract, activeReplacementMigration), 1);
+  assert.equal(countOccurrences(candidateCoachContract, activeAtomicReplacementMigration), 1);
+  assert.equal(countOccurrences(candidateCoachContract, activeReplacementSnapshotMigration), 1);
+  assert.equal(countOccurrences(candidateCoachContract, activeReplacementDescriptorsMigration), 1);
+  assert.equal(countOccurrences(candidateCoachContract, legacyCompatibilityMigration), 1);
   assert.match(
     normalized,
     /const cycle_redesign_schema_migration_path = "supabase\/migrations\/20260829200846_cycle_redesign_schema\.sql"/,
@@ -386,7 +444,27 @@ function validateCoachMigrationAllowlist(candidateCoachContract: string) {
   );
   assert.match(
     normalized,
-    /path !== cycle_redesign_schema_migration_path && path !== cycle_redesign_api_migration_path/,
+    /const cycle_active_replacement_migration_path = "supabase\/migrations\/20260831213114_cycle_active_replacement\.sql"/,
+  );
+  assert.match(
+    normalized,
+    /const cycle_active_atomic_replacement_migration_path = "supabase\/migrations\/20260831230440_cycle_active_atomic_replacement\.sql"/,
+  );
+  assert.match(
+    normalized,
+    /const cycle_active_replacement_snapshot_migration_path = "supabase\/migrations\/20260831233757_cycle_active_replacement_snapshot_response\.sql"/,
+  );
+  assert.match(
+    normalized,
+    /const cycle_active_replacement_descriptors_migration_path = "supabase\/migrations\/20260901002250_cycle_active_replacement_exercise_descriptors\.sql"/,
+  );
+  assert.match(
+    normalized,
+    /const cycle_legacy_compatibility_migration_path = "supabase\/migrations\/20260905201420_cycle_legacy_compatibility_expiry_youtube\.sql"/,
+  );
+  assert.match(
+    normalized,
+    /path !== cycle_redesign_schema_migration_path && path !== cycle_redesign_api_migration_path && path !== cycle_active_replacement_migration_path && path !== cycle_active_atomic_replacement_migration_path && path !== cycle_active_replacement_snapshot_migration_path && path !== cycle_active_replacement_descriptors_migration_path && path !== cycle_legacy_compatibility_migration_path/,
   );
   assert.doesNotMatch(
     normalized,
@@ -1086,7 +1164,7 @@ test("cycle redesign schema is forward-only, relationally scoped, and private", 
   validateSecurityContract(schema, api);
 });
 
-test("migration ownership hashes match the two exact forward-only files", () => {
+test("migration ownership hashes match the seven exact forward-only files", () => {
   assert.equal(
     sha256(schema),
     POST_PERF_06_MIGRATION_OWNERSHIP["20260829200846_cycle_redesign_schema.sql"],
@@ -1095,6 +1173,220 @@ test("migration ownership hashes match the two exact forward-only files", () => 
     sha256(api),
     POST_PERF_06_MIGRATION_OWNERSHIP["20260829200847_cycle_redesign_api.sql"],
   );
+  assert.equal(
+    sha256(activeReplacement),
+    POST_PERF_06_MIGRATION_OWNERSHIP["20260831213114_cycle_active_replacement.sql"],
+  );
+  assert.equal(
+    sha256(activeAtomicReplacement),
+    POST_PERF_06_MIGRATION_OWNERSHIP["20260831230440_cycle_active_atomic_replacement.sql"],
+  );
+  assert.equal(
+    sha256(activeReplacementSnapshot),
+    POST_PERF_06_MIGRATION_OWNERSHIP["20260831233757_cycle_active_replacement_snapshot_response.sql"],
+  );
+  assert.equal(
+    sha256(activeReplacementDescriptors),
+    POST_PERF_06_MIGRATION_OWNERSHIP["20260901002250_cycle_active_replacement_exercise_descriptors.sql"],
+  );
+  assert.equal(
+    sha256(legacyCompatibility),
+    POST_PERF_06_MIGRATION_OWNERSHIP["20260905201420_cycle_legacy_compatibility_expiry_youtube.sql"],
+  );
+});
+
+test("embedded replacement harness applies exact owned migrations over a pre-846 baseline", () => {
+  const ordered = [
+    "20260829200846_cycle_redesign_schema.sql",
+    "20260829200847_cycle_redesign_api.sql",
+    "20260831213114_cycle_active_replacement.sql",
+    "20260831230440_cycle_active_atomic_replacement.sql",
+    "20260831233757_cycle_active_replacement_snapshot_response.sql",
+    "20260901002250_cycle_active_replacement_exercise_descriptors.sql",
+    "20260905201420_cycle_legacy_compatibility_expiry_youtube.sql",
+  ];
+  let previous = -1;
+  for (const migration of ordered) {
+    const position = activeReplacementRunner.indexOf(`supabase/migrations/${migration}`);
+    assert.ok(position > previous, `${migration} must be applied exactly and in order`);
+    previous = position;
+  }
+  for (const ownedDefinition of [
+    "create table public.training_exercise_catalog",
+    "create table public.training_custom_exercises",
+    "create table public.training_cycle_drafts",
+    "create table public.training_cycle_draft_versions",
+    "create table public.training_cycle_plan_versions",
+    "create function private.assert_training_cycle_portal_access",
+    "create function private.lock_training_cycle_portal",
+    "create function private.training_cycle_draft_snapshot_json",
+  ]) {
+    assert.doesNotMatch(normalize(activeReplacementBootstrap), new RegExp(ownedDefinition.replaceAll(".", "\\.")));
+  }
+  assert.match(activeReplacementRunner, /grep -Eq '\^\(not ok\|Bail out!\)'/);
+  assert.match(activeReplacementRunner, /grep -Ec '\^ok \[0-9\]\+'/);
+  assert.match(activeReplacementSnapshotSql, /'responsekind', 'prepared_draft'/);
+  assert.match(activeReplacementSnapshotSql, /'draft', v_draft/);
+});
+
+test("atomic replacement creates the new draft before closing and covers legacy safely", () => {
+  assert.match(activeAtomicReplacementSql, /^-- cycle-redesign-active-atomic-replacement-02/);
+  const replace = normalize(extractFunction(
+    activeAtomicReplacement,
+    "public.replace_own_active_training_cycle_to_draft",
+  ));
+  assert.match(replace, /private\.lock_training_cycle_portal\(v_user_id, p_portal_scope\)/);
+  assert.match(replace, /private\.training_cycle_replacement_source/);
+  assert.ok(replace.indexOf("state = 'discarded'") < replace.indexOf("private.create_training_cycle_draft_record("));
+  assert.ok(replace.indexOf("private.create_training_cycle_draft_record(") < replace.indexOf("status = 'completed'"));
+  assert.match(replace, /from public\.training_workout_readiness as readiness/);
+  assert.match(activeAtomicReplacementSql, /legacy training cycle cannot be converted safely/);
+  assert.match(activeAtomicReplacementSql, /day\.week_index <> 1/);
+  assert.match(activeAtomicReplacementSql, /pg_catalog\.count\(\*\) not between 1 and 50/);
+  assert.match(activeAtomicReplacementSql, /\) > 200 then raise exception 'legacy training cycle cannot be converted safely'/);
+  assert.match(activeAtomicReplacementSql, /revoke execute on function public\.complete_own_active_training_cycle_manually/);
+});
+
+test("active-cycle replacement migration closes only the confirmed owned cycle", () => {
+  assert.match(activeReplacementSql, /^-- cycle-redesign-active-replacement-01/);
+  assert.match(activeReplacementSql, /begin;/);
+  assert.match(activeReplacementSql, /commit;$/);
+  assert.match(activeReplacementSql, /operation_kind in \([\s\S]*?'cycle_close'/);
+
+  const guard = normalize(extractFunction(
+    activeReplacement,
+    "public.get_own_active_training_cycle_guard",
+  ));
+  assert.match(guard, /security definer/);
+  assert.match(guard, /set search_path = ''/);
+  assert.match(guard, /v_user_id uuid := auth\.uid\(\)/);
+  assert.match(guard, /private\.assert_training_cycle_portal_access\(v_user_id, p_portal_scope\)/);
+  assert.match(guard, /cycle\.user_id = v_user_id/);
+  assert.match(guard, /cycle\.portal_scope = p_portal_scope/);
+  assert.match(guard, /cycle\.status = 'active'/);
+  assert.doesNotMatch(guard, /and cycle\.current_plan_version_id is not null/);
+  assert.match(guard, /'hascanonicalplan', v_cycle\.current_plan_version_id is not null/);
+
+  const close = normalize(extractFunction(
+    activeReplacement,
+    "public.complete_own_active_training_cycle_manually",
+  ));
+  assert.match(close, /security definer/);
+  assert.match(close, /set search_path = ''/);
+  assert.match(close, /private\.lock_training_cycle_portal\(v_user_id, p_portal_scope\)/);
+  assert.ok(
+    close.indexOf("from private.find_training_cycle_receipt(")
+      < close.indexOf("from public.training_cycles as cycle"),
+    "an exact retry resolves before mutable active-cycle state",
+  );
+  assert.match(close, /cycle\.id = p_expected_active_cycle_id/);
+  assert.match(close, /cycle\.user_id = v_user_id/);
+  assert.match(close, /cycle\.portal_scope = p_portal_scope/);
+  assert.match(close, /for update/);
+  assert.match(close, /from public\.training_workout_readiness as readiness/);
+  assert.match(close, /readiness\.training_session_id is null/);
+  assert.match(close, /status = 'completed'/);
+  assert.match(close, /closed_reason = 'manual'/);
+  assert.match(close, /private\.record_training_cycle_receipt\([\s\S]*?'cycle_close'/);
+  assert.doesNotMatch(close, /activate_own_training_cycle_draft/);
+  assert.doesNotMatch(
+    activeReplacement,
+    /\b(?:alter\s+table|insert\s+into|update|delete\s+from)\s+public\.(?:training_sessions|exercise_entries)\b/i,
+  );
+  assert.match(activeReplacementSql, /grant execute on function public\.get_own_active_training_cycle_guard\(text\) to authenticated/);
+  assert.doesNotMatch(activeReplacementSql, /grant execute on function public\.complete_own_active_training_cycle_manually\( uuid, text, uuid \) to authenticated/);
+  assert.match(activeReplacementSql, /revoke all on function public\.complete_own_active_training_cycle_manually\( uuid, text, uuid \) from public, anon, authenticated, service_role/);
+  assert.match(activeReplacementSql, /service_role[\s\S]*guard grants/);
+  assert.match(activeReplacementSql, /service_role[\s\S]*mutation grants/);
+});
+
+test("legacy compatibility preserves active cycles, canonicalizes YouTube, and schedules T-7 safely", () => {
+  assert.match(legacyCompatibilitySql, /^-- cycle-redesign-legacy-compatibility-05/);
+  assert.match(legacyCompatibilitySql, /begin;/);
+  assert.match(legacyCompatibilitySql, /commit;$/);
+
+  const youtubeCanonical = normalize(extractFunction(
+    legacyCompatibility,
+    "private.canonical_training_youtube_url",
+  ));
+  assert.match(youtubeCanonical, /language plpgsql immutable strict security invoker/);
+  assert.match(youtubeCanonical, /set search_path = ''/);
+  assert.match(youtubeCanonical, /\{11\}/);
+  assert.match(youtubeCanonical, /embed\|shorts\|live/);
+  assert.match(youtubeCanonical, /regexp_count\(p_value, '\[\?&\]v='\) = 1/);
+  assert.match(youtubeCanonical, /https:\/\/www\.youtube\.com\/watch\?v=/);
+
+  const youtube = normalize(extractFunction(
+    legacyCompatibility.replace(
+      "create or replace function private.is_valid_training_youtube_url(",
+      "create function private.is_valid_training_youtube_url(",
+    ),
+    "private.is_valid_training_youtube_url",
+  ));
+  assert.match(youtube, /language sql immutable strict security invoker/);
+  assert.match(youtube, /set search_path = ''/);
+  assert.match(youtube, /p_value = private\.canonical_training_youtube_url\(p_value\)/);
+  assert.match(legacyCompatibilitySql, /update public\.training_exercise_catalog set default_video_url = private\.canonical_training_youtube_url/);
+  assert.match(legacyCompatibilitySql, /update public\.training_custom_exercises set video_url = private\.canonical_training_youtube_url/);
+  assert.match(legacyCompatibilitySql, /update public\.training_cycle_plan_exercises set video_url_snapshot = private\.canonical_training_youtube_url/);
+  assert.match(legacyCompatibilitySql, /training_cycle_draft_versions_youtube_urls_canonical/);
+  assert.match(legacyCompatibilitySql, /training_cycle_plan_versions_youtube_urls_canonical/);
+
+  const adapt = normalize(extractFunction(
+    legacyCompatibility,
+    "public.adapt_own_active_legacy_training_cycle",
+  ));
+  assert.match(adapt, /security definer/);
+  assert.match(adapt, /set search_path = ''/);
+  assert.match(adapt, /set lock_timeout = '3s'/);
+  assert.match(adapt, /set statement_timeout = '12s'/);
+  assert.match(adapt, /v_user_id uuid := auth\.uid\(\)/);
+  assert.match(adapt, /private\.assert_training_cycle_portal_access\(v_user_id, p_portal_scope\)/);
+  assert.match(adapt, /private\.lock_training_cycle_portal\(v_user_id, p_portal_scope\)/);
+  assert.match(adapt, /cycle\.id = p_expected_cycle_id/);
+  assert.match(adapt, /cycle\.user_id = v_user_id/);
+  assert.match(adapt, /cycle\.portal_scope = p_portal_scope/);
+  assert.match(adapt, /for update/);
+  assert.match(adapt, /v_start_date \+ \(v_duration_weeks \* 7\) - 1/);
+  assert.match(adapt, /when sqlstate '55000'/);
+  assert.match(adapt, /'status', 'legacy_fallback'/);
+  assert.match(adapt, /current_plan_version_id = v_version_id/);
+  assert.match(adapt, /private\.schedule_training_cycle_notifications/);
+  assert.doesNotMatch(
+    legacyCompatibility,
+    /\b(?:alter\s+table|insert\s+into|update|delete\s+from)\s+public\.(?:training_sessions|exercise_entries)\b/i,
+  );
+  assert.match(legacyCompatibilitySql, /'expires_t7'/);
+  assert.doesNotMatch(legacyCompatibilitySql, /\('expires_t2'::text/);
+  assert.match(legacyCompatibilitySql, /grant execute on function public\.adapt_own_active_legacy_training_cycle\( uuid, text, uuid \) to authenticated/);
+  assert.match(legacyCompatibilitySql, /service_role[\s\S]*legacy cycle compatibility postcheck failed/);
+
+  assert.match(legacyCompatibilityDbTestSql, /select extensions\.plan\(30\)/);
+  assert.match(legacyCompatibilityDbTestSql, /four legacy weeks use an inclusive start plus 27 day end date/);
+  assert.match(legacyCompatibilityDbTestSql, /multi-week legacy data fails safely without truncation/);
+  assert.match(legacyCompatibilityDbTestSql, /concurrent adaptations with different requests serialize/);
+  assert.match(legacyCompatibilityDbTestSql, /adaptation does not duplicate legacy exercises/);
+});
+
+test("active-cycle replacement has a transactional local pgTAP harness", () => {
+  assert.match(activeReplacementDbTestSql, /^-- local-only pgtap coverage/);
+  assert.match(activeReplacementDbTestSql, /select extensions\.plan\(25\)/);
+  assert.match(activeReplacementDbTestSql, /legacy active cycle is visible/);
+  assert.match(activeReplacementDbTestSql, /canonical active cycle is visible/);
+  assert.match(activeReplacementDbTestSql, /owner cannot close another owner cycle/);
+  assert.match(activeReplacementDbTestSql, /portal scope requires its authoritative membership/);
+  assert.match(activeReplacementDbTestSql, /in-progress workout blocks manual replacement/);
+  assert.match(activeReplacementDbTestSql, /same request is idempotent/);
+  assert.match(activeReplacementDbTestSql, /atomic replacement returns the prepared draft in the same response/);
+  assert.match(activeReplacementDbTestSql, /idempotent replay returns the same complete prepared-draft response/);
+  assert.match(activeReplacementDbTestSql, /incompatible prior remote draft is retired instead of overwritten/);
+  assert.match(activeReplacementDbTestSql, /legacy exercise without catalog becomes an owner-scoped custom identity/);
+  assert.match(activeReplacementDbTestSql, /legacy replacement returns the newly materialized custom source inline/);
+  assert.match(activeReplacementDbTestSql, /extensions\.dblink_send_query/);
+  assert.match(activeReplacementDbTestSql, /concurrent replay waits/);
+  assert.match(activeReplacementDbTestSql, /serialized concurrent replay records one receipt/);
+  assert.match(activeReplacementDbTestSql, /select \* from extensions\.finish\(\); rollback;/);
+  assert.doesNotMatch(activeReplacementDbTestSql, /supabase\.co|fjjebhaqtrdbpxzxztmh|lzycxltqbrtsnwfdotqw/);
 });
 
 test("API migration uses parser-safe string search and locking clause order", () => {
@@ -1190,7 +1482,7 @@ test("catalog and notification keysets reach fixtures beyond the first 100", () 
   assert.equal(new Set(notificationSeen).size, 175);
 });
 
-test("T-3 through T+1 lifecycle protects an active workout without mutating it", () => {
+test("T-7 through T+1 lifecycle protects an active workout without mutating it", () => {
   validateLifecycleContract(schema, api);
   validateProgrammedLifecycle(
     schema,
@@ -1229,7 +1521,7 @@ test("all required lifecycle operations are exposed through bounded RPCs", () =>
   assert.match(apiSql, /cardinality\(p_notification_ids\) not between 1 and 50/);
 });
 
-test("Coach contract allowlists only the two owned redesign migrations", () => {
+test("Coach contract allowlists only the seven owned redesign migrations", () => {
   validateCoachMigrationAllowlist(coachContract);
 });
 

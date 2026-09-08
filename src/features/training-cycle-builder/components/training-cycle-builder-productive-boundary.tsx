@@ -1,6 +1,9 @@
 "use client";
 
-import type { TrainingCycleBuilderShellProps } from "./training-cycle-builder-contracts";
+import {
+  trainingCycleBuilderInstanceKey,
+  type TrainingCycleBuilderShellProps,
+} from "./training-cycle-builder-contracts";
 import { TrainingCycleBuilder } from "./training-cycle-builder";
 import type { TrainingCycleProductController } from "../hooks/use-training-cycle-product-controller";
 import { AppBackButton } from "@/ui/navigation/app-back-button";
@@ -35,7 +38,7 @@ export function TrainingCycleBuilderProductiveBoundary(props: {
     : props.controller.viewModel;
   return (
     <TrainingCycleBuilder
-      key={`${initialViewModel.activeCycleId ?? initialViewModel.draft.draftId}:${props.openAlertsRequest ?? 0}`}
+      key={trainingCycleBuilderInstanceKey(props.openAlertsRequest)}
       initialViewModel={initialViewModel}
       gateway={props.controller.gateway}
       shell={props.shell}

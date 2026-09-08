@@ -1,3 +1,5 @@
+import { normalizeOptionalYouTubeVideoUrl } from "@/lib/training/youtube-video-url";
+
 import {
   TRAINING_CYCLE_OPERATION_KINDS,
   TRAINING_CYCLE_PORTAL_SCOPES,
@@ -7,6 +9,8 @@ import {
   TRAINING_CYCLE_RPC_WEEKDAYS,
   TrainingCycleTransportError,
   type TrainingCycleAcceptedOperation,
+  type TrainingCyclePreparedDraftOperation,
+  type TrainingCycleActiveGuard,
   type TrainingCycleCatalogCursor,
   type TrainingCycleCatalogItem,
   type TrainingCycleCatalogPage,
@@ -19,6 +23,7 @@ import {
   type TrainingCycleListItem,
   type TrainingCycleListPage,
   type TrainingCycleLifecycleRefresh,
+  type TrainingCycleLegacyCompatibility,
   type TrainingCycleNotificationCursor,
   type TrainingCycleNotificationEvent,
   type TrainingCycleNotificationItem,
@@ -49,13 +54,12 @@ import {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
-const YOUTUBE = /^https:\/\/((www\.|m\.)?youtube\.com\/(watch\?[^\s]*v=[A-Za-z0-9_-]{6,64}[^\s]*|shorts\/[A-Za-z0-9_-]{6,64}[^\s]*|embed\/[A-Za-z0-9_-]{6,64}[^\s]*)|youtu\.be\/[A-Za-z0-9_-]{6,64}[^\s]*)$/;
 
 const DRAFT_ORIGINS = ["manual", "suggested", "duplicate", "renewal"] as const;
 const DRAFT_STATES = ["draft", "activated", "discarded"] as const;
 const PUBLIC_STATUSES = ["active", "expiring", "closed"] as const;
 const CHANGE_KINDS = ["activation", "edit", "extension"] as const;
-const NOTIFICATION_EVENTS = ["expires_t3", "expires_t2", "expires_t1", "expires_t0", "closed_t1"] as const;
+const NOTIFICATION_EVENTS = ["expires_t7", "expires_t3", "expires_t2", "expires_t1", "expires_t0", "closed_t1"] as const;
 
 function invalidResponse(): never {
   throw new TrainingCycleTransportError(
@@ -146,8 +150,13 @@ function nullableInstant(value: unknown): string | null {
 
 function youtubeUrl(value: unknown): string {
   const result = string(value, 19, 500);
-  if (/\s/.test(result) || !YOUTUBE.test(result)) invalidResponse();
-  return result;
+  try {
+    const normalized = normalizeOptionalYouTubeVideoUrl(result);
+    if (normalized === null) invalidResponse();
+    return normalized;
+  } catch {
+    return invalidResponse();
+  }
 }
 
 function assertJsonSize(value: unknown) {
@@ -181,6 +190,80 @@ export function parseAcceptedOperation(value: unknown): TrainingCycleAcceptedOpe
     operationKind: enumeration(record.operationKind, TRAINING_CYCLE_OPERATION_KINDS),
     aggregateId: uuid(record.aggregateId),
     resultVersion: record.resultVersion === null ? null : integer(record.resultVersion, 1, 256),
+  };
+}
+
+export function parsePreparedDraftOperation(value: unknown): TrainingCyclePreparedDraftOperation {
+  const record = object(value);
+  exactKeys(record, [
+    "responseKind", "requestId", "operationKind", "aggregateId", "resultVersion", "draft", "exerciseSources",
+  ]);
+  if (record.responseKind !== "prepared_draft" || record.operationKind !== "draft_duplicate") {
+    invalidResponse();
+  }
+  const draft = parseDraftSnapshot(record.draft);
+  const exerciseSources = array(record.exerciseSources, 0, 200).map((item) => {
+    const source = object(item);
+    exactKeys(source, ["kind", "id", "name", "muscleGroup", "videoUrl"]);
+    return {
+      source: {
+        kind: enumeration(source.kind, ["catalog", "custom"] as const),
+        id: uuid(source.id),
+      },
+      name: string(source.name, 1, 120),
+      muscleGroup: enumeration(source.muscleGroup, TRAINING_CYCLE_RPC_MUSCLES),
+      videoUrl: source.videoUrl === null ? null : youtubeUrl(source.videoUrl),
+    };
+  });
+  uniqueStrings(exerciseSources.map((item) => `${item.source.kind}:${item.source.id}`));
+  const referencedSources = new Set(draft.plan.days.flatMap((day) => day.exercises.map((exercise) => (
+    exercise.catalogExerciseId
+      ? `catalog:${exercise.catalogExerciseId}`
+      : `custom:${exercise.customExerciseId}`
+  ))));
+  const describedSources = new Set(exerciseSources.map((item) => `${item.source.kind}:${item.source.id}`));
+  if (referencedSources.size !== describedSources.size
+    || [...referencedSources].some((source) => !describedSources.has(source))) invalidResponse();
+  const result = {
+    responseKind: "prepared_draft" as const,
+    requestId: uuid(record.requestId),
+    operationKind: "draft_duplicate" as const,
+    aggregateId: uuid(record.aggregateId),
+    resultVersion: integer(record.resultVersion, 1, 256),
+    draft,
+    exerciseSources,
+  };
+  if (result.aggregateId !== draft.draftId || result.resultVersion !== draft.version) invalidResponse();
+  return result;
+}
+
+export function parseActiveCycleGuard(value: unknown): TrainingCycleActiveGuard {
+  const record = object(value);
+  exactKeys(record, ["cycleId", "hasCanonicalPlan"]);
+  return {
+    cycleId: uuid(record.cycleId),
+    hasCanonicalPlan: bool(record.hasCanonicalPlan),
+  };
+}
+
+export function parseLegacyCompatibility(value: unknown): TrainingCycleLegacyCompatibility {
+  const record = object(value);
+  exactKeys(record, ["responseKind", "requestId", "cycleId", "status", "version", "reason"]);
+  const responseKind = enumeration(record.responseKind, ["legacy_compatibility"] as const);
+  const status = enumeration(record.status, ["adapted", "already_canonical", "legacy_fallback"] as const);
+  const reason = record.reason === null
+    ? null
+    : enumeration(record.reason, ["unsupported_dates", "unsupported_plan"] as const);
+  const version = record.version === null ? null : integer(record.version, 1, 256);
+  if ((status === "legacy_fallback") !== (version === null && reason !== null)) invalidResponse();
+  if (status !== "legacy_fallback" && (version === null || reason !== null)) invalidResponse();
+  return {
+    responseKind,
+    requestId: uuid(record.requestId),
+    cycleId: uuid(record.cycleId),
+    status,
+    version,
+    reason,
   };
 }
 
@@ -634,7 +717,7 @@ export function parseRpcExecution(value: unknown): TrainingCycleRpcExecution {
 }
 
 export function assertResultMatchesOperation(
-  result: TrainingCycleAcceptedOperation,
+  result: Pick<TrainingCycleAcceptedOperation, "requestId" | "operationKind">,
   expected: { readonly requestId: string; readonly operationKind: TrainingCycleAcceptedOperation["operationKind"] },
 ) {
   if (result.requestId !== expected.requestId || result.operationKind !== expected.operationKind) invalidResponse();

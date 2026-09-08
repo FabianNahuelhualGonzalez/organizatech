@@ -41,8 +41,9 @@ export function AdvancedExerciseExecutionFields({
           href={resolved.plan.safeVideoUrl}
           target="_blank"
           rel="noopener noreferrer"
+          aria-label={`Ver técnica en YouTube: ${resolved.legacyExercise.name}`}
         >
-          Ver video
+          Ver técnica en YouTube
         </a>
       ) : null}
 

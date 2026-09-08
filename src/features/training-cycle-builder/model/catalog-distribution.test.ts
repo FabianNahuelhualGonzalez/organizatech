@@ -68,7 +68,7 @@ test("ejercicio personalizado exige identidad, nombre, grupo y URL YouTube segur
     name: "  Remo en punta   con barra ",
     primaryMuscleGroup: "back",
     aliases: ["Remo T"],
-    videoUrl: "https://youtu.be/abc123",
+    videoUrl: "https://youtu.be/AbCdEfGhI_1",
   });
   assert.equal(created.ok, true);
   if (!created.ok) return;
@@ -96,8 +96,9 @@ test("ejercicio personalizado exige identidad, nombre, grupo y URL YouTube segur
   assert.equal(invalidGroup.ok, false);
   if (!invalidGroup.ok) assert.ok(invalidGroup.issues.some((issue) => issue.code === "invalid_muscle_group"));
 
-  assert.equal(isSupportedYouTubeUrl("https://www.youtube.com/watch?v=abc"), true);
-  assert.equal(isSupportedYouTubeUrl("https://youtube.com/shorts/abc"), true);
+  assert.equal(isSupportedYouTubeUrl("https://www.youtube.com/watch?v=AbCdEfGhI_1"), true);
+  assert.equal(isSupportedYouTubeUrl("https://youtube.com/shorts/AbCdEfGhI_1"), true);
+  assert.equal(isSupportedYouTubeUrl("https://youtube.com/live/AbCdEfGhI_1"), true);
   assert.equal(isSupportedYouTubeUrl("http://youtu.be/abc"), false);
   assert.equal(isSupportedYouTubeUrl("https://example.com/watch?v=abc"), false);
 });

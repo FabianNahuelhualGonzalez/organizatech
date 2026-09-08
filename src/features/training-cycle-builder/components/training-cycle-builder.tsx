@@ -50,6 +50,8 @@ function hasTrainingCycleGateway(value: TrainingCycleBuilderGateway | null): val
     value?.saveDraft,
     value?.generateSuggestedDraft,
     value?.createCustomExercise,
+    value?.getActiveCycleGuard,
+    value?.completeActiveCycle,
     value?.activateCycle,
     value?.saveActiveCycle,
     value?.extendCycle,
@@ -183,7 +185,13 @@ function ConnectedTrainingCycleBuilder({
   let screenContent: ReactNode;
   switch (state.screen) {
     case "start":
-      screenContent = <CycleStartScreen state={state} viewModel={viewModel} dispatch={dispatch} />;
+      screenContent = (
+        <CycleStartScreen
+          state={state}
+          viewModel={viewModel}
+          onChooseOrigin={(origin, screen) => void controller.requestNewCycle(origin, screen)}
+        />
+      );
       break;
     case "duplicate":
       screenContent = <CycleDuplicateScreen state={state} viewModel={viewModel} dispatch={dispatch} />;
@@ -241,7 +249,14 @@ function ConnectedTrainingCycleBuilder({
       );
       break;
     case "active":
-      screenContent = <CycleActiveScreen state={state} viewModel={viewModel} dispatch={dispatch} />;
+      screenContent = (
+        <CycleActiveScreen
+          state={state}
+          viewModel={viewModel}
+          dispatch={dispatch}
+          onCreateNewCycle={() => void controller.requestNewCycle("duplicate", "duplicate")}
+        />
+      );
       break;
     case "alerts":
       screenContent = <CycleAlertsScreen viewModel={viewModel} dispatch={dispatch} />;
@@ -250,7 +265,12 @@ function ConnectedTrainingCycleBuilder({
       screenContent = <CycleClosingScreen dispatch={dispatch} />;
       break;
     case "next":
-      screenContent = <CycleNextScreen viewModel={viewModel} dispatch={dispatch} />;
+      screenContent = (
+        <CycleNextScreen
+          viewModel={viewModel}
+          onChooseOrigin={(origin, screen) => void controller.requestNewCycle(origin, screen)}
+        />
+      );
       break;
   }
 
@@ -277,6 +297,13 @@ function ConnectedTrainingCycleBuilder({
       </div>
       <StepBar screen={state.screen} />
       <div className={styles.bannerStack}>
+        {state.activeCycleCloseState === "error" && !state.pendingNewCycleIntent ? (
+          <StatusBanner
+            tone="error"
+            title="No pudimos iniciar un ciclo nuevo"
+            body={state.activeCycleCloseErrorMessage ?? "Tu ciclo actual sigue exactamente como estaba."}
+          />
+        ) : null}
         {state.recoveredDraftBannerOpen ? (
           <StatusBanner
             tone="success"
@@ -304,6 +331,30 @@ function ConnectedTrainingCycleBuilder({
       <main className={styles.content}>{screenContent}</main>
       <CycleCopySheet state={state} dispatch={dispatch} />
       <CycleExtensionSheet state={state} viewModel={viewModel} dispatch={dispatch} onConfirm={() => void controller.extendCycle()} />
+      {state.pendingNewCycleIntent && state.activeCycleCloseId ? (
+        <ConfirmDialog
+          ariaLabel="Confirmar nuevo ciclo de entrenamiento"
+          title="¿Quieres finalizar tu ciclo actual?"
+          cancelLabel="No, mantenerlo"
+          cancelVariant="primary"
+          onCancel={() => dispatch({ type: "cancel_active_cycle_close" })}
+          confirmLabel="Sí, finalizar y continuar"
+          confirmBusyLabel="Finalizando ciclo…"
+          confirmVariant="danger"
+          onConfirm={() => void controller.confirmActiveCycleClose()}
+          isBusy={state.activeCycleCloseState === "closing"}
+        >
+          <p>Tienes actualmente un ciclo de entrenamiento activo. Para iniciar uno nuevo debemos finalizar el ciclo actual.</p>
+          <p>Si eliges No, tu ciclo continuará exactamente como está.</p>
+          {state.activeCycleCloseState === "error" ? (
+            <StatusBanner
+              tone="error"
+              title="No se pudo finalizar el ciclo"
+              body={state.activeCycleCloseErrorMessage ?? "Tu ciclo actual sigue activo."}
+            />
+          ) : null}
+        </ConfirmDialog>
+      ) : null}
       {state.discardOpen && state.workflow === "draft" ? (
         <ConfirmDialog
           ariaLabel="Descartar borrador de ciclo"

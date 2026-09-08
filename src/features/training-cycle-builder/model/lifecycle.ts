@@ -13,7 +13,7 @@ import {
   type TrainingCyclePlanContent,
 } from "./types";
 
-export const EXPIRY_NOTICE_DAYS = [3, 2, 1, 0] as const;
+export const EXPIRY_NOTICE_DAYS = [7, 3, 1, 0] as const;
 export type ExpiryNoticeDay = (typeof EXPIRY_NOTICE_DAYS)[number];
 
 export type CycleLifecyclePhase =
