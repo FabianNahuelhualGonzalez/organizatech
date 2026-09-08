@@ -138,6 +138,7 @@ export interface TrainingCycleCatalogExerciseViewModel {
   readonly source: TrainingCycleExerciseSource;
   readonly name: string;
   readonly muscleGroup: TrainingCycleMuscleGroup;
+  readonly videoUrl?: string;
   readonly sources: readonly TrainingCycleCatalogScope[];
   readonly recommendation?: TrainingCycleRecommendationViewModel;
 }

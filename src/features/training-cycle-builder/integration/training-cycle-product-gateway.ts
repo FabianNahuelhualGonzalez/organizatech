@@ -50,11 +50,11 @@ export interface CreateTrainingCycleProductGatewayInput {
   readonly todayIsoDate?: string;
   readonly onDraftPersisted?: (draftId: string, version: number) => void;
   readonly onDraftDiscarded?: () => void;
-  readonly onCycleChanged?: (cycle: TrainingCycleRpcSnapshot) => void | Promise<void>;
+  readonly onCycleChanged?: (cycle: TrainingCycleRpcSnapshot) => boolean | void | Promise<boolean | void>;
   readonly onCycleReplaced?: (
     cycleId: string,
     draft: TrainingCycleDraftSnapshot,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
 }
 
 function asVersion(value: string) {
@@ -75,7 +75,9 @@ function savedAtLabel() {
 
 async function afterCommitted<T>(operation: () => T | Promise<T>): Promise<T> {
   try {
-    return await operation();
+    const result = await operation();
+    if (result === false) throw new TrainingCycleCommittedMutationError();
+    return result;
   } catch (error) {
     if (error instanceof TrainingCycleCommittedMutationError) throw error;
     throw new TrainingCycleCommittedMutationError();
@@ -91,9 +93,19 @@ function requiredVersion(result: Pick<TrainingCycleAcceptedOperation, "resultVer
 
 class ProductMutationQueue {
   private tail: Promise<void> = Promise.resolve();
+  private synchronizationRequired = false;
 
   run<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.tail.then(operation, operation);
+    const runIfSynchronized = async () => {
+      if (this.synchronizationRequired) throw new TrainingCycleCommittedMutationError();
+      try {
+        return await operation();
+      } catch (error) {
+        if (error instanceof TrainingCycleCommittedMutationError) this.synchronizationRequired = true;
+        throw error;
+      }
+    };
+    const result = this.tail.then(runIfSynchronized, runIfSynchronized);
     this.tail = result.then(() => undefined, () => undefined);
     return result;
   }
@@ -245,7 +257,7 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
         this.activeCycleVersion = null;
         this.newDraftSourceCycleId = input.expectedActiveCycleId;
         this.adoptDraft(result);
-        await this.input.onCycleReplaced?.(input.expectedActiveCycleId, draft);
+        await afterCommitted(() => this.input.onCycleReplaced?.(input.expectedActiveCycleId, draft));
         return projectedDraft;
       });
     });
@@ -257,12 +269,14 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
         throw new TrainingCycleTransportError("invalid_state", "Guarda el borrador antes de activarlo.");
       }
       const result = await this.input.rpc.activateDraft(this.remoteDraftId, this.remoteDraftVersion);
-      const version = requiredVersion(result);
-      this.activeCycleId = result.aggregateId;
-      this.activeCycleVersion = version;
-      const cycle = await this.input.rpc.getCycle(result.aggregateId);
-      await this.input.onCycleChanged?.(cycle);
-      return { cycleId: result.aggregateId, revision: String(version), status: "activated" };
+      return afterCommitted(async () => {
+        const version = requiredVersion(result);
+        this.activeCycleId = result.aggregateId;
+        this.activeCycleVersion = version;
+        const cycle = await this.input.rpc.getCycle(result.aggregateId);
+        await afterCommitted(() => this.input.onCycleChanged?.(cycle));
+        return { cycleId: result.aggregateId, revision: String(version), status: "activated" as const };
+      });
     });
   }
 
@@ -275,12 +289,14 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
           goal: input.goal,
           plan: mapBuilderDaysToRpcPlan(input.days),
         });
-        const version = requiredVersion(result);
-        this.activeCycleId = result.aggregateId;
-        this.activeCycleVersion = version;
-        const cycle = await this.input.rpc.getCycle(result.aggregateId);
-        await this.input.onCycleChanged?.(cycle);
-        return { status: "saved", revision: String(version), savedAtLabel: savedAtLabel() };
+        return await afterCommitted(async () => {
+          const version = requiredVersion(result);
+          this.activeCycleId = result.aggregateId;
+          this.activeCycleVersion = version;
+          const cycle = await this.input.rpc.getCycle(result.aggregateId);
+          await afterCommitted(() => this.input.onCycleChanged?.(cycle));
+          return { status: "saved" as const, revision: String(version), savedAtLabel: savedAtLabel() };
+        });
       } catch (error) {
         if (error instanceof TrainingCycleTransportError && error.code === "conflict") {
           return { status: "conflict" };
@@ -297,11 +313,13 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
         expectedVersion: asVersion(input.expectedRevision),
         newEndDate: input.newEndDate,
       });
-      this.activeCycleId = result.aggregateId;
-      this.activeCycleVersion = requiredVersion(result);
-      const cycle = await this.input.rpc.getCycle(result.aggregateId);
-      await this.input.onCycleChanged?.(cycle);
-      return { endDate: cycle.endDate, revision: String(this.activeCycleVersion) };
+      return afterCommitted(async () => {
+        this.activeCycleId = result.aggregateId;
+        this.activeCycleVersion = requiredVersion(result);
+        const cycle = await this.input.rpc.getCycle(result.aggregateId);
+        await afterCommitted(() => this.input.onCycleChanged?.(cycle));
+        return { endDate: cycle.endDate, revision: String(this.activeCycleVersion) };
+      });
     });
   }
 

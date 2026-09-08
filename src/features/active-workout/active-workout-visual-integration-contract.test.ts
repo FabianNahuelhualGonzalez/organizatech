@@ -601,9 +601,9 @@ const globalStyles = readSource("src/app/globals.css");
 
 const protectedFileHashes = {
   "AGENTS.md": "f0c3ef88979a0ab085551a656ebb1843bfa56138d948ca4236bce6fcd1fa9dd0",
-  "package.json": "e4e3d32b719728af3f1816c5f96ddc48d3a7a2a8dd2420af2344b012e04b7be7",
+  "package.json": "c9b7c23573e09648251d615be29741fac31c45c2098bb6a6073545ed560cd5a3",
   "package-lock.json": "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5",
-  "src/components/organizatech-app.tsx": "a5aa394fddeddf3d8745994a81bfd769d266fb129a9990b21b2509b1c17d8f11",
+  "src/components/organizatech-app.tsx": "ccff4b5ce3b4473a906d56e514dbbce94a70f26a55066f4f81f8be8a8d159aa6",
   "src/features/progress/components/comparison-screen-v2.tsx": "bff390e44cf5a04fe59b0f2a594fcb53fb2a50602c850362f1a88ca136765743",
   "src/features/active-workout/model/active-workout-controller-state.ts": "37006210eabda3f99217bd98b6ebf876780ed5ecc33bb8fba936eda7fd085ea5",
   "src/features/active-workout/hooks/useActiveWorkoutController.ts": "c7b475636a3b8731a9e8b9a46702584b9c2a4a06333b75139791bf3ef2ce25bf",

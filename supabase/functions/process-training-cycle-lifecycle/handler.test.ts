@@ -40,11 +40,64 @@ function request(secret = environment.schedulerSecret) {
   });
 }
 
+test("autorización negada, incierta o inválida impide cualquier envío/completion", async () => {
+  for (const authorization of [false, null, "true", { allowed: true }, new Error("offline")]) {
+    let providerCalls = 0;
+    let completions = 0;
+    const worker = createTrainingCycleLifecycleWorker(environment, async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/rpc/claim_due_training_cycle_lifecycle_deliveries")) return Response.json([delivery]);
+      if (url.endsWith("/rpc/authorize_training_cycle_lifecycle_delivery")) {
+        assert.deepEqual(JSON.parse(String(init?.body)), {
+          p_capability: environment.lifecycleRpcSecret,
+          p_delivery_id: delivery.delivery_id,
+          p_attempt_token: delivery.attempt_token,
+        });
+        if (authorization instanceof Error) throw authorization;
+        return Response.json(authorization);
+      }
+      if (url === BREVO_TRANSACTIONAL_EMAIL_ENDPOINT) providerCalls++;
+      if (url.endsWith("/rpc/complete_training_cycle_lifecycle_delivery")) completions++;
+      throw new Error("must not send");
+    });
+    assert.equal((await worker(request())).status, 202);
+    assert.equal(providerCalls, 0);
+    assert.equal(completions, 0);
+  }
+});
+
+test("dos workers con el mismo claim sólo envían si obtienen autorización única", async () => {
+  let authorizationUsed = false;
+  let providerCalls = 0;
+  const calls: string[] = [];
+  const worker = createTrainingCycleLifecycleWorker(environment, async (input) => {
+    const url = String(input);
+    if (url.endsWith("/rpc/claim_due_training_cycle_lifecycle_deliveries")) return Response.json([delivery]);
+    if (url.endsWith("/rpc/authorize_training_cycle_lifecycle_delivery")) {
+      const allowed = !authorizationUsed;
+      authorizationUsed = true;
+      calls.push("authorize");
+      return Response.json(allowed);
+    }
+    if (url === BREVO_TRANSACTIONAL_EMAIL_ENDPOINT) {
+      providerCalls++;
+      calls.push("send");
+      return Response.json({ messageId: "unique-authorized" }, { status: 201 });
+    }
+    if (url.endsWith("/rpc/complete_training_cycle_lifecycle_delivery")) return Response.json(true);
+    throw new Error("unexpected URL");
+  });
+  await Promise.all([worker(request()), worker(request())]);
+  assert.equal(providerCalls, 1);
+  assert.equal(calls[0], "authorize");
+});
+
 test("scheduler válido reclama, envía y completa con estados separados", async () => {
   const rpcBodies: Record<string, unknown>[] = [];
   let providerCalls = 0;
   const fetchImpl: typeof fetch = async (input, init = {}) => {
     const url = String(input);
+    if (url.endsWith("/rpc/authorize_training_cycle_lifecycle_delivery")) return Response.json(true);
     if (url.endsWith("/rpc/claim_due_training_cycle_lifecycle_deliveries")) {
       rpcBodies.push(JSON.parse(String(init.body)));
       return Response.json([delivery]);
@@ -75,6 +128,7 @@ test("éxito del proveedor con completion incierta nunca se convierte en retry",
   const outcomes: unknown[] = [];
   const fetchImpl: typeof fetch = async (input, init = {}) => {
     const url = String(input);
+    if (url.endsWith("/rpc/authorize_training_cycle_lifecycle_delivery")) return Response.json(true);
     if (url.endsWith("/rpc/claim_due_training_cycle_lifecycle_deliveries")) {
       return Response.json([delivery]);
     }
@@ -130,6 +184,7 @@ test("fallo transitorio se marca retryable sólo después del claim", async () =
   let providerCalls = 0;
   const fetchImpl: typeof fetch = async (input, init = {}) => {
     const url = String(input);
+    if (url.endsWith("/rpc/authorize_training_cycle_lifecycle_delivery")) return Response.json(true);
     if (url.endsWith("/rpc/claim_due_training_cycle_lifecycle_deliveries")) {
       return Response.json([delivery]);
     }
@@ -155,6 +210,7 @@ test("claim sobredimensionado falla cerrado antes de Brevo", async () => {
   const oversized = Array.from({ length: 26 }, () => delivery);
   const fetchImpl: typeof fetch = async (input) => {
     const url = String(input);
+    if (url.endsWith("/rpc/authorize_training_cycle_lifecycle_delivery")) return Response.json(true);
     if (url.endsWith("/rpc/claim_due_training_cycle_lifecycle_deliveries")) {
       return Response.json(oversized);
     }
@@ -171,6 +227,7 @@ test("respuesta RPC chunked excedida se corta antes de parsear o enviar", async 
   let providerCalls = 0;
   const fetchImpl: typeof fetch = async (input) => {
     const url = String(input);
+    if (url.endsWith("/rpc/authorize_training_cycle_lifecycle_delivery")) return Response.json(true);
     if (url.endsWith("/rpc/claim_due_training_cycle_lifecycle_deliveries")) {
       return new Response(new ReadableStream<Uint8Array>({
         start(controller) {
@@ -195,6 +252,7 @@ test("claim duplicado no puede provocar dos envíos concurrentes", async () => {
   let providerCalls = 0;
   const fetchImpl: typeof fetch = async (input) => {
     const url = String(input);
+    if (url.endsWith("/rpc/authorize_training_cycle_lifecycle_delivery")) return Response.json(true);
     if (url.endsWith("/rpc/claim_due_training_cycle_lifecycle_deliveries")) {
       return Response.json([delivery, delivery]);
     }

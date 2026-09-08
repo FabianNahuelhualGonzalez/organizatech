@@ -85,12 +85,12 @@ export function CycleReviewScreen({
   const activating = state.activationState === "activating";
   const savingActive = state.activeEditState === "saving";
   const activeConflict = state.activeEditState === "conflict";
-  const canActivate = validation.canActivate && !saveBlocksActivation && !activating && !savingActive && !activeConflict && (
+  const canActivate = validation.canActivate && !state.committedSyncPending && !saveBlocksActivation && !activating && !savingActive && !activeConflict && (
     !isActiveEdit || Boolean(state.activeCycleId && state.activeCycleRevision)
   );
   const activateLabel = savingActive
     ? "Guardando cambios…"
-    : activeConflict
+    : activeConflict || state.committedSyncPending
       ? "Recarga para continuar"
     : activating
     ? "Activando…"
@@ -203,12 +203,12 @@ export function CycleReviewScreen({
         </AccordionSection>
       ))}
       {state.activationState === "error" ? (
-        <StatusBanner tone="error" title="No se pudo activar" body={state.activationErrorMessage ?? "Inténtalo nuevamente."} />
+        <StatusBanner tone="error" title={state.committedSyncPending ? "Cambio guardado · actualización pendiente" : "No se pudo activar"} body={state.activationErrorMessage ?? "Inténtalo nuevamente."} />
       ) : null}
       {isActiveEdit && (state.activeEditState === "error" || state.activeEditState === "conflict") ? (
         <StatusBanner
           tone="error"
-          title={state.activeEditState === "conflict" ? "El ciclo cambió en otro lugar" : "No se guardaron los cambios"}
+          title={state.committedSyncPending ? "Cambio guardado · actualización pendiente" : state.activeEditState === "conflict" ? "El ciclo cambió en otro lugar" : "No se guardaron los cambios"}
           body={state.activeEditErrorMessage ?? "Tu edición sigue abierta."}
         />
       ) : null}
@@ -226,7 +226,7 @@ export function CycleReviewScreen({
       {isActiveEdit ? (
         <button className={styles.textAction} type="button" onClick={() => dispatch({ type: "cancel_active_edit" })}>Cancelar esta edición</button>
       ) : (
-        <button className={styles.textAction} type="button" onClick={() => dispatch({ type: "open_discard" })}>Descartar este borrador</button>
+        <button className={styles.textAction} type="button" disabled={state.committedSyncPending} onClick={() => dispatch({ type: "open_discard" })}>Descartar este borrador</button>
       )}
     </div>
   );
@@ -427,7 +427,7 @@ export function CycleExtensionSheet({
       description="Sólo puedes mover la fecha de término."
       onClose={() => dispatch({ type: "close_extend" })}
       canClose={!busy}
-      footer={<PrimaryAction disabled={!validation.valid || busy || !state.activeCycleId} isBusy={busy} onClick={onConfirm}>{busy ? "Guardando nueva fecha…" : validation.valid ? "Confirmar nueva fecha" : "Elige una fecha válida"}</PrimaryAction>}
+      footer={<PrimaryAction disabled={state.committedSyncPending || !validation.valid || busy || !state.activeCycleId} isBusy={busy} onClick={onConfirm}>{state.committedSyncPending ? "Recarga para continuar" : busy ? "Guardando nueva fecha…" : validation.valid ? "Confirmar nueva fecha" : "Elige una fecha válida"}</PrimaryAction>}
     >
       <div className={styles.lockedDate}><Lock size={15} aria-hidden="true" /><span><small>INICIO · BLOQUEADO</small><strong>{formatCycleDate(state.draft.startDate)}</strong></span></div>
       <label className={styles.stackField}><span>Nueva fecha de término</span><input type="date" value={state.extendDate} onChange={(event) => dispatch({ type: "set_extend_date", value: event.target.value })} /></label>
@@ -438,7 +438,7 @@ export function CycleExtensionSheet({
         })}
       </div>
       <StatusBanner tone={validation.valid ? "success" : "error"} title={validation.valid ? "Nueva duración válida" : "Revisa la fecha"} body={validation.message} />
-      {state.extensionState === "error" ? <StatusBanner tone="error" title="No se pudo extender" body={state.extensionErrorMessage ?? "La fecha actual no cambió."} /> : null}
+      {state.extensionState === "error" ? <StatusBanner tone="error" title={state.committedSyncPending ? "Cambio guardado · actualización pendiente" : "No se pudo extender"} body={state.extensionErrorMessage ?? "La fecha actual no cambió."} /> : null}
       <div className={styles.extensionProtection}><ShieldCheck size={15} aria-hidden="true" /><p>La fecha de inicio permanece bloqueada y la nueva fecha nunca puede retroceder.</p></div>
     </BottomSheet>
   );

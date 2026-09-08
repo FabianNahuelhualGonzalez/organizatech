@@ -76,6 +76,7 @@ export interface TrainingCycleBuilderState {
   readonly recoveredDraftBannerOpen: boolean;
   readonly activationState: "idle" | "activating" | "error";
   readonly activationErrorMessage: string | null;
+  readonly committedSyncPending: boolean;
   readonly suggestionState: "idle" | "loading" | "error";
   readonly suggestionErrorMessage: string | null;
   readonly activeCycleId: string | null;
@@ -110,7 +111,7 @@ export type TrainingCycleBuilderAction =
   | { readonly type: "open_exercise"; readonly exerciseId: string }
   | { readonly type: "set_catalog_scope"; readonly scope: TrainingCycleCatalogScope }
   | { readonly type: "set_catalog_query"; readonly value: string }
-  | { readonly type: "add_catalog_exercise"; readonly source: TrainingCycleExerciseDraft["source"]; readonly name: string; readonly muscleGroup: TrainingCycleMuscleGroup; readonly recommendation: TrainingCycleExerciseDraft["recommendation"] }
+  | { readonly type: "add_catalog_exercise"; readonly source: TrainingCycleExerciseDraft["source"]; readonly name: string; readonly muscleGroup: TrainingCycleMuscleGroup; readonly videoUrl?: string; readonly recommendation: TrainingCycleExerciseDraft["recommendation"] }
   | { readonly type: "set_custom_name"; readonly value: string }
   | { readonly type: "set_custom_muscle"; readonly value: TrainingCycleMuscleGroup }
   | { readonly type: "set_custom_video"; readonly value: string }
@@ -154,7 +155,7 @@ export type TrainingCycleBuilderAction =
   | { readonly type: "active_cycle_close_succeeded"; readonly draft: TrainingCycleDraftViewModel }
   | { readonly type: "set_save_state"; readonly state: TrainingCycleSaveState; readonly savedAtLabel?: string; readonly errorMessage?: string | null }
   | { readonly type: "activation_started" }
-  | { readonly type: "activation_failed"; readonly message: string }
+  | { readonly type: "activation_failed"; readonly message: string; readonly committed?: boolean }
   | { readonly type: "activation_succeeded"; readonly cycleId: string; readonly revision: string }
   | { readonly type: "show_active" }
   | { readonly type: "suggestion_started" }
@@ -163,14 +164,14 @@ export type TrainingCycleBuilderAction =
   | { readonly type: "begin_active_edit" }
   | { readonly type: "cancel_active_edit" }
   | { readonly type: "active_edit_started" }
-  | { readonly type: "active_edit_failed"; readonly message: string; readonly conflict: boolean }
+  | { readonly type: "active_edit_failed"; readonly message: string; readonly conflict: boolean; readonly committed?: boolean }
   | { readonly type: "active_edit_succeeded"; readonly revision: string; readonly savedAtLabel: string }
   | { readonly type: "dismiss_active_edit_saved" }
   | { readonly type: "open_extend" }
   | { readonly type: "close_extend" }
   | { readonly type: "set_extend_date"; readonly value: string }
   | { readonly type: "extension_started" }
-  | { readonly type: "extension_failed"; readonly message: string }
+  | { readonly type: "extension_failed"; readonly message: string; readonly committed?: boolean }
   | { readonly type: "extension_succeeded"; readonly endDate: string; readonly revision: string };
 
 function firstSelectedDay(draft: TrainingCycleDraftViewModel): TrainingCycleWeekDay {
@@ -257,6 +258,7 @@ export function createTrainingCycleBuilderState(
     saveErrorMessage: null,
     recoveredDraftBannerOpen: false,
     activationState: "idle",
+    committedSyncPending: false,
     activationErrorMessage: null,
     suggestionState: "idle",
     suggestionErrorMessage: null,
@@ -386,7 +388,7 @@ function createCatalogExercise(
     name: action.name,
     muscleGroup: action.muscleGroup,
     technique: "linear",
-    videoUrl: "",
+    videoUrl: normalizeOptionalYouTubeVideoUrl(action.videoUrl ?? "") ?? "",
     recommendation: action.recommendation,
     recommendationDecision: "idle",
     sets: Array.from({ length: 4 }, (_, index) => ({
@@ -597,6 +599,8 @@ export function trainingCycleBuilderReducer(
   state: TrainingCycleBuilderState,
   action: TrainingCycleBuilderAction,
 ): TrainingCycleBuilderState {
+  // A confirmed mutation needs a fresh authoritative view, not another edit.
+  if (state.committedSyncPending) return state;
   if (state.workflow === "active" && PLAN_EDIT_ACTIONS.has(action.type)) return state;
   switch (action.type) {
     case "navigate":
@@ -1103,7 +1107,7 @@ export function trainingCycleBuilderReducer(
       if (state.activationState === "activating") return state;
       return { ...state, activationState: "activating", activationErrorMessage: null };
     case "activation_failed":
-      return { ...state, activationState: "error", activationErrorMessage: action.message };
+      return { ...state, activationState: "error", activationErrorMessage: action.message, committedSyncPending: action.committed === true };
     case "activation_succeeded":
       return {
         ...state,
@@ -1175,6 +1179,7 @@ export function trainingCycleBuilderReducer(
     case "active_edit_failed":
       return {
         ...state,
+        committedSyncPending: action.committed === true,
         activeEditState: action.conflict ? "conflict" : "error",
         activeEditErrorMessage: action.message,
       };
@@ -1203,7 +1208,7 @@ export function trainingCycleBuilderReducer(
       if (state.extensionState === "saving") return state;
       return { ...state, extensionState: "saving", extensionErrorMessage: null };
     case "extension_failed":
-      return { ...state, extensionState: "error", extensionErrorMessage: action.message };
+      return { ...state, extensionState: "error", extensionErrorMessage: action.message, committedSyncPending: action.committed === true };
     case "extension_succeeded":
       {
         if (

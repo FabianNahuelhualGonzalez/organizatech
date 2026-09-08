@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
+
 import type { CoachRegistrationSubmission } from "@/features/auth/model/auth-form";
 import { createAuthRegistrationFormController } from "@/features/auth/model/auth-registration-form-controller";
 import {
@@ -8,6 +10,7 @@ import {
   COACH_REGISTRATION_CONFIRMATION_MESSAGE,
   COACH_REGISTRATION_REQUIRED_MESSAGE,
   MULTIPORTAL_AUTH_ERROR_MESSAGE,
+  MULTIPORTAL_AUTH_RETRYABLE_MESSAGE,
   SIGNUP_CONFIRMATION_INVALID_MESSAGE,
   USER_REGISTRATION_CONFIRMATION_MESSAGE,
   USER_REGISTRATION_CONFIRMED_MESSAGE,
@@ -23,6 +26,25 @@ import {
   createSinglePublicationNoticeController,
   createUserRegistrationOwnerController,
 } from "@/features/auth/model/portal-resolution-owner";
+import {
+  SupabaseAuthReadTimeoutError,
+  SupabaseAuthRefreshTransportError,
+  createResilientSupabaseAuthFetch,
+  isAuthoritativeSupabaseAuthRejection,
+  isTransientSupabaseAuthError,
+  runIdempotentAuthReadWithSingleRetry,
+  type SupabaseAuthRefreshIdentityScope,
+} from "@/lib/supabase/auth-resilience";
+import {
+  consumeAuthoritativeRefreshRejection,
+  getActiveSupabaseAuthIdentityScope,
+  readStoredSupabaseAuthIdentity,
+  recordAuthoritativeRefreshRejection,
+  recordSupabaseAuthIdentity,
+  seedSupabaseAuthIdentityFromStorage,
+} from "@/lib/supabase/client";
+import { readInitialSupabaseSession } from "@/lib/supabase/session";
+import { resolveSignedOutSessionPolicy } from "@/features/app-shell/model/signed-out-session-policy";
 
 interface TestAuthState {
   sessionId: string;
@@ -168,11 +190,527 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
+function createTestAuthStorage(initial: Record<string, string> = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    getItem(key: string) {
+      return values.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      values.set(key, value);
+    },
+    removeItem(key: string) {
+      values.delete(key);
+    },
+    has(key: string) {
+      return values.has(key);
+    },
+  };
+}
+
+function createTestSession(expiresAt: number, suffix = "a"): Session {
+  return {
+    access_token: `test-access-${suffix}`,
+    refresh_token: `test-refresh-${suffix}`,
+    expires_in: 3600,
+    expires_at: expiresAt,
+    token_type: "bearer",
+    user: {
+      id: `test-user-${suffix}`,
+      aud: "authenticated",
+      role: "authenticated",
+      email: `test-${suffix}@example.test`,
+      app_metadata: {},
+      user_metadata: {},
+      created_at: "2026-09-01T00:00:00.000Z",
+    },
+  };
+}
+
+function createRefreshSuccessResponse(suffix = "refreshed") {
+  return new Response(JSON.stringify(createTestSession(
+    Math.floor(Date.now() / 1000) + 3_600,
+    suffix,
+  )), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function createAuthErrorResponse(status: number) {
+  return new Response(JSON.stringify({
+    code: status === 401 ? "refresh_token_not_found" : "temporarily_unavailable",
+    msg: status === 401 ? "Invalid Refresh Token" : "Temporary failure",
+    message: status === 401 ? "Invalid Refresh Token" : "Temporary failure",
+  }), {
+    status,
+    headers: {
+      "content-type": "application/json",
+      "x-supabase-api-version": "2024-01-01",
+    },
+  });
+}
+
 function registrationStateSnapshot(
   form: ReturnType<typeof createAuthRegistrationFormController>,
 ) {
   return JSON.stringify(form.getState());
 }
+
+test("bootstrap Auth: una lectura colgada termina sin iniciar otro getSession bajo el mismo lock", async () => {
+  let attempts = 0;
+  const never = new Promise<never>(() => undefined);
+
+  await assert.rejects(
+    runIdempotentAuthReadWithSingleRetry(
+      () => {
+        attempts += 1;
+        return never;
+      },
+      {
+        timeoutMilliseconds: 5,
+        retryDelayMilliseconds: 0,
+        sleep: async () => undefined,
+      },
+    ),
+    SupabaseAuthReadTimeoutError,
+  );
+
+  assert.equal(attempts, 1, "un timeout no debe encolar otro getSession bajo el mismo lock");
+});
+
+test("bootstrap Auth: un fallo transitorio reintenta una vez y publica el éxito", async () => {
+  let attempts = 0;
+  const result = await runIdempotentAuthReadWithSingleRetry(
+    async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error("Failed to fetch"), { status: 503 });
+      }
+      return "session-a";
+    },
+    {
+      timeoutMilliseconds: 25,
+      retryDelayMilliseconds: 0,
+      sleep: async () => undefined,
+    },
+  );
+
+  assert.equal(result, "session-a");
+  assert.equal(attempts, 2);
+});
+
+test("bootstrap Auth: un rechazo 401 no se reclasifica como reintento de red", async () => {
+  let attempts = 0;
+
+  await assert.rejects(
+    runIdempotentAuthReadWithSingleRetry(async () => {
+      attempts += 1;
+      throw Object.assign(new Error("Invalid JWT"), { status: 401, code: "bad_jwt" });
+    }, {
+      timeoutMilliseconds: 25,
+      retryDelayMilliseconds: 0,
+      sleep: async () => undefined,
+    }),
+    /Invalid JWT/,
+  );
+
+  assert.equal(attempts, 1);
+});
+
+test("bootstrap Auth: clasifica sólo fallos transitorios y rechazos marcados", () => {
+  for (const error of [
+    new TypeError("Load failed"),
+    Object.assign(new Error("rate limited"), { status: 429 }),
+    Object.assign(new Error("upstream"), { statusCode: 502 }),
+    new Error("repository", { cause: Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }) }),
+  ]) {
+    assert.equal(isTransientSupabaseAuthError(error), true);
+  }
+
+  assert.equal(
+    isTransientSupabaseAuthError(Object.assign(new Error("Invalid JWT"), { status: 401 })),
+    false,
+  );
+  assert.equal(
+    isTransientSupabaseAuthError(Object.assign(new Error("invalid status"), { status: 600 })),
+    false,
+  );
+  assert.equal(
+    isAuthoritativeSupabaseAuthRejection({
+      message: "crossed row",
+      authFailureKind: "authoritative_rejection",
+    }),
+    true,
+  );
+  assert.equal(isAuthoritativeSupabaseAuthRejection(new Error("authorization failed")), false);
+});
+
+test("bootstrap Auth: getSession transitorio recupera la sesión en el segundo intento", async () => {
+  type SessionLookupResult = Awaited<ReturnType<SupabaseClient["auth"]["getSession"]>>;
+  let attempts = 0;
+  const session = { user: { id: "user-a" } } as Session;
+
+  const result = await readInitialSupabaseSession(async () => {
+    attempts += 1;
+    return attempts === 1
+      ? {
+        data: { session: null },
+        error: Object.assign(new Error("Service unavailable"), { status: 503 }),
+      } as SessionLookupResult
+      : { data: { session }, error: null } as SessionLookupResult;
+  }, {
+    timeoutMilliseconds: 25,
+    retryDelayMilliseconds: 0,
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result, session);
+  assert.equal(attempts, 2);
+});
+
+test("bootstrap Auth: getSession colgado respeta el presupuesto total acotado", async () => {
+  type SessionLookupResult = Awaited<ReturnType<SupabaseClient["auth"]["getSession"]>>;
+  let attempts = 0;
+  const never = new Promise<SessionLookupResult>(() => undefined);
+
+  await assert.rejects(
+    readInitialSupabaseSession(() => {
+      attempts += 1;
+      return never;
+    }, {
+      timeoutMilliseconds: 5,
+      retryDelayMilliseconds: 0,
+      sleep: async () => undefined,
+    }),
+    /no respondió dentro de 5 ms/,
+  );
+
+  assert.equal(attempts, 1);
+});
+
+test("transporte Auth: sólo intercepta refresh y conserva intactos los rechazos terminales", async () => {
+  const terminalStatuses: number[] = [];
+  const responses = [400, 401, 403];
+  let responseIndex = 0;
+  const resilientFetch = createResilientSupabaseAuthFetch({
+    timeoutMilliseconds: 25,
+    onTerminalRefreshRejection: (status) => terminalStatuses.push(status),
+    fetch: async () => createAuthErrorResponse(responses[responseIndex++]!),
+  });
+
+  for (const status of responses) {
+    const response = await resilientFetch(
+      "https://auth-resilience.test.supabase.co/auth/v1/token?grant_type=refresh_token",
+      { method: "POST" },
+    );
+    assert.equal(response.status, status);
+  }
+  assert.deepEqual(terminalStatuses, responses);
+
+  const untouched = createResilientSupabaseAuthFetch({
+    authOrigin: "https://auth-resilience.test.supabase.co",
+    fetch: async () => new Response(null, { status: 500 }),
+  });
+  const response = await untouched(
+    "https://auth-resilience.test.supabase.co/rest/v1/profile",
+    { method: "GET" },
+  );
+  assert.equal(response.status, 500, "otros productos Supabase no pasan por este transporte Auth");
+
+  const foreignRefresh = await untouched(
+    "https://other-project.test.supabase.co/auth/v1/token?grant_type=refresh_token",
+    { method: "POST" },
+  );
+  assert.equal(foreignRefresh.status, 500, "el transporte sólo intercepta el origen Auth configurado");
+});
+
+test("refresh terminal A conserva el scope capturado aunque B se active antes de responder", async () => {
+  const response = createDeferred<Response>();
+  const scopeA: SupabaseAuthRefreshIdentityScope = { userId: "user-a", sessionEpoch: 11 };
+  const scopeB: SupabaseAuthRefreshIdentityScope = { userId: "user-b", sessionEpoch: 12 };
+  let activeScope = scopeA;
+  const terminal: Array<{ status: number; scope: SupabaseAuthRefreshIdentityScope | null }> = [];
+  const fetch = createResilientSupabaseAuthFetch({
+    captureRefreshIdentityScope: () => activeScope,
+    onTerminalRefreshRejection: (status, scope) => terminal.push({ status, scope }),
+    fetch: async () => response.promise,
+  });
+
+  const pendingA = fetch(
+    "https://auth-resilience.test.supabase.co/auth/v1/token?grant_type=refresh_token",
+    { method: "POST" },
+  );
+  activeScope = scopeB;
+  response.resolve(createAuthErrorResponse(401));
+
+  assert.equal((await pendingA).status, 401);
+  assert.deepEqual(terminal, [{ status: 401, scope: scopeA }]);
+});
+
+test("scope Auth avanza aun cuando la nueva sesión pertenece al mismo usuario", () => {
+  const first = recordSupabaseAuthIdentity({
+    user: { id: "user-a" } as Session["user"],
+    refresh_token: "refresh-a-1",
+  });
+  const same = recordSupabaseAuthIdentity({
+    user: { id: "user-a" } as Session["user"],
+    refresh_token: "refresh-a-1",
+  });
+  const replacement = recordSupabaseAuthIdentity({
+    user: { id: "user-a" } as Session["user"],
+    refresh_token: "refresh-a-2",
+  });
+
+  assert.deepEqual(same, first);
+  assert.equal(replacement?.userId, "user-a");
+  assert.ok((replacement?.sessionEpoch ?? 0) > (first?.sessionEpoch ?? 0));
+  recordSupabaseAuthIdentity(null);
+});
+
+test("marcadores terminales A/B coexisten y un mismatch no consume otra identidad", () => {
+  const scopeA = { userId: "user-a", sessionEpoch: 101 };
+  const scopeB = { userId: "user-b", sessionEpoch: 102 };
+  const mismatch = { userId: "user-c", sessionEpoch: 103 };
+  const newerScopeA = { userId: "user-a", sessionEpoch: 104 };
+  const expiresAt = Date.now() + 60_000;
+
+  recordAuthoritativeRefreshRejection(scopeA, expiresAt);
+  recordAuthoritativeRefreshRejection(scopeB, expiresAt);
+  recordAuthoritativeRefreshRejection(newerScopeA, expiresAt);
+
+  assert.equal(consumeAuthoritativeRefreshRejection(mismatch), false);
+  assert.equal(consumeAuthoritativeRefreshRejection(scopeB), true);
+  assert.equal(consumeAuthoritativeRefreshRejection(newerScopeA), true);
+  assert.equal(consumeAuthoritativeRefreshRejection(scopeA), true);
+  assert.equal(consumeAuthoritativeRefreshRejection(scopeB), false);
+});
+
+test("bootstrap 401 usa identidad durable acotada y purga sólo su scope exacto", async () => {
+  const supabaseUrl = "https://fjjebhaqtrdbpxzxztmh.supabase.co";
+  const userAId = "11111111-1111-4111-8111-111111111111";
+  const userBId = "22222222-2222-4222-8222-222222222222";
+  const storage = {
+    getItem(key: string) {
+      assert.equal(key, "sb-fjjebhaqtrdbpxzxztmh-auth-token");
+      return JSON.stringify({
+        refresh_token: "refresh-bootstrap-a",
+        user: { id: userAId },
+      });
+    },
+  };
+
+  recordSupabaseAuthIdentity(null);
+  const scopeA = seedSupabaseAuthIdentityFromStorage(supabaseUrl, storage);
+  assert.equal(scopeA?.userId, userAId);
+  assert.deepEqual(getActiveSupabaseAuthIdentityScope(), scopeA);
+
+  const refresh = createResilientSupabaseAuthFetch({
+    authOrigin: supabaseUrl,
+    captureRefreshIdentityScope: getActiveSupabaseAuthIdentityScope,
+    onTerminalRefreshRejection: (_status, scope) => {
+      if (scope) recordAuthoritativeRefreshRejection(scope);
+    },
+    fetch: async () => createAuthErrorResponse(401),
+  });
+  assert.equal((await refresh(
+    `${supabaseUrl}/auth/v1/token?grant_type=refresh_token`,
+    { method: "POST" },
+  )).status, 401);
+
+  const scopeB = recordSupabaseAuthIdentity({
+    user: { id: userBId } as Session["user"],
+    refresh_token: "refresh-bootstrap-b",
+  });
+  assert.ok(scopeA && scopeB);
+  assert.equal(consumeAuthoritativeRefreshRejection(scopeB), false);
+  assert.equal(resolveSignedOutSessionPolicy({
+    isExplicitLogoutInFlight: false,
+    hasAuthoritativeRefreshRejection: false,
+  }).purgeDurableStorage, false);
+  assert.equal(resolveSignedOutSessionPolicy({
+    isExplicitLogoutInFlight: false,
+    hasAuthoritativeRefreshRejection: consumeAuthoritativeRefreshRejection(scopeA),
+  }).purgeDurableStorage, true);
+
+  assert.equal(readStoredSupabaseAuthIdentity(supabaseUrl, {
+    getItem: () => "{malformed",
+  }), null);
+  assert.equal(readStoredSupabaseAuthIdentity(supabaseUrl, {
+    getItem: () => JSON.stringify({ refresh_token: "refresh-a", user: { id: "not-a-uuid" } }),
+  }), null);
+  assert.equal(readStoredSupabaseAuthIdentity(supabaseUrl, {
+    getItem: () => "x".repeat((128 * 1024) + 1),
+  }), null);
+  recordSupabaseAuthIdentity(null);
+});
+
+test("transporte Auth: timeout real aborta aunque el fetch subyacente no termine", async () => {
+  const resilientFetch = createResilientSupabaseAuthFetch({
+    timeoutMilliseconds: 5,
+    fetch: async () => new Promise<Response>(() => undefined),
+  });
+
+  await assert.rejects(
+    resilientFetch(
+      "https://auth-resilience.test.supabase.co/auth/v1/token?grant_type=refresh_token",
+      { method: "POST" },
+    ),
+    (error: unknown) => error instanceof SupabaseAuthRefreshTransportError
+      && error.status === 408,
+  );
+});
+
+test("cliente Supabase real: cerrar y reabrir restaura la sesión durable", async () => {
+  const storageKey = "auth-resilience-reopen";
+  const originalSession = createTestSession(Math.floor(Date.now() / 1000) + 3_600);
+  const storage = createTestAuthStorage({
+    [storageKey]: JSON.stringify(originalSession),
+  });
+  let fetchCalls = 0;
+  const fetch = async () => {
+    fetchCalls += 1;
+    return new Response(null, { status: 500 });
+  };
+  const options = {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      storageKey,
+      storage,
+    },
+    global: { fetch },
+  };
+
+  const firstClient = createClient(
+    "https://auth-resilience-reopen.test.supabase.co",
+    "test-anon-key",
+    options,
+  );
+  const first = await firstClient.auth.getSession();
+  firstClient.auth.stopAutoRefresh();
+
+  const reopenedClient = createClient(
+    "https://auth-resilience-reopen.test.supabase.co",
+    "test-anon-key",
+    options,
+  );
+  const reopened = await reopenedClient.auth.getSession();
+  reopenedClient.auth.stopAutoRefresh();
+
+  assert.equal(first.error, null);
+  assert.equal(reopened.error, null);
+  assert.equal(first.data.session?.user.id, originalSession.user.id);
+  assert.equal(reopened.data.session?.user.id, originalSession.user.id);
+  assert.equal(storage.has(storageKey), true);
+  assert.equal(fetchCalls, 0, "una sesión vigente se restaura sin red ni refresh innecesario");
+});
+
+test("cliente Supabase real: DNS, abort, 429 y 5xx conservan storage y nunca emiten SIGNED_OUT", async (context) => {
+  const failures: ReadonlyArray<{
+    name: string;
+    respond(): Promise<Response>;
+  }> = [
+    {
+      name: "DNS",
+      respond: async () => {
+        throw new TypeError("Failed to fetch");
+      },
+    },
+    {
+      name: "abort",
+      respond: async () => new Promise<Response>(() => undefined),
+    },
+    ...[429, 500, 503].map((status) => ({
+      name: String(status),
+      respond: async () => createAuthErrorResponse(status),
+    })),
+  ];
+
+  for (const failure of failures) {
+    await context.test(failure.name, async () => {
+      const storageKey = `auth-resilience-${failure.name}`;
+      const storage = createTestAuthStorage({
+        [storageKey]: JSON.stringify(createTestSession(1, failure.name)),
+      });
+      const events: string[] = [];
+      let fetchCalls = 0;
+      const fetch = createResilientSupabaseAuthFetch({
+        timeoutMilliseconds: 5,
+        fetch: async () => {
+          fetchCalls += 1;
+          if (fetchCalls === 1) return failure.respond();
+          assert.equal(storage.has(storageKey), true, "el primer fallo no puede purgar storage");
+          return createRefreshSuccessResponse(failure.name);
+        },
+      });
+      const client = createClient(
+        `https://auth-resilience-${failure.name.toLowerCase()}.test.supabase.co`,
+        "test-anon-key",
+        {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+            storageKey,
+            storage,
+          },
+          global: { fetch },
+        },
+      );
+      const subscription = client.auth.onAuthStateChange((event) => events.push(event));
+
+      const result = await client.auth.getSession();
+      subscription.data.subscription.unsubscribe();
+      client.auth.stopAutoRefresh();
+
+      assert.equal(result.error, null);
+      assert.ok(result.data.session);
+      assert.equal(storage.has(storageKey), true);
+      assert.equal(events.includes("SIGNED_OUT"), false);
+      assert.equal(fetchCalls, 2, "Auth debe recuperar el primer fallo con un único retry exitoso");
+    });
+  }
+});
+
+test("cliente Supabase real: un 401 terminal elimina Auth storage y emite SIGNED_OUT", async () => {
+  const storageKey = "auth-resilience-terminal-401";
+  const storage = createTestAuthStorage({
+    [storageKey]: JSON.stringify(createTestSession(1, "terminal")),
+  });
+  const events: string[] = [];
+  const terminalStatuses: number[] = [];
+  const fetch = createResilientSupabaseAuthFetch({
+    onTerminalRefreshRejection: (status) => terminalStatuses.push(status),
+    fetch: async () => createAuthErrorResponse(401),
+  });
+  const client = createClient(
+    "https://auth-resilience-terminal.test.supabase.co",
+    "test-anon-key",
+    {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        storageKey,
+        storage,
+      },
+      global: { fetch },
+    },
+  );
+  const subscription = client.auth.onAuthStateChange((event) => events.push(event));
+
+  const result = await client.auth.getSession();
+  subscription.data.subscription.unsubscribe();
+  client.auth.stopAutoRefresh();
+
+  assert.ok(result.error);
+  assert.equal(result.data.session, null);
+  assert.equal(storage.has(storageKey), false);
+  assert.equal(events.includes("SIGNED_OUT"), true);
+  assert.deepEqual(terminalStatuses, [401]);
+});
 
 test("H3 · captura vigente shared autoriza únicamente la identidad esperada", () => {
   const form = createAuthRegistrationFormController();
@@ -695,7 +1233,7 @@ test("correo, metadata, accountType, query, roles y privilegios nunca reemplazan
   }
 });
 
-test("fallo autoritativo no filtra detalles y también falla cerrado", async () => {
+test("excepción autoritativa no filtra detalles, falla cerrada y conserva la sesión", async () => {
   const controller = createMultiportalAuthController<TestAuthState>();
   const { owner } = beginCurrentResolution();
   let signedOut = false;
@@ -719,7 +1257,60 @@ test("fallo autoritativo no filtra detalles y también falla cerrado", async () 
     message: MULTIPORTAL_AUTH_ERROR_MESSAGE,
   });
   assert.equal(JSON.stringify(result).includes("leaked-detail"), false);
-  assert.equal(signedOut, true);
+  assert.equal(signedOut, false, "una excepción no demuestra identidad o membresía inválida");
+});
+
+test("fallo transitorio de portal conserva la sesión y queda marcado para reintentar", async () => {
+  const controller = createMultiportalAuthController<TestAuthState>();
+  const { owner } = beginCurrentResolution();
+  let signOuts = 0;
+  const result = await controller.resolvePortalAccess({
+    requestedPortal: "usuario",
+    expectedUserId: userA.userId,
+    owner,
+  }, createGateway({
+    getCurrentIdentity: async () => {
+      throw new Error("repository", {
+        cause: Object.assign(new Error("Failed to fetch"), { status: 503 }),
+      });
+    },
+    signOut: async () => {
+      signOuts += 1;
+      return "signed_out";
+    },
+  }));
+
+  assert.deepEqual(result, {
+    state: "error",
+    requestedPortal: "usuario",
+    message: MULTIPORTAL_AUTH_RETRYABLE_MESSAGE,
+    retryable: true,
+  });
+  assert.equal(signOuts, 0);
+});
+
+test("ausencia autoritativa de identidad mantiene el rechazo con signOut", async () => {
+  const controller = createMultiportalAuthController<TestAuthState>();
+  const { owner } = beginCurrentResolution();
+  let signOuts = 0;
+  const result = await controller.resolvePortalAccess({
+    requestedPortal: "usuario",
+    expectedUserId: userA.userId,
+    owner,
+  }, createGateway({
+    getCurrentIdentity: async () => null,
+    signOut: async () => {
+      signOuts += 1;
+      return "signed_out";
+    },
+  }));
+
+  assert.deepEqual(result, {
+    state: "error",
+    requestedPortal: "usuario",
+    message: MULTIPORTAL_AUTH_ERROR_MESSAGE,
+  });
+  assert.equal(signOuts, 1);
 });
 
 test("no declara rechazo Coach seguro si signOut falla", async () => {

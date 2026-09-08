@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { formatWeeklyComparisonDate } from "./weekly-comparison-date";
 
 /*
  * Static Progress visual integration contract only.
@@ -26,6 +27,26 @@ const userPortalShellStylesSource = readFileSync(
   "src/features/user-portal-shell/components/user-portal-shell.module.css",
   "utf8",
 );
+
+const originalTimeZone = process.env.TZ;
+try {
+  for (const timeZone of ["UTC", "America/Santiago", "Pacific/Honolulu", "Pacific/Kiritimati"]) {
+    process.env.TZ = timeZone;
+    assert.equal(formatWeeklyComparisonDate("2026-09-01"), "01-09-2026");
+    assert.equal(formatWeeklyComparisonDate("2026-08-18"), "18-08-2026");
+    assert.equal(formatWeeklyComparisonDate("2025-12-31"), "31-12-2025");
+    assert.equal(formatWeeklyComparisonDate("2026-01-01"), "01-01-2026");
+    assert.equal(formatWeeklyComparisonDate("2024-02-29"), "29-02-2024");
+  }
+
+  process.env.TZ = "America/Santiago";
+  assert.equal(formatWeeklyComparisonDate("2026-09-01T12:00:00.000Z"), "01-09-2026");
+  process.env.TZ = "Pacific/Kiritimati";
+  assert.equal(formatWeeklyComparisonDate("2026-09-01T12:00:00.000Z"), "02-09-2026");
+} finally {
+  if (originalTimeZone === undefined) delete process.env.TZ;
+  else process.env.TZ = originalTimeZone;
+}
 
 for (const componentName of [
   "ComparisonScreenV2",

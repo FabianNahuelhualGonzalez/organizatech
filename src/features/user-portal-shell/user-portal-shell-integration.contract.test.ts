@@ -361,6 +361,7 @@ const SILENT_REVALIDATION_POLICY_BARRIER = "[UI-NAV-01S.same-identity-policy]";
 const SILENT_REVALIDATION_WIRING_BARRIER = "[UI-NAV-01S.silent-wiring]";
 const SILENT_REVALIDATION_INVALIDATION_BARRIER = "[UI-NAV-01S.immediate-invalidation]";
 const SILENT_REVALIDATION_RESULT_BARRIER = "[UI-NAV-01S.authoritative-result]";
+const SILENT_REVALIDATION_RETRYABLE_BARRIER = "[UI-NAV-01S.retryable-continuity]";
 const SILENT_REVALIDATION_VISUAL_BARRIER = "[UI-NAV-01S.visual-continuity]";
 const SILENT_REVALIDATION_STALE_BARRIER = "[UI-NAV-01S.stale-callback]";
 const SILENT_REVALIDATION_TOKEN_BARRIER = "[UI-NAV-01S.token-refresh-continuity]";
@@ -1186,6 +1187,69 @@ function assertSilentSessionRevalidationBoundary(sources: Sources) {
     proofName,
     `${SILENT_REVALIDATION_POLICY_BARRIER} conserva exactamente la prueba vigente`,
   );
+
+  const retryablePolicy = findNamedFunction(
+    paths.sessionRevalidation,
+    sources.sessionRevalidation,
+    "shouldPreserveUserPortalAfterRetryableRevalidation",
+  );
+  assert.ok(retryablePolicy.declaration.body, `${SILENT_REVALIDATION_RETRYABLE_BARRIER} política con cuerpo`);
+  const retryableIfs = retryablePolicy.declaration.body.statements.filter(
+    (statement): statement is ts.IfStatement => ts.isIfStatement(statement),
+  );
+  assert.equal(retryableIfs.length, 1, `${SILENT_REVALIDATION_RETRYABLE_BARRIER} rechazo fail-closed único`);
+  assert.deepEqual(
+    flattenLogicalOr(retryableIfs[0].expression)
+      .map((term) => compact(term.getText(retryablePolicy.sourceFile)))
+      .sort(),
+    [
+      'input.access.state!=="error"',
+      "input.access.retryable!==true",
+      "!input.isResolutionCurrent",
+      'input.sessionRevalidation.kind!=="silent_revalidation"',
+      "input.sessionRevalidation.authorizationProof.userId!==input.expectedUserId",
+      "input.expectedUserId!==input.nextSessionUserId",
+      "input.expectedUserId!==input.nextAuthenticatedUserId",
+    ].sort(),
+    `${SILENT_REVALIDATION_RETRYABLE_BARRIER} exige error transitorio, owner e identidad exactos`,
+  );
+  assert.equal(
+    compact(retryableIfs[0].thenStatement.getText(retryablePolicy.sourceFile)),
+    "returnfalse;",
+    `${SILENT_REVALIDATION_RETRYABLE_BARRIER} cualquier duda rechaza preservar`,
+  );
+  const retryableReturns = retryablePolicy.declaration.body.statements.filter(
+    (statement): statement is ts.ReturnStatement => ts.isReturnStatement(statement),
+  );
+  assert.equal(retryableReturns.length, 1, `${SILENT_REVALIDATION_RETRYABLE_BARRIER} preservación única`);
+  assert.ok(retryableReturns[0].expression, `${SILENT_REVALIDATION_RETRYABLE_BARRIER} preservación explícita`);
+  const retryableProofCall = unwrapExpression(retryableReturns[0].expression);
+  assert.ok(
+    ts.isCallExpression(retryableProofCall)
+    && compact(retryableProofCall.expression.getText(retryablePolicy.sourceFile))
+      === "hasCurrentUserPortalAuthorization"
+    && retryableProofCall.arguments.length === 1,
+    `${SILENT_REVALIDATION_RETRYABLE_BARRIER} revalida la prueba vigente`,
+  );
+  const retryableProofInput = unwrapExpression(retryableProofCall.arguments[0]);
+  assert.ok(ts.isObjectLiteralExpression(retryableProofInput), `${SILENT_REVALIDATION_RETRYABLE_BARRIER} identidad explícita`);
+  assert.deepEqual(
+    retryableProofInput.properties.map((property) => propertyName(property, retryablePolicy.sourceFile)).sort(),
+    ["authenticatedUserId", "authorizationProof", "sessionUserId"],
+    `${SILENT_REVALIDATION_RETRYABLE_BARRIER} sin fuentes permisivas`,
+  );
+  const expectedRetryableProofInput = {
+    authorizationProof: "input.sessionRevalidation.authorizationProof",
+    sessionUserId: "input.nextSessionUserId",
+    authenticatedUserId: "input.nextAuthenticatedUserId",
+  } as const;
+  for (const [name, expected] of Object.entries(expectedRetryableProofInput)) {
+    assert.equal(
+      compact(objectPropertyExpression(retryableProofInput, retryablePolicy.sourceFile, name).getText(retryablePolicy.sourceFile)),
+      expected,
+      `${SILENT_REVALIDATION_RETRYABLE_BARRIER} ${name} validado`,
+    );
+  }
   assert.doesNotMatch(
     sources.sessionRevalidation,
     /localStorage|sessionStorage|cookie|document\.cookie|URLSearchParams|setTimeout|setInterval|hasSupabaseSession|metadata|email/i,
@@ -1351,6 +1415,11 @@ function assertSilentSessionRevalidationBoundary(sources: Sources) {
     sources.root,
     "authorizeAndContinuePortalSession",
   );
+  assert.match(
+    compact(authorization.declaration.getText(authorization.sourceFile)),
+    /if\(sessionRevalidation\.kind!=="silent_revalidation"\)setIsAuthLoading\(true\)/,
+    `${SILENT_REVALIDATION_VISUAL_BARRIER} login/bootstrap muestran splash sin interrumpir TOKEN_REFRESHED`,
+  );
   assert.equal(
     authorization.declaration.parameters.length,
     5,
@@ -1401,6 +1470,54 @@ function assertSilentSessionRevalidationBoundary(sources: Sources) {
     rejectedWrites.length,
     1,
     `${SILENT_REVALIDATION_RESULT_BARRIER} resultado inválido limpia la prueba`,
+  );
+  const retryablePreservationCalls = findCalls(rejectedBranches[0].thenStatement, (call) => (
+    compact(call.expression.getText(authorization.sourceFile))
+      === "shouldPreserveUserPortalAfterRetryableRevalidation"
+  ));
+  assert.equal(retryablePreservationCalls.length, 1, `${SILENT_REVALIDATION_RETRYABLE_BARRIER} decisión única`);
+  const retryablePreservationInput = unwrapExpression(retryablePreservationCalls[0].arguments[0]);
+  assert.ok(ts.isObjectLiteralExpression(retryablePreservationInput), `${SILENT_REVALIDATION_RETRYABLE_BARRIER} wiring explícito`);
+  const expectedRetryableWiring = {
+    access: "access",
+    sessionRevalidation: revalidationParameterName,
+    expectedUserId: "resolutionOwner.expectedUserId",
+    nextSessionUserId: "authState.session?.user.id",
+    nextAuthenticatedUserId: "authState.user?.id",
+    isResolutionCurrent: "multiportalAuth.isPortalResolutionCurrent(resolutionOwner)",
+  } as const;
+  assert.deepEqual(
+    retryablePreservationInput.properties.map((property) => propertyName(property, authorization.sourceFile)).sort(),
+    Object.keys(expectedRetryableWiring).sort(),
+    `${SILENT_REVALIDATION_RETRYABLE_BARRIER} señales exactas`,
+  );
+  for (const [name, expected] of Object.entries(expectedRetryableWiring)) {
+    assert.equal(
+      compact(objectPropertyExpression(retryablePreservationInput, authorization.sourceFile, name).getText(authorization.sourceFile)),
+      expected,
+      `${SILENT_REVALIDATION_RETRYABLE_BARRIER} ${name} conectado`,
+    );
+  }
+  const retryableBranches: ts.IfStatement[] = [];
+  const visitRetryableBranches = (node: ts.Node) => {
+    if (
+      ts.isIfStatement(node)
+      && compact(node.expression.getText(authorization.sourceFile)) === "preserveAuthorizedUserPortal"
+    ) retryableBranches.push(node);
+    ts.forEachChild(node, visitRetryableBranches);
+  };
+  visitRetryableBranches(rejectedBranches[0].thenStatement);
+  assert.equal(retryableBranches.length, 1, `${SILENT_REVALIDATION_RETRYABLE_BARRIER} branch único`);
+  assert.equal(
+    compact(retryableBranches[0].thenStatement.getText(authorization.sourceFile)),
+    "applySessionState(authState);",
+    `${SILENT_REVALIDATION_RETRYABLE_BARRIER} mantiene renderizable la misma sesión`,
+  );
+  assert.ok(
+    retryableBranches[0].elseStatement
+    && compact(retryableBranches[0].elseStatement.getText(authorization.sourceFile))
+      === "replaceUserPortalAuthorizationProof(null);",
+    `${SILENT_REVALIDATION_RESULT_BARRIER} todo resultado no elegible limpia la prueba`,
   );
 
   const continuation = findNamedFunction(
@@ -1614,7 +1731,7 @@ function assertAuthorizationBoundary(sources: Sources) {
   );
   assert.ok(
     continuationCode.includes('continuation.kind==="stale"||!isAuthorizationCurrent()'),
-    "[UI-NAV-01.proof-stale] stale o owner reemplazado no publica",
+    "[UI-NAV-01.proof-stale] stale o owner reemplazado no continúa después de la carga",
   );
   assert.equal(
     countCalls(continuation.declaration, continuation.sourceFile, "isAuthorizationCurrent"),
@@ -1641,13 +1758,35 @@ function assertAuthorizationBoundary(sources: Sources) {
   assert.equal(publications.length, 2, "[UI-NAV-01.proof-publication] publicaciones por lifecycle exactas");
   assert.equal(
     publications.filter((publication) => publication.pos < awaitContinuations[0].pos).length,
-    1,
-    "[UI-NAV-01.proof-publication] revalidación silenciosa publica antes de omitir continuación",
+    2,
+    "[UI-NAV-01.proof-publication] ambas rutas publican autorización antes de esperar datos críticos",
   );
   assert.equal(
     publications.filter((publication) => publication.pos > awaitContinuations[0].pos).length,
-    1,
-    "[UI-NAV-01.proof-publication] bootstrap/login publica después de continuación vigente",
+    0,
+    "[UI-NAV-01.proof-publication] ninguna ruta fabrica autorización después de cargar datos",
+  );
+  const foregroundPublication = publications
+    .filter((publication) => publication.pos < awaitContinuations[0].pos)
+    .sort((left, right) => right.pos - left.pos)[0];
+  assert.ok(foregroundPublication, "[UI-NAV-01.splash-readiness] bootstrap/login publica su prueba antes de la carga");
+  const foregroundPrefix = compact(
+    continuation.sourceFile.text.slice(foregroundPublication.getStart(), awaitContinuations[0].getStart()),
+  );
+  assert.doesNotMatch(
+    foregroundPrefix,
+    /setIsAuthLoading\(false\)|clearCompletedAuthForm\(\)|restoreActiveFlowForSession|createAuthNavigationReset/,
+    "[UI-NAV-01.splash-readiness] el Dashboard no reemplaza el splash antes de completar datos críticos",
+  );
+  const foregroundContinuationCall = awaitContinuations[0].expression;
+  assert.ok(
+    ts.isCallExpression(foregroundContinuationCall),
+    "[UI-NAV-01.splash-readiness] continuación identificable",
+  );
+  assert.equal(
+    foregroundContinuationCall.arguments.length,
+    3,
+    "[UI-NAV-01.splash-readiness] la presentación queda en el completion de la carga crítica",
   );
 }
 
@@ -2359,9 +2498,11 @@ const mutationProbes: Array<{
     mutate: (source) => replaceExactlyOnce(
       source,
       `  ): Promise<AuthorizedPortalAccess | null> {
+    if (sessionRevalidation.kind !== "silent_revalidation") setIsAuthLoading(true);
     const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);`,
       `  ): Promise<AuthorizedPortalAccess | null> {
     replaceUserPortalAuthorizationProof(sessionRevalidation.authorizationProof);
+    if (sessionRevalidation.kind !== "silent_revalidation") setIsAuthLoading(true);
     const access = await multiportalAuth.resolvePortalAccess(authState, requestedPortal, resolutionOwner);`,
       "Deferred callback republishes captured proof",
     ),
@@ -2383,12 +2524,8 @@ const mutationProbes: Array<{
     barrier: SILENT_REVALIDATION_VISUAL_BARRIER,
     mutate: (source) => replaceExactlyOnce(
       source,
-      `        portalEventDecision === "authorize_coach"
-      ) {
-        setIsAuthLoading(false);`,
-      `        portalEventDecision === "authorize_coach"
-      ) {
-        setIsAuthLoading(true);`,
+      `    if (sessionRevalidation.kind !== "silent_revalidation") setIsAuthLoading(true);`,
+      `    setIsAuthLoading(true);`,
       "Redundant event activates auth loading",
     ),
   },
@@ -2435,9 +2572,20 @@ const mutationProbes: Array<{
     barrier: SILENT_REVALIDATION_RESULT_BARRIER,
     mutate: (source) => replaceExactlyOnce(
       source,
-      "      replaceUserPortalAuthorizationProof(null);\n      const rejectionMessage = multiportalAuth.settlePortalSignOutMessage(access.message);",
-      "      void userPortalAuthorizationProofRef.current;\n      const rejectionMessage = multiportalAuth.settlePortalSignOutMessage(access.message);",
+      "      else replaceUserPortalAuthorizationProof(null);\n      const rejectionMessage = multiportalAuth.settlePortalSignOutMessage(access.message);",
+      "      else void userPortalAuthorizationProofRef.current;\n      const rejectionMessage = multiportalAuth.settlePortalSignOutMessage(access.message);",
       "Invalid authoritative result retains proof",
+    ),
+  },
+  {
+    name: "UI-NAV-01S · descartar continuidad ante error transitorio de la misma identidad",
+    target: "root",
+    barrier: SILENT_REVALIDATION_RETRYABLE_BARRIER,
+    mutate: (source) => replaceExactlyOnce(
+      source,
+      "      if (preserveAuthorizedUserPortal) applySessionState(authState);",
+      "      if (false) applySessionState(authState);",
+      "Retryable same-identity revalidation discards renderable session",
     ),
   },
   {
@@ -2635,8 +2783,8 @@ const mutationProbes: Array<{
     barrier: "[UI-NAV-01.logout-local]",
     mutate: (source) => replaceExactlyOnce(
       source,
-      '        const { error } = await supabase.auth.signOut({ scope: "local" });',
-      '        const { error } = await supabase.auth.signOut({ scope: "global" });',
+      '          const { error } = await supabase.auth.signOut({ scope: "local" });',
+      '          const { error } = await supabase.auth.signOut({ scope: "global" });',
       "Global logout",
     ),
   },
@@ -2777,8 +2925,8 @@ const mutationProbes: Array<{
   },
 ];
 
-test("UI-NAV-01/UI-NAV-01S fija 39/39 mutantes semánticos con TypeScript válido y restauración SHA", () => {
-  assert.equal(mutationProbes.length, 39, "conteo fijo de mutantes");
+test("UI-NAV-01/UI-NAV-01S fija 40/40 mutantes semánticos con TypeScript válido y restauración SHA", () => {
+  assert.equal(mutationProbes.length, 40, "conteo fijo de mutantes");
   const temporaryRoot = mkdtempSync(join(tmpdir(), "organizatech-ui-nav-01-"));
   try {
     for (const path of Object.values(paths)) {

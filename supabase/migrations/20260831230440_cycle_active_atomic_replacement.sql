@@ -138,6 +138,9 @@ begin
             )
             or day.sort_order not between 0 and 6
             or pg_catalog.char_length(pg_catalog.btrim(routine.name)) not between 1 and 120
+            -- The canonical payload has no legacy notes fields.
+            or pg_catalog.btrim(coalesce(routine.notes, '')) <> ''
+            or pg_catalog.btrim(coalesce(day.notes, '')) <> ''
           )
       )
       or exists (
@@ -219,6 +222,9 @@ begin
           exercise.target_sets not between 1 and 20
           or exercise.target_reps not between 1 and 1000
           or exercise.base_weight not between 0 and 100000
+          -- Do not turn a two-component legacy load into base weight alone.
+          or coalesce(exercise.side_weight, 0) <> 0
+          or pg_catalog.btrim(coalesce(exercise.notes, '')) <> ''
           or (
             not exists (
             select 1

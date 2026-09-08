@@ -1,6 +1,11 @@
-import type { Session, User } from "@supabase/supabase-js";
+import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "./client";
+import { SupabasePrincipalIdentityCoordinationUnavailableError } from "./auth-identity-operation";
+import {
+  runIdempotentAuthReadWithSingleRetry,
+  type IdempotentAuthReadOptions,
+} from "./auth-resilience";
 
 export type DataMode = "demo" | "supabase";
 
@@ -11,10 +16,23 @@ export interface SupabaseSessionState {
   user: User | null;
 }
 
-export async function getInitialSupabaseSession(): Promise<SupabaseSessionState> {
-  const supabase = getSupabaseBrowserClient();
+interface InitialSupabaseSessionDependencies {
+  getBrowserClient?: () => SupabaseClient | null;
+  configured?: () => boolean;
+}
+
+export async function getInitialSupabaseSession(
+  dependencies: InitialSupabaseSessionDependencies = {},
+): Promise<SupabaseSessionState> {
+  const configured = dependencies.configured ?? isSupabaseConfigured;
+  const supabase = (dependencies.getBrowserClient ?? getSupabaseBrowserClient)();
 
   if (!supabase) {
+    // Un proyecto configurado sin coordinación cross-tab no es modo demo: se bloquea el acceso
+    // antes de que Auth lea/refresque storage y antes de conceder cualquier sesión local.
+    if (configured()) {
+      throw new SupabasePrincipalIdentityCoordinationUnavailableError();
+    }
     return {
       isConfigured: false,
       dataMode: "demo",
@@ -23,10 +41,9 @@ export async function getInitialSupabaseSession(): Promise<SupabaseSessionState>
     };
   }
 
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-
-  const session = data.session;
+  const session = await readInitialSupabaseSession(
+    () => supabase.auth.getSession(),
+  );
 
   return {
     isConfigured: true,
@@ -34,6 +51,22 @@ export async function getInitialSupabaseSession(): Promise<SupabaseSessionState>
     session,
     user: session?.user ?? null,
   };
+}
+
+type SessionLookupResult = Awaited<ReturnType<SupabaseClient["auth"]["getSession"]>>;
+
+export async function readInitialSupabaseSession(
+  getSession: () => Promise<SessionLookupResult>,
+  options: IdempotentAuthReadOptions = {},
+): Promise<Session | null> {
+  return runIdempotentAuthReadWithSingleRetry(
+    async () => {
+      const { data, error } = await getSession();
+      if (error) throw error;
+      return data.session;
+    },
+    options,
+  );
 }
 
 export function getMissingSupabaseMessage() {

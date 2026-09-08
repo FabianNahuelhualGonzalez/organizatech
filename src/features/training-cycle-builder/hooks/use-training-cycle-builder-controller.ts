@@ -60,7 +60,10 @@ interface UseTrainingCycleBuilderControllerOptions {
   readonly gateway: TrainingCycleBuilderGateway;
 }
 
-function publicOperationError(operation: "save" | "suggest" | "activate" | "active_edit" | "discard" | "extend") {
+export function publicOperationError(operation: "save" | "suggest" | "activate" | "active_edit" | "discard" | "extend", error?: unknown) {
+  if (error instanceof TrainingCycleCommittedMutationError) {
+    return "El cambio se guardó, pero no pudimos actualizar la pantalla. Recarga antes de continuar.";
+  }
   if (operation === "save") return "No pudimos guardar tus cambios. El borrador sigue disponible aquí.";
   if (operation === "suggest") return "No pudimos generar la rutina sugerida. Revisa tu conexión e inténtalo otra vez.";
   if (operation === "activate") return "No pudimos activar el ciclo. Revisa tu conexión e inténtalo otra vez.";
@@ -246,13 +249,13 @@ export function useTrainingCycleBuilderController({
   }, [state.origin]);
 
   useEffect(() => {
-    if (state.workflow !== "draft" || state.discardState === "discarding") {
+    if (state.committedSyncPending || state.workflow !== "draft" || state.discardState === "discarding") {
       autosaveOwner.pause();
       return;
     }
     autosaveOwner.resume(state.draft.draftId);
     return () => autosaveOwner.pause();
-  }, [autosaveOwner, state.discardState, state.draft.draftId, state.workflow]);
+  }, [autosaveOwner, state.committedSyncPending, state.discardState, state.draft.draftId, state.workflow]);
 
   const persistDraftSnapshot = useCallback(async (
     draft: TrainingCycleDraftViewModel,
@@ -274,6 +277,7 @@ export function useTrainingCycleBuilderController({
   useEffect(() => {
     if (
       state.revision === 0 ||
+      state.committedSyncPending ||
       state.workflow !== "draft" ||
       state.discardState === "discarding"
     ) return;
@@ -286,13 +290,13 @@ export function useTrainingCycleBuilderController({
       void persistDraftSnapshot(snapshot, claim);
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timeoutId);
-  }, [autosaveOwner, persistDraftSnapshot, state.discardState, state.draft, state.revision, state.workflow]);
+  }, [autosaveOwner, persistDraftSnapshot, state.committedSyncPending, state.discardState, state.draft, state.revision, state.workflow]);
 
   const retrySave = useCallback(async () => {
-    if (state.workflow !== "draft" || state.discardState === "discarding") return;
+    if (state.committedSyncPending || state.workflow !== "draft" || state.discardState === "discarding") return;
     dispatch({ type: "set_save_state", state: "saving", errorMessage: null });
     await persistDraftSnapshot(draftRef.current);
-  }, [persistDraftSnapshot, state.discardState, state.workflow]);
+  }, [persistDraftSnapshot, state.committedSyncPending, state.discardState, state.workflow]);
 
   const requestNewCycle = useCallback(async (
     origin: TrainingCycleBuilderOrigin,
@@ -362,7 +366,7 @@ export function useTrainingCycleBuilderController({
   }, [state.origin, state.screen, state.workflow]);
 
   const activate = useCallback(async () => {
-    if (activationLockRef.current || state.workflow !== "draft") return;
+    if (activationLockRef.current || state.committedSyncPending || state.workflow !== "draft") return;
     const draft = draftRef.current;
     if (!getTrainingCycleDraftValidation(draft).canActivate) return;
     activationLockRef.current = true;
@@ -379,16 +383,19 @@ export function useTrainingCycleBuilderController({
       );
       if (!result.cycleId || !result.revision) throw new TypeError("Invalid activation result");
       dispatch({ type: "activation_succeeded", cycleId: result.cycleId, revision: result.revision });
-    } catch {
-      dispatch({ type: "activation_failed", message: publicOperationError("activate") });
+    } catch (error) {
+      const committed = error instanceof TrainingCycleCommittedMutationError;
+      if (committed) autosaveOwner.pause();
+      dispatch({ type: "activation_failed", message: publicOperationError("activate", error), committed });
     } finally {
       activationLockRef.current = false;
     }
-  }, [autosaveOwner, state.workflow]);
+  }, [autosaveOwner, state.committedSyncPending, state.workflow]);
 
   const saveActiveCycle = useCallback(async () => {
     if (
       activeEditLockRef.current ||
+      state.committedSyncPending ||
       state.workflow !== "active_edit" ||
       state.activeEditState === "conflict" ||
       !state.activeCycleId ||
@@ -420,19 +427,20 @@ export function useTrainingCycleBuilderController({
         revision: result.revision,
         savedAtLabel: result.savedAtLabel,
       });
-    } catch {
+    } catch (error) {
       dispatch({
         type: "active_edit_failed",
-        conflict: false,
-        message: publicOperationError("active_edit"),
+        conflict: error instanceof TrainingCycleCommittedMutationError,
+        committed: error instanceof TrainingCycleCommittedMutationError,
+        message: publicOperationError("active_edit", error),
       });
     } finally {
       activeEditLockRef.current = false;
     }
-  }, [state.activeCycleId, state.activeCycleRevision, state.activeEditState, state.workflow]);
+  }, [state.activeCycleId, state.activeCycleRevision, state.activeEditState, state.committedSyncPending, state.workflow]);
 
   const discardDraft = useCallback(async () => {
-    if (discardLockRef.current || state.workflow !== "draft") return;
+    if (discardLockRef.current || state.committedSyncPending || state.workflow !== "draft") return;
     discardLockRef.current = true;
     const discardedDraft = draftRef.current;
     autosaveOwner.pause();
@@ -458,10 +466,10 @@ export function useTrainingCycleBuilderController({
     } finally {
       discardLockRef.current = false;
     }
-  }, [autosaveOwner, state.workflow]);
+  }, [autosaveOwner, state.committedSyncPending, state.workflow]);
 
   const extendCycle = useCallback(async () => {
-    if (extensionLockRef.current || !state.activeCycleId || state.workflow !== "active") return;
+    if (extensionLockRef.current || state.committedSyncPending || !state.activeCycleId || state.workflow !== "active") return;
     const requestedValidation = getExtensionValidation(
       state.draft.endDate,
       state.extendDate,
@@ -489,12 +497,12 @@ export function useTrainingCycleBuilderController({
         throw new TypeError("Invalid extension result");
       }
       dispatch({ type: "extension_succeeded", endDate: result.endDate, revision: result.revision });
-    } catch {
-      dispatch({ type: "extension_failed", message: publicOperationError("extend") });
+    } catch (error) {
+      dispatch({ type: "extension_failed", message: publicOperationError("extend", error), committed: error instanceof TrainingCycleCommittedMutationError });
     } finally {
       extensionLockRef.current = false;
     }
-  }, [initialViewModel.todayIsoDate, state.activeCycleId, state.activeCycleRevision, state.draft.endDate, state.extendDate, state.workflow]);
+  }, [initialViewModel.todayIsoDate, state.activeCycleId, state.activeCycleRevision, state.committedSyncPending, state.draft.endDate, state.extendDate, state.workflow]);
 
   const saveCustomExercise = useCallback(async () => {
     if (state.customSaveState === "saving") return;

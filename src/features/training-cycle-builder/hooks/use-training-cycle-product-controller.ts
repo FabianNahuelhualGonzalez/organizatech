@@ -288,22 +288,22 @@ export function useTrainingCycleProductController(input: {
           : current);
       },
       async onCycleChanged(cycle) {
-        if (!ownsCurrentContext()) return;
+        if (!ownsCurrentContext()) return false;
         setSnapshot((current) => current.status === "ready"
           && current.ownerContextKey === ownerContextKey
           && current.rpc === rpc
           ? { ...current, data: { ...current.data, activeCycle: cycle } }
           : current);
-        await notifyCycleChanged(cycle.cycleId);
+        return notifyCycleChanged(cycle.cycleId);
       },
       async onCycleReplaced(cycleId, draft) {
-        if (!ownsCurrentContext()) return;
+        if (!ownsCurrentContext()) return false;
         setSnapshot((current) => current.status === "ready"
           && current.ownerContextKey === ownerContextKey
           && current.rpc === rpc
           ? { ...current, data: closeActiveTrainingCycleProductData(current.data, draft) }
           : current);
-        await notifyCycleChanged(cycleId);
+        return notifyCycleChanged(cycleId);
       },
     });
     return {

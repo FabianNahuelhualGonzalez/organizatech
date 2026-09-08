@@ -112,6 +112,46 @@ test("proyecta IDs reales, orden canónico y ciclo activo sin inventar catálogo
   assert.equal(exercise?.id, EXERCISE_ID);
   assert.equal(exercise?.sets[0]?.id, SET_1_ID);
   assert.equal(exercise?.muscleGroup, "Pectoral");
+  assert.equal(model.catalog[0]?.videoUrl, catalog[0]?.videoUrl);
+});
+
+test("un borrador remoto sin snapshot conserva su URL explícita, incluso null", () => {
+  for (const videoUrl of [null, "https://www.youtube.com/watch?v=ZyXwVuTsR_2"]) {
+    for (const sourceCycleId of [null, CYCLE_ID]) {
+      const model = buildTrainingCycleProductViewModel({
+        todayIsoDate: "2026-08-29",
+        catalog,
+        entries: [],
+        activeCycle: null,
+        sourceCycle: null,
+        lastCycle: null,
+        draft: {
+          draftId: DRAFT_ID,
+          origin: sourceCycleId ? "duplicate" : "manual",
+          sourceCycleId,
+          state: "draft",
+          version: 1,
+          goal: "volume",
+          startDate: "2026-08-30",
+          endDate: "2026-10-11",
+          activatedCycleId: null,
+          createdAt: "2026-08-29T00:00:00.000Z",
+          updatedAt: "2026-08-29T00:00:00.000Z",
+          plan: {
+            days: [{
+              day: "monday", name: "Empuje", order: 0,
+              exercises: [{
+                catalogExerciseId: CATALOG_ID,
+                order: 0, technique: "linear", videoUrl,
+                sets: [{ order: 0, targetReps: 10, targetKg: 80, toFailure: false, drops: [] }],
+              }],
+            }],
+          },
+        },
+      });
+      assert.equal(model.draft.routines.monday.exercises[0]?.videoUrl, videoUrl ?? "");
+    }
+  }
 });
 
 test("un snapshot sin video no resucita el enlace actual del catálogo", () => {

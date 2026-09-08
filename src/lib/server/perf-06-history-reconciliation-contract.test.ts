@@ -54,7 +54,7 @@ const aclMigrationSha256 = "3e49a2328f87bd09ad620287af801f71d82330aad2546aef324d
 const productRepository = "src/lib/data/repository.ts";
 const cycleScopedRepository = "src/lib/training/cycle-scoped-training-repository.ts";
 const lineageModel = "src/lib/training/training-exercise-lineage.ts";
-const productRepositorySha256 = "f1e1e38d8bce6ce2a4b86d03931338b63ec5ced883e9ceec63a9c3eb64ed4e98";
+const productRepositorySha256 = "2b0bfad78ecfada878e93cd70ae331a282c3630e7e488a6491c349f2cc764de4";
 const packageLockSha256 = "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5";
 
 const historicalMappings = [
@@ -1690,9 +1690,9 @@ function validateProductAndAccess(root: string): void {
 
   const cycleRepository = read(root, cycleScopedRepository);
   const lineagePayload = read(root, lineageModel);
-  assert.equal((cycleRepository.match(/\.from\("training_exercise_lineages"\)/g) ?? []).length, 2, "producto tiene un SELECT y un INSERT directos de lineage");
-  assert.equal((cycleRepository.match(/\.from\("training_exercise_lineages"\)[\s\S]{0,180}?\.insert\(/g) ?? []).length, 1, "único write directo productivo es INSERT");
-  assert.doesNotMatch(cycleRepository, /\.from\("training_exercise_lineages"\)[\s\S]{0,180}?\.(?:update|upsert|delete)\(/, "producto no hace UPDATE/UPSERT/DELETE directo de lineages");
+  assert.equal((cycleRepository.match(/\.from\("training_exercise_lineages"\)/g) ?? []).length, 0, "producto delega altas y vinculación lineage a la RPC atómica por día");
+  assert.match(cycleRepository, /\.rpc\("apply_training_cycle_day_exercise_changes"/, "producto usa la RPC atómica para cambios de ejercicios");
+  assert.doesNotMatch(cycleRepository, /\.from\("training_exercise_lineages"\)[\s\S]{0,180}?\.(?:insert|update|upsert|delete)\(/, "producto no escribe lineages directamente");
   assert.match(lineagePayload, /return \{\s*user_id: input\.userId,\s*source_legacy_exercise_id: input\.sourceLegacyExerciseId \?\? null,\s*origin_kind: input\.sourceLegacyExerciseId \? "legacy" : "scoped",\s*\};/, "payload INSERT productivo allowlisted a identidad lineage");
 
   const lineageMigration = read(root, join(migrationsDirectory, "20260610000001_training_exercise_lineage.sql"));

@@ -169,6 +169,7 @@ async function invokeLifecycleRpc(input: {
   readonly environment: TrainingCycleLifecycleWorkerEnvironment;
   readonly functionName:
     | "claim_due_training_cycle_lifecycle_deliveries"
+    | "authorize_training_cycle_lifecycle_delivery"
     | "complete_training_cycle_lifecycle_delivery";
   readonly body: Readonly<Record<string, unknown>>;
   readonly fetchImpl?: typeof fetch;
@@ -287,6 +288,20 @@ async function processDelivery(
   delivery: Delivery,
   fetchImpl?: typeof fetch,
 ) {
+  // A claim alone is not permission to send: extension/replacement may have
+  // superseded it. Fail closed on denial, malformed replies or uncertain RPC.
+  const authorized = await invokeLifecycleRpc({
+    environment,
+    functionName: "authorize_training_cycle_lifecycle_delivery",
+    body: {
+      p_capability: environment.lifecycleRpcSecret,
+      p_delivery_id: delivery.deliveryId,
+      p_attempt_token: delivery.attemptToken,
+    },
+    fetchImpl,
+  }).catch(() => false);
+  if (authorized !== true) return;
+
   let messageId: string;
   try {
     const rendered = renderTrainingCycleLifecycleEmail({

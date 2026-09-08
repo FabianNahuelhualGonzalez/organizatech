@@ -62,6 +62,10 @@ const CYCLE_ACTIVE_REPLACEMENT_DESCRIPTORS_MIGRATION_PATH =
   "supabase/migrations/20260901002250_cycle_active_replacement_exercise_descriptors.sql";
 const CYCLE_LEGACY_COMPATIBILITY_MIGRATION_PATH =
   "supabase/migrations/20260905201420_cycle_legacy_compatibility_expiry_youtube.sql";
+const TRAINING_RESOURCE_BOUNDS_MIGRATION_PATH =
+  "supabase/migrations/20260902163716_sec_training_rpc_resource_bounds.sql";
+const TRAINING_INTEGER_CAST_FIX_MIGRATION_PATH =
+  "supabase/migrations/20260902183335_sec_training_integer_cast_fix.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -559,6 +563,8 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== CYCLE_ACTIVE_REPLACEMENT_SNAPSHOT_MIGRATION_PATH
         && path !== CYCLE_ACTIVE_REPLACEMENT_DESCRIPTORS_MIGRATION_PATH
         && path !== CYCLE_LEGACY_COMPATIBILITY_MIGRATION_PATH
+        && path !== TRAINING_RESOURCE_BOUNDS_MIGRATION_PATH
+        && path !== TRAINING_INTEGER_CAST_FIX_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
@@ -822,8 +828,8 @@ const mutations = [
     expectedFailure: FAILURE.logoutRetainsState,
     apply: (value: string) => replaceExactlyOnce(
       value,
-      "  ) {\n    replaceUserPortalAuthorizationProof(null);\n    replaceCoachPortalSession(null);\n    if (\n",
-      "  ) {\n    replaceUserPortalAuthorizationProof(null);\n    void coachPortalSessionRef.current;\n    if (\n",
+      "  ) {\n    replaceUserPortalAuthorizationProof(null);\n    replaceCoachPortalSession(null);\n    const hasExactDurableStoragePurge = options.purgeDurableStorage === true\n",
+      "  ) {\n    replaceUserPortalAuthorizationProof(null);\n    void coachPortalSessionRef.current;\n    const hasExactDurableStoragePurge = options.purgeDurableStorage === true\n",
       "M16",
     ),
   },

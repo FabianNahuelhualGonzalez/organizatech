@@ -20,6 +20,7 @@ const manifest = readSource("public/manifest.json");
 const landingStyles = readSource("src/app/page.module.css");
 const qaCyclesClient = readSource("src/app/qa/training-cycles/training-cycles-qa-client.tsx");
 const authScreen = readSource("src/features/auth/components/auth-screen.tsx");
+const authStyles = readSource("src/features/auth/components/auth-screen.module.css");
 
 assert.match(globals, /:root\s*\{[\s\S]*?--background:\s*#07101A;/);
 assert.match(globals, /html\s*\{[\s\S]*?background:\s*var\(--background\);/);
@@ -105,13 +106,20 @@ assert.match(qaCyclesClient, /background:\s*"var\(--background\)"/);
 assert.match(authScreen, /function AuthFrame\([\s\S]*?className=\{styles\.shell\}/);
 for (const authState of [
   "AuthScreen",
-  "AuthLoadingScreen",
   "PasswordRecoveryScreen",
   "RecoveryExpiredScreen",
   "NewPasswordScreen",
 ]) {
   assert.match(authScreen, new RegExp(`(?:export )?function ${authState}\\([\\s\\S]*?<AuthFrame`));
 }
+assert.match(
+  authScreen,
+  /function AuthLoadingScreen\([\s\S]*?className=\{styles\.loadingSplash\}/,
+);
+assert.match(
+  authStyles,
+  /\.loadingSplash\s*\{[\s\S]*?background-color:\s*var\(--background\);/,
+);
 
 // La normalización no sustituye superficies elevadas ni colores semánticos.
 assert.match(globals, /--panel:\s*#101b27;/);

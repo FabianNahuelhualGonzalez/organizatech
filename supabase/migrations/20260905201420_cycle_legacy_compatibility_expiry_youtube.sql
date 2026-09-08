@@ -9,6 +9,103 @@ begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '120s';
 
+-- The short pre-dispatch transaction is the send authorization point.
+-- An extension winning the portal lock first cancels the stale email. An email
+-- authorized first may already be in flight; no database lock spans provider I/O.
+alter table private.training_cycle_notification_deliveries
+  add column dispatch_attempt_token uuid;
+
+create function public.authorize_training_cycle_lifecycle_delivery(
+  p_capability text,
+  p_delivery_id uuid,
+  p_attempt_token uuid
+)
+returns boolean
+language plpgsql
+volatile
+security definer
+set search_path = ''
+set lock_timeout = '2s'
+set statement_timeout = '5s'
+as $function$
+declare
+  v_delivery private.training_cycle_notification_deliveries;
+  v_notification public.training_cycle_notifications;
+  v_cycle public.training_cycles;
+begin
+  if auth.uid() is not null
+    or not private.verify_training_cycle_lifecycle_capability(p_capability)
+  then
+    raise exception 'training cycle dispatch unauthorized' using errcode = '42501';
+  end if;
+  if p_delivery_id is null or p_attempt_token is null then
+    raise exception 'invalid training cycle dispatch payload' using errcode = '22023';
+  end if;
+
+  select delivery.* into v_delivery
+  from private.training_cycle_notification_deliveries as delivery
+  where delivery.id = p_delivery_id;
+  if not found then return false; end if;
+  perform private.lock_training_cycle_portal(v_delivery.user_id, v_delivery.portal_scope);
+  select delivery.* into strict v_delivery
+  from private.training_cycle_notification_deliveries as delivery
+  where delivery.id = p_delivery_id
+  for update;
+
+  if v_delivery.status <> 'sending'
+    or v_delivery.attempt_token is distinct from p_attempt_token
+    or v_delivery.dispatch_attempt_token = p_attempt_token
+  then
+    return false;
+  end if;
+
+  select notification.* into v_notification
+  from public.training_cycle_notifications as notification
+  where notification.id = v_delivery.notification_id
+    and notification.user_id = v_delivery.user_id
+    and notification.portal_scope = v_delivery.portal_scope
+    and notification.cycle_id = v_delivery.cycle_id
+  for update;
+  select cycle.* into v_cycle
+  from public.training_cycles as cycle
+  where cycle.id = v_delivery.cycle_id
+    and cycle.user_id = v_delivery.user_id
+    and cycle.portal_scope = v_delivery.portal_scope;
+
+  if v_notification.id is null
+    or v_notification.superseded_at is not null
+    or v_cycle.id is null
+    or v_cycle.deleted_at is not null
+    or v_cycle.current_plan_version_id is null
+    or v_cycle.planned_end_date is distinct from v_notification.end_date_snapshot
+    or v_delivery.claimed_at < pg_catalog.clock_timestamp() - interval '15 minutes'
+    or (v_notification.event_kind <> 'closed_t1' and v_cycle.status <> 'active')
+    or (v_notification.event_kind = 'closed_t1' and v_cycle.status <> 'completed')
+  then
+    update private.training_cycle_notification_deliveries
+    set status = 'rejected', attempt_token = null,
+      provider_error_code = 'notification_superseded',
+      updated_at = pg_catalog.clock_timestamp()
+    where id = p_delivery_id;
+    return false;
+  end if;
+
+  -- Only one worker can obtain authorization for this attempt. A lost response
+  -- must not be retried into a duplicate send; existing lease reconciliation
+  -- makes an uncertain attempt terminally ambiguous.
+  update private.training_cycle_notification_deliveries
+  set dispatch_attempt_token = p_attempt_token,
+    updated_at = pg_catalog.clock_timestamp()
+  where id = p_delivery_id;
+  return true;
+end;
+$function$;
+
+revoke all on function public.authorize_training_cycle_lifecycle_delivery(text, uuid, uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.authorize_training_cycle_lifecycle_delivery(text, uuid, uuid)
+  to anon;
+
 create function private.canonical_training_youtube_url(p_value text)
 returns text
 language plpgsql
@@ -664,6 +761,21 @@ begin
   if pg_catalog.to_regprocedure(
     'public.adapt_own_active_legacy_training_cycle(uuid,text,uuid)'
   ) is null
+    or not pg_catalog.has_function_privilege(
+      'anon',
+      'public.authorize_training_cycle_lifecycle_delivery(text,uuid,uuid)',
+      'EXECUTE'
+    )
+    or pg_catalog.has_function_privilege(
+      'authenticated',
+      'public.authorize_training_cycle_lifecycle_delivery(text,uuid,uuid)',
+      'EXECUTE'
+    )
+    or pg_catalog.has_function_privilege(
+      'service_role',
+      'public.authorize_training_cycle_lifecycle_delivery(text,uuid,uuid)',
+      'EXECUTE'
+    )
     or not pg_catalog.has_function_privilege(
       'authenticated',
       'public.adapt_own_active_legacy_training_cycle(uuid,text,uuid)',

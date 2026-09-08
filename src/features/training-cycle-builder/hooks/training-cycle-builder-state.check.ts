@@ -34,6 +34,24 @@ function reduce(
   return actions.reduce(trainingCycleBuilderReducer, state);
 }
 
+test("un cambio confirmado con sync pendiente bloquea nuevos gestos hasta recargar", () => {
+  const failures: TrainingCycleBuilderAction[] = [
+    { type: "activation_failed", message: "Cambio guardado", committed: true },
+    { type: "extension_failed", message: "Cambio guardado", committed: true },
+    { type: "active_edit_failed", message: "Cambio guardado", committed: true, conflict: true },
+  ];
+  for (const failure of failures) {
+    const pending = reduce(createState(), failure);
+    assert.equal(pending.committedSyncPending, true);
+    for (const gesture of [
+      { type: "activation_started" }, { type: "extension_started" }, { type: "active_edit_started" },
+      { type: "open_extend" }, { type: "open_discard" }, { type: "navigate", screen: "setup" },
+    ] as TrainingCycleBuilderAction[]) {
+      assert.equal(reduce(pending, gesture), pending);
+    }
+  }
+});
+
 test("el payload de guardado usa una allowlist explícita y no expone ownership", () => {
   const input = buildTrainingCycleSaveDraftInput(createState().draft, "duplicate");
   assert.deepEqual(Object.keys(input).sort(), ["days", "draftId", "endDate", "goal", "origin", "startDate"]);
@@ -436,6 +454,27 @@ test("las recomendaciones se pueden aceptar, modificar e ignorar sin aplicar sol
 
   state = reduce(state, { type: "ignore_recommendation" });
   assert.equal(state.draft.routines.monday.exercises[0].recommendationDecision, "ignored");
+});
+
+test("el video del catálogo llega al payload y borrarlo no lo restaura", () => {
+  const recommendation = createState().draft.routines.monday.exercises[0].recommendation;
+  let state = reduce(createState(), {
+    type: "add_catalog_exercise",
+    source: { kind: "catalog", id: "video-catalog" },
+    name: "Remo con video",
+    muscleGroup: "Dorsal",
+    videoUrl: "https://youtu.be/AbCdEfGhI_1?si=tracking",
+    recommendation,
+  });
+  const added = state.draft.routines.monday.exercises.find((exercise) => exercise.source.id === "video-catalog");
+  assert.ok(added);
+  const canonical = "https://www.youtube.com/watch?v=AbCdEfGhI_1";
+  assert.equal(added.videoUrl, canonical);
+  assert.equal(buildTrainingCycleSaveDraftInput(state.draft, "manual").days[0].exercises
+    .find((exercise) => exercise.source.id === "video-catalog")?.videoUrl, canonical);
+  state = reduce(state, { type: "open_exercise", exerciseId: added.id }, { type: "set_video_url", value: "" });
+  assert.equal(buildTrainingCycleSaveDraftInput(state.draft, "manual").days[0].exercises
+    .find((exercise) => exercise.source.id === "video-catalog")?.videoUrl, null);
 });
 
 test("catálogo, personalizado y copia de día mantienen el estado dentro de la feature", () => {

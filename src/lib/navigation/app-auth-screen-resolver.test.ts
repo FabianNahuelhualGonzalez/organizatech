@@ -28,7 +28,7 @@ assert.equal(resolveInitialAuthScreen("expired", "registro"), "recovery-expired"
 // CASO — mensaje de estado inicial por cada estado de ruta (paridad literal, incluye tildes).
 assert.equal(resolveInitialAuthStatusMessage("expired"), "El enlace de recuperación expiró o ya fue utilizado.");
 assert.equal(resolveInitialAuthStatusMessage("active"), "Crea una nueva contraseña para continuar.");
-assert.equal(resolveInitialAuthStatusMessage("none"), "Validando sesión...");
+assert.equal(resolveInitialAuthStatusMessage("none"), "");
 
 // CASO — una intención active permanece bajo loading hasta que Supabase confirme la sesión.
 assert.equal(resolveInitialAuthLoading("none"), true);

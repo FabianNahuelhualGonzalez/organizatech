@@ -13,6 +13,7 @@ import {
   type PasswordRecoveryPortalGuard,
   type PasswordRecoveryPortalMountPermit,
 } from "@/features/auth/model/password-recovery-portal-guard";
+import { signOutPasswordRecoveryIdentityLocally } from "@/lib/auth/password-recovery-session";
 import {
   COACH_REGISTRATION_REQUIRED_MESSAGE,
   MULTIPORTAL_AUTH_ERROR_MESSAGE,
@@ -38,7 +39,14 @@ import {
   type PortalResolutionOwner,
   type UserRegistrationOwner,
 } from "@/features/auth/model/portal-resolution-owner";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import {
+  getActiveSupabaseAuthIdentityScope,
+  getSupabaseBrowserClient,
+  isSupabaseConfigured,
+  signOutSupabaseAuthIdentityLocallyIfCurrent,
+} from "@/lib/supabase/client";
+import { SupabasePrincipalIdentityCoordinationUnavailableError } from "@/lib/supabase/auth-identity-operation";
+import type { SupabaseAuthRefreshIdentityScope } from "@/lib/supabase/auth-resilience";
 import type { SupabaseSessionState } from "@/lib/supabase/session";
 
 export type PortalSessionEventDecision =
@@ -181,12 +189,28 @@ export function useMultiportalAuthBoundary(input: {
     return passwordRecoveryPortalGuardRef.current!.isBlocked();
   }
 
-  function signOutPasswordRecoveryLocally() {
+  function signOutPasswordRecoveryLocally(
+    expectedIdentityScope: SupabaseAuthRefreshIdentityScope | null,
+  ) {
     return passwordRecoveryPortalGuardRef.current!.runLocalSignOut(async () => {
       const supabase = getSupabaseBrowserClient();
-      if (!supabase) return { error: null };
-      const { error } = await supabase.auth.signOut({ scope: "local" });
-      return { error };
+      if (!supabase) {
+        return {
+          error: isSupabaseConfigured()
+            ? new SupabasePrincipalIdentityCoordinationUnavailableError()
+            : null,
+        };
+      }
+      return signOutPasswordRecoveryIdentityLocally({
+        expectedIdentityScope,
+        getCurrentIdentityScope: getActiveSupabaseAuthIdentityScope,
+        auth: {
+          getSession: () => supabase.auth.getSession(),
+          signOut: (_options, identityScope) => (
+            signOutSupabaseAuthIdentityLocallyIfCurrent(supabase.auth, identityScope)
+          ),
+        },
+      });
     });
   }
 

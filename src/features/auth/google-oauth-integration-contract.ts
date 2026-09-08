@@ -128,10 +128,10 @@ function hasFinalPrincipalTransferGuard(source: string) {
 
 test("transfer revalida principal como último await antes de setSession y mata mutantes", () => {
   assert.equal(hasFinalPrincipalTransferGuard(gateway), true);
-  const finalRead = "      const principalUserId = await readPrincipalUserId(principal, guard);\n";
+  const finalRead = "        const principalUserId = await readPrincipalUserId(principal, guard);\n";
   const finalReadIndex = gateway.lastIndexOf(finalRead);
   assert.ok(finalReadIndex >= 0);
-  const withoutFinalRead = `${gateway.slice(0, finalReadIndex)}      const principalUserId = null;\n${gateway.slice(finalReadIndex + finalRead.length)}`;
+  const withoutFinalRead = `${gateway.slice(0, finalReadIndex)}        const principalUserId = null;\n${gateway.slice(finalReadIndex + finalRead.length)}`;
   const movedFinalRead = `${gateway.slice(0, finalReadIndex)}${gateway.slice(finalReadIndex + finalRead.length)}`.replace(
     "      await assertTransientIdentity(transient, userId, guard);\n      const sessionResult = await transient.auth.getSession();",
     "      const principalUserId = await readPrincipalUserId(principal, guard);\n      await assertTransientIdentity(transient, userId, guard);\n      const sessionResult = await transient.auth.getSession();",

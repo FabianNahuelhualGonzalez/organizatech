@@ -248,9 +248,8 @@ export function projectTrainingCycleRpcPlan(input: {
           name,
           muscleGroup: rpcMuscleToUi(muscleGroup),
           technique: exercise.technique,
-          videoUrl: snapshotExercise
-            ? (exercise.videoUrl ?? "")
-            : (catalogItem?.videoUrl ?? ""),
+          // A persisted null is an intentional absence, not a catalog default.
+          videoUrl: exercise.videoUrl ?? "",
           sets,
           recommendation: buildRecommendation({
             exerciseId,
@@ -341,6 +340,7 @@ function buildCatalog(
     source: item.source,
     name: item.name,
     muscleGroup: rpcMuscleToUi(item.muscleGroup),
+    videoUrl: item.videoUrl ?? "",
     sources: [
       ...(previousSources.has(sourceKey(item.source)) ? ["previous" as const] : []),
       ...(recentSources.has(sourceKey(item.source)) ? ["recent" as const] : []),

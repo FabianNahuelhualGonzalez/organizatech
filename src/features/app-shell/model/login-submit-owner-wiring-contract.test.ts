@@ -198,7 +198,7 @@ for (const mutation of [
         "      loginSubmitOwner = loginSubmitOwnerController.acquire();\n      if (!loginSubmitOwner) return;",
         "      loginSubmitOwner = null;",
       ),
-      "      const settlement = await loginSubmitOwnerController!.settle(\n        loginSubmitOwner!,\n        supabase.auth.signInWithPassword({ email, password }),\n      );",
+      "      const settlement = await loginSubmitOwnerController!.settle(\n        loginSubmitOwner!,\n        runSupabasePrincipalIdentityOperation(() => (\n          supabase.auth.signInWithPassword({ email, password })\n        )),\n      );",
       "      const lateRequest = supabase.auth.signInWithPassword({ email, password });\n      loginSubmitOwner = loginSubmitOwnerController.acquire();\n      if (!loginSubmitOwner) return;\n      const settlement = await loginSubmitOwnerController.settle(loginSubmitOwner, lateRequest);",
     ),
   },

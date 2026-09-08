@@ -380,7 +380,7 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   const logout = extractBetween(sources.app, "async function handleLogout", "function openRoutineDay");
   assert.doesNotMatch(logout, /clearBrowserStorageScope|clearPasswordRecoveryFlow/);
   assertMarkersInOrder(logout, [
-    'await supabase.auth.signOut({ scope: "local" })',
+    'supabase.auth.signOut({ scope: "local" })',
     "if (error) throw error;",
     "clearUserSessionState",
   ], "signOut antes de cleanup");
@@ -391,10 +391,10 @@ function assertP341StaticContracts(sources: P341ContractSources) {
   );
   assert.match(
     passwordUpdate,
-    /signOut: \(\) => multiportalAuth\.signOutPasswordRecoveryLocally\(\)/,
+    /signOut: \(_options, identityScope\) => \([\s\S]*?signOutSupabaseAuthIdentityLocallyIfCurrent\(supabase\.auth, identityScope\)/,
   );
   assert.match(passwordUpdate, /result\.kind === "sign-out-error"/);
-  assert.doesNotMatch(passwordUpdate, /supabase\.auth\.signOut\(\)/);
+  assert.doesNotMatch(passwordUpdate, /supabase\.auth\.signOut\(/);
   assert.doesNotMatch(passwordUpdate, /setStatusMessage\("Contrase\\u00f1a actualizada/);
 
   const refresh = extractBetween(
@@ -517,8 +517,14 @@ function assertP341StaticContracts(sources: P341ContractSources) {
     'access.state === "user_registration_required"',
     'access.state === "coach_registration_required"',
     'access.state === "error"',
+    "shouldPreserveUserPortalAfterRetryableRevalidation",
     "multiportalAuth.settlePortalSignOutMessage(access.message)",
     'if (rejectionMessage) setAuthStatus(rejectionMessage, "error")',
+  ], "rechazo multiportal preserva sólo una sesión Usuario ya autorizada y reintentable");
+  const authorizedPortalContinuation = portalAuthorizationContinuation.slice(
+    portalAuthorizationContinuation.lastIndexOf("    applySessionState(authState);"),
+  );
+  assertMarkersInOrder(authorizedPortalContinuation, [
     "applySessionState(authState)",
     "await continueAuthorizedPortalAccess(",
     "() => multiportalAuth.isPortalResolutionCurrent(resolutionOwner)",
@@ -2163,16 +2169,16 @@ async function run() {
       name: "limpiar storage antes de signOut",
       target: "app",
       mutate: (source) => source.replace(
-        "      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut({ scope: \"local\" });",
-        "      clearBrowserStorageScope(currentStorageScope);\n      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const { error } = await supabase.auth.signOut({ scope: \"local\" });",
+        "      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const signOutResult = await runSupabasePrincipalIdentityOperation(async () => {",
+        "      clearBrowserStorageScope(currentStorageScope);\n      const supabase = getSupabaseBrowserClient();\n      if (supabase) {\n        const signOutResult = await runSupabasePrincipalIdentityOperation(async () => {",
       ),
     },
     {
       name: "ignorar error de signOut",
       target: "app",
       mutate: (source) => source.replace(
-        "        const { error } = await supabase.auth.signOut({ scope: \"local\" });\n        if (error) throw error;",
-        "        await supabase.auth.signOut({ scope: \"local\" });",
+        "          const { error } = await supabase.auth.signOut({ scope: \"local\" });\n          if (error) throw error;",
+        "          await supabase.auth.signOut({ scope: \"local\" });",
       ),
     },
     {

@@ -3,16 +3,20 @@ import { PublicError } from "@/lib/errors/public-error";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ExerciseEntry, TrainingDayCode, TrainingSession, TrainingSessionStatus } from "@/lib/progress/types";
 import {
-  createCycleScopedRetiredExerciseNotes,
   getCycleScopedExerciseDisplayNotes,
   isCycleScopedExerciseRetired,
   normalizeCycleScopedExerciseName,
 } from "@/lib/training/cycle-scoped-plan-edit";
 import {
-  createExerciseLineageInsertPayload,
   resolveExerciseLineageIdForReplacement,
   resolveExerciseLineageIdForSessionEntry,
 } from "@/lib/training/training-exercise-lineage";
+import {
+  MAX_TRAINING_EXERCISES_PER_DAY,
+  MAX_TRAINING_SERIES_PER_EXERCISE,
+  exceedsTrainingExerciseLimit,
+  exceedsTrainingSeriesLimit,
+} from "@/lib/training/training-resource-bounds";
 
 const TRAINING_DAY_CODES = new Set<TrainingDayCode>([
   "monday",
@@ -273,7 +277,7 @@ export async function createTrainingSessionWithCycleEntries(
     p_status: input.status,
     p_week_number: input.weekNumber,
     p_notes: input.notes ?? null,
-    p_entries: input.entries.map((entry) => {
+    p_entries: input.status === "completed" ? input.entries.map((entry) => {
       const observation = toPersistedExerciseObservation(entry.observation);
       return {
         id: entry.id,
@@ -287,7 +291,7 @@ export async function createTrainingSessionWithCycleEntries(
         notes: entry.notes ?? "",
         ...(observation ? { observation } : {}),
       };
-    }),
+    }) : [],
   });
 
   if (error) throw mapCycleScopedRepositoryError(error);
@@ -623,120 +627,86 @@ export async function addCycleScopedTrainingDaysAndExercises(
     existingKeys.add(key);
   }
 
-  const updatedExercises: Array<{ id: string }> = [];
-  if (updates.length > 0) {
-    for (const update of updates) {
-      await assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId ?? userId);
-      const { data, error } = await supabase
-        .from("training_cycle_exercises")
-        .update({
-          name: update.name.trim(),
-          target_sets: Math.max(1, update.targetSets),
-          target_reps: Math.max(1, update.targetReps),
-          base_weight: Math.max(0, update.baseWeight),
-          side_weight: update.sideWeight ?? null,
-          sort_order: Math.max(0, update.sortOrder),
-          notes: update.notes ?? null,
-        })
-        .eq("id", update.exerciseId)
-        .eq("user_id", userId)
-        .eq("cycle_id", input.cycleId)
-        .eq("day_id", update.dayId)
-        .is("deleted_at", null)
-        .select("id");
-
-      if (error) throw mapCycleScopedRepositoryError(error);
-      if ((data ?? []).length !== 1) {
-        throw new CycleScopedTrainingRepositoryError(
-          "unexpected",
-          "No pudimos confirmar la actualizacion de un ejercicio.",
-        );
-      }
-      updatedExercises.push(data[0]);
-    }
+  const changesByDayId = new Map<string, {
+    insertions: typeof uniqueAdditions;
+    retireExerciseIds: string[];
+    updates: typeof updates;
+  }>();
+  for (const dayId of dayIds) {
+    changesByDayId.set(dayId, { insertions: [], retireExerciseIds: [], updates: [] });
+  }
+  for (const addition of uniqueAdditions) {
+    changesByDayId.get(addition.dayId)?.insertions.push(addition);
+  }
+  for (const update of updates) {
+    changesByDayId.get(update.dayId)?.updates.push(update);
+  }
+  for (const exerciseId of retiredIds) {
+    const current = existingById.get(exerciseId);
+    if (current) changesByDayId.get(current.day_id)?.retireExerciseIds.push(exerciseId);
   }
 
-  let insertedExercises: Array<{ id: string }> = [];
-  if (uniqueAdditions.length > 0) {
-    const additionsWithLineage = [];
-    for (const addition of uniqueAdditions) {
-      additionsWithLineage.push({
-        ...addition,
-        exerciseLineageId: addition.exerciseLineageId ??
-          await createTrainingExerciseLineage(
-            supabase,
-            userId,
-            null,
-            expectedUserId ?? userId,
-          ),
-      });
+  let exercisesAdded = 0;
+  let exercisesUpdated = 0;
+  let exercisesRetired = 0;
+  for (const [dayId, changes] of changesByDayId) {
+    if (
+      changes.insertions.length === 0
+      && changes.updates.length === 0
+      && changes.retireExerciseIds.length === 0
+    ) {
+      continue;
     }
 
     await assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId ?? userId);
-    const { data, error } = await supabase
-      .from("training_cycle_exercises")
-      .insert(additionsWithLineage.map((addition) => ({
-        user_id: userId,
-        cycle_id: input.cycleId,
-        day_id: addition.dayId,
+    const { data, error } = await supabase.rpc("apply_training_cycle_day_exercise_changes", {
+      p_cycle_id: input.cycleId,
+      p_day_id: dayId,
+      p_insertions: changes.insertions.map((addition) => ({
         name: addition.name.trim(),
-        target_sets: Math.max(1, addition.targetSets),
-        target_reps: Math.max(1, addition.targetReps),
-        base_weight: Math.max(0, addition.baseWeight),
+        target_sets: addition.targetSets,
+        target_reps: addition.targetReps,
+        base_weight: addition.baseWeight,
         side_weight: addition.sideWeight ?? null,
-        sort_order: Math.max(0, addition.sortOrder),
+        sort_order: addition.sortOrder,
         notes: addition.notes ?? null,
-        source_legacy_exercise_id: null,
-        exercise_lineage_id: addition.exerciseLineageId,
-      })))
-      .select("id");
+        exercise_lineage_id: addition.exerciseLineageId ?? null,
+      })),
+      p_retire_exercise_ids: changes.retireExerciseIds,
+      p_updates: changes.updates.map((update) => ({
+        id: update.exerciseId,
+        name: update.name.trim(),
+        target_sets: update.targetSets,
+        target_reps: update.targetReps,
+        base_weight: update.baseWeight,
+        side_weight: update.sideWeight ?? null,
+        sort_order: update.sortOrder,
+        notes: update.notes ?? null,
+      })),
+    });
 
     if (error) throw mapCycleScopedRepositoryError(error);
-    insertedExercises = data ?? [];
-    if (insertedExercises.length !== uniqueAdditions.length) {
+    const counts = readTrainingCycleDayExerciseChangeCounts(data);
+    if (
+      counts.exercisesAdded !== changes.insertions.length
+      || counts.exercisesUpdated !== changes.updates.length
+      || counts.exercisesRetired !== changes.retireExerciseIds.length
+    ) {
       throw new CycleScopedTrainingRepositoryError(
         "unexpected",
-        "No pudimos confirmar todos los ejercicios agregados.",
+        "No pudimos confirmar todos los cambios del dia.",
       );
     }
-  }
-
-  const retiredAt = new Date().toISOString();
-  const retiredExercises: Array<{ id: string }> = [];
-  if (retiredIds.length > 0) {
-    for (const exerciseId of retiredIds) {
-      const current = existingById.get(exerciseId);
-      if (!current) continue;
-      const hasEntries = registeredExerciseIds.has(exerciseId);
-      const updatePayload = hasEntries
-        ? { notes: createCycleScopedRetiredExerciseNotes(current.notes ?? null, retiredAt) }
-        : { deleted_at: retiredAt };
-      await assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId ?? userId);
-      const { data, error } = await supabase
-        .from("training_cycle_exercises")
-        .update(updatePayload)
-        .eq("id", exerciseId)
-        .eq("user_id", userId)
-        .eq("cycle_id", input.cycleId)
-        .is("deleted_at", null)
-        .select("id");
-
-      if (error) throw mapCycleScopedRepositoryError(error);
-      if ((data ?? []).length !== 1) {
-        throw new CycleScopedTrainingRepositoryError(
-          "unexpected",
-          "No pudimos confirmar el retiro de un ejercicio.",
-        );
-      }
-      retiredExercises.push(data[0]);
-    }
+    exercisesAdded += counts.exercisesAdded;
+    exercisesUpdated += counts.exercisesUpdated;
+    exercisesRetired += counts.exercisesRetired;
   }
 
   return {
     daysAdded: insertedDays.length,
-    exercisesAdded: insertedExercises.length,
-    exercisesUpdated: updatedExercises.length,
-    exercisesRetired: retiredExercises.length,
+    exercisesAdded,
+    exercisesUpdated,
+    exercisesRetired,
   };
 }
 
@@ -1016,47 +986,37 @@ function assertExpectedCycleScopedRequestCurrent(
   }
 }
 
-async function createTrainingExerciseLineage(
-  supabase: ReturnType<typeof getSupabaseBrowserClient>,
-  userId: string,
-  sourceLegacyExerciseId: string | null,
-  expectedUserId: string,
-) {
-  if (!supabase) {
-    throw new CycleScopedTrainingRepositoryError(
-      "session_required",
-      "Debes iniciar sesion para gestionar el plan del ciclo.",
-    );
-  }
-
-  if (sourceLegacyExerciseId) {
-    const { data: existing, error: existingError } = await supabase
-      .from("training_exercise_lineages")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("source_legacy_exercise_id", sourceLegacyExerciseId)
-      .maybeSingle();
-
-    if (existingError) throw mapCycleScopedRepositoryError(existingError);
-    if (existing?.id) return existing.id as string;
-  }
-
-  await assertExpectedCycleScopedRepositoryUser(supabase, expectedUserId);
-  const { data, error } = await supabase
-    .from("training_exercise_lineages")
-    .insert(createExerciseLineageInsertPayload({ userId, sourceLegacyExerciseId }))
-    .select("id")
-    .single();
-
-  if (error) throw mapCycleScopedRepositoryError(error);
-  if (!data?.id) {
+function readTrainingCycleDayExerciseChangeCounts(value: unknown) {
+  const counts = value as Partial<Record<
+    "exercises_added" | "exercises_retired" | "exercises_updated",
+    unknown
+  >> | null;
+  if (!counts || typeof counts !== "object") {
     throw new CycleScopedTrainingRepositoryError(
       "unexpected",
-      "No pudimos confirmar la identidad historica del ejercicio.",
+      "No pudimos confirmar los cambios del dia.",
     );
   }
 
-  return data.id as string;
+  const exercisesAdded = counts.exercises_added;
+  const exercisesRetired = counts.exercises_retired;
+  const exercisesUpdated = counts.exercises_updated;
+  if (
+    !Number.isSafeInteger(exercisesAdded)
+    || !Number.isSafeInteger(exercisesRetired)
+    || !Number.isSafeInteger(exercisesUpdated)
+  ) {
+    throw new CycleScopedTrainingRepositoryError(
+      "unexpected",
+      "No pudimos confirmar los cambios del dia.",
+    );
+  }
+
+  return {
+    exercisesAdded: exercisesAdded as number,
+    exercisesRetired: exercisesRetired as number,
+    exercisesUpdated: exercisesUpdated as number,
+  };
 }
 
 function validatePlanInput(input: CycleScopedTrainingCycleInput) {
@@ -1085,6 +1045,24 @@ function validatePlanInput(input: CycleScopedTrainingCycleInput) {
       "Configura al menos un dia y un ejercicio antes de crear el ciclo.",
     );
   }
+
+  for (const routine of input.plan.routines) {
+    for (const day of routine.days) {
+      if (exceedsTrainingExerciseLimit(day.exercises.length)) {
+        throw new CycleScopedTrainingRepositoryError(
+          "invalid_plan",
+          `Cada dia admite hasta ${MAX_TRAINING_EXERCISES_PER_DAY} ejercicios.`,
+        );
+      }
+
+      if (day.exercises.some((exercise) => exceedsTrainingSeriesLimit(exercise.targetSets))) {
+        throw new CycleScopedTrainingRepositoryError(
+          "invalid_plan",
+          `Cada ejercicio admite hasta ${MAX_TRAINING_SERIES_PER_EXERCISE} series.`,
+        );
+      }
+    }
+  }
 }
 
 function validateTrainingSessionInput(input: CycleScopedTrainingSessionInput) {
@@ -1102,7 +1080,14 @@ function validateTrainingSessionInput(input: CycleScopedTrainingSessionInput) {
     );
   }
 
-  for (const entry of input.entries) {
+  if (input.status === "completed" && exceedsTrainingExerciseLimit(input.entries.length)) {
+    throw new CycleScopedTrainingRepositoryError(
+      "invalid_plan",
+      `Cada entrenamiento admite hasta ${MAX_TRAINING_EXERCISES_PER_DAY} ejercicios.`,
+    );
+  }
+
+  for (const entry of input.status === "completed" ? input.entries : []) {
     if (!entry.trainingCycleExerciseId) {
       throw new CycleScopedTrainingRepositoryError(
         "invalid_plan",
@@ -1114,6 +1099,14 @@ function validateTrainingSessionInput(input: CycleScopedTrainingSessionInput) {
       throw new CycleScopedTrainingRepositoryError(
         "invalid_plan",
         "Cada ejercicio requiere al menos una serie registrada.",
+      );
+    }
+
+
+    if (exceedsTrainingSeriesLimit(entry.reps.length)) {
+      throw new CycleScopedTrainingRepositoryError(
+        "invalid_plan",
+        `Cada ejercicio admite hasta ${MAX_TRAINING_SERIES_PER_EXERCISE} series.`,
       );
     }
   }
@@ -1320,7 +1313,7 @@ function mapCycleScopedRepositoryError(error: unknown) {
     );
   }
 
-  if (code === "P0001") {
+  if (code === "P0001" || code === "22023" || code === "54000") {
     return new CycleScopedTrainingRepositoryError(
       "invalid_plan",
       "No pudimos validar el plan de entrenamiento. Revisa los datos e intenta nuevamente.",

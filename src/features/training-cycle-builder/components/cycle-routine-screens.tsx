@@ -250,6 +250,7 @@ export function CycleCatalogScreen({
                   source: exercise.source,
                   name: exercise.name,
                   muscleGroup: exercise.muscleGroup,
+                  videoUrl: exercise.videoUrl,
                   recommendation: exercise.recommendation ?? {
                     hasHistory: false,
                     title: "Sin historial suficiente",

@@ -30,6 +30,7 @@ const recoverySource = readFileSync("src/lib/auth/password-recovery-session.ts",
 const storageSource = readFileSync("src/lib/storage/browser-storage.ts", "utf8");
 const authBoundarySource = readFileSync(H1_SOURCE_PATHS.boundary, "utf8");
 const portalGuardSource = readFileSync("src/features/auth/model/password-recovery-portal-guard.ts", "utf8");
+const supabaseClientSource = readFileSync("src/lib/supabase/client.ts", "utf8");
 
 function sourceSection(source: string, startMarker: string, endMarker: string): string {
   const start = source.indexOf(startMarker);
@@ -718,8 +719,12 @@ function renameLocalSignOutError(source: string): string {
   const original = source.slice(declaration.getStart(sourceFile), declaration.getEnd());
   const renamedBinding = replaceExactlyOnce(
     original,
-    "const { error } = await multiportalAuth.signOutPasswordRecoveryLocally();",
-    "const { error: recoveryCloseFailure } = await multiportalAuth.signOutPasswordRecoveryLocally();",
+    `const { error } = await multiportalAuth.signOutPasswordRecoveryLocally(
+      passwordRecoveryIdentityScopeRef.current,
+    );`,
+    `const { error: recoveryCloseFailure } = await multiportalAuth.signOutPasswordRecoveryLocally(
+      passwordRecoveryIdentityScopeRef.current,
+    );`,
     "H1.C03.binding",
   );
   const renamedCondition = replaceExactlyOnce(
@@ -1095,20 +1100,25 @@ assert.match(updateHandlerSource, /isTerminalOperationCurrent:[\s\S]*?sessionDat
 assert.match(updateHandlerSource, /releaseSessionOperationOwner\(/);
 assert.doesNotMatch(updateHandlerSource, /Symbol\(/);
 assert.match(updateHandlerSource, /executePasswordRecoveryUpdate\(\{/);
+assert.match(updateHandlerSource, /expectedIdentityScope,/);
+assert.match(updateHandlerSource, /getCurrentIdentityScope: getActiveSupabaseAuthIdentityScope/);
 assert.match(updateHandlerSource, /getSession: \(\) => supabase\.auth\.getSession\(\)/);
 assert.equal((appSource.match(/supabase\.auth\.updateUser\(/g) ?? []).length, 1);
 assert.match(updateHandlerSource, /updateUser: \(attributes\) => supabase\.auth\.updateUser\(attributes\)/);
-assert.match(updateHandlerSource, /signOut: \(\) => multiportalAuth\.signOutPasswordRecoveryLocally\(\)/);
+assert.match(updateHandlerSource, /signOut: \(_options, identityScope\) => \([\s\S]*?signOutSupabaseAuthIdentityLocallyIfCurrent\(supabase\.auth, identityScope\)/);
+assert.doesNotMatch(updateHandlerSource, /signOut: [\s\S]*?supabase\.auth\.signOut\(/);
 assert.match(updateHandlerSource, /result\.kind === "update-error"[\s\S]*?closePasswordRecoverySessionLocally\(/);
 
 const getSessionIndex = recoverySource.indexOf("await input.auth.getSession()");
 const updateUserIndex = recoverySource.indexOf("await input.auth.updateUser({ password: input.password })");
 assert.ok(getSessionIndex >= 0 && updateUserIndex > getSessionIndex, "getSession debe preceder al write allowlisted");
+assert.match(recoverySource, /runSupabasePrincipalIdentityOperation\(\(\) => executeLockedPasswordRecoveryUpdate\(input\)\)/);
 assert.match(recoverySource, /if \(sessionResult\.error \|\| !sessionResult\.data\.session\) return \{ kind: "invalid-recovery" \};/);
 assert.match(recoverySource, /if \(!input\.isOperationCurrent\(\)\) return \{ kind: "stale" \};/);
 assert.match(recoverySource, /const confirmedUserId = normalizePasswordRecoveryUserId\(input\.confirmedUserId\)/);
+assert.match(recoverySource, /isSameIdentityScope\(input\.expectedIdentityScope, input\.getCurrentIdentityScope\(\)\)/);
 assert.match(recoverySource, /normalizePasswordRecoveryUserId\(sessionResult\.data\.session\.user\.id\) !== confirmedUserId/);
-assert.match(recoverySource, /const signOutResult = await input\.auth\.signOut\(\{ scope: "local" \}\);\s*\n\s*if \(!input\.isTerminalOperationCurrent\(\)\)/);
+assert.match(recoverySource, /const closingSessionResult = await input\.auth\.getSession\(\);[\s\S]*?normalizePasswordRecoveryUserId\(closingSessionResult\.data\.session\?\.user\.id\) !== confirmedUserId[\s\S]*?const signOutResult = await input\.auth\.signOut\([\s\S]*?\{ scope: "local" \},[\s\S]*?input\.expectedIdentityScope,[\s\S]*?\);[\s\S]*?if \(signOutResult\.identityChanged\) return \{ kind: "stale" \};\s*\n\s*if \(!input\.isTerminalOperationCurrent\(\)\)/);
 assert.match(recoverySource, /if \(signOutResult\.error\) return \{ kind: "sign-out-error", error: signOutResult\.error \};/);
 assert.match(recoverySource, /input\.storedRecoveryStatus === "confirmed"\) return "invalid"/);
 assert.match(recoverySource, /confirmedRecoveryUserId === sessionUserId/);
@@ -1120,7 +1130,7 @@ assert.match(completionSource, /setNewPassword\(""\)[\s\S]*?setNewPasswordConfir
 assert.match(completionSource, /finalizePasswordRecoveryToLogin\([\s\S]*?"success"/);
 assert.match(
   recoveryFinalizationSource,
-  /const \{ error \} = await multiportalAuth\.signOutPasswordRecoveryLocally\(\);[\s\S]*?finalizePasswordRecoveryToLogin\(/,
+  /const \{ error \} = await multiportalAuth\.signOutPasswordRecoveryLocally\(\s*passwordRecoveryIdentityScopeRef\.current,?\s*\);[\s\S]*?finalizePasswordRecoveryToLogin\(/,
 );
 assert.match(
   recoveryFinalizationSource,
@@ -1139,7 +1149,15 @@ assert.match(storageSource, /status: "confirmed"/);
 assert.match(storageSource, /normalizePasswordRecoveryUserId\(value: unknown\)/);
 assert.doesNotMatch(recoveryStorageSource, /userId|accessToken|refreshToken|access_token|refresh_token|fingerprint/i);
 
-assert.match(authBoundarySource, /supabase\.auth\.signOut\(\{ scope: "local" \}\)/);
+assert.match(authBoundarySource, /signOutPasswordRecoveryIdentityLocally\(\{/);
+assert.match(authBoundarySource, /getCurrentIdentityScope: getActiveSupabaseAuthIdentityScope/);
+assert.match(authBoundarySource, /signOutSupabaseAuthIdentityLocallyIfCurrent\(supabase\.auth, identityScope\)/);
+assert.doesNotMatch(authBoundarySource, /signOutPasswordRecoveryIdentityLocally\([\s\S]*?supabase\.auth\.signOut\(/);
+assert.match(recoverySource, /input\.auth\.signOut\(\{ scope: "local" \}, expectedScope\)/);
+assert.match(supabaseClientSource, /interface SupabaseAuthAtomicSignOutInternals[\s\S]*?_acquireLock<[\s\S]*?_useSession<[\s\S]*?_signOut\(/);
+assert.match(supabaseClientSource, /lockAcquireTimeout === undefined[\s\S]*?typeof lockAcquireTimeout === "number" && Number\.isFinite\(lockAcquireTimeout\)[\s\S]*?!hasCompatibleLockAcquireTimeout[\s\S]*?typeof internals\._acquireLock !== "function"[\s\S]*?typeof internals\._useSession !== "function"[\s\S]*?typeof internals\._signOut !== "function"[\s\S]*?SupabaseAtomicIdentitySignOutUnavailableError/);
+assert.match(supabaseClientSource, /internals\._acquireLock\(lockAcquireTimeout, async \(\) => \{[\s\S]*?internals\._useSession![\s\S]*?session\.refresh_token !== lockedExpectedIdentity\.refreshToken[\s\S]*?internals\._signOut!\(\{ scope: "local" \}\)/);
+assert.doesNotMatch(supabaseClientSource, /signOutSupabaseAuthIdentityLocallyIfCurrent[\s\S]*?auth\.signOut\(/);
 assert.doesNotMatch(portalGuardSource, /localStorage|sessionStorage|console\.|access_token|refresh_token|email|userId/i);
 assert.match(appSource, /function beginPasswordRecoveryPortalSession[\s\S]*?authenticatedSessionCoordinatorRef\.current\.reset\(\)[\s\S]*?replaceCoachPortalSession\(null\)[\s\S]*?setSupabaseSession\(null\)[\s\S]*?setSupabaseUser\(null\)/);
 

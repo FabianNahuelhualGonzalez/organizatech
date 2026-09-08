@@ -81,11 +81,177 @@ values
   ('95000000-0000-4000-8000-000000000003', '91000000-0000-4000-8000-000000000003', '92000000-0000-4000-8000-000000000003', '94000000-0000-4000-8000-000000000003', 'Press', 4, 10, 80, 0),
   ('95000000-0000-4000-8000-000000000004', '91000000-0000-4000-8000-000000000002', '92000000-0000-4000-8000-000000000002', '94000000-0000-4000-8000-000000000004', 'Press', 4, 10, 80, 0);
 
+-- Each otherwise representable fixture has exactly one unsupported field.
+insert into auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_data)
+select ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  'authenticated', 'authenticated', 'legacy-preserve-' || n || '@example.test', '{}', '{}'
+from generate_series(11, 14) as n;
+insert into public.user_registrations (user_id)
+select ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid
+from generate_series(11, 14) as n;
+insert into public.training_cycles (
+  id, user_id, name, cycle_number, goal, started_at, status, plan_snapshot,
+  portal_scope, current_plan_version, duration_weeks, planned_start_date
+)
+select ('92000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  'Legacy preserved ' || n, 1, 'volume', '2026-09-01T12:00:00Z', 'active',
+  '{}', 'usuario', 0, 4, '2026-09-01'
+from generate_series(11, 14) as n;
+insert into public.training_cycle_routines (id, user_id, cycle_id, name, sort_order, notes)
+select ('93000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  ('92000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  'Empuje', 0, case when n = 12 then 'Indicaciones de rutina' end
+from generate_series(11, 14) as n;
+insert into public.training_cycle_days (
+  id, user_id, cycle_id, routine_id, week_index, day_code, sort_order, notes
+)
+select ('94000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  ('92000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  ('93000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  1, 'monday', 0, case when n = 13 then 'Indicaciones de día' end
+from generate_series(11, 14) as n;
+insert into public.training_cycle_exercises (
+  id, user_id, cycle_id, day_id, name, target_sets, target_reps,
+  base_weight, side_weight, sort_order, notes
+)
+select ('95000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  ('92000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  ('94000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
+  'Press', 4, 10, 20, case when n = 11 then 10 else 0 end, 0,
+  case when n = 14 then 'Indicaciones de ejercicio' end
+from generate_series(11, 14) as n;
+
 set local session_replication_role = origin;
 commit;
 
 begin;
-select extensions.plan(30);
+select extensions.plan(42);
+
+-- Both entry points must preserve all original rows and avoid partial writes.
+create temp view legacy_preservation_state as
+select n, jsonb_build_object(
+  'training_cycles', (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
+    from public.training_cycles as row
+    where row.user_id = ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid),
+  'training_cycle_routines', (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
+    from public.training_cycle_routines as row
+    where row.user_id = ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid),
+  'training_cycle_days', (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
+    from public.training_cycle_days as row
+    where row.user_id = ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid),
+  'training_cycle_exercises', (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
+    from public.training_cycle_exercises as row
+    where row.user_id = ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid),
+  'training_cycle_plan_versions', (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
+    from public.training_cycle_plan_versions as row
+    where row.user_id = ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid),
+  'training_exercise_lineages', (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
+    from public.training_exercise_lineages as row
+    where row.user_id = ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid),
+  'training_custom_exercises', (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
+    from public.training_custom_exercises as row
+    where row.user_id = ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid),
+  'training_cycle_drafts', (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
+    from public.training_cycle_drafts as row
+    where row.user_id = ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid),
+  'training_cycle_notifications', (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
+    from public.training_cycle_notifications as row
+    where row.user_id = ('91000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid)
+) as payload
+from generate_series(11, 14) as n;
+create temp table legacy_preservation_before as select * from legacy_preservation_state;
+
+set local role authenticated;
+
+select set_config('request.jwt.claim.sub', '91000000-0000-4000-8000-000000000011', true);
+select extensions.is(
+  public.adapt_own_active_legacy_training_cycle(
+    '96000000-0000-4000-8000-000000000011', 'usuario',
+    '92000000-0000-4000-8000-000000000011'
+  )->>'status',
+  'legacy_fallback',
+  'side weight retain the operational legacy fallback'
+);
+select extensions.throws_ok(
+  $$select public.replace_own_active_training_cycle_to_draft(
+    '97000000-0000-4000-8000-000000000011', 'usuario',
+    '92000000-0000-4000-8000-000000000011', '2026-10-01', '2026-10-28'
+  )$$,
+  '55000',
+  'legacy training cycle cannot be converted safely',
+  'side weight block replacement before any destructive write'
+);
+
+select set_config('request.jwt.claim.sub', '91000000-0000-4000-8000-000000000012', true);
+select extensions.is(
+  public.adapt_own_active_legacy_training_cycle(
+    '96000000-0000-4000-8000-000000000012', 'usuario',
+    '92000000-0000-4000-8000-000000000012'
+  )->>'status',
+  'legacy_fallback',
+  'routine notes retain the operational legacy fallback'
+);
+select extensions.throws_ok(
+  $$select public.replace_own_active_training_cycle_to_draft(
+    '97000000-0000-4000-8000-000000000012', 'usuario',
+    '92000000-0000-4000-8000-000000000012', '2026-10-01', '2026-10-28'
+  )$$,
+  '55000',
+  'legacy training cycle cannot be converted safely',
+  'routine notes block replacement before any destructive write'
+);
+
+select set_config('request.jwt.claim.sub', '91000000-0000-4000-8000-000000000013', true);
+select extensions.is(
+  public.adapt_own_active_legacy_training_cycle(
+    '96000000-0000-4000-8000-000000000013', 'usuario',
+    '92000000-0000-4000-8000-000000000013'
+  )->>'status',
+  'legacy_fallback',
+  'day notes retain the operational legacy fallback'
+);
+select extensions.throws_ok(
+  $$select public.replace_own_active_training_cycle_to_draft(
+    '97000000-0000-4000-8000-000000000013', 'usuario',
+    '92000000-0000-4000-8000-000000000013', '2026-10-01', '2026-10-28'
+  )$$,
+  '55000',
+  'legacy training cycle cannot be converted safely',
+  'day notes block replacement before any destructive write'
+);
+
+select set_config('request.jwt.claim.sub', '91000000-0000-4000-8000-000000000014', true);
+select extensions.is(
+  public.adapt_own_active_legacy_training_cycle(
+    '96000000-0000-4000-8000-000000000014', 'usuario',
+    '92000000-0000-4000-8000-000000000014'
+  )->>'status',
+  'legacy_fallback',
+  'exercise notes retain the operational legacy fallback'
+);
+select extensions.throws_ok(
+  $$select public.replace_own_active_training_cycle_to_draft(
+    '97000000-0000-4000-8000-000000000014', 'usuario',
+    '92000000-0000-4000-8000-000000000014', '2026-10-01', '2026-10-28'
+  )$$,
+  '55000',
+  'legacy training cycle cannot be converted safely',
+  'exercise notes block replacement before any destructive write'
+);
+reset role;
+select extensions.is(
+  after.payload, before.payload,
+  'unsupported legacy fixture ' || before.n || ' preserves all rows and creates no partial plan'
+)
+from legacy_preservation_before as before
+join legacy_preservation_state as after using (n)
+order by before.n;
+select set_config('request.jwt.claim.sub', '', true);
+
 
 select extensions.ok(
   private.is_valid_training_youtube_url('https://www.youtube.com/watch?v=AbCdEfGhI_1'),

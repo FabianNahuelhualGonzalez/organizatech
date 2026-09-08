@@ -11,13 +11,13 @@ export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260831213114_cycle_active_replacement.sql":
     "9f286e415cfaa431ba319365ac5f3669525419cca243148370167d5d03b592bd",
   "20260831230440_cycle_active_atomic_replacement.sql":
-    "a535070b9cabc74e119fae09262d00ad8b12c1072c1ab1be431fdb6821033848",
+    "f7597fcebdfed2151005f6c213b707d8f75717c9ecd8a09034f4c14325050797",
   "20260831233757_cycle_active_replacement_snapshot_response.sql":
     "06b0d6cebc52d24a0099e8c24848709a4aa38c58f9b208fd0dcfa64837c1c372",
   "20260901002250_cycle_active_replacement_exercise_descriptors.sql":
     "7a2933c53a81d404af97a8108baf018bc28517e1cc772fddac92916323489c64",
   "20260905201420_cycle_legacy_compatibility_expiry_youtube.sql":
-    "3368b40c2dcac88a484a3a826daa7f45c56d771324419f3e104400c82dbc6b65",
+    "f57bcf4fd4ecbda74c608c8a300ac49b504cdf0279ca82b88952c1f9f5bb76c5",
 } as const;
 
 const schemaPath =
@@ -1361,7 +1361,7 @@ test("legacy compatibility preserves active cycles, canonicalizes YouTube, and s
   assert.match(legacyCompatibilitySql, /grant execute on function public\.adapt_own_active_legacy_training_cycle\( uuid, text, uuid \) to authenticated/);
   assert.match(legacyCompatibilitySql, /service_role[\s\S]*legacy cycle compatibility postcheck failed/);
 
-  assert.match(legacyCompatibilityDbTestSql, /select extensions\.plan\(30\)/);
+  assert.match(legacyCompatibilityDbTestSql, /select extensions\.plan\(42\)/);
   assert.match(legacyCompatibilityDbTestSql, /four legacy weeks use an inclusive start plus 27 day end date/);
   assert.match(legacyCompatibilityDbTestSql, /multi-week legacy data fails safely without truncation/);
   assert.match(legacyCompatibilityDbTestSql, /concurrent adaptations with different requests serialize/);

@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 
+SECURITY_ORDER=${1:-chronological}
+case "$SECURITY_ORDER" in
+  chronological|qa-upgrade|prod-upgrade) ;;
+  *) echo "usage: $0 [chronological|qa-upgrade|prod-upgrade]" >&2; exit 2 ;;
+esac
+
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 RUNTIME_DIR=$(mktemp -d /tmp/organizatech-cycle-pg.XXXXXX)
 JAR="$RUNTIME_DIR/postgres.jar"
@@ -41,11 +47,30 @@ query_file() {
   node "$ROOT_DIR/supabase/tests/support/run-sql-file.mjs" "$DB_URL" "$1"
 }
 
+apply_security_migrations() {
+  echo "APPLY_EXACT=20260902163716_sec_training_rpc_resource_bounds.sql"
+  query_file "$ROOT_DIR/supabase/migrations/20260902163716_sec_training_rpc_resource_bounds.sql" >/dev/null
+  echo "APPLY_EXACT=20260902183335_sec_training_integer_cast_fix.sql"
+  query_file "$ROOT_DIR/supabase/migrations/20260902183335_sec_training_integer_cast_fix.sql" >/dev/null
+}
+
+echo "MIGRATION_ORDER=$SECURITY_ORDER"
 query_file "$ROOT_DIR/supabase/tests/support/cycle_active_replacement_embedded_bootstrap.sql"
+# Load the real legacy RPC whose existing signature is re-granted by SEC-TRAIN.
+# Extract its complete definition from the historical migration, not a stub.
+awk '/^create or replace function public[.]create_training_cycle_with_plan\(/,/^\$\$;/' \
+  "$ROOT_DIR/supabase/migrations/20260610000001_training_exercise_lineage.sql" \
+  > "$RUNTIME_DIR/legacy-create-cycle.sql"
+test "$(grep -Ec '^create or replace function ' "$RUNTIME_DIR/legacy-create-cycle.sql")" = "1"
+test "$(tail -1 "$RUNTIME_DIR/legacy-create-cycle.sql")" = '$$;'
+echo "APPLY_BASELINE=create_training_cycle_with_plan (20260610000001)"
+query_file "$RUNTIME_DIR/legacy-create-cycle.sql" >/dev/null
+if test "$SECURITY_ORDER" = "prod-upgrade"; then apply_security_migrations; fi
 echo "APPLY_EXACT=20260829200846_cycle_redesign_schema.sql"
 query_file "$ROOT_DIR/supabase/migrations/20260829200846_cycle_redesign_schema.sql" >/dev/null
 echo "APPLY_EXACT=20260829200847_cycle_redesign_api.sql"
 query_file "$ROOT_DIR/supabase/migrations/20260829200847_cycle_redesign_api.sql" >/dev/null
+if test "$SECURITY_ORDER" = "qa-upgrade"; then apply_security_migrations; fi
 echo "APPLY_EXACT=20260831213114_cycle_active_replacement.sql"
 query_file "$ROOT_DIR/supabase/migrations/20260831213114_cycle_active_replacement.sql" >/dev/null
 echo "APPLY_EXACT=20260831230440_cycle_active_atomic_replacement.sql"
@@ -54,6 +79,7 @@ echo "APPLY_EXACT=20260831233757_cycle_active_replacement_snapshot_response.sql"
 query_file "$ROOT_DIR/supabase/migrations/20260831233757_cycle_active_replacement_snapshot_response.sql" >/dev/null
 echo "APPLY_EXACT=20260901002250_cycle_active_replacement_exercise_descriptors.sql"
 query_file "$ROOT_DIR/supabase/migrations/20260901002250_cycle_active_replacement_exercise_descriptors.sql" >/dev/null
+if test "$SECURITY_ORDER" = "chronological"; then apply_security_migrations; fi
 echo "SEED_HISTORICAL=cycle_legacy_youtube_backfill_fixture.sql"
 query_file "$ROOT_DIR/supabase/tests/support/cycle_legacy_youtube_backfill_fixture.sql" >/dev/null
 echo "APPLY_EXACT=20260905201420_cycle_legacy_compatibility_expiry_youtube.sql"
@@ -78,6 +104,16 @@ if printf '%s\n' "$LEGACY_OUTPUT" | grep -Eq '^(not ok|Bail out!)'; then
   echo "EMBEDDED_POSTGRES_LEGACY_COMPATIBILITY=FAIL" >&2
   exit 1
 fi
-printf '%s\n' "$LEGACY_OUTPUT" | grep -Fq '1..30'
-test "$(printf '%s\n' "$LEGACY_OUTPUT" | grep -Ec '^ok [0-9]+')" = "30"
+printf '%s\n' "$LEGACY_OUTPUT" | grep -Fq '1..42'
+test "$(printf '%s\n' "$LEGACY_OUTPUT" | grep -Ec '^ok [0-9]+')" = "42"
 echo "EMBEDDED_POSTGRES_LEGACY_COMPATIBILITY=PASS"
+echo "RUN_PGTAP=20260905201420_cycle_dispatch_authorization_test.sql"
+DISPATCH_OUTPUT=$(query_file "$ROOT_DIR/supabase/tests/20260905201420_cycle_dispatch_authorization_test.sql")
+printf '%s\n' "$DISPATCH_OUTPUT"
+if printf '%s\n' "$DISPATCH_OUTPUT" | grep -Eq '^(not ok|Bail out!)'; then
+  echo "EMBEDDED_POSTGRES_DISPATCH_AUTHORIZATION=FAIL" >&2
+  exit 1
+fi
+printf '%s\n' "$DISPATCH_OUTPUT" | grep -Fq '1..28'
+test "$(printf '%s\n' "$DISPATCH_OUTPUT" | grep -Ec '^ok [0-9]+')" = "28"
+echo "EMBEDDED_POSTGRES_DISPATCH_AUTHORIZATION=PASS"

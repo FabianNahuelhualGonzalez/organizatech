@@ -19,7 +19,7 @@ import {
   trainingCycleBuilderReducer,
   type TrainingCycleBuilderAction,
 } from "../hooks/training-cycle-builder-state";
-import { TrainingCycleNewCycleOperationOwner } from "../hooks/use-training-cycle-builder-controller";
+import { TrainingCycleNewCycleOperationOwner, publicOperationError } from "../hooks/use-training-cycle-builder-controller";
 import {
   closeActiveTrainingCycleProductData,
   type TrainingCycleProductData,
@@ -148,6 +148,43 @@ function fakeRpc(input: {
   };
 }
 
+test("false de sincronización post-commit no se presenta como éxito ni se repite la mutación", async () => {
+  for (const operation of ["activate", "edit", "extend", "replace"] as const) {
+    const rpc = fakeRpc();
+    let mutations = 0;
+    rpc.activateDraft = async () => { mutations++; return accepted("cycle_activate", CYCLE_ID, 2); };
+    rpc.editActiveCycle = async () => { mutations++; return accepted("cycle_edit", CYCLE_ID, 2); };
+    rpc.extendActiveCycle = async () => { mutations++; return accepted("cycle_extend", CYCLE_ID, 2); };
+    rpc.replaceActiveCycleToDraft = async () => { mutations++; return preparedReplacement(); };
+    const gateway = createTrainingCycleProductGateway({
+      rpc, catalog: CATALOG, remoteDraft: replacementDraft(DRAFT_ID),
+      sourceCycleId: SOURCE_CYCLE_ID, activeCycle: snapshot(1),
+      onCycleChanged: async () => false,
+      onCycleReplaced: async () => false,
+    });
+    const invoke = () => {
+      if (operation === "activate") return gateway.activateCycle();
+      if (operation === "edit") return gateway.saveActiveCycle({
+        cycleId: CYCLE_ID, expectedRevision: "1", goal: "volume", days: saveInput().days,
+      });
+      if (operation === "extend") return gateway.extendCycle({
+        cycleId: CYCLE_ID, expectedRevision: "1", currentEndDate: "2026-10-13", newEndDate: "2026-10-20",
+      });
+      return gateway.completeActiveCycle({
+        expectedActiveCycleId: ACTIVE_CYCLE_ID, startDate: "2026-09-01", endDate: "2026-10-13",
+      });
+    };
+    await assert.rejects(invoke, TrainingCycleCommittedMutationError);
+    await assert.rejects(invoke, TrainingCycleCommittedMutationError);
+    await assert.rejects(() => gateway.saveDraft(saveInput()), TrainingCycleCommittedMutationError);
+    assert.equal(mutations, 1, operation);
+  }
+  for (const operation of ["activate", "active_edit", "extend"] as const) {
+    assert.match(publicOperationError(operation, new TrainingCycleCommittedMutationError()), /se guardó.*Recarga/);
+    assert.doesNotMatch(publicOperationError(operation, new TrainingCycleCommittedMutationError()), /no cambió|No pudimos activar/);
+  }
+});
+
 test("duplica una vez, guarda la edición sobre versión 1 y activa la última versión", async () => {
   const rpc = fakeRpc();
   const gateway = createTrainingCycleProductGateway({ rpc, catalog: CATALOG, remoteDraft: null, sourceCycleId: SOURCE_CYCLE_ID, activeCycle: null });
@@ -245,9 +282,8 @@ test("una respuesta de reemplazo inválida no adopta referencias ni dirige el si
     startDate: "2026-09-01",
     endDate: "2026-10-13",
   }), (error) => error instanceof TrainingCycleCommittedMutationError);
-  await gateway.saveDraft(saveInput("duplicate"));
-
-  assert.deepEqual(rpc.calls, ["save:1"]);
+  await assert.rejects(() => gateway.saveDraft(saveInput("duplicate")), TrainingCycleCommittedMutationError);
+  assert.deepEqual(rpc.calls, []);
 });
 
 test("un callback onCycleReplaced fallido se clasifica committed y conserva referencias del draft", async () => {
@@ -266,8 +302,8 @@ test("un callback onCycleReplaced fallido se clasifica committed y conserva refe
     startDate: "2026-09-01",
     endDate: "2026-10-13",
   }), (error) => error instanceof TrainingCycleCommittedMutationError);
-  await gateway.saveDraft(saveInput("duplicate"));
-  assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`, "save:1"]);
+  await assert.rejects(() => gateway.saveDraft(saveInput("duplicate")), TrainingCycleCommittedMutationError);
+  assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`]);
 });
 
 test("un callback onDraftPersisted fallido también conserva el draft committed", async () => {
@@ -290,8 +326,8 @@ test("un callback onDraftPersisted fallido también conserva el draft committed"
     startDate: "2026-09-01",
     endDate: "2026-10-13",
   }), (error) => error instanceof TrainingCycleCommittedMutationError);
-  await gateway.saveDraft(saveInput("duplicate"));
-  assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`, "save:1"]);
+  await assert.rejects(() => gateway.saveDraft(saveInput("duplicate")), TrainingCycleCommittedMutationError);
+  assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`]);
 });
 
 test("legacy sin catálogo adopta el descriptor custom creado en la respuesta atómica", async () => {

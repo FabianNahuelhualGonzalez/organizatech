@@ -420,7 +420,7 @@ export class TrainingCycleCommittedMutationError extends Error {
   readonly committed = true;
 
   constructor() {
-    super("El ciclo anterior terminó, pero falta sincronizar el nuevo borrador.");
+    super("El cambio quedó confirmado, pero falta sincronizar la información.");
     this.name = "TrainingCycleCommittedMutationError";
   }
 }

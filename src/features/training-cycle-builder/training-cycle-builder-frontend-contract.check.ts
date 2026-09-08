@@ -93,7 +93,7 @@ for (const contract of [
 const propsContract = contractsSource.match(/export interface TrainingCycleBuilderProps[\s\S]*?\n\}/)?.[0] ?? "";
 assert.doesNotMatch(propsContract, /initialViewModel\?|gateway\?/);
 assert.match(controllerSource, /activationLockRef/);
-assert.match(controllerSource, /if \(activationLockRef\.current \|\| state\.workflow !== "draft"\) return;/);
+assert.match(controllerSource, /if \(activationLockRef\.current \|\| state\.committedSyncPending \|\| state\.workflow !== "draft"\) return;/);
 assert.match(controllerSource, /AUTOSAVE_DELAY_MS/);
 assert.match(controllerSource, /TrainingCycleDraftAutosaveOwner/);
 assert.match(controllerSource, /autosaveOwner\.claim\(snapshot\.draftId\)/);
