@@ -22,6 +22,12 @@ import {
 import { applyTechniqueToExercise } from "@/features/training-cycle-builder/model/techniques";
 import { createFixtureExercise, createFixtureSet } from "@/features/training-cycle-builder/model/test-fixtures";
 import { DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS } from "@/features/training-cycle-builder/model/types";
+import {
+  CYCLE_CATALOG_TABS,
+  filterCycleCatalog,
+  getCycleCatalogEmptyState,
+  resolveCycleCustomExerciseName,
+} from "@/features/training-cycle-builder/model/catalog-presentation";
 
 function createState() {
   return createTrainingCycleBuilderState(createTrainingCycleBuilderTestViewModel());
@@ -33,6 +39,152 @@ function reduce(
 ) {
   return actions.reduce(trainingCycleBuilderReducer, state);
 }
+
+function catalogAddAction(): Extract<TrainingCycleBuilderAction, { type: "add_catalog_exercise" }> {
+  return {
+    type: "add_catalog_exercise",
+    source: { kind: "catalog", id: "military-press" },
+    name: "Press militar",
+    muscleGroup: "Hombros",
+    recommendation: { hasHistory: false, title: "Referencia inicial", body: "Editable", source: "Inicial" },
+  };
+}
+
+test("Todos es la primera pestaña y cada apertura desde rutina muestra el catálogo completo", () => {
+  const initial = createState();
+  assert.deepEqual(CYCLE_CATALOG_TABS.map(({ scope }) => scope), ["all", "previous", "recent"]);
+  assert.equal(initial.catalogScope, "all");
+  const reopened = reduce(initial,
+    { type: "navigate", screen: "catalog" },
+    { type: "set_catalog_scope", scope: "previous" },
+    { type: "set_catalog_query", value: "Press" },
+    { type: "return_to", screen: "routine" },
+    { type: "navigate", screen: "catalog" },
+  );
+  assert.equal(reopened.catalogScope, "all");
+  assert.equal(reopened.catalogQuery, "");
+  const catalog = createTrainingCycleBuilderTestViewModel().catalog;
+  assert.deepEqual(filterCycleCatalog(catalog, reopened.catalogQuery, reopened.catalogScope), catalog);
+  for (const scope of ["previous", "recent"] as const) {
+    assert.deepEqual(filterCycleCatalog(catalog, "", scope), catalog.filter((entry) => entry.sources.includes(scope)));
+  }
+  // Preserve accent-insensitive global search even when a history tab was selected.
+  const triceps = filterCycleCatalog(catalog, "  TRICEPS  ", "previous");
+  assert.ok(triceps.length > 0);
+  assert.ok(triceps.every((entry) => entry.muscleGroup === "Tríceps"));
+});
+
+test("historial vacío, recientes y búsqueda sin resultados tienen mensajes distintos sin comillas vacías", () => {
+  const previous = getCycleCatalogEmptyState("  ", "previous");
+  assert.equal(`${previous.title} ${previous.body}`, "Aún no tienes ejercicios de un ciclo anterior. Explora el catálogo o crea el que no encuentres: quedará guardado en tu cuenta para futuras rutinas.");
+  assert.equal(previous.showBrowse, true);
+  assert.equal(previous.createLabel, "Crear ejercicio");
+  assert.equal(getCycleCatalogEmptyState("", "recent").title, "Aún no tienes ejercicios recientes.");
+  assert.equal(getCycleCatalogEmptyState("", "all").showBrowse, false);
+  for (const scope of ["previous", "recent", "all"] as const) {
+    const empty = getCycleCatalogEmptyState("\t ", scope);
+    assert.doesNotMatch(JSON.stringify(empty), /“”|No encontramos/);
+    const searched = getCycleCatalogEmptyState("  Ejercicio inexistente  ", scope);
+    assert.equal(searched.title, "No encontramos “Ejercicio inexistente”");
+    assert.equal(searched.createLabel, "Crear “Ejercicio inexistente”");
+    assert.match(searched.body, /guardado en tu cuenta/);
+  }
+});
+
+test("reabrir un personalizado conserva nombre, grupo y video salvo precarga de una búsqueda explícita", () => {
+  const filled = reduce(createState(),
+    { type: "navigate", screen: "catalog" },
+    { type: "navigate", screen: "custom" },
+    { type: "set_custom_name", value: "Mi press en máquina" },
+    { type: "set_custom_muscle", value: "Pectoral" },
+    { type: "set_custom_video", value: "https://youtu.be/abcdefghijk" },
+    { type: "custom_exercise_failed", message: "No se pudo guardar el ejercicio" },
+    { type: "back" },
+  );
+  for (const query of ["", "   ", "\t", "  Sentadilla libre  "]) {
+    const searching = reduce(filled, { type: "set_catalog_query", value: query });
+    const name = resolveCycleCustomExerciseName(searching.catalogQuery, searching.customName);
+    const prepared = name !== searching.customName
+      ? reduce(searching, { type: "set_custom_name", value: name })
+      : searching;
+    const reopened = reduce(prepared, { type: "navigate", screen: "custom" });
+    assert.equal(reopened.customName, query.trim() ? "Sentadilla libre" : "Mi press en máquina");
+    assert.equal(reopened.customMuscleGroup, "Pectoral");
+    assert.equal(reopened.customVideoUrl, "https://youtu.be/abcdefghijk");
+    assert.equal(reopened.screen, "custom");
+    assert.equal(reopened.revision, filled.revision);
+    assert.equal(reopened.draft, filled.draft);
+    if (!query.trim()) assert.equal(reopened.customErrorMessage, filled.customErrorMessage);
+  }
+  assert.equal(resolveCycleCustomExerciseName("", ""), "");
+});
+
+test("el aviso acredita la adición real al día correcto pero nunca el guardado remoto", () => {
+  const initial = reduce(createState(),
+    { type: "select_day", day: "tuesday" },
+    { type: "navigate", screen: "catalog" },
+    { type: "set_save_state", state: "saving" },
+  );
+  const added = reduce(initial, catalogAddAction());
+  const exercise = added.draft.routines.tuesday.exercises.at(-1)!;
+  assert.deepEqual(added.catalogAddition, { exerciseId: exercise.id, name: exercise.name, day: "tuesday" });
+  assert.equal(added.draft.routines.tuesday.exercises.length, initial.draft.routines.tuesday.exercises.length + 1);
+  assert.equal(added.revision, initial.revision + 1);
+  assert.notEqual(added.saveState, "saved");
+  const dismissed = reduce(added, { type: "dismiss_catalog_addition", exerciseId: exercise.id });
+  assert.equal(dismissed.catalogAddition, null);
+  assert.equal(dismissed.draft, added.draft);
+  assert.equal(dismissed.revision, added.revision);
+  assert.equal(dismissed.saveState, added.saveState);
+  assert.deepEqual(buildTrainingCycleSaveDraftInput(dismissed.draft, dismissed.origin), buildTrainingCycleSaveDraftInput(added.draft, added.origin));
+  assert.doesNotMatch(JSON.stringify(buildTrainingCycleSaveDraftInput(added.draft, added.origin)), /catalogAddition/);
+});
+
+test("pulsaciones repetidas renuevan el aviso y un temporizador viejo no borra el nuevo", () => {
+  const first = reduce(createState(), { type: "navigate", screen: "catalog" }, catalogAddAction());
+  const second = reduce(first, catalogAddAction());
+  assert.notEqual(first.catalogAddition!.exerciseId, second.catalogAddition!.exerciseId);
+  assert.equal(second.draft.routines.monday.exercises.length, first.draft.routines.monday.exercises.length + 1);
+  assert.equal(reduce(second, {
+    type: "dismiss_catalog_addition", exerciseId: first.catalogAddition!.exerciseId,
+  }), second);
+  assert.equal(reduce(second, {
+    type: "dismiss_catalog_addition", exerciseId: second.catalogAddition!.exerciseId,
+  }).catalogAddition, null);
+});
+
+test("salir del catálogo o cambiar de día no conserva avisos obsoletos", () => {
+  const added = reduce(createState(), { type: "navigate", screen: "routine" },
+    { type: "navigate", screen: "catalog" }, catalogAddAction());
+  for (const action of [
+    { type: "navigate", screen: "custom" },
+    { type: "return_to", screen: "routine" },
+    { type: "back" },
+    { type: "select_day", day: "friday" },
+  ] satisfies TrainingCycleBuilderAction[]) {
+    const next = reduce(added, action);
+    assert.equal(next.catalogAddition, null);
+    assert.equal(next.revision, added.revision);
+  }
+});
+
+test("un add bloqueado no confirma nada y la limpieza visual no desbloquea escrituras", () => {
+  for (const locked of [
+    { ...createState(), committedSyncPending: true },
+    { ...createState(), workflow: "active" as const },
+  ]) {
+    assert.equal(reduce(locked, catalogAddAction()), locked);
+    assert.equal(locked.catalogAddition, null);
+  }
+  const added = reduce(createState(), catalogAddAction());
+  const pending = { ...added, committedSyncPending: true };
+  const expired = reduce(pending, { type: "dismiss_catalog_addition", exerciseId: added.catalogAddition!.exerciseId });
+  assert.equal(expired.catalogAddition, null);
+  assert.equal(expired.committedSyncPending, true);
+  assert.equal(expired.draft, pending.draft);
+  assert.equal(expired.revision, pending.revision);
+  assert.equal(reduce(expired, catalogAddAction()), expired);
+});
 
 test("un cambio confirmado con sync pendiente bloquea nuevos gestos hasta recargar", () => {
   const failures: TrainingCycleBuilderAction[] = [

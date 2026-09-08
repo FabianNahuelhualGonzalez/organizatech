@@ -34,6 +34,35 @@ const stateSource = read(`${FEATURE_ROOT}/hooks/training-cycle-builder-state.ts`
 const videoUrlSource = read("src/lib/training/youtube-video-url.ts");
 const cssSource = read(`${FEATURE_ROOT}/components/training-cycle-builder.module.css`);
 const modalShellSource = read("src/ui/modals/modal-shell.tsx");
+const catalogScreenSource = read(`${FEATURE_ROOT}/components/cycle-catalog-screen.tsx`);
+const catalogNoticeSource = read(`${FEATURE_ROOT}/components/cycle-catalog-addition-notice.tsx`);
+const routineScreensSource = read(`${FEATURE_ROOT}/components/cycle-routine-screens.tsx`);
+
+// UX aprobada: información neutral en Rutina; el catálogo acusa la adición al
+// borrador, nunca un guardado remoto. Su región persistente no roba foco.
+const routineScreenSource = routineScreensSource.split("export { CycleCatalogScreen }")[0];
+assert.doesNotMatch(routineScreenSource, /Revisa tu distribución|warnings\.slice/);
+assert.match(routineScreenSource, /Tu distribución se actualizará a medida que agregues ejercicios/);
+assert.match(routineScreenSource, /Ver distribución muscular/);
+assert.match(catalogScreenSource, /CYCLE_CATALOG_TABS\.map/);
+assert.match(catalogScreenSource, /CycleCatalogAdditionNotice addition=\{state\.catalogAddition\}/);
+assert.match(catalogScreenSource, /getCycleCatalogEmptyState\(state\.catalogQuery, state\.catalogScope\)/);
+assert.match(catalogScreenSource, /const name = resolveCycleCustomExerciseName\(state\.catalogQuery, state\.customName\)/);
+assert.match(catalogScreenSource, /if \(name !== state\.customName\) dispatch\(\{ type: "set_custom_name", value: name \}\)/);
+assert.doesNotMatch(catalogScreenSource, /set_custom_name", value: state\.catalogQuery\.trim\(\)/);
+assert.match(catalogScreenSource, /set_catalog_query", value: ""[\s\S]*set_catalog_scope", scope: "all"/);
+assert.match(catalogScreenSource, /Ver ejercicios/);
+assert.match(catalogNoticeSource, /role="status" aria-live="polite" aria-atomic="true"/);
+assert.match(catalogNoticeSource, /key=\{addition\.exerciseId\}/);
+assert.match(catalogNoticeSource, /return \(\) => clearTimeout\(timeout\)/);
+assert.match(catalogNoticeSource, /dismiss_catalog_addition", exerciseId: addition\.exerciseId/);
+assert.doesNotMatch(catalogNoticeSource, /autoFocus|\.focus\(|scrollIntoView|role="(?:dialog|alert)"|Guardado|servidor/);
+const noticeRegionRule = cssSource.match(/\.catalogNoticeRegion\s*\{([^}]*)\}/)?.[1] ?? "";
+assert.match(noticeRegionRule, /position: fixed/);
+assert.match(noticeRegionRule, /safe-area-inset-top/);
+assert.match(noticeRegionRule, /pointer-events: none/);
+assert.match(cssSource, /@keyframes cycle-notice-enter/);
+assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.catalogAdditionNotice\s*\{\s*animation: none/);
 
 // El composition root sólo selecciona y compone la boundary productiva; la lógica permanece en la feature.
 assert.match(rootSource, /import \{ TrainingCycleBuilderProductiveBoundary \} from "@\/features\/training-cycle-builder\/components\/training-cycle-builder-productive-boundary";/);

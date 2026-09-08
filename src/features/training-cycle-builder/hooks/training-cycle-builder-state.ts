@@ -49,6 +49,11 @@ export interface TrainingCycleBuilderState {
   readonly quickKg: string;
   readonly catalogScope: TrainingCycleCatalogScope;
   readonly catalogQuery: string;
+  readonly catalogAddition: {
+    readonly exerciseId: string;
+    readonly name: string;
+    readonly day: TrainingCycleWeekDay;
+  } | null;
   readonly customName: string;
   readonly customMuscleGroup: TrainingCycleMuscleGroup | null;
   readonly customVideoUrl: string;
@@ -111,6 +116,7 @@ export type TrainingCycleBuilderAction =
   | { readonly type: "open_exercise"; readonly exerciseId: string }
   | { readonly type: "set_catalog_scope"; readonly scope: TrainingCycleCatalogScope }
   | { readonly type: "set_catalog_query"; readonly value: string }
+  | { readonly type: "dismiss_catalog_addition"; readonly exerciseId: string }
   | { readonly type: "add_catalog_exercise"; readonly source: TrainingCycleExerciseDraft["source"]; readonly name: string; readonly muscleGroup: TrainingCycleMuscleGroup; readonly videoUrl?: string; readonly recommendation: TrainingCycleExerciseDraft["recommendation"] }
   | { readonly type: "set_custom_name"; readonly value: string }
   | { readonly type: "set_custom_muscle"; readonly value: TrainingCycleMuscleGroup }
@@ -233,8 +239,9 @@ export function createTrainingCycleBuilderState(
     exerciseMode: "quick",
     quickReps: "10",
     quickKg: "20",
-    catalogScope: "previous",
+    catalogScope: "all",
     catalogQuery: "",
+    catalogAddition: null,
     customName: "",
     customMuscleGroup: null,
     customVideoUrl: "",
@@ -599,6 +606,12 @@ export function trainingCycleBuilderReducer(
   state: TrainingCycleBuilderState,
   action: TrainingCycleBuilderAction,
 ): TrainingCycleBuilderState {
+  // A UI-only acknowledgement may expire even while a committed write awaits sync.
+  if (action.type === "dismiss_catalog_addition") {
+    return state.catalogAddition?.exerciseId === action.exerciseId
+      ? { ...state, catalogAddition: null }
+      : state;
+  }
   // A confirmed mutation needs a fresh authoritative view, not another edit.
   if (state.committedSyncPending) return state;
   if (state.workflow === "active" && PLAN_EDIT_ACTIONS.has(action.type)) return state;
@@ -610,6 +623,8 @@ export function trainingCycleBuilderReducer(
         history: [...state.history, state.screen],
         screen: action.screen,
         openExerciseMenuId: null,
+        catalogAddition: null,
+        ...(action.screen === "catalog" ? { catalogScope: "all" as const, catalogQuery: "" } : {}),
       };
     case "return_to": {
       let targetIndex = -1;
@@ -625,6 +640,7 @@ export function trainingCycleBuilderReducer(
         history: targetIndex >= 0 ? state.history.slice(0, targetIndex) : state.history,
         openExerciseMenuId: null,
         openSetId: null,
+        catalogAddition: null,
       };
     }
     case "back": {
@@ -640,6 +656,7 @@ export function trainingCycleBuilderReducer(
           currentDay: firstSelectedDay(state.sourceDraft),
           activeEditState: "idle",
           activeEditErrorMessage: null,
+          catalogAddition: null,
         };
       }
       return {
@@ -647,6 +664,7 @@ export function trainingCycleBuilderReducer(
         screen: previous,
         history: state.history.slice(0, -1),
         openExerciseMenuId: null,
+        catalogAddition: null,
       };
     }
     case "choose_origin": {
@@ -685,7 +703,7 @@ export function trainingCycleBuilderReducer(
       });
     }
     case "select_day":
-      return { ...state, currentDay: action.day, openExerciseMenuId: null };
+      return { ...state, currentDay: action.day, openExerciseMenuId: null, catalogAddition: null };
     case "set_routine_name":
       return markDraftChanged(
         state,
@@ -760,7 +778,10 @@ export function trainingCycleBuilderReducer(
           ...routine,
           exercises: [...routine.exercises, exercise],
         })),
-        { nextEntityNumber: state.nextEntityNumber + 1 },
+        {
+          nextEntityNumber: state.nextEntityNumber + 1,
+          catalogAddition: { exerciseId: exercise.id, name: exercise.name, day: state.currentDay },
+        },
       );
     }
     case "set_custom_name":

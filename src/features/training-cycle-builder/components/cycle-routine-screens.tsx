@@ -9,7 +9,6 @@ import {
   EllipsisVertical,
   Info,
   Plus,
-  Search,
   Trash2,
   TriangleAlert,
   Video,
@@ -23,9 +22,6 @@ import {
   TRAINING_CYCLE_MUSCLE_GROUPS,
   TRAINING_CYCLE_TECHNIQUE_LABELS,
   TRAINING_CYCLE_TECHNIQUES,
-  type TrainingCycleBuilderInitialViewModel,
-  type TrainingCycleCatalogExerciseViewModel,
-  type TrainingCycleCatalogScope,
   type TrainingCycleExerciseDraft,
   type TrainingCycleTechnique,
 } from "@/features/training-cycle-builder/components/training-cycle-builder-contracts";
@@ -64,7 +60,6 @@ export function CycleRoutineScreen({
   readonly dispatch: BuilderDispatch;
 }) {
   const routine = state.draft.routines[state.currentDay];
-  const warnings = getTrainingCycleWarnings(state.draft, state.currentDay);
   const groupCount = new Set(routine.exercises.map((exercise) => exercise.muscleGroup)).size;
   return (
     <div className={styles.screen}>
@@ -94,9 +89,10 @@ export function CycleRoutineScreen({
           onChange={(event) => dispatch({ type: "set_routine_name", value: event.target.value })}
         />
       </label>
-      {warnings.slice(0, 2).map((warning) => (
-        <StatusBanner key={warning} tone="warning" title="Revisa tu distribución" body={warning} />
-      ))}
+      <p className={styles.distributionHint}>
+        <Info size={16} aria-hidden="true" />
+        Tu distribución se actualizará a medida que agregues ejercicios
+      </p>
       <div className={styles.sectionTitleRow}>
         <h3>Ejercicios</h3>
         <span>{routine.exercises.length} ejercicios · {groupCount} grupos</span>
@@ -172,122 +168,7 @@ export function CycleRoutineScreen({
   );
 }
 
-const DIACRITICS = /[\u0300-\u036f]/g;
-function normalizeSearch(value: string) {
-  return value.normalize("NFD").replace(DIACRITICS, "").toLocaleLowerCase("es-CL").trim();
-}
-
-const CATALOG_SCOPE_LABELS: Record<TrainingCycleCatalogScope, string> = {
-  previous: "Ciclo anterior",
-  recent: "Recientes",
-  all: "Todos",
-};
-
-function filterCatalog(
-  catalog: readonly TrainingCycleCatalogExerciseViewModel[],
-  query: string,
-  scope: TrainingCycleCatalogScope,
-) {
-  const normalizedQuery = normalizeSearch(query);
-  return catalog.filter((exercise) => {
-    if (normalizedQuery) {
-      return normalizeSearch(exercise.name).includes(normalizedQuery) ||
-        normalizeSearch(exercise.muscleGroup).includes(normalizedQuery);
-    }
-    return scope === "all" || exercise.sources.includes(scope);
-  });
-}
-
-export function CycleCatalogScreen({
-  state,
-  viewModel,
-  dispatch,
-}: {
-  readonly state: TrainingCycleBuilderState;
-  readonly viewModel: TrainingCycleBuilderInitialViewModel;
-  readonly dispatch: BuilderDispatch;
-}) {
-  const results = filterCatalog(viewModel.catalog, state.catalogQuery, state.catalogScope);
-  return (
-    <div className={styles.screen}>
-      <ScreenHeading title={`Agregar a ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}`} />
-      <label className={styles.searchField}>
-        <Search size={16} aria-hidden="true" />
-        <span className={styles.srOnly}>Buscar ejercicio o grupo</span>
-        <input
-          type="search"
-          placeholder="Buscar ejercicio o grupo…"
-          value={state.catalogQuery}
-          onChange={(event) => dispatch({ type: "set_catalog_query", value: event.target.value })}
-        />
-      </label>
-      <div className={styles.segmentedControl} role="group" aria-label="Origen del catálogo">
-        {(Object.keys(CATALOG_SCOPE_LABELS) as TrainingCycleCatalogScope[]).map((scope) => (
-          <button
-            type="button"
-            key={scope}
-            data-selected={state.catalogScope === scope}
-            aria-pressed={state.catalogScope === scope}
-            onClick={() => dispatch({ type: "set_catalog_scope", scope })}
-          >
-            {CATALOG_SCOPE_LABELS[scope]}
-          </button>
-        ))}
-      </div>
-      {results.length ? (
-        <ul className={styles.catalogList}>
-          {results.map((exercise) => (
-            <li key={exercise.id}>
-              <div>
-                <strong>{exercise.name}</strong>
-                <span><small className={styles.groupTag}>{exercise.muscleGroup}</small>{exercise.sources.includes("previous") ? <small>Del ciclo anterior</small> : exercise.sources.includes("recent") ? <small>Reciente</small> : null}</span>
-              </div>
-              <button
-                type="button"
-                aria-label={`Agregar ${exercise.name}`}
-                onClick={() => dispatch({
-                  type: "add_catalog_exercise",
-                  source: exercise.source,
-                  name: exercise.name,
-                  muscleGroup: exercise.muscleGroup,
-                  videoUrl: exercise.videoUrl,
-                  recommendation: exercise.recommendation ?? {
-                    hasHistory: false,
-                    title: "Sin historial suficiente",
-                    body: "Partimos con una carga conservadora que puedes modificar.",
-                    source: "Sugerencia inicial conservadora.",
-                  },
-                })}
-              >
-                <Plus size={16} aria-hidden="true" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <div className={styles.noResults} role="status">
-          <strong>No encontramos “{state.catalogQuery}”</strong>
-          <p>Puedes crearlo como un ejercicio propio.</p>
-          <button type="button" onClick={() => {
-            dispatch({ type: "set_custom_name", value: state.catalogQuery });
-            dispatch({ type: "navigate", screen: "custom" });
-          }}>
-            Crear “{state.catalogQuery}”
-          </button>
-        </div>
-      )}
-      <SecondaryAction onClick={() => {
-        if (state.catalogQuery.trim()) dispatch({ type: "set_custom_name", value: state.catalogQuery });
-        dispatch({ type: "navigate", screen: "custom" });
-      }}>
-        <Plus size={15} aria-hidden="true" />Crear un ejercicio personalizado
-      </SecondaryAction>
-      <PrimaryAction onClick={() => dispatch({ type: "return_to", screen: "routine" })}>
-        Listo · ir a la rutina
-      </PrimaryAction>
-    </div>
-  );
-}
+export { CycleCatalogScreen } from "./cycle-catalog-screen";
 
 export function CycleCustomExerciseScreen({
   state,
