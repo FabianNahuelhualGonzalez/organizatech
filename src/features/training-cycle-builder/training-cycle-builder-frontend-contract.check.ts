@@ -109,15 +109,31 @@ test("Series lineales sólo monta el bloque común; por-series monta técnicas, 
   assert.match(html(), /Aplicar a las 4 series/);
   assert.doesNotMatch(html(), /TÉCNICA DE ENTRENAMIENTO|Repeticiones serie|Kilogramos serie|al fallo muscular|Acciones de la serie|Agregar descenso|Duplicar serie|Eliminar serie/);
   const initialRevision = state.revision;
+  const initialDraft = structuredClone(state.draft);
   click("Modificar por series");
   assert.equal(state.exerciseMode, "per_set");
   assert.equal(state.revision, initialRevision);
+  assert.deepEqual(state.draft, initialDraft, "abrir el detalle no convierte ni recalcula las series existentes");
   assert.doesNotMatch(html(), /MISMO VALOR EN TODAS LAS SERIES|Aplicar a las/);
   assert.match(html(), /TÉCNICA DE ENTRENAMIENTO/);
-  for (const technique of cycleContracts.TRAINING_CYCLE_TECHNIQUES) {
+  const picker = elementsIn(render()).find((node) => node.type === "fieldset");
+  assert.ok(picker);
+  const choices = elementsIn(picker).filter((node) => typeof node.props.selected === "boolean");
+  assert.deepEqual(choices.map((node) => node.props.children), [
+    "Pirámide ascendente", "Pirámide descendente", "Drop set", "Fallo muscular",
+  ]);
+  assert.ok(choices.every((node) => node.props.selected === false), "no seleccionar otra técnica al ocultar Lineal");
+  assert.doesNotMatch(html(), />Lineal<|Todas las series parten iguales/);
+  for (const technique of ["ascending", "descending", "drop_set", "failure"] as const) {
     const label = cycleContracts.TRAINING_CYCLE_TECHNIQUE_LABELS[technique];
     click(label);
     assert.equal(state.draft.routines.monday.exercises[0].technique, technique);
+    const updatedPicker = elementsIn(render()).find((node) => node.type === "fieldset");
+    assert.ok(updatedPicker);
+    const selected = elementsIn(updatedPicker).filter((node) => node.props.selected === true);
+    assert.deepEqual(selected.map((node) => node.props.children), [label]);
+    assert.ok(elementsIn(updatedPicker).some((node) => node.type === "p" && typeof node.props.children === "string"), "conservar la ayuda de la técnica elegida");
+    assert.doesNotMatch(html(), />Lineal<|Todas las series parten iguales/);
     assert.match(html(), /Repeticiones serie 1/);
     assert.match(html(), /Kilogramos serie 1/);
     assert.match(html(), /Serie 1 al fallo muscular/);
@@ -139,6 +155,36 @@ test("Series lineales sólo monta el bloque común; por-series monta técnicas, 
   assert.doesNotMatch(html(), /TÉCNICA DE ENTRENAMIENTO|Repeticiones serie|Kilogramos serie|al fallo muscular|Acciones de la serie|DESCENSOS|Duplicar serie|Eliminar serie/);
   assert.ok(state.draft.routines.monday.exercises[0].sets.every((set) => !set.toFailure && !set.drops.length));
   assert.equal(actions.at(-1)?.type, "set_exercise_mode");
+});
+
+test("un borrador lineal editado por serie se reabre sin opción Lineal ni conversión de sus valores", () => {
+  const Screen = loadExerciseScreen();
+  let state = cycleState.trainingCycleBuilderReducer(
+    cycleState.createTrainingCycleBuilderState(createTrainingCycleBuilderTestViewModel()),
+    { type: "open_exercise", exerciseId: "press-flat" },
+  );
+  const dispatch = (action: cycleState.TrainingCycleBuilderAction) => { state = cycleState.trainingCycleBuilderReducer(state, action); };
+  const render = () => Screen({ state, dispatch });
+  const perSet = elementsIn(render()).find((node) => node.props.children === "Modificar por series");
+  assert.ok(perSet);
+  (perSet.props.onClick as () => void)();
+  const kilograms = elementsIn(render()).filter((node) => node.type === "input" && node.props.inputMode === "decimal");
+  assert.equal(kilograms.length, 4);
+  (kilograms[1].props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "42,5" } });
+  const savedDraft = structuredClone(state.draft);
+  const savedRevision = state.revision;
+  dispatch({ type: "return_to", screen: "routine" });
+  dispatch({ type: "open_exercise", exerciseId: "press-flat" });
+  assert.equal(state.exerciseMode, "per_set");
+  assert.equal(state.revision, savedRevision);
+  assert.deepEqual(state.draft, savedDraft);
+  assert.equal(state.draft.routines.monday.exercises[0].technique, "linear", "preservar compatibilidad de datos, no migrarlos por render");
+  assert.equal(state.draft.routines.monday.exercises[0].sets[1].targetKg, "42,5");
+  const html = renderToStaticMarkup(render());
+  assert.match(html, /Modificar por series/);
+  assert.match(html, /Kilogramos serie 2/);
+  assert.match(html, /value="42,5"/);
+  assert.doesNotMatch(html, />Lineal<|Todas las series parten iguales/);
 });
 
 test("el handler de Aplicar enlaza ambos buffers con todas las series sin controles individuales", () => {

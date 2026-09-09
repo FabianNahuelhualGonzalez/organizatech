@@ -255,8 +255,7 @@ export function CycleCustomExerciseScreen({
   );
 }
 
-const TECHNIQUE_HELP: Record<TrainingCycleTechnique, string> = {
-  linear: "Todas las series parten iguales y puedes editarlas una por una.",
+const TECHNIQUE_HELP: Record<Exclude<TrainingCycleTechnique, "linear">, string> = {
   ascending: "La carga sube serie a serie y las repeticiones bajan. Cada celda sigue editable.",
   descending: "Partes pesado y bajas la carga mientras aumentan las repeticiones.",
   drop_set: "Dentro de una serie bajas la carga sin descansar. Abre la serie para editar los descensos.",
@@ -352,13 +351,13 @@ export function CycleExerciseScreen({
           <fieldset className={styles.techniquePicker}>
             <legend>TÉCNICA DE ENTRENAMIENTO</legend>
             <div>
-              {TRAINING_CYCLE_TECHNIQUES.map((technique) => (
+              {TRAINING_CYCLE_TECHNIQUES.filter((technique) => technique !== "linear").map((technique) => (
                 <ChoiceChip key={technique} selected={exercise.technique === technique} onClick={() => dispatch({ type: "set_technique", technique })}>
                   {TRAINING_CYCLE_TECHNIQUE_LABELS[technique]}
                 </ChoiceChip>
               ))}
             </div>
-            <p>{TECHNIQUE_HELP[exercise.technique]}</p>
+            {exercise.technique !== "linear" ? <p>{TECHNIQUE_HELP[exercise.technique]}</p> : null}
           </fieldset>
           <div className={styles.sectionTitleRow}><h3>Series</h3><span>{setSummary}</span></div>
           <div className={styles.setTable}>
