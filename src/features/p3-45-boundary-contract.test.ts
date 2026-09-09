@@ -17,7 +17,11 @@ import ts from "typescript";
 import { legacyAppShellLayoutAst } from "@/features/app-shell/test-support/legacy-app-shell-layout-ast";
 
 const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
-  ignoredDirectConditionalElements: ["CalendarRemindersProductiveBoundary"],
+  ignoredDirectConditionalElements: [
+    "CalendarRemindersProductiveBoundary",
+    "TrainingCycleBuilderProductiveBoundary",
+  ],
+  ignoredConjunctiveGuardIdentifiers: ["isTrainingCycleProductVisible"],
   ignoredAttributesByElement: {
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
@@ -25,7 +29,9 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
       "retryExerciseHistory",
       "saveCompletedTrainingStatus",
       "retrySaveCompletedTraining",
+      "advancedExecution",
     ],
+    TrainingCompletionSummaryScreen: ["advancedExecutionSync"],
   },
 } as const;
 
@@ -368,7 +374,6 @@ for (const visualPath of [
   "src/features/notifications/components/NotificationPanel.tsx",
   "src/features/notifications/components/NotificationGroup.tsx",
   "src/components/training/cycle-history/CycleHistoryProductiveContainer.tsx",
-  "src/features/active-workout/components/TrainingCompletionSummaryScreen.tsx",
 ]) {
   assert.equal(
     readFileSync(visualPath, "utf8"),
@@ -376,6 +381,14 @@ for (const visualPath of [
     `${visualPath} conserva paridad byte a byte con el baseline`,
   );
 }
+const completionSummaryPath = "src/features/active-workout/components/TrainingCompletionSummaryScreen.tsx";
+const completionSummary = readFileSync(completionSummaryPath, "utf8");
+assert.match(completionSummary, /advancedExecutionSync\?: ReactNode/);
+assert.match(
+  completionSummary,
+  /\{advancedExecutionSync \?\? null\}/,
+);
+assert.doesNotMatch(completionSummary, /ShareWorkoutCard|workout-share|navigator/);
 
 const sourceProbes: Array<{
   name: string;

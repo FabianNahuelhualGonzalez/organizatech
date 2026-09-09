@@ -17,8 +17,14 @@ const repository = readFileSync("src/features/notifications/data/supabase-calend
 test("Usuario y Coach usan scopes persistidos separados y Coach no recibe catálogo Usuario", () => {
   assert.match(root, /usePersistedCalendarNotifications\([\s\S]*supabaseUser\?\.id \?\? null,[\s\S]*coachPortalSession \? "coach" : "usuario"/);
   assert.match(root, /includeCatalogNotifications: !coachPortalSession/);
-  assert.match(root, /additionalNotifications: persistedCalendarNotifications\.notifications/);
-  assert.match(root, /persistedSeenRecords: persistedCalendarNotifications\.seenRecords/);
+  assert.match(
+    root,
+    /additionalNotifications:\s*\[\s*\.\.\.persistedCalendarNotifications\.notifications,\s*\.\.\.persistedTrainingCycleNotifications\.notifications,\s*\]/,
+  );
+  assert.match(
+    root,
+    /persistedSeenRecords:\s*\[\s*\.\.\.persistedCalendarNotifications\.seenRecords,\s*\.\.\.persistedTrainingCycleNotifications\.seenRecords,\s*\]/,
+  );
   assert.match(coach, /aria-controls="notification-panel"/);
   assert.match(coach, /aria-expanded=\{isNotificationPanelOpen\}/);
   assert.match(coach, /className=\{styles\.notificationBadge\}/);
@@ -31,7 +37,10 @@ test("read_at remoto es autoridad de calendar y localStorage no puede ocultar ro
   assert.match(hook, /markOwnCalendarNotificationRead/);
   assert.match(hook, /\.catch\(\(\) => \{[\s\S]*shouldReloadAfterCalendarMarkReadFailure\(current, generation\.current\)[\s\S]*void reload\(\)/);
   assert.match(hook, /visibilitychange/);
-  assert.match(root, /if \(!isNotificationPanelOpen\) void persistedCalendarNotifications\.reload\(\)/);
+  assert.match(
+    root,
+    /if \(!isNotificationPanelOpen\) \{\s*void persistedCalendarNotifications\.reload\(\);\s*void persistedTrainingCycleNotifications\.reload\(\);\s*\}/,
+  );
 });
 
 test("un snapshot Calendar nunca cruza de la identidad A a B mientras B carga o falla", () => {

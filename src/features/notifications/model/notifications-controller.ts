@@ -200,10 +200,14 @@ export function createNotificationsController(input: {
           if (!replayGuard) return false;
           const isPersistedCalendarNotification = notification.kind === "calendar"
             && notification.id.startsWith("calendar:");
+          const isPersistedTrainingCycleNotification = notification.kind === "training-cycle"
+            && notification.id.startsWith("training-cycle:");
           if (!isPersistedCalendarNotification) {
-            if (!markSeen([notification.id])) {
-              releaseOpenReplayGuard(replayGuard);
-              return false;
+            if (!isPersistedTrainingCycleNotification) {
+              if (!markSeen([notification.id])) {
+                releaseOpenReplayGuard(replayGuard);
+                return false;
+              }
             }
           }
           if (!isCapturedOwnerCurrent(owner)) {

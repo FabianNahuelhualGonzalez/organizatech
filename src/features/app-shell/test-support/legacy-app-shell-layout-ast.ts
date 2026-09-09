@@ -9,6 +9,7 @@ const EXPANDABLE_SLOTS = new Set([
 export interface LegacyAppShellLayoutAstOptions {
   readonly ignoredAttributesByElement?: Readonly<Record<string, readonly string[]>>;
   readonly ignoredDirectConditionalElements?: readonly string[];
+  readonly ignoredConjunctiveGuardIdentifiers?: readonly string[];
 }
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {
@@ -50,6 +51,21 @@ export function legacyAppShellLayoutAst(
   ));
   if (!root?.body) throw new Error(`${path}: falta OrganizatechApp`);
 
+  const ignoredConjunctiveGuards = new Set(options.ignoredConjunctiveGuardIdentifiers ?? []);
+  const isIgnoredConjunctiveGuard = (node: ts.Node) => {
+    if (!ts.isExpression(node)) return false;
+    const candidate = unwrapExpression(node);
+    return (
+      ts.isIdentifier(candidate)
+      && ignoredConjunctiveGuards.has(candidate.text)
+    ) || (
+      ts.isPrefixUnaryExpression(candidate)
+      && candidate.operator === ts.SyntaxKind.ExclamationToken
+      && ts.isIdentifier(unwrapExpression(candidate.operand))
+      && ignoredConjunctiveGuards.has((unwrapExpression(candidate.operand) as ts.Identifier).text)
+    );
+  };
+
   const slotInitializers = new Map<string, ts.Expression>();
   const layouts: ts.JsxElement[] = [];
   const visit = (node: ts.Node) => {
@@ -73,6 +89,13 @@ export function legacyAppShellLayoutAst(
   const syntaxAst = (node: ts.Node, resolving = new Set<string>()): unknown => {
     if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
       return jsxAst(node, resolving);
+    }
+    if (
+      ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+    ) {
+      if (isIgnoredConjunctiveGuard(node.left)) return syntaxAst(node.right, resolving);
+      if (isIgnoredConjunctiveGuard(node.right)) return syntaxAst(node.left, resolving);
     }
     const children = node.getChildren(sourceFile);
     return children.length === 0
