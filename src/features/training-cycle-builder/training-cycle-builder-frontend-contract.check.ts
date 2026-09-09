@@ -146,6 +146,10 @@ test("Series lineales sólo monta el bloque común; por-series monta técnicas, 
   (expand.props.onClick as () => void)();
   assert.match(html(), /DESCENSOS DE CARGA/);
   assert.match(html(), /Kg descenso 1/);
+  const dropLabels = elementsIn(render()).filter((node) => node.type === "label"
+    && elementsIn(node).some((child) => child.type === "span" && /^(?:Reps|Kg) descenso /.test(String(child.props.children))));
+  assert.deepEqual(dropLabels.map((node) => elementsIn(node).find((child) => child.type === "input")?.props.inputMode), ["numeric", "decimal"]);
+  assert.ok(html().indexOf("Reps descenso 1") < html().indexOf("Kg descenso 1"), "el orden DOM y de lectura es reps antes que kg");
   assert.match(html(), /Agregar descenso/);
   assert.match(html(), /Duplicar serie/);
   assert.match(html(), /Eliminar serie/);
@@ -205,6 +209,54 @@ test("el handler de Aplicar enlaza ambos buffers con todas las series sin contro
   assert.equal(state.draft.routines.monday.exercises[0].technique, "linear");
   assert.ok(state.draft.routines.monday.exercises[0].sets.every((set) => set.targetKg === "95" && set.targetReps === "14" && !set.toFailure && !set.drops.length));
   assert.match(renderToStaticMarkup(render()), /value="95"/);
+});
+
+test("descensos muestra reps antes de kg y sus handlers recalculan sin tocar las otras principales", () => {
+  const Screen = loadExerciseScreen();
+  let state = cycleState.createTrainingCycleBuilderState(createTrainingCycleBuilderTestViewModel());
+  const dispatch = (action: cycleState.TrainingCycleBuilderAction) => { state = cycleState.trainingCycleBuilderReducer(state, action); };
+  for (const action of [
+    { type: "open_exercise", exerciseId: "press-flat" },
+    { type: "set_quick_reps", value: "20" },
+    { type: "set_quick_kg", value: "70" },
+    { type: "apply_quick_values" },
+    { type: "set_exercise_mode", mode: "per_set" },
+    { type: "set_technique", technique: "drop_set" },
+    { type: "add_drop", setId: "press-flat-set-4" },
+    { type: "toggle_set_open", setId: "press-flat-set-4" },
+  ] as const) dispatch(action);
+  const render = () => Screen({ state, dispatch });
+  const inputFor = (label: string) => {
+    const control = elementsIn(render()).find((node) => node.type === "label" && elementsIn(node).some((child) => child.type === "span"
+      && (Array.isArray(child.props.children) ? child.props.children.join("") : child.props.children) === label));
+    assert.ok(control, `falta campo ${label}`);
+    const input = elementsIn(control).find((node) => node.type === "input");
+    assert.ok(input);
+    return input;
+  };
+  const change = (label: string, value: string) => {
+    (inputFor(label).props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
+  };
+  const html = renderToStaticMarkup(render());
+  assert.ok(html.indexOf("Reps descenso 1") < html.indexOf("Kg descenso 1"));
+  assert.equal(inputFor("Reps descenso 1").props.inputMode, "numeric");
+  assert.equal(inputFor("Kg descenso 1").props.inputMode, "decimal");
+  change("Reps descenso 1", "40");
+  assert.equal(inputFor("Kg descenso 1").props.value, "28");
+  change("Kilogramos serie 4", "100");
+  assert.equal(inputFor("Kg descenso 1").props.value, "40");
+  change("Kg descenso 1", "30,5");
+  assert.equal(inputFor("Kg descenso 1").props.value, "30,5");
+  assert.equal(inputFor("Kg descenso 2").props.value, "24");
+  change("Kilogramos serie 4", "120");
+  assert.equal(inputFor("Kg descenso 1").props.value, "30,5", "editar la referencia no pisa carga manual");
+  change("Reps descenso 2", "");
+  assert.equal(inputFor("Reps descenso 2").props.value, "");
+  assert.equal(inputFor("Kg descenso 2").props.value, "");
+  assert.equal(cycleState.getTrainingCycleDraftValidation(state.draft).canSave, false);
+  const exercise = state.draft.routines.monday.exercises[0];
+  assert.equal(exercise.technique, "drop_set");
+  assert.deepEqual(exercise.sets.slice(0, 3).map((set) => [set.targetReps, set.targetKg, set.drops.length]), [["20", "70", 0], ["20", "70", 0], ["20", "70", 0]]);
 });
 
 // Detalle de series: nombres solicitados y cambios de forma/color acotados a técnicas.

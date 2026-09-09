@@ -381,8 +381,8 @@ export function CycleExerciseScreen({
                           {set.drops.map((drop, dropIndex) => (
                             <div key={drop.id}>
                               <b>↓{dropIndex + 1}</b>
-                              <label><span className={styles.srOnly}>Kg descenso {dropIndex + 1}</span><input inputMode="decimal" value={drop.targetKg} onChange={(event) => dispatch({ type: "edit_drop", setId: set.id, dropId: drop.id, field: "targetKg", value: event.target.value })} /></label><span>kg</span>
                               <label><span className={styles.srOnly}>Reps descenso {dropIndex + 1}</span><input inputMode="numeric" value={drop.targetReps} onChange={(event) => dispatch({ type: "edit_drop", setId: set.id, dropId: drop.id, field: "targetReps", value: event.target.value })} /></label><span>reps</span>
+                              <label><span className={styles.srOnly}>Kg descenso {dropIndex + 1}</span><input inputMode="decimal" value={drop.targetKg} onChange={(event) => dispatch({ type: "edit_drop", setId: set.id, dropId: drop.id, field: "targetKg", value: event.target.value })} /></label><span>kg</span>
                               <button className={styles.touchIconButton} type="button" aria-label={`Quitar descenso ${dropIndex + 1}`} onClick={() => dispatch({ type: "remove_drop", setId: set.id, dropId: drop.id })}><X size={15} aria-hidden="true" /></button>
                             </div>
                           ))}

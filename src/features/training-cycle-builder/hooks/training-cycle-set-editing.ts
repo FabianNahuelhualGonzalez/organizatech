@@ -3,6 +3,7 @@ import type {
 } from "@/features/training-cycle-builder/components/training-cycle-builder-contracts";
 import { suggestPyramidSetTargets } from "@/features/training-cycle-builder/model/techniques";
 import { DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS } from "@/features/training-cycle-builder/model/types";
+import { refreshSuggestedTrainingCycleDrops } from "./training-cycle-drop-editing";
 
 interface SetEdit {
   readonly setId: string;
@@ -64,7 +65,12 @@ export function editTrainingCycleSet(
     ...exercise,
     recommendationDecision: exercise.recommendationDecision === "ignored" ? "ignored" : "modified",
     sets: exercise.sets.map((set, index) => {
-      if (index === selectedIndex) return { ...set, [edit.field]: edit.value };
+      if (index === selectedIndex) {
+        const edited = { ...set, [edit.field]: edit.value };
+        return exercise.technique === "drop_set"
+          ? refreshSuggestedTrainingCycleDrops(edited)
+          : edited;
+      }
       if (!refreshLoads) return set;
       const targetKg = exercise.technique === "ascending" || exercise.technique === "descending"
         // The reps reference is irrelevant here: only targetKg is used.

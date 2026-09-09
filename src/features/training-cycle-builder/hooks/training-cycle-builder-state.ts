@@ -26,12 +26,16 @@ import {
   normalizeOptionalYouTubeVideoUrl,
   validateOptionalYouTubeVideoUrl,
 } from "@/features/training-cycle-builder/hooks/training-cycle-video-url";
-import {
-  suggestDropTargetKg,
-  suggestPyramidSetTargets,
-} from "@/features/training-cycle-builder/model/techniques";
+import { suggestPyramidSetTargets } from "@/features/training-cycle-builder/model/techniques";
 import { DEFAULT_TRAINING_CYCLE_BUILDER_LIMITS } from "@/features/training-cycle-builder/model/types";
 import { applyLinearSetValues, editTrainingCycleSet, hasUniformLinearSets } from "./training-cycle-set-editing";
+import {
+  createSuggestedTrainingCycleDrop,
+  editTrainingCycleDrop,
+  parseTrainingCycleDropKg,
+  parseTrainingCycleDropReps,
+  refreshSuggestedTrainingCycleDrops,
+} from "./training-cycle-drop-editing";
 
 export type TrainingCycleExerciseMode = "quick" | "per_set";
 export type TrainingCycleCopyMode = "exercises" | "day";
@@ -486,15 +490,11 @@ function applyTechnique(
   ));
   const lastIndex = exercise.sets.length - 1;
   const hasAnyDrop = exercise.sets.some((set) => set.drops.length > 0);
-  if (technique === "drop_set" && !hasAnyDrop) {
-    const referenceKg = finiteTechniqueReference(
-      exercise.sets[lastIndex]?.targetKg,
-      0,
-      0,
-      TRAINING_CYCLE_MAX_KG,
-    );
-    if (suggestDropTargetKg(referenceKg) >= referenceKg) return exercise;
-  }
+  const lastSet = exercise.sets[lastIndex];
+  const initialDrop = technique === "drop_set" && !hasAnyDrop && lastSet
+    ? createSuggestedTrainingCycleDrop(`${lastSet.id}-drop-1`, lastSet)
+    : null;
+  if (technique === "drop_set" && !hasAnyDrop && !initialDrop) return exercise;
   return {
     ...exercise,
     technique,
@@ -520,14 +520,8 @@ function applyTechnique(
         };
       }
       if (technique === "drop_set") {
-        const drops = !hasAnyDrop && index === lastIndex
-          ? [{
-              id: `${set.id}-drop-1`,
-              targetKg: String(suggestDropTargetKg(
-                finiteTechniqueReference(set.targetKg, baseKg, 0, TRAINING_CYCLE_MAX_KG),
-              )),
-              targetReps: "8",
-            }]
+        const drops = initialDrop && index === lastIndex
+          ? [initialDrop]
           : set.drops;
         return { ...set, toFailure: drops.length > 0, drops };
       }
@@ -920,27 +914,14 @@ export function trainingCycleBuilderReducer(
       const updated = updateCurrentExercise(state, (exercise) => {
         const selectedSet = exercise.sets.find((set) => set.id === action.setId);
         if (!selectedSet || selectedSet.drops.length >= TRAINING_CYCLE_MAX_DROPS) return exercise;
-        const previousKg = finiteTechniqueReference(
-          selectedSet.drops.at(-1)?.targetKg ?? selectedSet.targetKg,
-          0,
-          0,
-          TRAINING_CYCLE_MAX_KG,
-        );
-        const suggestedKg = suggestDropTargetKg(previousKg);
-        if (suggestedKg >= previousKg) return exercise;
+        const drop = createSuggestedTrainingCycleDrop(nextId(state, "drop"), selectedSet.drops.at(-1) ?? selectedSet);
+        if (!drop) return exercise;
         return {
           ...exercise,
           sets: exercise.sets.map((set) => set.id === action.setId
             ? {
               ...set,
-              drops: [
-                ...set.drops,
-                {
-                  id: nextId(state, "drop"),
-                  targetKg: String(suggestedKg),
-                  targetReps: "8",
-                },
-              ],
+              drops: [...set.drops, drop],
               toFailure: true,
             }
             : set),
@@ -949,44 +930,16 @@ export function trainingCycleBuilderReducer(
       return updated !== state ? { ...updated, nextEntityNumber: state.nextEntityNumber + 1 } : updated;
     }
     case "edit_drop":
-      return updateCurrentExercise(state, (exercise) => {
-        const set = exercise.sets.find((candidate) => candidate.id === action.setId);
-        if (!set) return exercise;
-        const dropIndex = set.drops.findIndex((drop) => drop.id === action.dropId);
-        if (dropIndex < 0) return exercise;
-        if (action.field === "targetKg") {
-          const kg = Number(action.value);
-          const previousKg = Number(dropIndex === 0 ? set.targetKg : set.drops[dropIndex - 1].targetKg);
-          const nextKg = Number(set.drops[dropIndex + 1]?.targetKg);
-          if (
-            !Number.isFinite(kg)
-            || kg < 0
-            || kg > TRAINING_CYCLE_MAX_KG
-            || !Number.isFinite(previousKg)
-            || kg >= previousKg
-            || (dropIndex + 1 < set.drops.length && (!Number.isFinite(nextKg) || kg <= nextKg))
-          ) return exercise;
-        }
-        return {
-          ...exercise,
-          sets: exercise.sets.map((candidate) => candidate.id === action.setId
-            ? {
-                ...candidate,
-                drops: candidate.drops.map((drop) =>
-                  drop.id === action.dropId ? { ...drop, [action.field]: action.value } : drop),
-              }
-            : candidate),
-        };
-      });
+      return updateCurrentExercise(state, (exercise) => editTrainingCycleDrop(exercise, action));
     case "remove_drop":
       return updateCurrentExercise(state, (exercise) => ({
         ...exercise,
         sets: exercise.sets.map((set) => set.id === action.setId
-          ? {
+          ? refreshSuggestedTrainingCycleDrops({
               ...set,
               drops: set.drops.filter((drop) => drop.id !== action.dropId),
               toFailure: set.drops.some((drop) => drop.id !== action.dropId),
-            }
+            })
           : set),
       }));
     case "set_video_url":
@@ -1000,10 +953,10 @@ export function trainingCycleBuilderReducer(
         return {
           ...exercise,
           recommendationDecision: "accepted",
-          sets: exercise.sets.map((set, index) => ({
-            ...set,
-            targetKg: suggestedSets.get(index + 1)?.suggestedKg ?? suggestedKg,
-          })),
+          sets: exercise.sets.map((set, index) => {
+            const accepted = { ...set, targetKg: suggestedSets.get(index + 1)?.suggestedKg ?? suggestedKg };
+            return exercise.technique === "drop_set" ? refreshSuggestedTrainingCycleDrops(accepted) : accepted;
+          }),
         };
       });
       const exercise = updated.draft.routines[updated.currentDay].exercises.find(
@@ -1405,13 +1358,12 @@ export function getTrainingCycleDraftValidation(draft: TrainingCycleDraftViewMod
         toFiniteNumber(set.targetKg, -1) >= 0 &&
         toFiniteNumber(set.targetKg, -1) <= TRAINING_CYCLE_MAX_KG &&
         set.drops.every((drop, dropIndex) => {
-          const kg = toFiniteNumber(drop.targetKg, -1);
-          const reps = toFiniteNumber(drop.targetReps, 0);
+          const kg = parseTrainingCycleDropKg(drop.targetKg);
+          const reps = parseTrainingCycleDropReps(drop.targetReps);
           const previousKg = dropIndex === 0
-            ? toFiniteNumber(set.targetKg, -1)
-            : toFiniteNumber(set.drops[dropIndex - 1].targetKg, -1);
-          return reps > 0 && reps <= TRAINING_CYCLE_MAX_REPS &&
-            kg >= 0 && kg <= TRAINING_CYCLE_MAX_KG && kg < previousKg;
+            ? parseTrainingCycleDropKg(set.targetKg)
+            : parseTrainingCycleDropKg(set.drops[dropIndex - 1].targetKg);
+          return reps !== null && kg !== null && previousKg !== null && kg < previousKg;
         }))));
   let invalidVideoCount = 0;
   for (const day of draft.selectedDays) {

@@ -1605,7 +1605,7 @@
 
 .dropEditor > div {
   display: grid;
-  grid-template-columns: 20px minmax(45px, 1fr) 18px minmax(45px, 1fr) 28px 44px;
+  grid-template-columns: 20px minmax(45px, 1fr) 28px minmax(45px, 1fr) 18px 44px;
   align-items: center;
   gap: 4px;
   margin-bottom: 5px;
@@ -2605,7 +2605,7 @@
   }
 
   .dropEditor > div {
-    grid-template-columns: 18px minmax(41px, 1fr) 16px minmax(41px, 1fr) 24px 42px;
+    grid-template-columns: 18px minmax(41px, 1fr) 24px minmax(41px, 1fr) 16px 42px;
     gap: 2px;
   }
 

@@ -79,6 +79,8 @@ export interface TrainingCycleDropDraft {
   readonly id: string;
   readonly targetKg: string;
   readonly targetReps: string;
+  /** Editor-only provenance; absent on loaded plans and excluded from save payloads. */
+  readonly followsPreviousLoad?: boolean;
 }
 
 export interface TrainingCycleSetDraft {
