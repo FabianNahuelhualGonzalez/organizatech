@@ -7,7 +7,29 @@ import type {
   TrainingCycleExecutionExerciseDraft,
   TrainingCycleExecutionSetPatch,
 } from "@/features/training-cycle-builder/active-workout/model/active-workout-execution";
+import { isBackendCompatibleYoutubeUrl } from "@/features/training-cycle-builder/data/training-cycle-rpc-mappers";
 import { formatDecimalEs } from "@/lib/progress/weight-format";
+
+export function AdvancedExerciseVideoReference({
+  exerciseName,
+  safeVideoUrl,
+}: {
+  readonly exerciseName: string;
+  readonly safeVideoUrl: string;
+}) {
+  if (!isBackendCompatibleYoutubeUrl(safeVideoUrl)) return null;
+  return (
+    <a
+      className={styles.videoLink}
+      href={safeVideoUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`Ver técnica en YouTube: ${exerciseName}`}
+    >
+      Ver técnica en YouTube
+    </a>
+  );
+}
 
 export interface AdvancedExerciseExecutionFieldsProps {
   readonly resolved: ResolvedAdvancedWorkoutExercise;
@@ -35,18 +57,6 @@ export function AdvancedExerciseExecutionFields({
 
   return (
     <div className={styles.execution} data-technique={resolved.plan.technique}>
-      {resolved.plan.safeVideoUrl ? (
-        <a
-          className={styles.videoLink}
-          href={resolved.plan.safeVideoUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`Ver técnica en YouTube: ${resolved.legacyExercise.name}`}
-        >
-          Ver técnica en YouTube
-        </a>
-      ) : null}
-
       {resolved.plan.sets.map((setPlan, setIndex) => {
         const set = draftBySetId.get(setPlan.snapshotId);
         if (!set) return null;

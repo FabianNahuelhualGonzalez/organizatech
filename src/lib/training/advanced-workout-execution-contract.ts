@@ -16,4 +16,5 @@ export interface AdvancedWorkoutExecutionIntegration {
   readonly isReady: boolean;
   readonly publishPendingPayload: () => boolean;
   readonly getExercise: (legacyExerciseId: string) => AdvancedWorkoutExerciseIntegration | null;
+  readonly getExerciseVideoReference: (legacyExerciseId: string) => ReactNode | null;
 }

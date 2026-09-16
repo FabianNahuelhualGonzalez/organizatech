@@ -61,6 +61,11 @@ export interface ResolvedAdvancedWorkoutExercise {
   readonly plan: CanonicalTrainingCycleExecutionExercisePlan;
 }
 
+export interface ResolvedAdvancedWorkoutVideoReference {
+  readonly legacyCycleExerciseId: string;
+  readonly safeVideoUrl: string;
+}
+
 export interface ResolvedAdvancedWorkoutPlan {
   readonly storageScope: BrowserStorageScope;
   readonly cycleId: string;
@@ -333,6 +338,69 @@ export function resolveAdvancedWorkoutPlan(input: {
       exercises: resolved,
     },
   };
+}
+
+/**
+ * Resuelve sólo referencias visuales seguras por IDs canónicos. No habilita la
+ * captura avanzada ni relaja sus invariantes cuando el plan completo cae a legacy.
+ */
+export function resolveAdvancedWorkoutVideoReferences(input: {
+  readonly context: AdvancedWorkoutExecutionContext | undefined;
+  readonly exercises: readonly ExerciseTemplate[];
+}): readonly ResolvedAdvancedWorkoutVideoReference[] {
+  if (!input.context || input.exercises.length === 0) return [];
+  if (
+    !isBrowserStorageScope(input.context.storageScope)
+    || input.context.storageScope === "demo"
+    || !isValidAttemptId(input.context.workoutAttemptId)
+    || !isValidInstant(input.context.performedAt)
+    || typeof input.context.onPayloadReady !== "function"
+  ) return [];
+
+  let snapshot: TrainingCycleRpcSnapshot;
+  try {
+    snapshot = reparseTypedCycleSnapshot(input.context.snapshot);
+  } catch {
+    return [];
+  }
+  if (snapshot.portalScope !== "usuario") return [];
+
+  const currentByLegacyId = new Map<string, ExerciseTemplate>();
+  for (const exercise of input.exercises) {
+    if (currentByLegacyId.has(exercise.id)) return [];
+    currentByLegacyId.set(exercise.id, exercise);
+  }
+
+  const seenLegacyIds = new Set<string>();
+  const references: ResolvedAdvancedWorkoutVideoReference[] = [];
+  for (const day of snapshot.plan.days) {
+    if (!day.legacyCycleDayId) continue;
+    for (const snapshotExercise of day.exercises) {
+      const legacyCycleExerciseId = snapshotExercise.legacyCycleExerciseId;
+      if (!legacyCycleExerciseId) continue;
+      if (seenLegacyIds.has(legacyCycleExerciseId)) return [];
+      seenLegacyIds.add(legacyCycleExerciseId);
+
+      const legacyExercise = currentByLegacyId.get(legacyCycleExerciseId);
+      if (!legacyExercise) continue;
+      if (
+        legacyExercise.cycleId !== snapshot.cycleId
+        || legacyExercise.cycleDayId !== day.legacyCycleDayId
+        || legacyExercise.trainingCycleExerciseId !== legacyCycleExerciseId
+        || legacyExercise.exerciseLineageId !== snapshotExercise.exerciseLineageId
+      ) continue;
+      if (
+        snapshotExercise.videoUrl !== null
+        && isBackendCompatibleYoutubeUrl(snapshotExercise.videoUrl)
+      ) {
+        references.push({
+          legacyCycleExerciseId,
+          safeVideoUrl: snapshotExercise.videoUrl,
+        });
+      }
+    }
+  }
+  return references;
 }
 
 export function createTrainingCycleExecutionDraft(

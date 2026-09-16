@@ -269,6 +269,7 @@ export function ActiveWorkoutSheetBoundary({
   }
 
   const activeAdvancedExercise = advancedExecution?.getExercise(activeExercise.id) ?? null;
+  const activeVideoReference = advancedExecution?.getExerciseVideoReference(activeExercise.id) ?? null;
   const activeAdvancedExerciseReady = activeAdvancedExercise?.isReady ?? true;
   const registrationComplete = isActiveWorkoutRegistrationComplete(
     activeExercise,
@@ -448,6 +449,7 @@ export function ActiveWorkoutSheetBoundary({
           onCommitRegistration={commitExerciseRegistration}
           onClose={closeExerciseSheet}
           advancedExecution={activeAdvancedExercise ?? undefined}
+          videoReference={activeVideoReference}
         />
       ) : null}
     </>

@@ -7,6 +7,7 @@ import {
   useRef,
   type CSSProperties,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 
 import styles from "@/features/active-workout/active-workout.module.css";
@@ -61,6 +62,7 @@ export interface ExerciseRegistrationSheetProps {
   onCommitRegistration: (action: ActiveWorkoutRegistrationCommit) => void;
   onClose: () => void;
   advancedExecution?: AdvancedWorkoutExerciseIntegration;
+  videoReference?: ReactNode;
 }
 
 export function ExerciseRegistrationSheet({
@@ -84,6 +86,7 @@ export function ExerciseRegistrationSheet({
   onCommitRegistration,
   onClose,
   advancedExecution,
+  videoReference,
 }: ExerciseRegistrationSheetProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const weightInputRef = useRef<HTMLInputElement>(null);
@@ -183,6 +186,7 @@ export function ExerciseRegistrationSheet({
         </header>
 
         <div className={styles.workoutSheetBody}>
+          {videoReference ?? null}
           {advancedExecution ? (
             advancedExecution.renderRegistrationFields(weightInputRef)
           ) : (

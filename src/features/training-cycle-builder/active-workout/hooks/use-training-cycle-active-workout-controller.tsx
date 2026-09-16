@@ -10,7 +10,10 @@ import {
   type Ref,
 } from "react";
 
-import { AdvancedExerciseExecutionFields } from "@/features/training-cycle-builder/active-workout/components/AdvancedExerciseExecutionFields";
+import {
+  AdvancedExerciseExecutionFields,
+  AdvancedExerciseVideoReference,
+} from "@/features/training-cycle-builder/active-workout/components/AdvancedExerciseExecutionFields";
 import { TrainingCycleExecutionSyncStatus } from "@/features/training-cycle-builder/active-workout/components/TrainingCycleExecutionSyncStatus";
 import { useTrainingCycleExecutionDraft, useTrainingCycleExecutionSync } from "@/features/training-cycle-builder/active-workout/hooks/use-training-cycle-execution";
 import {
@@ -19,6 +22,7 @@ import {
   isTrainingCycleExecutionDraftReady,
   isTrainingCycleExecutionExerciseReady,
   projectTrainingCycleExecutionToLegacyDraft,
+  resolveAdvancedWorkoutVideoReferences,
   type AdvancedWorkoutExecutionContext,
   type RecordOwnTrainingCycleExecutionPayload,
 } from "@/features/training-cycle-builder/active-workout/model/active-workout-execution";
@@ -103,6 +107,10 @@ export function useTrainingCycleActiveWorkoutController(
     exercises: input.exercises,
     legacyDrafts,
   });
+  const videoReferences = useMemo(
+    () => resolveAdvancedWorkoutVideoReferences({ context, exercises: input.exercises }),
+    [context, input.exercises],
+  );
   const payload = useMemo(() => {
     if (!execution.plan || !execution.draft) return null;
     try {
@@ -136,46 +144,66 @@ export function useTrainingCycleActiveWorkoutController(
   }, [execution.draft, execution.plan, legacyDrafts, updateLegacyDraft]);
 
   const integration = useMemo<AdvancedWorkoutExecutionIntegration | undefined>(() => {
-    if (!execution.plan || !execution.draft) return undefined;
-    const exerciseByLegacyId = new Map(execution.plan.exercises.map((resolved) => {
-      const draft = getTrainingCycleExecutionExerciseDraft(
-        execution.draft,
-        resolved.plan.snapshotId,
-      );
-      if (!draft) return [resolved.legacyExercise.id, null] as const;
-      return [resolved.legacyExercise.id, {
-        isReady: isTrainingCycleExecutionExerciseReady(draft),
-        legacyDraftProjection: projectTrainingCycleExecutionToLegacyDraft(draft),
-        renderRegistrationFields: (initialControlRef: Ref<HTMLInputElement>) => (
-          <AdvancedExerciseExecutionFields
-            resolved={resolved}
-            draft={draft}
-            initialControlRef={initialControlRef}
-            onSetChange={(planSetId, patch) => execution.updateSet({
-              planExerciseId: resolved.plan.snapshotId,
-              planSetId,
-              patch,
-            })}
-            onDropChange={(planSetId, planDropId, patch) => execution.updateDrop({
-              planExerciseId: resolved.plan.snapshotId,
-              planSetId,
-              planDropId,
-              patch,
-            })}
-          />
-        ),
-      }] as const;
-    }));
+    if ((!execution.plan || !execution.draft) && videoReferences.length === 0) return undefined;
+    const exerciseByLegacyId = new Map<string, ReturnType<AdvancedWorkoutExecutionIntegration["getExercise"]>>();
+    if (execution.plan && execution.draft) {
+      for (const resolved of execution.plan.exercises) {
+        const draft = getTrainingCycleExecutionExerciseDraft(
+          execution.draft,
+          resolved.plan.snapshotId,
+        );
+        exerciseByLegacyId.set(resolved.legacyExercise.id, draft ? {
+          isReady: isTrainingCycleExecutionExerciseReady(draft),
+          legacyDraftProjection: projectTrainingCycleExecutionToLegacyDraft(draft),
+          renderRegistrationFields: (initialControlRef: Ref<HTMLInputElement>) => (
+            <AdvancedExerciseExecutionFields
+              resolved={resolved}
+              draft={draft}
+              initialControlRef={initialControlRef}
+              onSetChange={(planSetId, patch) => execution.updateSet({
+                planExerciseId: resolved.plan.snapshotId,
+                planSetId,
+                patch,
+              })}
+              onDropChange={(planSetId, planDropId, patch) => execution.updateDrop({
+                planExerciseId: resolved.plan.snapshotId,
+                planSetId,
+                planDropId,
+                patch,
+              })}
+            />
+          ),
+        } : null);
+      }
+    }
+    const videoReferenceByLegacyId = new Map(videoReferences.map((reference) => [
+      reference.legacyCycleExerciseId,
+      reference.safeVideoUrl,
+    ]));
+    const exerciseNameByLegacyId = new Map(input.exercises.map((exercise) => [exercise.id, exercise.name]));
     return {
-      isReady: payload !== null && isTrainingCycleExecutionDraftReady(execution.draft),
+      isReady: execution.plan && execution.draft
+        ? payload !== null && isTrainingCycleExecutionDraftReady(execution.draft)
+        : true,
       publishPendingPayload: () => {
+        if (!execution.plan || !execution.draft) return true;
         if (!payload) return false;
         onPayloadReady(payload);
         return true;
       },
       getExercise: (legacyExerciseId) => exerciseByLegacyId.get(legacyExerciseId) ?? null,
+      getExerciseVideoReference: (legacyExerciseId) => {
+        const safeVideoUrl = videoReferenceByLegacyId.get(legacyExerciseId);
+        const exerciseName = exerciseNameByLegacyId.get(legacyExerciseId);
+        return safeVideoUrl && exerciseName ? (
+          <AdvancedExerciseVideoReference
+            exerciseName={exerciseName}
+            safeVideoUrl={safeVideoUrl}
+          />
+        ) : null;
+      },
     };
-  }, [execution, onPayloadReady, payload]);
+  }, [execution, input.exercises, onPayloadReady, payload, videoReferences]);
 
   const [syncScopeKey, setSyncScopeKey] = useState<string | null>(null);
   const syncIdentityRef = useRef<string | null>(null);

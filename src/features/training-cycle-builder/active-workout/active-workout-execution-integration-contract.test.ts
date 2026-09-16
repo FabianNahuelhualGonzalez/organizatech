@@ -55,9 +55,19 @@ test("la captura incluye series, fallo y drops; el video abre con aislamiento", 
   ]) assert.match(fields, new RegExp(marker.replace(".", "\\.")));
   assert.match(fields, /target="_blank"/);
   assert.match(fields, /rel="noopener noreferrer"/);
-  assert.match(fields, /href=\{resolved\.plan\.safeVideoUrl\}/);
+  assert.match(fields, /isBackendCompatibleYoutubeUrl\(safeVideoUrl\)/);
+  assert.match(fields, /href=\{safeVideoUrl\}/);
   assert.match(fields, />\s*Ver técnica en YouTube\s*</);
-  assert.match(fields, /aria-label=\{`Ver técnica en YouTube: \$\{resolved\.legacyExercise\.name\}`\}/);
+  assert.match(fields, /aria-label=\{`Ver técnica en YouTube: \$\{exerciseName\}`\}/);
+  assert.match(sheet, /\{videoReference \?\? null\}/);
+  assert.ok(
+    sheet.indexOf("{videoReference ?? null}") < sheet.indexOf("{advancedExecution ? ("),
+    "la referencia se monta aunque la captura use el fallback legacy",
+  );
+  assert.match(boundary, /advancedExecution\?\.getExerciseVideoReference\(activeExercise\.id\)/);
+  assert.match(boundary, /videoReference=\{activeVideoReference\}/);
+  assert.match(controller, /resolveAdvancedWorkoutVideoReferences\(\{ context, exercises: input\.exercises \}\)/);
+  assert.match(controller, /if \(!execution\.plan \|\| !execution\.draft\) return true;/);
 });
 
 test("cada cambio avanzado se proyecta al draft legacy y el payload precede al write legacy", () => {

@@ -6,6 +6,7 @@ import {
   createTrainingCycleExecutionDraft,
   getTrainingCycleExecutionExerciseDraft,
   resolveAdvancedWorkoutPlan,
+  resolveAdvancedWorkoutVideoReferences,
   TrainingCycleExecutionPayloadError,
   updateTrainingCycleExecutionDrop,
   updateTrainingCycleExecutionSet,
@@ -34,7 +35,9 @@ const SET_A_ID = uuid(12);
 const SET_B_ID = uuid(13);
 const DROP_B_ID = uuid(14);
 
-function snapshot(videoUrl = "https://www.youtube.com/watch?v=ABCdef12345"): TrainingCycleRpcSnapshot {
+function snapshot(
+  videoUrl: string | null = "https://www.youtube.com/watch?v=ABCdef12345",
+): TrainingCycleRpcSnapshot {
   return {
     cycleId: CYCLE_ID,
     portalScope: "usuario",
@@ -202,6 +205,37 @@ test("video sólo queda disponible para una URL YouTube allowlisted y el snapsho
       exercises,
     }),
     { kind: "legacy" },
+  );
+});
+
+test("un ciclo activado conserva la referencia de video aunque la captura avanzada caiga a legacy", () => {
+  const visibleExercises = [exercises[1]];
+  assert.deepEqual(
+    resolveAdvancedWorkoutPlan({ context: context(), exercises: visibleExercises }),
+    { kind: "legacy" },
+    "la captura completa falla cerrado si el conjunto visible no coincide con el snapshot",
+  );
+
+  assert.deepEqual(
+    resolveAdvancedWorkoutVideoReferences({ context: context(), exercises: visibleExercises }),
+    [{
+      legacyCycleExerciseId: LEGACY_EXERCISE_A_ID,
+      safeVideoUrl: "https://www.youtube.com/watch?v=ABCdef12345",
+    }],
+    "la acción segura del ejercicio visible no debe desaparecer con el fallback legacy",
+  );
+  assert.deepEqual(
+    resolveAdvancedWorkoutVideoReferences({
+      context: context(snapshot("https://evil.example.com/video/ABCdef12345")),
+      exercises: visibleExercises,
+    }),
+    [],
+    "un snapshot alterado nunca publica enlaces",
+  );
+  assert.deepEqual(
+    resolveAdvancedWorkoutVideoReferences({ context: context(snapshot(null)), exercises }),
+    [],
+    "un ejercicio sin video no publica una acción vacía",
   );
 });
 

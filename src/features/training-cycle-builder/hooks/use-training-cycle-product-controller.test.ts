@@ -15,6 +15,7 @@ function fakeRpc(input: {
   readonly pages?: number;
   readonly draftSource?: string | null;
   readonly activeGuard?: { readonly cycleId: string; readonly hasCanonicalPlan: boolean } | null;
+  readonly activeCycle?: unknown;
 } = {}) {
   const sourceId = input.draftSource ?? null;
   const pageCount = input.pages ?? 1;
@@ -47,7 +48,7 @@ function fakeRpc(input: {
       };
     },
     getDraft: async () => sourceId ? ({ sourceCycleId: sourceId }) : null,
-    getActiveCycle: async () => null,
+    getActiveCycle: async () => (input.activeCycle ?? null) as never,
     listCycles: async () => ({ items: [{ cycleId: "20000000-0000-4000-8000-000000000099" }], nextCursor: null }),
     getCycle: async (cycleId: string) => { cycleLoads.push(cycleId); return { cycleId }; },
   };
@@ -121,6 +122,24 @@ test("carga catálogo keyset acotado y reutiliza una fuente que también es el �
   const result = await loadTrainingCycleProductData(rpc as never);
   assert.equal(rpc.cycleLoads.length, 1);
   assert.equal((result.sourceCycle as { cycleId: string }).cycleId, cycleId);
+});
+
+test("la lectura del activo conserva el video canónico del ciclo activado", async () => {
+  const activeCycle = {
+    cycleId: "20000000-0000-4000-8000-000000000098",
+    plan: {
+      days: [{
+        exercises: [{ videoUrl: "https://www.youtube.com/watch?v=AbCdEfGhI_1" }],
+      }],
+    },
+  };
+  const result = await loadTrainingCycleProductData(fakeRpc({ activeCycle }) as never);
+
+  assert.equal(result.activeCycle, activeCycle);
+  assert.equal(
+    result.activeCycle?.plan.days[0]?.exercises[0]?.videoUrl,
+    "https://www.youtube.com/watch?v=AbCdEfGhI_1",
+  );
 });
 
 test("falla cerrado si el catálogo requiere más de tres páginas", async () => {
