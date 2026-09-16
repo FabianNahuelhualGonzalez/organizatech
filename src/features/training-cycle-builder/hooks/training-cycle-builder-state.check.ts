@@ -1474,6 +1474,31 @@ test("confirmar el cierre prepara un borrador manual limpio sólo después del �
   assert.deepEqual(clean.sourceDraft.selectedDays, []);
 });
 
+test("confirmar un ciclo nuevo desde Mi ciclo abre el selector de alternativas", () => {
+  const active = reduce(createState(), { type: "show_active" });
+  const confirmation = reduce(active, {
+    type: "active_cycle_close_confirmation_required",
+    cycleId: "40000000-0000-4000-8000-000000000002",
+    origin: "duplicate",
+    screen: "start",
+  });
+  const committedDraft = {
+    ...confirmation.draft,
+    draftId: "30000000-0000-4000-8000-000000000099",
+  };
+  const next = reduce(
+    reduce(confirmation, { type: "active_cycle_close_started" }),
+    { type: "active_cycle_close_succeeded", draft: committedDraft },
+  );
+
+  assert.equal(next.workflow, "draft");
+  assert.equal(next.origin, "duplicate");
+  assert.equal(next.screen, "start");
+  assert.equal(next.draft.draftId, committedDraft.draftId);
+  assert.ok(next.sourceDraft.selectedDays.length > 0);
+  assert.ok(next.sourceDraft.routines.monday.exercises.length > 0);
+});
+
 test("un error de cierre mantiene el activo y permite reintentar la misma confirmación", () => {
   const active = reduce(createState(), { type: "show_active" });
   const editing = reduce(active, { type: "begin_active_edit" });

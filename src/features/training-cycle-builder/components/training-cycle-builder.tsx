@@ -253,7 +253,7 @@ function ConnectedTrainingCycleBuilder({
           state={state}
           viewModel={viewModel}
           dispatch={dispatch}
-          onRequestNewCycle={() => void controller.requestNewCycle("manual", "setup")}
+          onRequestNewCycle={() => void controller.requestNewCycle("duplicate", "start")}
         />
       );
       break;
@@ -304,6 +304,10 @@ function ConnectedTrainingCycleBuilder({
             tone="error"
             title="No pudimos iniciar un ciclo nuevo"
             body={state.activeCycleCloseErrorMessage ?? "Tu ciclo actual sigue exactamente como estaba."}
+            actionLabel={state.committedSyncPending ? "Recargar ahora" : undefined}
+            onAction={state.committedSyncPending
+              ? () => window.location.reload()
+              : undefined}
           />
         ) : null}
         {state.recoveredDraftBannerOpen ? (
