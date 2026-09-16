@@ -1647,6 +1647,7 @@ export function OrganizatechApp({
     expectedUserId: supabaseUser?.id ?? null,
     entries: displayEntries,
     onCycleChanged: synchronizeTrainingCycleProductWithLegacy,
+    onCycleReplaced: synchronizeTrainingCycleReplacementWithLegacy,
     onStartTraining: () => navigateTo("entrenamiento"),
   });
   const trainingCycleActiveWorkout = useTrainingCycleActiveWorkoutController({
@@ -2231,6 +2232,14 @@ export function OrganizatechApp({
     }
 
     return true;
+  }
+
+  async function synchronizeTrainingCycleReplacementWithLegacy() {
+    const requestToken = captureSessionDataRequestToken();
+    if (!isSessionDataRequestCurrent(requestToken)) return false;
+
+    const cyclesResult = await refreshTrainingCyclesBoundary();
+    return isSessionDataRequestCurrent(requestToken) && cyclesResult.kind === "success";
   }
 
   async function createCycleScopedTrainingCycleFromSetup(

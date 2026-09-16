@@ -46,10 +46,23 @@ import styles from "@/features/training-cycle-builder/components/training-cycle-
 
 type BuilderDispatch = Dispatch<TrainingCycleBuilderAction>;
 
-function exerciseSpecification(exercise: TrainingCycleExerciseDraft) {
+export function formatTrainingCycleExerciseSpecification(exercise: TrainingCycleExerciseDraft) {
   const repetitions = [...new Set(exercise.sets.map((set) => set.targetReps))];
   const kilograms = [...new Set(exercise.sets.map((set) => set.targetKg))];
-  return `${exercise.sets.length}×${repetitions.length === 1 ? repetitions[0] : "var"} · ${kilograms.length === 1 ? kilograms[0] : "var"}kg`;
+  const seriesLabel = `${exercise.sets.length} ${exercise.sets.length === 1 ? "serie" : "series"}`;
+  const repetitionsAreVariable = repetitions.length !== 1;
+  const kilogramsAreVariable = kilograms.length !== 1;
+  if (repetitionsAreVariable && kilogramsAreVariable) {
+    return `${seriesLabel} · repeticiones y peso variables`;
+  }
+  if (repetitionsAreVariable) {
+    return `${seriesLabel} · repeticiones variables · ${kilograms[0]} kg`;
+  }
+  const repetitionsLabel = `${repetitions[0]} ${repetitions[0] === "1" ? "repetición" : "repeticiones"}`;
+  if (kilogramsAreVariable) {
+    return `${seriesLabel} · ${repetitionsLabel} · peso variable`;
+  }
+  return `${seriesLabel} · ${repetitionsLabel} · ${kilograms[0]} kg`;
 }
 
 export function CycleRoutineScreen({
@@ -119,7 +132,7 @@ export function CycleRoutineScreen({
                     <strong>{exercise.name}</strong>
                     <span>
                       <small className={styles.groupTag}>{exercise.muscleGroup}</small>
-                      <small>{exerciseSpecification(exercise)}</small>
+                      <small>{formatTrainingCycleExerciseSpecification(exercise)}</small>
                       {exercise.technique !== "linear" ? <small className={styles.techniqueTag}>{TRAINING_CYCLE_TECHNIQUE_LABELS[exercise.technique]}</small> : null}
                       {exercise.videoUrl && validateOptionalYouTubeVideoUrl(exercise.videoUrl).valid
                         ? <Video size={12} aria-label="Con video" />

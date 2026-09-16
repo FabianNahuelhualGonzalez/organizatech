@@ -153,7 +153,7 @@ export async function confirmTrainingCycleActiveClose(
     if (error instanceof TrainingCycleCommittedMutationError) {
       dispatch({
         type: "active_cycle_close_committed_sync_failed",
-        message: "El ciclo anterior terminó, pero no pudimos sincronizar el nuevo borrador. Recarga para continuar.",
+        message: "El ciclo anterior terminó. El nuevo borrador no terminó de prepararse; recarga para recuperarlo sin repetir el cierre.",
       });
       return;
     }

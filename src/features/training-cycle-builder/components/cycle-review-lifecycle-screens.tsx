@@ -37,6 +37,7 @@ import {
   SecondaryAction,
   StatusBanner,
 } from "@/features/training-cycle-builder/components/training-cycle-builder-ui";
+import { AppBackButton } from "@/ui/navigation/app-back-button";
 import styles from "@/features/training-cycle-builder/components/training-cycle-builder.module.css";
 
 type BuilderDispatch = Dispatch<TrainingCycleBuilderAction>;
@@ -265,7 +266,9 @@ export function CycleSuccessScreen({
       </section>
       <PrimaryAction onClick={onStartTraining}>Comenzar a entrenar</PrimaryAction>
       <SecondaryAction onClick={onReviewCycle}>Revisar mi ciclo</SecondaryAction>
-      <button className={styles.textAction} type="button" onClick={onExit}>Ir al inicio</button>
+      <div className={styles.successExitAction}>
+        <AppBackButton onBack={onExit} label="Volver al menú principal" />
+      </div>
     </div>
   );
 }
@@ -274,10 +277,12 @@ export function CycleActiveScreen({
   state,
   viewModel,
   dispatch,
+  onRequestNewCycle,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly viewModel: TrainingCycleBuilderInitialViewModel;
   readonly dispatch: BuilderDispatch;
+  readonly onRequestNewCycle: () => void;
 }) {
   const remaining = viewModel.activeCycleDaysRemaining ?? 0;
   const elapsed = viewModel.activeCycleElapsedDays ?? 0;
@@ -327,6 +332,12 @@ export function CycleActiveScreen({
           body="Falta la revisión del ciclo activo. Recarga antes de editar para evitar sobrescribir cambios."
         />
       )}
+      <SecondaryAction
+        disabled={state.committedSyncPending || state.activeCycleCloseState === "closing"}
+        onClick={onRequestNewCycle}
+      >
+        Crear un nuevo ciclo de entrenamiento
+      </SecondaryAction>
     </div>
   );
 }

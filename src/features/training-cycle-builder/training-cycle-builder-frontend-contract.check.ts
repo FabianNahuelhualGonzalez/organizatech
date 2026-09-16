@@ -45,6 +45,7 @@ const autosaveSource = read(`${FEATURE_ROOT}/hooks/training-cycle-draft-autosave
 const stateSource = read(`${FEATURE_ROOT}/hooks/training-cycle-builder-state.ts`);
 const videoUrlSource = read("src/lib/training/youtube-video-url.ts");
 const cssSource = read(`${FEATURE_ROOT}/components/training-cycle-builder.module.css`);
+const backButtonCssSource = read("src/ui/navigation/app-back-button.module.css");
 const modalShellSource = read("src/ui/modals/modal-shell.tsx");
 const catalogScreenSource = read(`${FEATURE_ROOT}/components/cycle-catalog-screen.tsx`);
 const catalogNoticeSource = read(`${FEATURE_ROOT}/components/cycle-catalog-addition-notice.tsx`);
@@ -52,7 +53,7 @@ const routineScreensSource = read(`${FEATURE_ROOT}/components/cycle-routine-scre
 
 // Ejecuta el TSX real de esta pantalla en Node. Sólo los primitives y CSS se
 // sustituyen; no es un navegador ni una prueba de layout, foco o estilos.
-function loadExerciseScreen() {
+function loadExerciseModule() {
   const Button = ({ children, selected, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { selected?: boolean }) =>
     createElement("button", { ...props, ...(selected === undefined ? {} : { "aria-pressed": selected }) }, children);
   const dependencies: Record<string, unknown> = {
@@ -67,7 +68,10 @@ function loadExerciseScreen() {
     },
     "./cycle-catalog-screen": {},
   };
-  const exports: { CycleExerciseScreen?: typeof import("./components/cycle-routine-screens").CycleExerciseScreen } = {};
+  const exports: {
+    CycleExerciseScreen?: typeof import("./components/cycle-routine-screens").CycleExerciseScreen;
+    formatTrainingCycleExerciseSpecification?: typeof import("./components/cycle-routine-screens").formatTrainingCycleExerciseSpecification;
+  } = {};
   const { outputText } = transpileModule(routineScreensSource, {
     compilerOptions: { jsx: JsxEmit.ReactJSX, module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: true },
   });
@@ -79,7 +83,15 @@ function loadExerciseScreen() {
     },
   });
   assert.ok(exports.CycleExerciseScreen);
-  return exports.CycleExerciseScreen;
+  assert.ok(exports.formatTrainingCycleExerciseSpecification);
+  return {
+    Screen: exports.CycleExerciseScreen,
+    formatSpecification: exports.formatTrainingCycleExerciseSpecification,
+  };
+}
+
+function loadExerciseScreen() {
+  return loadExerciseModule().Screen;
 }
 
 function elementsIn(node: ReactNode): ReactElement<Record<string, unknown>>[] {
@@ -87,6 +99,29 @@ function elementsIn(node: ReactNode): ReactElement<Record<string, unknown>>[] {
   if (!isValidElement<{ children?: ReactNode }>(node)) return [];
   return [node, ...elementsIn(node.props.children)];
 }
+
+test("resume series, repeticiones y peso con lenguaje humano en las cuatro combinaciones", () => {
+  const { formatSpecification } = loadExerciseModule();
+  const base = createTrainingCycleBuilderTestViewModel().draft.routines.monday.exercises[0];
+  assert.ok(base);
+  const exercise = (repetitions: readonly string[], kilograms: readonly string[]) => ({
+    ...base,
+    sets: base.sets.map((set, index) => ({
+      ...set,
+      targetReps: repetitions[index] ?? repetitions[0]!,
+      targetKg: kilograms[index] ?? kilograms[0]!,
+    })),
+  });
+
+  assert.equal(formatSpecification(exercise(["10"], ["20"])), "4 series · 10 repeticiones · 20 kg");
+  assert.equal(formatSpecification(exercise(["10", "12", "10", "12"], ["20"])), "4 series · repeticiones variables · 20 kg");
+  assert.equal(formatSpecification(exercise(["10"], ["20", "25", "20", "25"])), "4 series · 10 repeticiones · peso variable");
+  assert.equal(formatSpecification(exercise(["10", "12", "10", "12"], ["20", "25", "20", "25"])), "4 series · repeticiones y peso variables");
+  assert.equal(formatSpecification({
+    ...base,
+    sets: [{ ...base.sets[0]!, targetReps: "1", targetKg: "20" }],
+  }), "1 serie · 1 repetición · 20 kg");
+});
 
 test("Series lineales sólo monta el bloque común; por-series monta técnicas, filas y descensos", () => {
   const Screen = loadExerciseScreen();
@@ -304,6 +339,13 @@ assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.cata
 assert.match(rootSource, /import \{ TrainingCycleBuilderProductiveBoundary \} from "@\/features\/training-cycle-builder\/components\/training-cycle-builder-productive-boundary";/);
 assert.match(rootSource, /import \{ useTrainingCycleProductController \} from "@\/features\/training-cycle-builder\/hooks\/use-training-cycle-product-controller";/);
 assert.match(rootSource, /const trainingCycleProduct = useTrainingCycleProductController\(/);
+assert.match(rootSource, /onCycleReplaced: synchronizeTrainingCycleReplacementWithLegacy/);
+const replacementSyncSource = rootSource.match(
+  /async function synchronizeTrainingCycleReplacementWithLegacy\(\) \{[\s\S]*?\n  \}/,
+)?.[0] ?? "";
+assert.match(replacementSyncSource, /captureSessionDataRequestToken\(\)/);
+assert.match(replacementSyncSource, /refreshTrainingCyclesBoundary\(\)/);
+assert.doesNotMatch(replacementSyncSource, /reloadCycleScopedBoundary/);
 assert.match(rootSource, /<TrainingCycleBuilderProductiveBoundary/);
 assert.match(productiveBoundarySource, /export function TrainingCycleBuilderProductiveBoundary\(/);
 assert.match(productiveBoundarySource, /<TrainingCycleBuilder/);
@@ -311,6 +353,7 @@ assert.match(productiveBoundarySource, /key=\{trainingCycleBuilderInstanceKey\(p
 assert.doesNotMatch(productiveBoundarySource, /key=\{`[^`]*(?:activeCycleId|draftId)/);
 assert.match(productControllerSource, /createTrainingCycleProductGateway/);
 assert.match(productControllerSource, /buildTrainingCycleProductViewModel/);
+assert.match(productControllerSource, /synchronizeLegacy: \(\) => lifecycle\.onCycleReplaced\(\)/);
 assert.match(featureSource, /export function TrainingCycleBuilder\(/);
 assert.match(featureSource, /import \{ AppTopbar \} from "@\/features\/app-shell\/components\/app-topbar";/);
 assert.match(featureSource, /import \{ AppBackButton \} from "@\/ui\/navigation\/app-back-button";/);
@@ -388,15 +431,24 @@ assert.match(featureSource, /cancelLabel="No"/);
 assert.match(featureSource, /confirmLabel="Sí"/);
 assert.match(featureSource, /requestNewCycle\("manual", "setup"\)/);
 assert.match(lifecycleScreensSource, /Editar objetivo, días y rutinas/);
-assert.match(
-  creationScreensSource,
-  /\{isActiveEdit \? \([\s\S]*Crear un nuevo ciclo de entrenamiento[\s\S]*\) : null\}/,
+const setupScreenSource = creationScreensSource.match(/export function CycleSetupScreen[\s\S]*$/)?.[0] ?? "";
+const activeScreenSource = lifecycleScreensSource.match(/export function CycleActiveScreen[\s\S]*?export function CycleAlertsScreen/)?.[0] ?? "";
+assert.doesNotMatch(setupScreenSource, /Crear un nuevo ciclo de entrenamiento|onRequestNewCycle/);
+assert.match(activeScreenSource, /onRequestNewCycle/);
+assert.ok(
+  activeScreenSource.indexOf("Editar objetivo, días y rutinas")
+    < activeScreenSource.indexOf("Crear un nuevo ciclo de entrenamiento"),
+  "Crear un nuevo ciclo debe estar inmediatamente después de Editar en Mi ciclo",
 );
 assert.doesNotMatch(
-  lifecycleScreensSource.match(/export function CycleActiveScreen[\s\S]*?export function CycleAlertsScreen/)?.[0] ?? "",
-  /Extender la fecha de término|Crear un nuevo ciclo de entrenamiento|Ver avisos de vencimiento|Ver qué pasa si no lo extiendo|PrimaryAction/,
+  activeScreenSource,
+  /Extender la fecha de término|Ver avisos de vencimiento|Ver qué pasa si no lo extiendo|PrimaryAction/,
 );
 assert.doesNotMatch(lifecycleScreensSource, /begin_active_edit[\s\S]{0,200}active_cycle_close/);
+const successScreenSource = lifecycleScreensSource.match(/export function CycleSuccessScreen[\s\S]*?export function CycleActiveScreen/)?.[0] ?? "";
+assert.match(successScreenSource, /<AppBackButton onBack=\{onExit\} label="Volver al menú principal" \/>/);
+assert.doesNotMatch(successScreenSource, /Ir al inicio|history\.back/);
+assert.match(cssSource, /\.successExitAction > button \{[\s\S]*?width: 100%;[\s\S]*?min-height: 48px;[\s\S]*?border: 1px solid/);
 assert.match(controllerSource, /state\.workflow !== "draft"/);
 assert.match(stateSource, /expectedRevision/);
 assert.match(stateSource, /durationDays/);
@@ -459,6 +511,22 @@ assert.match(cssSource, /font-family: "Roboto Mono"/);
 assert.match(cssSource, /min-width: 44px;/);
 assert.match(cssSource, /min-height: 44px;/);
 assert.match(cssSource, /:focus-visible/);
+assert.match(backButtonCssSource, /min-width: 44px;/);
+assert.match(backButtonCssSource, /min-height: 44px;/);
+assert.match(backButtonCssSource, /@media \(hover: hover\) and \(pointer: fine\)/);
+assert.match(backButtonCssSource, /@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.button:hover,[\s\S]*?\.button:active[\s\S]*?background: transparent;/);
+assert.match(backButtonCssSource, /\.button:focus-visible/);
+
+const comparisonBreakpoint = Number(cssSource.match(/@media \(min-width: (\d+)px\) \{\s*\.comparisonTable/)?.[1]);
+assert.equal(comparisonBreakpoint, 600);
+assert.match(cssSource, /\.comparisonTable > \[role="row"\]:not\(\.comparisonHead\) \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/);
+assert.match(cssSource, /@media \(min-width: 600px\)[\s\S]*?\.comparisonTable > \[role="row"\]:not\(\.comparisonHead\)[\s\S]*?grid-template-columns: minmax\(0, 1fr\) 140px 160px;/);
+assert.match(creationScreensSource, /<small aria-hidden="true">Plan:<\/small>/);
+assert.match(creationScreensSource, /<small aria-hidden="true">Real:<\/small>/);
+assert.match(cssSource, /overflow-wrap: anywhere;/);
+for (const [width, expectedColumns] of [[320, 1], [390, 1], [430, 1], [768, 3]] as const) {
+  assert.equal(width >= comparisonBreakpoint ? 3 : 1, expectedColumns, `layout determinista a ${width}px`);
+}
 
 const baseDateFieldsRule = cssSource.match(/\.dateFields\s*\{([^}]*)\}/)?.[1] ?? "";
 const sharedDateLabelRule = cssSource.match(

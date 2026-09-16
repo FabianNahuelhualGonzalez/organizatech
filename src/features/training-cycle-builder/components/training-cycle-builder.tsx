@@ -202,7 +202,6 @@ function ConnectedTrainingCycleBuilder({
           state={state}
           dispatch={dispatch}
           onGenerateSuggestion={() => void controller.generateSuggestion()}
-          onRequestNewCycle={() => void controller.requestNewCycle("manual", "setup")}
         />
       );
       break;
@@ -255,6 +254,7 @@ function ConnectedTrainingCycleBuilder({
           state={state}
           viewModel={viewModel}
           dispatch={dispatch}
+          onRequestNewCycle={() => void controller.requestNewCycle("manual", "setup")}
         />
       );
       break;

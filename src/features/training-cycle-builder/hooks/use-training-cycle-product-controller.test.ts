@@ -7,6 +7,7 @@ import {
   closeActiveTrainingCycleProductData,
   clearDiscardedTrainingCycleProductData,
   loadTrainingCycleProductData,
+  publishTrainingCycleReplacement,
   selectOwnedTrainingCycleProductSnapshot,
 } from "./use-training-cycle-product-controller";
 import { createTrainingCycleProductLifecycleController } from "../integration/training-cycle-product-lifecycle";
@@ -181,6 +182,34 @@ test("el cierre conserva el ciclo recién terminado como fuente del duplicado", 
   assert.equal(closed.lastCycle, activeCycle);
 });
 
+test("publicación de reemplazo exige refresh legacy vigente y exitoso", async () => {
+  let current = true;
+  let publications = 0;
+  const published = await publishTrainingCycleReplacement({
+    isCurrent: () => current,
+    publish: () => { publications += 1; },
+    synchronizeLegacy: async () => true,
+  });
+  assert.equal(published, true);
+  assert.equal(publications, 1);
+
+  const incomplete = await publishTrainingCycleReplacement({
+    isCurrent: () => current,
+    publish: () => { publications += 1; },
+    synchronizeLegacy: async () => false,
+  });
+  assert.equal(incomplete, false);
+  assert.equal(publications, 2);
+
+  const stale = await publishTrainingCycleReplacement({
+    isCurrent: () => current,
+    publish: () => { publications += 1; current = false; },
+    synchronizeLegacy: async () => true,
+  });
+  assert.equal(stale, false);
+  assert.equal(publications, 3);
+});
+
 test("A→B oculta el snapshot ready de A antes de que se ejecute el effect de B", () => {
   const snapshotA = {
     ownerContextKey: "usuario:identity-a",
@@ -231,6 +260,25 @@ test("activación y comenzar entrenamiento respetan refresh legacy antes de nave
     "training:cycle-1",
     "refresh:cycle-stale",
   ]);
+});
+
+test("reemplazo sincroniza sólo la lista y no intenta recargar el ciclo cerrado", async () => {
+  const calls: string[] = [];
+  const lifecycle = createTrainingCycleProductLifecycleController({
+    ownerContextKey: "usuario:identity-a",
+    getCurrentContextKey: () => "usuario:identity-a",
+    async onCycleChanged(cycleId) {
+      calls.push(`full-refresh:${cycleId}`);
+      return false;
+    },
+    async onCycleReplaced() {
+      calls.push("cycles-refresh");
+      return true;
+    },
+  });
+
+  assert.equal(await lifecycle.onCycleReplaced(), true);
+  assert.deepEqual(calls, ["cycles-refresh"]);
 });
 
 test("refresh A pendiente no puede navegar después del render síncrono de B", async () => {

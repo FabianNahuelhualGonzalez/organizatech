@@ -8,12 +8,15 @@ export interface TrainingCycleProductLifecycleCallbacks {
    * devolver false cuando el owner capturado dejó de ser vigente o el refresh falló.
    */
   readonly onCycleChanged?: (cycleId: string) => Promise<boolean>;
+  /** Sincroniza la lista legacy después de cerrar un ciclo, sin recargar el ciclo cerrado. */
+  readonly onCycleReplaced?: () => Promise<boolean>;
   /** Se ejecuta sólo después de una sincronización legacy vigente y exitosa. */
   readonly onStartTraining?: (cycleId: string) => void | Promise<void>;
 }
 
 export interface TrainingCycleProductLifecycleController {
   readonly onCycleChanged: (cycleId: string) => Promise<boolean>;
+  readonly onCycleReplaced: () => Promise<boolean>;
   readonly onStartTraining: (cycleId: string) => Promise<boolean>;
 }
 
@@ -33,6 +36,16 @@ export function createTrainingCycleProductLifecycleController(
     if (!normalizedCycleId || !callbacks.onCycleChanged || !ownsCurrentContext()) return false;
     try {
       const refreshed = await callbacks.onCycleChanged(normalizedCycleId);
+      return ownsCurrentContext() && refreshed === true;
+    } catch {
+      return false;
+    }
+  };
+
+  const onCycleReplaced = async () => {
+    if (!callbacks.onCycleReplaced || !ownsCurrentContext()) return false;
+    try {
+      const refreshed = await callbacks.onCycleReplaced();
       return ownsCurrentContext() && refreshed === true;
     } catch {
       return false;
@@ -59,5 +72,5 @@ export function createTrainingCycleProductLifecycleController(
     return operation;
   };
 
-  return { onCycleChanged, onStartTraining };
+  return { onCycleChanged, onCycleReplaced, onStartTraining };
 }

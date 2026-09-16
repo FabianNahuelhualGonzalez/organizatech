@@ -33,7 +33,7 @@ const MAX_CATALOG_PAGES = 3;
 type ProductRpc = ReturnType<typeof createTrainingCycleRpcGateway>;
 type ProductLifecycleCallbackRefs = Pick<
   TrainingCycleProductLifecycleCallbacks,
-  "onCycleChanged" | "onStartTraining"
+  "onCycleChanged" | "onCycleReplaced" | "onStartTraining"
 >;
 
 export interface TrainingCycleProductData {
@@ -175,6 +175,19 @@ export function closeActiveTrainingCycleProductData(
   };
 }
 
+export async function publishTrainingCycleReplacement(input: {
+  readonly isCurrent: () => boolean;
+  readonly publish: () => void;
+  readonly synchronizeLegacy: () => Promise<boolean>;
+}) {
+  if (!input.isCurrent()) return false;
+  input.publish();
+  // El snapshot productivo se publica primero para mantener el commit visible,
+  // pero el reemplazo sólo termina cuando la lista legacy quedó sincronizada.
+  const synchronized = await input.synchronizeLegacy();
+  return input.isCurrent() && synchronized === true;
+}
+
 function todayInSantiago() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Santiago",
@@ -189,6 +202,7 @@ export function useTrainingCycleProductController(input: {
   readonly expectedUserId: string | null;
   readonly entries: readonly ExerciseEntry[];
   readonly onCycleChanged?: TrainingCycleProductLifecycleCallbacks["onCycleChanged"];
+  readonly onCycleReplaced?: TrainingCycleProductLifecycleCallbacks["onCycleReplaced"];
   readonly onStartTraining?: TrainingCycleProductLifecycleCallbacks["onStartTraining"];
 }): TrainingCycleProductController {
   const generation = useRef(0);
@@ -198,6 +212,7 @@ export function useTrainingCycleProductController(input: {
   const callbacksRef = useRef<ProductLifecycleCallbackRefs>({});
   callbacksRef.current = {
     onCycleChanged: input.onCycleChanged,
+    onCycleReplaced: input.onCycleReplaced,
     onStartTraining: input.onStartTraining,
   };
   const [reloadVersion, setReloadVersion] = useState(0);
@@ -252,6 +267,7 @@ export function useTrainingCycleProductController(input: {
       ownerContextKey,
       getCurrentContextKey: () => requestedContextKeyRef.current,
       onCycleChanged: ownerCallbacks.onCycleChanged,
+      onCycleReplaced: ownerCallbacks.onCycleReplaced,
       onStartTraining: ownerCallbacks.onStartTraining,
     });
     const notifyCycleChanged = async (cycleId: string) => {
@@ -296,14 +312,16 @@ export function useTrainingCycleProductController(input: {
           : current);
         return notifyCycleChanged(cycle.cycleId);
       },
-      async onCycleReplaced(cycleId, draft) {
-        if (!ownsCurrentContext()) return false;
-        setSnapshot((current) => current.status === "ready"
-          && current.ownerContextKey === ownerContextKey
-          && current.rpc === rpc
-          ? { ...current, data: closeActiveTrainingCycleProductData(current.data, draft) }
-          : current);
-        return notifyCycleChanged(cycleId);
+      async onCycleReplaced(_cycleId, draft) {
+        return publishTrainingCycleReplacement({
+          isCurrent: ownsCurrentContext,
+          publish: () => setSnapshot((current) => current.status === "ready"
+            && current.ownerContextKey === ownerContextKey
+            && current.rpc === rpc
+            ? { ...current, data: closeActiveTrainingCycleProductData(current.data, draft) }
+            : current),
+          synchronizeLegacy: () => lifecycle.onCycleReplaced(),
+        });
       },
     });
     return {

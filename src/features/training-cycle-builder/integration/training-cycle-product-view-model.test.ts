@@ -234,6 +234,51 @@ test("un usuario sin ciclo recibe un borrador vacío editable", () => {
   assert.equal(model.hasRecoverableDraft, false);
 });
 
+test("reload expone una copia remota no limpiada como recuperación pendiente, no como ciclo nuevo vacío", () => {
+  const source = cycle();
+  const model = buildTrainingCycleProductViewModel({
+    todayIsoDate: "2026-09-01",
+    catalog,
+    entries: [],
+    activeCycle: null,
+    draft: {
+      draftId: DRAFT_ID,
+      origin: "duplicate",
+      sourceCycleId: CYCLE_ID,
+      state: "draft",
+      version: 1,
+      goal: "volume",
+      startDate: "2026-09-02",
+      endDate: "2026-10-14",
+      plan: {
+        days: [{
+          day: "monday",
+          name: "Empuje",
+          order: 0,
+          exercises: [{
+            catalogExerciseId: CATALOG_ID,
+            order: 0,
+            technique: "linear",
+            videoUrl: null,
+            sets: [{ order: 0, targetReps: 10, targetKg: 80, toFailure: false, drops: [] }],
+          }],
+        }],
+      },
+      activatedCycleId: null,
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    },
+    sourceCycle: source,
+    lastCycle: source,
+  });
+
+  assert.equal(model.initialScreen, "start");
+  assert.equal(model.origin, "resume");
+  assert.equal(model.hasRecoverableDraft, true);
+  assert.match(model.recoveredDraftLabel ?? "", /Copia del ciclo anterior pendiente de revisión/);
+  assert.equal(model.draft.routines.monday.exercises.length, 1);
+});
+
 test("falla cerrado si un draft remoto referencia una fuente que no puede resolverse", () => {
   const source = cycle();
   const plan = {

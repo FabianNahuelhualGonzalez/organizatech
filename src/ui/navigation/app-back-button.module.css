@@ -10,12 +10,23 @@
   color: var(--text);
   background: transparent;
   padding: 0;
+  -webkit-tap-highlight-color: transparent;
   transition: color 140ms ease, background-color 140ms ease;
 }
 
-.button:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--primary) 14%, transparent);
+@media (hover: hover) and (pointer: fine) {
+  .button:hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .button:hover,
+  .button:active {
+    color: var(--text);
+    background: transparent;
+  }
 }
 
 .button:focus-visible {

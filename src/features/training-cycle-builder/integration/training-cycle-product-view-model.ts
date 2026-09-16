@@ -429,7 +429,9 @@ export function buildTrainingCycleProductViewModel(
     duplicateComparison: buildComparison(effectiveSource, input.entries),
     hasRecoverableDraft: Boolean(input.draft && !input.activeCycle),
     recoveredDraftLabel: input.draft
-      ? `${input.draft.goal} · ${input.draft.startDate} – ${input.draft.endDate}`
+      ? `${input.draft.origin === "duplicate" && input.draft.plan.days.length > 0
+          ? "Copia del ciclo anterior pendiente de revisión"
+          : input.draft.goal} · ${input.draft.startDate} – ${input.draft.endDate}`
       : undefined,
     saveState: input.draft || input.activeCycle ? "saved" : "pending",
     activeCycleDaysRemaining: input.activeCycle?.daysUntilEnd,

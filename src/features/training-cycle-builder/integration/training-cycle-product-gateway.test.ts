@@ -22,6 +22,7 @@ import {
 import { TrainingCycleNewCycleOperationOwner, publicOperationError } from "../hooks/use-training-cycle-builder-controller";
 import {
   closeActiveTrainingCycleProductData,
+  publishTrainingCycleReplacement,
   type TrainingCycleProductData,
 } from "../hooks/use-training-cycle-product-controller";
 import { createTrainingCycleProductGateway } from "./training-cycle-product-gateway";
@@ -148,7 +149,7 @@ function fakeRpc(input: {
   };
 }
 
-test("false de sincronización post-commit no se presenta como éxito ni se repite la mutación", async () => {
+test("false de publicación post-commit bloquea mutaciones sin repetirlas", async () => {
   for (const operation of ["activate", "edit", "extend", "replace"] as const) {
     const rpc = fakeRpc();
     let mutations = 0;
@@ -324,7 +325,7 @@ test("una respuesta de reemplazo inválida no adopta referencias ni dirige el si
   assert.deepEqual(rpc.calls, []);
 });
 
-test("un callback onCycleReplaced fallido se clasifica committed y conserva referencias del draft", async () => {
+test("un callback de publicación fallido conserva el bloqueo post-commit", async () => {
   const rpc = fakeRpc();
   const gateway = createTrainingCycleProductGateway({
     rpc,
@@ -340,7 +341,7 @@ test("un callback onCycleReplaced fallido se clasifica committed y conserva refe
     startDate: "2026-09-01",
     endDate: "2026-10-13",
     origin: "duplicate",
-  }), (error) => error instanceof TrainingCycleCommittedMutationError);
+  }), TrainingCycleCommittedMutationError);
   await assert.rejects(() => gateway.saveDraft(saveInput("duplicate")), TrainingCycleCommittedMutationError);
   assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`]);
 });
@@ -438,20 +439,38 @@ test("descriptor ausente después del commit informa sincronización pendiente s
 
   assert.equal(state.activeCycleId, null);
   assert.equal(state.committedSyncPending, true);
-  assert.match(state.activeCycleCloseErrorMessage ?? "", /terminó.*sincronizar/i);
+  assert.match(state.activeCycleCloseErrorMessage ?? "", /terminó.*prepararse/i);
   assert.doesNotMatch(state.activeCycleCloseErrorMessage ?? "", /sigue activo/i);
   assert.equal(state.draft.draftId, createTrainingCycleBuilderTestViewModel().draft.draftId);
 });
 
-test("notify post-commit fallido deja activo nulo y sincronización pendiente", async () => {
+test("caso QA: reemplaza, sincroniza la lista sin recargar el ciclo cerrado y permite guardar", async () => {
   const rpc = fakeRpc({ activeGuard: { cycleId: ACTIVE_CYCLE_ID, hasCanonicalPlan: true } });
+  let productSnapshotPublished = false;
+  const lifecycleCalls: string[] = [];
+  const lifecycle = createTrainingCycleProductLifecycleController({
+    ownerContextKey: "usuario:test-owner",
+    getCurrentContextKey: () => "usuario:test-owner",
+    async onCycleChanged(cycleId) {
+      lifecycleCalls.push(`full-refresh:${cycleId}`);
+      return false;
+    },
+    async onCycleReplaced() {
+      lifecycleCalls.push("cycles-refresh");
+      return true;
+    },
+  });
   const gateway = createTrainingCycleProductGateway({
     rpc,
     catalog: CATALOG,
     remoteDraft: null,
     sourceCycleId: null,
     activeCycle: { ...snapshot(4), cycleId: ACTIVE_CYCLE_ID },
-    onCycleReplaced: async () => { throw new Error("notification-refresh-failed"); },
+    onCycleReplaced: async () => publishTrainingCycleReplacement({
+      isCurrent: () => true,
+      publish: () => { productSnapshotPublished = true; },
+      synchronizeLegacy: () => lifecycle.onCycleReplaced(),
+    }),
   });
   let state = trainingCycleBuilderReducer(createTrainingCycleBuilderState({
     ...createTrainingCycleBuilderTestViewModel(),
@@ -464,17 +483,23 @@ test("notify post-commit fallido deja activo nulo y sincronización pendiente", 
   };
   const owner = new TrainingCycleNewCycleOperationOwner();
 
-  await owner.request(gateway, dispatch, state, "duplicate", "duplicate");
+  await owner.request(gateway, dispatch, state, "manual", "setup");
   await owner.confirm(gateway, dispatch, state);
 
   assert.equal(state.activeCycleId, null);
-  assert.equal(state.committedSyncPending, true);
-  assert.match(state.activeCycleCloseErrorMessage ?? "", /terminó.*sincronizar/i);
-  assert.doesNotMatch(state.activeCycleCloseErrorMessage ?? "", /sigue activo/i);
+  assert.equal(state.workflow, "draft");
+  assert.equal(state.screen, "setup");
+  assert.equal(state.committedSyncPending, false);
+  assert.equal(state.activeCycleCloseErrorMessage, null);
+  assert.equal(productSnapshotPublished, true);
+  assert.deepEqual(lifecycleCalls, ["cycles-refresh"]);
+  assert.equal(state.draft.draftId, NEW_DRAFT_ID);
+  assert.deepEqual(state.draft.selectedDays, []);
+  assert.ok(Object.values(state.draft.routines).every((routine) => routine.exercises.length === 0));
 
-  await owner.request(gateway, dispatch, state, "manual", "setup");
-  await owner.confirm(gateway, dispatch, state);
-  assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`]);
+  await gateway.saveDraft(saveInput("manual"));
+  assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`, "save:1", "save:2"]);
+  assert.equal(rpc.calls.filter((call) => call.startsWith("replace:")).length, 1);
 });
 
 test("fallar al limpiar el draft post-commit no repite el reemplazo ni finge rollback", async () => {
@@ -510,7 +535,7 @@ test("fallar al limpiar el draft post-commit no repite el reemplazo ni finge rol
 
   assert.equal(state.activeCycleId, null);
   assert.equal(state.committedSyncPending, true);
-  assert.match(state.activeCycleCloseErrorMessage ?? "", /terminó.*sincronizar/i);
+  assert.match(state.activeCycleCloseErrorMessage ?? "", /terminó.*prepararse/i);
   assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`]);
   assert.equal(cleanWrites, 1);
 });
@@ -544,7 +569,7 @@ test("rechazo pre-commit mantiene el ciclo activo y usa el mensaje de cierre no 
   assert.equal(state.activeCycleId, ACTIVE_CYCLE_ID);
   assert.equal(state.committedSyncPending, false);
   assert.match(state.activeCycleCloseErrorMessage ?? "", /sigue activo/i);
-  assert.doesNotMatch(state.activeCycleCloseErrorMessage ?? "", /terminó.*sincronizar/i);
+  assert.doesNotMatch(state.activeCycleCloseErrorMessage ?? "", /terminó.*prepararse/i);
 });
 
 test("flujo completo: No conserva el activo y produce cero writes", async () => {

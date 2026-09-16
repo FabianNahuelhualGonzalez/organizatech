@@ -148,9 +148,15 @@ function ComparisonTable({
       </div>
       {rows.map((row) => (
         <div role="row" key={row.id}>
-          <span role="cell">{row.exerciseName}</span>
-          <span role="cell">{row.plannedLabel}</span>
-          <strong role="cell" data-outcome={row.outcome}>{row.actualLabel}</strong>
+          <span role="cell" className={styles.comparisonExercise}>{row.exerciseName}</span>
+          <span role="cell" className={styles.comparisonValue}>
+            <small aria-hidden="true">Plan:</small>
+            <span>{row.plannedLabel}</span>
+          </span>
+          <strong role="cell" className={styles.comparisonValue} data-outcome={row.outcome}>
+            <small aria-hidden="true">Real:</small>
+            <span>{row.actualLabel}</span>
+          </strong>
         </div>
       ))}
       <p>Último registro comparable. Verde: cumpliste o superaste. Ámbar: quedaste bajo el objetivo.</p>
@@ -233,12 +239,10 @@ export function CycleSetupScreen({
   state,
   dispatch,
   onGenerateSuggestion,
-  onRequestNewCycle,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly dispatch: BuilderDispatch;
   readonly onGenerateSuggestion: () => void;
-  readonly onRequestNewCycle: () => void;
 }) {
   const validation = getTrainingCycleDraftValidation(state.draft);
   const isActiveEdit = state.workflow === "active_edit";
@@ -345,14 +349,6 @@ export function CycleSetupScreen({
       >
         {generating ? "Generando una rutina editable…" : continueLabel}
       </PrimaryAction>
-      {isActiveEdit ? (
-        <SecondaryAction
-          disabled={state.committedSyncPending}
-          onClick={onRequestNewCycle}
-        >
-          Crear un nuevo ciclo de entrenamiento
-        </SecondaryAction>
-      ) : null}
     </div>
   );
 }
