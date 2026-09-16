@@ -58,13 +58,10 @@
   padding: 2px 0;
 }
 
-.utilityRow > :last-child {
-  min-width: 0;
-  margin-left: auto;
-}
-
 .saveChip {
   display: inline-flex;
+  min-width: 0;
+  margin-left: auto;
   min-height: 32px;
   align-items: center;
   justify-content: flex-end;

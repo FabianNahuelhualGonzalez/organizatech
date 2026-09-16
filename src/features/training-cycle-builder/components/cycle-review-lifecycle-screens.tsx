@@ -274,12 +274,10 @@ export function CycleActiveScreen({
   state,
   viewModel,
   dispatch,
-  onCreateNewCycle,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly viewModel: TrainingCycleBuilderInitialViewModel;
   readonly dispatch: BuilderDispatch;
-  readonly onCreateNewCycle: () => void;
 }) {
   const remaining = viewModel.activeCycleDaysRemaining ?? 0;
   const elapsed = viewModel.activeCycleElapsedDays ?? 0;
@@ -321,7 +319,7 @@ export function CycleActiveScreen({
         })}
       </div>
       {state.activeCycleRevision ? (
-        <PrimaryAction onClick={() => dispatch({ type: "begin_active_edit" })}>Editar objetivo, días y rutinas</PrimaryAction>
+        <SecondaryAction onClick={() => dispatch({ type: "begin_active_edit" })}>Editar objetivo, días y rutinas</SecondaryAction>
       ) : (
         <StatusBanner
           tone="error"
@@ -329,10 +327,6 @@ export function CycleActiveScreen({
           body="Falta la revisión del ciclo activo. Recarga antes de editar para evitar sobrescribir cambios."
         />
       )}
-      <SecondaryAction onClick={() => dispatch({ type: "open_extend" })}>Extender la fecha de término</SecondaryAction>
-      <SecondaryAction onClick={onCreateNewCycle}>Crear un nuevo ciclo de entrenamiento</SecondaryAction>
-      <SecondaryAction onClick={() => dispatch({ type: "navigate", screen: "alerts" })}>Ver avisos de vencimiento</SecondaryAction>
-      <button className={styles.textAction} type="button" onClick={() => dispatch({ type: "navigate", screen: "closing" })}>Ver qué pasa si no lo extiendo</button>
     </div>
   );
 }

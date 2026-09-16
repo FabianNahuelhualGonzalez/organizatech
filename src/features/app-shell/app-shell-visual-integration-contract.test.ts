@@ -353,8 +353,9 @@ assert.doesNotMatch(components.screenHeader, /screen !== "dashboard"|canGoBackFr
 // TRAIN-UI-01 — contrato focal ESTATICO/source-based del Back canonico. No simula click ni
 // teclado; comprueba que el elemento nativo conserva una unica conexion onClick al controller.
 // ---------------------------------------------------------------------------------------------
-assert.match(appBackButtonSource, /export interface AppBackButtonProps \{\s*onBack: \(\) => void;\s*\}/);
+assert.match(appBackButtonSource, /export interface AppBackButtonProps \{\s*onBack: \(\) => void;\s*label\?: string;\s*\}/);
 assert.match(appBackButtonSource, /<button[\s\S]*type="button"[\s\S]*aria-label="Volver"[\s\S]*onClick=\{onBack\}/);
+assert.match(appBackButtonSource, /\{label \? <span>\{label\}<\/span> : null\}/);
 assert.equal((appBackButtonSource.match(/onClick=\{onBack\}/g) ?? []).length, 1);
 assert.doesNotMatch(appBackButtonSource, /onKeyDown|onKeyUp|onKeyPress/, "el button nativo posee la activacion de teclado");
 assert.match(appBackButtonSource, /<svg[\s\S]*width="24"[\s\S]*height="24"[\s\S]*viewBox="0 0 24 24"/);

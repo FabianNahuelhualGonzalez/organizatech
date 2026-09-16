@@ -133,6 +133,17 @@ const exercises = [
   exercise({ id: LEGACY_EXERCISE_A_ID, lineage: LINEAGE_A_ID, name: "Nombre B" }),
 ];
 
+function videoInput(overrides: Partial<Parameters<typeof resolveAdvancedWorkoutVideoReferences>[0]> = {}) {
+  return {
+    enabled: true,
+    userId: USER_ID,
+    storageScope: `supabase:${USER_ID}` as const,
+    snapshot: snapshot(),
+    exercises,
+    ...overrides,
+  };
+}
+
 function context(value = snapshot()): AdvancedWorkoutExecutionContext {
   return {
     storageScope: `supabase:${USER_ID}`,
@@ -217,25 +228,77 @@ test("un ciclo activado conserva la referencia de video aunque la captura avanza
   );
 
   assert.deepEqual(
-    resolveAdvancedWorkoutVideoReferences({ context: context(), exercises: visibleExercises }),
+    resolveAdvancedWorkoutVideoReferences(videoInput({ exercises: visibleExercises })),
     [{
-      legacyCycleExerciseId: LEGACY_EXERCISE_A_ID,
+      exerciseId: LEGACY_EXERCISE_A_ID,
       safeVideoUrl: "https://www.youtube.com/watch?v=ABCdef12345",
     }],
     "la acción segura del ejercicio visible no debe desaparecer con el fallback legacy",
   );
   assert.deepEqual(
-    resolveAdvancedWorkoutVideoReferences({
-      context: context(snapshot("https://evil.example.com/video/ABCdef12345")),
+    resolveAdvancedWorkoutVideoReferences(videoInput({
+      snapshot: snapshot("https://evil.example.com/video/ABCdef12345"),
       exercises: visibleExercises,
-    }),
+    })),
     [],
     "un snapshot alterado nunca publica enlaces",
   );
   assert.deepEqual(
-    resolveAdvancedWorkoutVideoReferences({ context: context(snapshot(null)), exercises }),
+    resolveAdvancedWorkoutVideoReferences(videoInput({ snapshot: snapshot(null) })),
     [],
     "un ejercicio sin video no publica una acción vacía",
+  );
+});
+
+test("el video no depende del intento avanzado y falla cerrado sin bridges legacy", () => {
+  const sourceSnapshot = snapshot();
+  const withoutLegacyBridge: TrainingCycleRpcSnapshot = {
+    ...sourceSnapshot,
+    plan: {
+      days: sourceSnapshot.plan.days.map((day) => ({
+        ...day,
+        legacyCycleDayId: null,
+        exercises: day.exercises.map((item) => ({ ...item, legacyCycleExerciseId: null })),
+      })),
+    },
+  };
+  assert.deepEqual(
+    resolveAdvancedWorkoutVideoReferences(videoInput({
+      snapshot: withoutLegacyBridge,
+      exercises: [exercises[1]],
+    })),
+    [],
+    "sin IDs puente no existe identidad de ejercicio suficiente para publicar el enlace",
+  );
+  assert.deepEqual(
+    resolveAdvancedWorkoutVideoReferences(videoInput({ exercises: [{
+      ...exercises[1],
+      id: uuid(200),
+      trainingCycleExerciseId: uuid(200),
+    }] })),
+    [],
+    "IDs visibles arbitrarios nunca sustituyen al ID de ejercicio del snapshot",
+  );
+  assert.deepEqual(
+    resolveAdvancedWorkoutVideoReferences(videoInput({ snapshot: null, exercises: [exercises[1]] })),
+    [],
+  );
+});
+
+test("el video desaparece al deshabilitar la identidad aunque sobreviva un snapshot stale", () => {
+  assert.equal(resolveAdvancedWorkoutVideoReferences(videoInput()).length, 1);
+  assert.deepEqual(
+    resolveAdvancedWorkoutVideoReferences(videoInput({ enabled: false })),
+    [],
+  );
+  assert.deepEqual(
+    resolveAdvancedWorkoutVideoReferences(videoInput({ userId: uuid(99) })),
+    [],
+    "el scope Supabase debe pertenecer a la identidad activa",
+  );
+  assert.deepEqual(
+    resolveAdvancedWorkoutVideoReferences(videoInput({ storageScope: "demo" })),
+    [],
   );
 });
 

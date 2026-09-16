@@ -66,7 +66,7 @@ test("la captura incluye series, fallo y drops; el video abre con aislamiento", 
   );
   assert.match(boundary, /advancedExecution\?\.getExerciseVideoReference\(activeExercise\.id\)/);
   assert.match(boundary, /videoReference=\{activeVideoReference\}/);
-  assert.match(controller, /resolveAdvancedWorkoutVideoReferences\(\{ context, exercises: input\.exercises \}\)/);
+  assert.match(controller, /resolveAdvancedWorkoutVideoReferences\(\{\s*enabled: input\.enabled,\s*userId: input\.userId,\s*storageScope: input\.storageScope,\s*snapshot: input\.snapshot,\s*exercises: input\.exercises,\s*\}\)/);
   assert.match(controller, /if \(!execution\.plan \|\| !execution\.draft\) return true;/);
 });
 

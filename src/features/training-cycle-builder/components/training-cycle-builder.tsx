@@ -254,7 +254,6 @@ function ConnectedTrainingCycleBuilder({
           state={state}
           viewModel={viewModel}
           dispatch={dispatch}
-          onCreateNewCycle={() => void controller.requestNewCycle("duplicate", "duplicate")}
         />
       );
       break;
@@ -290,7 +289,10 @@ function ConnectedTrainingCycleBuilder({
         />
       ) : null}
       <div className={styles.utilityRow}>
-        <AppBackButton onBack={handleBack} />
+        <AppBackButton
+          onBack={handleBack}
+          label={state.screen === "active" ? "Volver al menú principal" : undefined}
+        />
         {state.workflow === "draft" ? (
           <SaveChip state={state.saveState} savedAtLabel={state.savedAtLabel} />
         ) : null}

@@ -315,7 +315,7 @@ assert.match(featureSource, /import \{ AppTopbar \} from "@\/features\/app-shell
 assert.match(featureSource, /import \{ AppBackButton \} from "@\/ui\/navigation\/app-back-button";/);
 assert.match(featureSource, /import \{ ConfirmDialog \} from "@\/ui\/modals\/confirm-dialog";/);
 assert.match(featureSource, /<AppTopbar/);
-assert.match(featureSource, /<AppBackButton onBack=\{handleBack\} \/>/);
+assert.match(featureSource, /label=\{state\.screen === "active" \? "Volver al menú principal" : undefined\}/);
 assert.match(featureSource, /if \(!hasTrainingCycleViewModel\(initialViewModel\) \|\| !hasTrainingCycleGateway\(gateway\)\)/);
 assert.doesNotMatch(featureSource, /DEFAULT_VIEW_MODEL|deterministicTrainingCycleBuilderGateway|\?\?\s*(?:DEFAULT|deterministic)/);
 assert.match(featureSource, /No pudimos cargar el constructor de ciclos/);
@@ -381,12 +381,14 @@ assert.match(controllerSource, /newCycleOwner\.request\(/);
 assert.match(controllerSource, /newCycleOwner\.confirm\(/);
 assert.match(controllerSource, /getActiveCycleGuard/);
 assert.match(controllerSource, /completeActiveCycle/);
-assert.match(featureSource, /controller\.requestNewCycle\("duplicate", "duplicate"\)/);
 assert.match(featureSource, /¿Quieres finalizar tu ciclo actual\?/);
 assert.match(featureSource, /No, mantenerlo/);
 assert.match(featureSource, /Sí, finalizar y continuar/);
 assert.match(lifecycleScreensSource, /Editar objetivo, días y rutinas/);
-assert.match(lifecycleScreensSource, /Crear un nuevo ciclo de entrenamiento/);
+assert.doesNotMatch(
+  lifecycleScreensSource.match(/export function CycleActiveScreen[\s\S]*?export function CycleAlertsScreen/)?.[0] ?? "",
+  /Extender la fecha de término|Crear un nuevo ciclo de entrenamiento|Ver avisos de vencimiento|Ver qué pasa si no lo extiendo|PrimaryAction/,
+);
 assert.doesNotMatch(lifecycleScreensSource, /begin_active_edit[\s\S]{0,200}active_cycle_close/);
 assert.match(controllerSource, /state\.workflow !== "draft"/);
 assert.match(stateSource, /expectedRevision/);

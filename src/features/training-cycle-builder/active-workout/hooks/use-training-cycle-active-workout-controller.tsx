@@ -108,8 +108,14 @@ export function useTrainingCycleActiveWorkoutController(
     legacyDrafts,
   });
   const videoReferences = useMemo(
-    () => resolveAdvancedWorkoutVideoReferences({ context, exercises: input.exercises }),
-    [context, input.exercises],
+    () => resolveAdvancedWorkoutVideoReferences({
+      enabled: input.enabled,
+      userId: input.userId,
+      storageScope: input.storageScope,
+      snapshot: input.snapshot,
+      exercises: input.exercises,
+    }),
+    [input.enabled, input.exercises, input.snapshot, input.storageScope, input.userId],
   );
   const payload = useMemo(() => {
     if (!execution.plan || !execution.draft) return null;
@@ -177,7 +183,7 @@ export function useTrainingCycleActiveWorkoutController(
       }
     }
     const videoReferenceByLegacyId = new Map(videoReferences.map((reference) => [
-      reference.legacyCycleExerciseId,
+      reference.exerciseId,
       reference.safeVideoUrl,
     ]));
     const exerciseNameByLegacyId = new Map(input.exercises.map((exercise) => [exercise.id, exercise.name]));
