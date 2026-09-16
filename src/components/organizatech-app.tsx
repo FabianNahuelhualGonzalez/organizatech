@@ -4405,10 +4405,15 @@ export function OrganizatechApp({
   );
 
   if (coachPortalSession) {
+    const coachDataIdentityGeneration =
+      supabaseAuthIdentityScopeRef.current?.userId === coachPortalSession.userId
+        ? supabaseAuthIdentityScopeRef.current.sessionEpoch
+        : null;
     return (
       <CoachPortalBoundary
-        key={`${coachPortalSession.userId}:${coachPortalSession.registration.createdAt}`}
+        key={`${coachPortalSession.userId}:${coachPortalSession.registration.createdAt}:${coachDataIdentityGeneration ?? "unavailable"}`}
         session={coachPortalSession}
+        coachDataIdentityGeneration={coachDataIdentityGeneration}
         isLoggingOut={isBusy}
         isNotificationPanelOpen={isNotificationPanelOpen}
         notificationBadgeText={notificationBadgeText}

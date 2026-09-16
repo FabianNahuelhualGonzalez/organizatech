@@ -1,0 +1,16 @@
+.section { margin-bottom: 18px; }
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: 9px; margin-bottom: 9px; }
+.head h3 { margin: 0; font-size: 13px; font-weight: 700; }
+.head > span { color: rgba(255, 255, 255, .55); font-size: 10px; text-align: right; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.card { min-width: 44px; min-height: 44px; padding: 13px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 13px; background: transparent; color: inherit; text-align: left; font: inherit; }
+.card[data-state="alert"] { border-color: rgba(251, 191, 36, .35); background: rgba(251, 191, 36, .05); }
+.cardHead { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
+.label { min-width: 0; color: rgba(255, 255, 255, .55); font-size: 9.5px; font-weight: 700; letter-spacing: .03em; overflow-wrap: anywhere; }
+.value { display: block; font-size: 24px; line-height: 1.15; font-weight: 700; }
+.card[data-state="alert"] .value { color: #fbbf24; }
+.card[data-state="inactive"] .value { color: rgba(255, 255, 255, .55); }
+.note { display: block; margin-top: 4px; color: rgba(255, 255, 255, .55); font-size: 9.5px; line-height: 1.35; }
+.card:focus-visible { outline: 2px solid #8fb2ff; outline-offset: 2px; }
+.card:disabled { cursor: default; }
+@container (max-width: 359px) { .value { font-size: 22px; } }

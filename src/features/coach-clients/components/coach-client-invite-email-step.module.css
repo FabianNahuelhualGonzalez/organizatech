@@ -1,0 +1,14 @@
+.form { flex: none; min-width: 0; }
+.fieldGroup { margin-bottom: 12px; }
+.fieldGroup label { display: block; margin-bottom: 6px; font-size: 10px; color: rgba(255, 255, 255, .55); font-weight: 600; }
+.field { display: flex; align-items: center; gap: 9px; height: 52px; padding: 0 13px; border: 1px solid rgba(255, 255, 255, .28); border-radius: 12px; }
+.field > svg { flex: none; color: rgba(255, 255, 255, .55); }
+.field[data-tone="ok"] { border-color: rgba(74, 222, 128, .45); }
+.field[data-tone="err"] { border-color: rgba(248, 113, 113, .5); }
+.field input { display: block; flex: 1; min-width: 0; width: 100%; min-height: 44px; border: 0; background: transparent; padding: 0; color: #fff; font: inherit; font-size: 16px; }
+.field input::placeholder { color: rgba(255, 255, 255, .55); }
+.field > .ok { color: #4ade80; }
+.field input:focus-visible { outline: 2px solid #8fb2ff; outline-offset: 2px; }
+.error { display: flex; gap: 9px; padding: 11px 12px; margin-bottom: 12px; border: 1px solid rgba(248, 113, 113, .4); background: rgba(248, 113, 113, .06); border-radius: 11px; }
+.error > span { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; background: #f87171; }
+.error p { flex: 1; min-width: 0; margin: 0; font-size: 10.5px; color: rgba(255, 255, 255, .75); line-height: 1.5; overflow-wrap: anywhere; }

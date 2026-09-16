@@ -2386,13 +2386,14 @@ test("UI-NAV-01S tolera comentarios, formato, renombres locales y reordenamiento
   }
 });
 
-test("la lista de consumidores del gestor de foco es exacta e incluye el drawer Usuario", () => {
+test("la lista de consumidores del gestor de foco es exacta e incluye el drawer Usuario y CoachOverlay aislado", () => {
   assert.deepEqual(collectOverlayConsumers("src").sort(), [
     "src/components/profile/ProfileAvatarEditor.tsx",
     "src/features/app-shell/components/app-navigation-drawer.tsx",
     "src/features/coach-portal/components/coach-portal.tsx",
     "src/features/notifications/components/NotificationPanel.tsx",
     "src/features/user-portal-shell/components/user-portal-shell.tsx",
+    "src/ui/coach-overlays/coach-overlay.tsx",
     "src/ui/modals/modal-shell.tsx",
   ]);
 });

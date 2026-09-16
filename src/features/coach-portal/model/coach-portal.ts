@@ -12,7 +12,7 @@ export const COACH_HOME_MESSAGE =
 
 export const COACH_PORTAL_MENU_ITEMS = [
   { id: "profile", label: "Mi perfil", availability: "enabled" },
-  { id: "dashboard", label: "Panel principal", availability: "disabled" },
+  { id: "dashboard", label: "Panel principal", availability: "enabled" },
   { id: "training", label: "Entrenemos", availability: "disabled" },
   { id: "comparison", label: "Comparación semanal", availability: "disabled" },
   { id: "edit-cycle", label: "Modificar ciclo de entrenamiento", availability: "disabled" },
