@@ -243,7 +243,6 @@ function ConnectedTrainingCycleBuilder({
           state={state}
           viewModel={viewModel}
           onStartTraining={() => void handleStartTraining()}
-          onReviewCycle={() => dispatch({ type: "show_active" })}
           onExit={onExit}
         />
       );

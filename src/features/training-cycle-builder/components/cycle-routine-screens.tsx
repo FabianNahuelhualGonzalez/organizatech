@@ -1,12 +1,11 @@
 "use client";
 
 import {
-  ArrowDown,
-  ArrowUp,
   Check,
   ChevronDown,
   Copy,
   EllipsisVertical,
+  GripVertical,
   Info,
   Plus,
   Trash2,
@@ -14,7 +13,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import type { Dispatch } from "react";
+import { useEffect, type Dispatch, type DragEvent } from "react";
 
 import {
   TRAINING_CYCLE_DAY_LABELS,
@@ -74,6 +73,19 @@ export function CycleRoutineScreen({
 }) {
   const routine = state.draft.routines[state.currentDay];
   const groupCount = new Set(routine.exercises.map((exercise) => exercise.muscleGroup)).size;
+
+  function handleDragStart(event: DragEvent<HTMLLIElement>, exerciseId: string) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", exerciseId);
+  }
+
+  function handleDrop(event: DragEvent<HTMLLIElement>, targetExerciseId: string) {
+    event.preventDefault();
+    const exerciseId = event.dataTransfer.getData("text/plain");
+    if (exerciseId && exerciseId !== targetExerciseId) {
+      dispatch({ type: "move_exercise_to", exerciseId, targetExerciseId });
+    }
+  }
   return (
     <div className={styles.screen}>
       <div className={styles.dayTabs} role="tablist" aria-label="Días de entrenamiento">
@@ -121,9 +133,19 @@ export function CycleRoutineScreen({
           {routine.exercises.map((exercise, index) => {
             const menuOpen = state.openExerciseMenuId === exercise.id;
             return (
-              <li key={exercise.id} data-menu-open={menuOpen}>
+              <li
+                key={exercise.id}
+                draggable
+                data-menu-open={menuOpen}
+                onDragStart={(event) => handleDragStart(event, exercise.id)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => handleDrop(event, exercise.id)}
+              >
                 <div className={styles.exerciseRow}>
                   <span className={styles.exerciseOrder}>{index + 1}</span>
+                  <span className={styles.exerciseDragHandle} aria-label={`Arrastrar ${exercise.name}`} role="img">
+                    <GripVertical size={17} aria-hidden="true" />
+                  </span>
                   <button
                     className={styles.exerciseMain}
                     type="button"
@@ -151,8 +173,6 @@ export function CycleRoutineScreen({
                 </div>
                 {menuOpen ? (
                   <div className={styles.exerciseActions}>
-                    <button type="button" disabled={index === 0} onClick={() => dispatch({ type: "move_exercise", exerciseId: exercise.id, direction: "up" })}><ArrowUp size={13} aria-hidden="true" />Subir</button>
-                    <button type="button" disabled={index === routine.exercises.length - 1} onClick={() => dispatch({ type: "move_exercise", exerciseId: exercise.id, direction: "down" })}><ArrowDown size={13} aria-hidden="true" />Bajar</button>
                     <button type="button" onClick={() => dispatch({ type: "duplicate_exercise", exerciseId: exercise.id })}><Copy size={13} aria-hidden="true" />Duplicar</button>
                     <button type="button" data-danger onClick={() => dispatch({ type: "remove_exercise", exerciseId: exercise.id })}><Trash2 size={13} aria-hidden="true" />Eliminar</button>
                   </div>
@@ -476,28 +496,69 @@ export function CycleCopySheet({
   readonly state: TrainingCycleBuilderState;
   readonly dispatch: BuilderDispatch;
 }) {
-  if (!state.copyMode) return null;
+  useEffect(() => {
+    if (!state.copyNotice) return;
+    const timeout = window.setTimeout(() => dispatch({ type: "dismiss_copy_notice" }), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [dispatch, state.copyNotice]);
+
+  const notice = state.copyNotice ? <div className={styles.copyNotice} role="status">{state.copyNotice}</div> : null;
+  if (!state.copyMode) return notice;
   const isDay = state.copyMode === "day";
+  const sourceRoutine = state.copySourceDay ? state.draft.routines[state.copySourceDay] : null;
+  const selectedExercise = sourceRoutine?.exercises.find((exercise) => exercise.id === state.copyExerciseId) ?? null;
+  const title = isDay
+    ? "Copiar un día completo"
+    : state.copyStep === "exercises"
+      ? "Elige un ejercicio"
+      : state.copyStep === "confirm"
+        ? "Confirmar ejercicio"
+        : "Copiar ejercicios de otro día";
+  const description = isDay
+    ? `Reemplaza el nombre y los ejercicios de ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}.`
+    : state.copyStep === "exercises"
+      ? `Elige un ejercicio de ${sourceRoutine ? TRAINING_CYCLE_DAY_LABELS[sourceRoutine.day] : "otro día"}.`
+      : state.copyStep === "confirm" && selectedExercise
+        ? `Agregarás un ejercicio al final de ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}.`
+        : `Los ejercicios se agregan al final de ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}.`;
   return (
-    <BottomSheet
+    <>
+      <BottomSheet
       titleId="cycle-copy-sheet-title"
-      title={isDay ? "Copiar un día completo" : "Copiar ejercicios de otro día"}
-      description={isDay
-        ? `Reemplaza el nombre y los ejercicios de ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}.`
-        : `Los ejercicios se agregan al final de ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}.`}
+      title={title}
+      description={description}
       onClose={() => dispatch({ type: "close_copy" })}
     >
-      <div className={styles.copySources}>
-        {state.draft.selectedDays.filter((day) => day !== state.currentDay).map((day) => {
-          const routine = state.draft.routines[day];
-          return (
-            <button type="button" key={day} onClick={() => dispatch({ type: "copy_from_day", sourceDay: day })}>
-              <span><strong>{TRAINING_CYCLE_DAY_SHORT_LABELS[day]} · {routine.name || "Sin nombre"}</strong><small>{routine.exercises.length} ejercicios · {[...new Set(routine.exercises.map((exercise) => exercise.muscleGroup))].join(", ") || "Sin grupos"}</small></span>
-              <span aria-hidden="true">›</span>
-            </button>
-          );
-        })}
-      </div>
-    </BottomSheet>
+        {state.copyStep === "confirm" && selectedExercise ? (
+          <div className={styles.copyConfirmation}>
+            <p>¿Quieres agregar <strong>{selectedExercise.name}</strong> a la rutina actual de {TRAINING_CYCLE_DAY_LABELS[state.currentDay]}?</p>
+            <div><SecondaryAction onClick={() => dispatch({ type: "close_copy" })}>Cancelar</SecondaryAction><PrimaryAction onClick={() => dispatch({ type: "confirm_copy_exercise" })}>Sí, agregar</PrimaryAction></div>
+          </div>
+        ) : (
+          <>
+            {!isDay && state.copyStep === "exercises" ? <button className={styles.backCopyButton} type="button" onClick={() => dispatch({ type: "back_copy_source" })}>‹ Elegir otro día</button> : null}
+            <div className={styles.copySources}>
+              {state.copyStep === "exercises" && sourceRoutine ? sourceRoutine.exercises.map((exercise) => (
+                <button type="button" key={exercise.id} onClick={() => dispatch({ type: "select_copy_exercise", exerciseId: exercise.id })}>
+                  <span><strong>{exercise.name}</strong><small>{exercise.muscleGroup} · {formatTrainingCycleExerciseSpecification(exercise)}</small></span>
+                  <span aria-hidden="true">›</span>
+                </button>
+              )) : state.draft.selectedDays.filter((day) => day !== state.currentDay).map((day) => {
+                const routine = state.draft.routines[day];
+                return (
+                  <button type="button" key={day} onClick={() => isDay
+                    ? dispatch({ type: "copy_from_day", sourceDay: day })
+                    : dispatch({ type: "select_copy_source", sourceDay: day })}>
+                    <span><strong>{TRAINING_CYCLE_DAY_SHORT_LABELS[day]} · {routine.name || "Sin nombre"}</strong><small>{routine.exercises.length} ejercicios · {[...new Set(routine.exercises.map((exercise) => exercise.muscleGroup))].join(", ") || "Sin grupos"}</small></span>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </BottomSheet>
+      {notice}
+    </>
   );
 }

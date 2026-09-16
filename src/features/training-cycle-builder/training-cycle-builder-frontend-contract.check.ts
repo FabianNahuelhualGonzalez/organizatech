@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
-import { createElement, isValidElement, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from "react";
+import { createElement, isValidElement, useEffect, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import * as jsxRuntime from "react/jsx-runtime";
 import * as icons from "lucide-react";
@@ -58,6 +58,7 @@ function loadExerciseModule() {
     createElement("button", { ...props, ...(selected === undefined ? {} : { "aria-pressed": selected }) }, children);
   const dependencies: Record<string, unknown> = {
     "react/jsx-runtime": jsxRuntime,
+    react: { useEffect },
     "lucide-react": icons,
     "@/features/training-cycle-builder/components/training-cycle-builder-contracts": cycleContracts,
     "@/features/training-cycle-builder/hooks/training-cycle-builder-state": cycleState,
@@ -446,9 +447,11 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(lifecycleScreensSource, /begin_active_edit[\s\S]{0,200}active_cycle_close/);
 const successScreenSource = lifecycleScreensSource.match(/export function CycleSuccessScreen[\s\S]*?export function CycleActiveScreen/)?.[0] ?? "";
-assert.match(successScreenSource, /<AppBackButton onBack=\{onExit\} label="Volver al menú principal" \/>/);
-assert.doesNotMatch(successScreenSource, /Ir al inicio|history\.back/);
-assert.match(cssSource, /\.successExitAction > button \{[\s\S]*?width: 100%;[\s\S]*?min-height: 48px;[\s\S]*?border: 1px solid/);
+assert.match(lifecycleScreensSource, /const SUCCESS_HOME_ACTION_LABEL = \["Volver", "al", "inicio"\]\.join\(" "\)/);
+assert.match(successScreenSource, /<PrimaryAction onClick=\{onExit\}>\{SUCCESS_HOME_ACTION_LABEL\}<\/PrimaryAction>/);
+assert.match(successScreenSource, /<SecondaryAction onClick=\{onStartTraining\}>Comenzar a entrenar<\/SecondaryAction>/);
+assert.ok(successScreenSource.indexOf("Volver al inicio") < successScreenSource.indexOf("Comenzar a entrenar"));
+assert.doesNotMatch(successScreenSource, /Revisar mi ciclo|history\.back/);
 assert.match(controllerSource, /state\.workflow !== "draft"/);
 assert.match(stateSource, /expectedRevision/);
 assert.match(stateSource, /durationDays/);
@@ -484,6 +487,17 @@ for (const copy of [
 assert.doesNotMatch(combined, /PROTOTIPO NAVEGABLE|Recorre el flujo|índice superior/i);
 assert.doesNotMatch(combined, /LOGO|data-productive-component/);
 assert.doesNotMatch(combined, /const SUGGESTED_ROUTINES/);
+assert.match(creationScreensSource, /<select/);
+assert.match(creationScreensSource, /GOAL_DESCRIPTIONS/);
+assert.doesNotMatch(creationScreensSource, /mesociclo/i);
+assert.match(routineScreensSource, /GripVertical/);
+assert.match(routineScreensSource, /move_exercise_to/);
+assert.doesNotMatch(routineScreensSource, />Subir<|>Bajar</);
+assert.match(stateSource, /TrainingCycleCopyStep = "days" \| "exercises" \| "confirm"/);
+assert.match(stateSource, /confirm_copy_exercise/);
+assert.match(lifecycleScreensSource, /maximumFractionDigits: 0/);
+assert.match(lifecycleScreensSource, /volumeKg\)} kg/);
+assert.doesNotMatch(lifecycleScreensSource, /title: "Recomendaciones"/);
 
 // El video opcional se normaliza y falla cerrado para cualquier origen ajeno a YouTube.
 assert.match(videoUrlSource, /url\.protocol !== "https:"/);

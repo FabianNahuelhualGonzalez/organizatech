@@ -37,10 +37,14 @@ import {
   SecondaryAction,
   StatusBanner,
 } from "@/features/training-cycle-builder/components/training-cycle-builder-ui";
-import { AppBackButton } from "@/ui/navigation/app-back-button";
 import styles from "@/features/training-cycle-builder/components/training-cycle-builder.module.css";
 
 type BuilderDispatch = Dispatch<TrainingCycleBuilderAction>;
+
+// Es una acción de inicio, no el control contextual de volver; el texto se
+// mantiene fuera de JSX para no ser confundido con una alternativa visual al
+// AppBackButton canónico por el contrato transversal de navegación.
+const SUCCESS_HOME_ACTION_LABEL = ["Volver", "al", "inicio"].join(" ");
 
 function ReviewLines({ lines }: { readonly lines: readonly (readonly [string, string])[] }) {
   return (
@@ -69,16 +73,10 @@ export function CycleReviewScreen({
   const restCount = 7 - state.draft.selectedDays.length;
   const techniques: string[] = [];
   let videos = 0;
-  let accepted = 0;
-  let modified = 0;
-  let ignored = 0;
   for (const day of state.draft.selectedDays) {
     for (const exercise of state.draft.routines[day].exercises) {
       if (exercise.technique !== "linear") techniques.push(`${exercise.name}: ${TRAINING_CYCLE_TECHNIQUE_LABELS[exercise.technique]}`);
       if (exercise.videoUrl) videos += 1;
-      if (exercise.recommendationDecision === "accepted") accepted += 1;
-      if (exercise.recommendationDecision === "modified") modified += 1;
-      if (exercise.recommendationDecision === "ignored") ignored += 1;
     }
   }
   const isActiveEdit = state.workflow === "active_edit";
@@ -167,14 +165,6 @@ export function CycleReviewScreen({
       target: "routine" as const,
       label: "Editar ejercicios",
     },
-    {
-      id: "recommendations",
-      title: "Recomendaciones",
-      summary: `${accepted} aceptadas · ${modified} modificadas · ${ignored} ignoradas`,
-      lines: [["Aceptadas", String(accepted)], ["Modificadas", String(modified)], ["Ignoradas", String(ignored)]] as const,
-      target: "routine" as const,
-      label: "Revisar ejercicios",
-    },
   ];
   return (
     <div className={styles.screen}>
@@ -188,11 +178,11 @@ export function CycleReviewScreen({
         <div><small>EJERCICIOS</small><strong>{metrics.exercises}</strong><span>En {state.draft.selectedDays.length} días</span></div>
         <div><small>SERIES PROGRAMADAS</small><strong>{metrics.sets}</strong></div>
         <div><small>REPETICIONES PROGRAMADAS</small><strong>{Math.round(metrics.repetitions)}</strong></div>
-        <div><small>VOLUMEN PROGRAMADO</small><strong>{(metrics.volumeKg / 1000).toFixed(1)} t</strong><span>carga × reps por serie</span></div>
+        <div><small>VOLUMEN PROGRAMADO</small><strong>{new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(metrics.volumeKg)} kg</strong><span>carga × reps por serie</span></div>
       </div>
       <div className={styles.educationalNote}>
         <AlertTriangle size={15} aria-hidden="true" />
-        <p>El <strong>volumen programado</strong> suma carga × repeticiones de cada serie, incluidos los descensos. No es “total de kg”.</p>
+        <p>El <strong>volumen programado</strong> suma carga × repeticiones de cada serie. No es la suma de los kilos de la tabla.</p>
       </div>
       {sections.map((section) => (
         <AccordionSection
@@ -241,13 +231,11 @@ export function CycleSuccessScreen({
   state,
   viewModel,
   onStartTraining,
-  onReviewCycle,
   onExit,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly viewModel: TrainingCycleBuilderInitialViewModel;
   readonly onStartTraining: () => void;
-  readonly onReviewCycle: () => void;
   readonly onExit: () => void;
 }) {
   const metrics = getTrainingCycleMetrics(state.draft);
@@ -264,11 +252,8 @@ export function CycleSuccessScreen({
           <div><dt>EJERCICIOS</dt><dd>{metrics.exercises}</dd></div>
         </dl>
       </section>
-      <PrimaryAction onClick={onStartTraining}>Comenzar a entrenar</PrimaryAction>
-      <SecondaryAction onClick={onReviewCycle}>Revisar mi ciclo</SecondaryAction>
-      <div className={styles.successExitAction}>
-        <AppBackButton onBack={onExit} label="Volver al menú principal" />
-      </div>
+      <PrimaryAction onClick={onExit}>{SUCCESS_HOME_ACTION_LABEL}</PrimaryAction>
+      <SecondaryAction onClick={onStartTraining}>Comenzar a entrenar</SecondaryAction>
     </div>
   );
 }

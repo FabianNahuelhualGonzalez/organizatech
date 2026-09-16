@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Clock3, LineChart, Lock, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Clock3, LineChart, Lock } from "lucide-react";
 import type { Dispatch, ReactNode } from "react";
 
 import {
@@ -228,11 +228,11 @@ export function CycleDuplicateScreen({
   );
 }
 
-const GOAL_HINTS: Record<TrainingCycleGoal, string> = {
-  strength: "Cargas altas, pocas reps",
-  volume: "Más series y repeticiones",
-  definition: "Ritmo alto, cargas medias",
-  deload: "Semanas suaves de recuperación",
+const GOAL_DESCRIPTIONS: Record<TrainingCycleGoal, string> = {
+  strength: "Prioriza cargas altas y pocas repeticiones para ganar fuerza máxima. Los descansos entre series son más largos.",
+  volume: "Suma series y repeticiones para maximizar el trabajo muscular total. Pensado para ganar masa muscular.",
+  definition: "Cargas medias con descansos cortos, para mantener la masa muscular mientras defines.",
+  deload: "Reduce la intensidad para que el cuerpo recupere antes de iniciar el próximo ciclo.",
 };
 
 export function CycleSetupScreen({
@@ -266,22 +266,20 @@ export function CycleSetupScreen({
           ? "Puedes cambiar el objetivo, días y rutina. Las fechas tienen sus propias protecciones."
           : "El objetivo orienta las cargas y repeticiones que podremos sugerir."}
       />
-      <fieldset className={styles.goalGrid}>
-        <legend>OBJETIVO PRINCIPAL</legend>
-        {TRAINING_CYCLE_GOALS.map((goal) => (
-          <button
-            type="button"
-            key={goal}
-            data-selected={state.draft.goal === goal}
-            aria-pressed={state.draft.goal === goal}
-            disabled={generating}
-            onClick={() => dispatch({ type: "set_goal", goal })}
-          >
-            <strong>{TRAINING_CYCLE_GOAL_LABELS[goal]}</strong>
-            <small>{GOAL_HINTS[goal]}</small>
-          </button>
-        ))}
-      </fieldset>
+      <label className={styles.goalField}>
+        <span>OBJETIVO PRINCIPAL</span>
+        <select
+          value={state.draft.goal}
+          disabled={generating}
+          onChange={(event) => dispatch({ type: "set_goal", goal: event.target.value as TrainingCycleGoal })}
+        >
+          {TRAINING_CYCLE_GOALS.map((goal) => <option key={goal} value={goal}>{TRAINING_CYCLE_GOAL_LABELS[goal]}</option>)}
+        </select>
+      </label>
+      <section className={styles.goalDescription} aria-live="polite">
+        <strong>{TRAINING_CYCLE_GOAL_LABELS[state.draft.goal]}</strong>
+        <p>{GOAL_DESCRIPTIONS[state.draft.goal]}</p>
+      </section>
       <fieldset className={styles.dateFields}>
         <legend>FECHAS DEL CICLO</legend>
         <label><span>Inicio {isActiveEdit ? "· bloqueado" : ""}</span><input type="date" disabled={isActiveEdit || generating} value={state.draft.startDate} onChange={(event) => dispatch({ type: "set_start_date", value: event.target.value })} /></label>
@@ -296,10 +294,6 @@ export function CycleSetupScreen({
       <div className={styles.durationBox} data-invalid={!validation.datesValid} role="status">
         <span><small>DURACIÓN</small><strong>{validation.datesValid ? `${validation.durationDays} días · ~${durationWeeks} semanas` : "Fechas no válidas"}</strong></span>
         {!validation.datesValid ? <p>El término debe ser posterior al inicio</p> : null}
-      </div>
-      <div className={styles.educationalNote}>
-        <Sparkles size={15} aria-hidden="true" />
-        <p>Con esta duración muchos entrenadores hablarían de un <strong>mesociclo</strong>. Es sólo una forma de nombrarlo: mandan tus fechas.</p>
       </div>
       <fieldset className={styles.dayPicker}>
         <legend>DÍAS QUE VAS A ENTRENAR</legend>

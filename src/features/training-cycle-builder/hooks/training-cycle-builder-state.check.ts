@@ -1294,6 +1294,36 @@ test("catálogo, personalizado y copia de día mantienen el estado dentro de la 
   assert.equal(state.draft.routines.thursday.exercises.length, state.draft.routines.tuesday.exercises.length);
 });
 
+test("copiar un ejercicio y reordenar conservan identidad, datos y el resto de la rutina", () => {
+  let state = reduce(
+    createState(),
+    { type: "select_day", day: "thursday" },
+    { type: "open_copy", mode: "exercises" },
+    { type: "select_copy_source", sourceDay: "tuesday" },
+  );
+  const source = state.draft.routines.tuesday.exercises[0];
+  const before = state.draft.routines.thursday.exercises.length;
+  state = reduce(
+    state,
+    { type: "select_copy_exercise", exerciseId: source.id },
+    { type: "confirm_copy_exercise" },
+  );
+  const copied = state.draft.routines.thursday.exercises.at(-1);
+  assert.equal(state.copyMode, null);
+  assert.equal(state.copyNotice, "Ejercicio agregado");
+  assert.equal(state.draft.routines.thursday.exercises.length, before + 1);
+  assert.equal(copied?.name, source.name);
+  assert.notEqual(copied?.id, source.id);
+  assert.notEqual(copied?.sets[0]?.id, source.sets[0]?.id);
+
+  const first = state.draft.routines.thursday.exercises[0];
+  state = reduce(state, { type: "move_exercise_to", exerciseId: copied!.id, targetExerciseId: first.id });
+  assert.equal(state.draft.routines.thursday.exercises[0]?.id, copied?.id);
+  assert.equal(state.draft.routines.thursday.exercises[1]?.id, first.id);
+  state = reduce(state, { type: "dismiss_copy_notice" });
+  assert.equal(state.copyNotice, null);
+});
+
 test("las métricas distinguen series, repeticiones y volumen e incluyen drops", () => {
   let state = reduce(createState(), { type: "open_exercise", exerciseId: "press-flat" });
   const before = getTrainingCycleMetrics(state.draft);

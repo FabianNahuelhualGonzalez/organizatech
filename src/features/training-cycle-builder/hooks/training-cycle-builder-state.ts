@@ -39,6 +39,7 @@ import {
 
 export type TrainingCycleExerciseMode = "quick" | "per_set";
 export type TrainingCycleCopyMode = "exercises" | "day";
+export type TrainingCycleCopyStep = "days" | "exercises" | "confirm";
 
 export interface TrainingCycleBuilderState {
   readonly workflow: TrainingCycleBuilderWorkflow;
@@ -69,6 +70,10 @@ export interface TrainingCycleBuilderState {
   readonly openSetId: string | null;
   readonly openReviewSection: string | null;
   readonly copyMode: TrainingCycleCopyMode | null;
+  readonly copyStep: TrainingCycleCopyStep;
+  readonly copySourceDay: TrainingCycleWeekDay | null;
+  readonly copyExerciseId: string | null;
+  readonly copyNotice: string | null;
   readonly discardOpen: boolean;
   readonly discardState: "idle" | "discarding";
   readonly pendingNewCycleIntent: {
@@ -116,6 +121,7 @@ export type TrainingCycleBuilderAction =
   | { readonly type: "set_routine_name"; readonly value: string }
   | { readonly type: "toggle_exercise_menu"; readonly exerciseId: string }
   | { readonly type: "move_exercise"; readonly exerciseId: string; readonly direction: "up" | "down" }
+  | { readonly type: "move_exercise_to"; readonly exerciseId: string; readonly targetExerciseId: string }
   | { readonly type: "duplicate_exercise"; readonly exerciseId: string }
   | { readonly type: "remove_exercise"; readonly exerciseId: string }
   | { readonly type: "open_exercise"; readonly exerciseId: string }
@@ -151,6 +157,11 @@ export type TrainingCycleBuilderAction =
   | { readonly type: "toggle_review_section"; readonly section: string }
   | { readonly type: "open_copy"; readonly mode: TrainingCycleCopyMode }
   | { readonly type: "close_copy" }
+  | { readonly type: "select_copy_source"; readonly sourceDay: TrainingCycleWeekDay }
+  | { readonly type: "back_copy_source" }
+  | { readonly type: "select_copy_exercise"; readonly exerciseId: string }
+  | { readonly type: "confirm_copy_exercise" }
+  | { readonly type: "dismiss_copy_notice" }
   | { readonly type: "copy_from_day"; readonly sourceDay: TrainingCycleWeekDay }
   | { readonly type: "open_discard" }
   | { readonly type: "close_discard" }
@@ -257,6 +268,10 @@ export function createTrainingCycleBuilderState(
     openSetId: null,
     openReviewSection: "plan",
     copyMode: null,
+    copyStep: "days",
+    copySourceDay: null,
+    copyExerciseId: null,
+    copyNotice: null,
     discardOpen: false,
     discardState: "idle",
     pendingNewCycleIntent: null,
@@ -575,6 +590,7 @@ const PLAN_EDIT_ACTIONS = new Set<TrainingCycleBuilderAction["type"]>([
   "toggle_day",
   "set_routine_name",
   "move_exercise",
+  "move_exercise_to",
   "duplicate_exercise",
   "remove_exercise",
   "add_catalog_exercise",
@@ -595,6 +611,7 @@ const PLAN_EDIT_ACTIONS = new Set<TrainingCycleBuilderAction["type"]>([
   "modify_recommendation",
   "ignore_recommendation",
   "copy_from_day",
+  "confirm_copy_exercise",
 ]);
 
 export function trainingCycleBuilderReducer(
@@ -719,6 +736,20 @@ export function trainingCycleBuilderReducer(
       if (index < 0 || target < 0 || target >= routine.exercises.length) return state;
       const exercises = [...routine.exercises];
       [exercises[index], exercises[target]] = [exercises[target], exercises[index]];
+      return markDraftChanged(
+        state,
+        updateRoutine(state.draft, state.currentDay, (current) => ({ ...current, exercises })),
+        { openExerciseMenuId: null },
+      );
+    }
+    case "move_exercise_to": {
+      const routine = state.draft.routines[state.currentDay];
+      const fromIndex = routine.exercises.findIndex((exercise) => exercise.id === action.exerciseId);
+      const targetIndex = routine.exercises.findIndex((exercise) => exercise.id === action.targetExerciseId);
+      if (fromIndex < 0 || targetIndex < 0 || fromIndex === targetIndex) return state;
+      const exercises = [...routine.exercises];
+      const [exercise] = exercises.splice(fromIndex, 1);
+      exercises.splice(fromIndex < targetIndex ? targetIndex - 1 : targetIndex, 0, exercise);
       return markDraftChanged(
         state,
         updateRoutine(state.draft, state.currentDay, (current) => ({ ...current, exercises })),
@@ -982,9 +1013,40 @@ export function trainingCycleBuilderReducer(
         openReviewSection: state.openReviewSection === action.section ? null : action.section,
       };
     case "open_copy":
-      return { ...state, copyMode: action.mode };
+      return { ...state, copyMode: action.mode, copyStep: "days", copySourceDay: null, copyExerciseId: null };
     case "close_copy":
-      return { ...state, copyMode: null };
+      return { ...state, copyMode: null, copyStep: "days", copySourceDay: null, copyExerciseId: null };
+    case "select_copy_source":
+      if (state.copyMode !== "exercises" || action.sourceDay === state.currentDay) return state;
+      return { ...state, copyStep: "exercises", copySourceDay: action.sourceDay, copyExerciseId: null };
+    case "back_copy_source":
+      if (state.copyMode !== "exercises") return state;
+      return { ...state, copyStep: "days", copySourceDay: null, copyExerciseId: null };
+    case "select_copy_exercise": {
+      if (state.copyMode !== "exercises" || !state.copySourceDay) return state;
+      const exists = state.draft.routines[state.copySourceDay].exercises.some((exercise) => exercise.id === action.exerciseId);
+      return exists ? { ...state, copyStep: "confirm", copyExerciseId: action.exerciseId } : state;
+    }
+    case "confirm_copy_exercise": {
+      if (state.copyMode !== "exercises" || !state.copySourceDay || !state.copyExerciseId) return state;
+      const source = state.draft.routines[state.copySourceDay].exercises.find((exercise) => exercise.id === state.copyExerciseId);
+      if (!source) return state;
+      const exercise = cloneExercise(source, "copy-exercise", state.nextEntityNumber);
+      return markDraftChanged(
+        state,
+        updateRoutine(state.draft, state.currentDay, (routine) => ({ ...routine, exercises: [...routine.exercises, exercise] })),
+        {
+          copyMode: null,
+          copyStep: "days",
+          copySourceDay: null,
+          copyExerciseId: null,
+          copyNotice: "Ejercicio agregado",
+          nextEntityNumber: state.nextEntityNumber + 1,
+        },
+      );
+    }
+    case "dismiss_copy_notice":
+      return { ...state, copyNotice: null };
     case "copy_from_day": {
       const source = state.draft.routines[action.sourceDay];
       const clonedExercises = source.exercises.map((exercise, index) =>
@@ -996,6 +1058,9 @@ export function trainingCycleBuilderReducer(
           : { ...routine, exercises: [...routine.exercises, ...clonedExercises] });
       return markDraftChanged(state, draft, {
         copyMode: null,
+        copyStep: "days",
+        copySourceDay: null,
+        copyExerciseId: null,
         nextEntityNumber: state.nextEntityNumber + clonedExercises.length,
       });
     }
