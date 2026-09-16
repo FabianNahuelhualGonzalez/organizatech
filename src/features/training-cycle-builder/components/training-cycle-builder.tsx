@@ -202,6 +202,7 @@ function ConnectedTrainingCycleBuilder({
           state={state}
           dispatch={dispatch}
           onGenerateSuggestion={() => void controller.generateSuggestion()}
+          onRequestNewCycle={() => void controller.requestNewCycle("manual", "setup")}
         />
       );
       break;
@@ -336,18 +337,17 @@ function ConnectedTrainingCycleBuilder({
       {state.pendingNewCycleIntent && state.activeCycleCloseId ? (
         <ConfirmDialog
           ariaLabel="Confirmar nuevo ciclo de entrenamiento"
-          title="¿Quieres finalizar tu ciclo actual?"
-          cancelLabel="No, mantenerlo"
+          title="¿Estás seguro de que quieres crear uno nuevo?"
+          cancelLabel="No"
           cancelVariant="primary"
           onCancel={() => dispatch({ type: "cancel_active_cycle_close" })}
-          confirmLabel="Sí, finalizar y continuar"
-          confirmBusyLabel="Finalizando ciclo…"
+          confirmLabel="Sí"
+          confirmBusyLabel="Creando…"
           confirmVariant="danger"
           onConfirm={() => void controller.confirmActiveCycleClose()}
           isBusy={state.activeCycleCloseState === "closing"}
         >
-          <p>Tienes actualmente un ciclo de entrenamiento activo. Para iniciar uno nuevo debemos finalizar el ciclo actual.</p>
-          <p>Si eliges No, tu ciclo continuará exactamente como está.</p>
+          <p>Cerraremos el ciclo que tienes actualmente en curso.</p>
           {state.activeCycleCloseState === "error" ? (
             <StatusBanner
               tone="error"

@@ -237,6 +237,7 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
     readonly expectedActiveCycleId: string;
     readonly startDate: string;
     readonly endDate: string;
+    readonly origin: "manual" | "suggested" | "duplicate";
   }): Promise<TrainingCycleDraftViewModel> {
     return this.queue.run(async () => {
       const result = await this.input.rpc.replaceActiveCycleToDraft({
@@ -254,25 +255,43 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
           || draft.activatedCycleId !== null) {
           throw new TrainingCycleTransportError("invalid_response", "El servidor devolvió una respuesta inválida.");
         }
+        let preparedDraft = draft;
+        let preparedOperation: Pick<TrainingCycleAcceptedOperation, "aggregateId" | "resultVersion"> = result;
+        if (input.origin !== "duplicate") {
+          const cleanOperation = await this.input.rpc.saveDraft({
+            draftId: draft.draftId,
+            expectedVersion: draft.version,
+            goal: draft.goal,
+            startDate: draft.startDate,
+            endDate: draft.endDate,
+            plan: { days: [] },
+          });
+          const cleanVersion = requiredVersion(cleanOperation);
+          if (cleanOperation.aggregateId !== draft.draftId) {
+            throw new TrainingCycleTransportError("invalid_response", "El servidor devolvió una respuesta inválida.");
+          }
+          preparedDraft = { ...draft, version: cleanVersion, plan: { days: [] } };
+          preparedOperation = cleanOperation;
+        }
         const projectedDraft = projectTrainingCycleRpcPlan({
-          draftId: draft.draftId,
-          goal: draft.goal,
-          startDate: draft.startDate,
-          endDate: draft.endDate,
-          plan: draft.plan,
+          draftId: preparedDraft.draftId,
+          goal: preparedDraft.goal,
+          startDate: preparedDraft.startDate,
+          endDate: preparedDraft.endDate,
+          plan: preparedDraft.plan,
           catalogBySource: new Map([...this.input.catalog, ...result.exerciseSources].map((item) => [
             `${item.source.kind}:${item.source.id}`,
             item,
           ])),
           sourceCycle: this.input.activeCycle,
           entries: this.input.entries ?? [],
-          todayIsoDate: this.input.todayIsoDate ?? draft.startDate,
+          todayIsoDate: this.input.todayIsoDate ?? preparedDraft.startDate,
         });
         this.activeCycleId = null;
         this.activeCycleVersion = null;
         this.newDraftSourceCycleId = input.expectedActiveCycleId;
-        this.adoptDraft(result);
-        await afterCommitted(() => this.input.onCycleReplaced?.(input.expectedActiveCycleId, draft));
+        this.adoptDraft(preparedOperation);
+        await afterCommitted(() => this.input.onCycleReplaced?.(input.expectedActiveCycleId, preparedDraft));
         return projectedDraft;
       });
     });

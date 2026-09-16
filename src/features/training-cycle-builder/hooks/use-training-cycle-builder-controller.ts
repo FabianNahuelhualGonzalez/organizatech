@@ -96,9 +96,17 @@ export async function requestTrainingCycleNewCycle(
   dispatch: Dispatch<TrainingCycleBuilderAction>,
   origin: TrainingCycleBuilderOrigin,
   screen: TrainingCycleBuilderScreen,
+  expectedActiveCycleId?: string | null,
 ) {
   try {
     const guard = await gateway.getActiveCycleGuard();
+    if (expectedActiveCycleId && guard?.cycleId !== expectedActiveCycleId) {
+      dispatch({
+        type: "active_cycle_guard_failed",
+        message: "Tu ciclo activo cambió. Recarga antes de crear uno nuevo.",
+      });
+      return;
+    }
     if (guard) {
       dispatch({
         type: "active_cycle_close_confirmation_required",
@@ -122,16 +130,23 @@ export async function confirmTrainingCycleActiveClose(
   dispatch: Dispatch<TrainingCycleBuilderAction>,
   state: Pick<
     TrainingCycleBuilderState,
-    "activeCycleCloseId" | "pendingNewCycleIntent" | "draft"
+    "activeCycleId" | "activeCycleCloseId" | "pendingNewCycleIntent" | "draft"
   >,
 ) {
-  if (!state.activeCycleCloseId || !state.pendingNewCycleIntent) return;
+  if (
+    !state.activeCycleCloseId
+    || state.activeCycleId !== state.activeCycleCloseId
+    || !state.pendingNewCycleIntent
+  ) return;
   dispatch({ type: "active_cycle_close_started" });
   try {
     const draft = await gateway.completeActiveCycle({
       expectedActiveCycleId: state.activeCycleCloseId,
       startDate: state.draft.startDate,
       endDate: state.draft.endDate,
+      origin: state.pendingNewCycleIntent.origin === "resume"
+        ? "manual"
+        : state.pendingNewCycleIntent.origin,
     });
     dispatch({ type: "active_cycle_close_succeeded", draft });
   } catch (error) {
@@ -156,14 +171,23 @@ export class TrainingCycleNewCycleOperationOwner {
   async request(
     gateway: Pick<TrainingCycleBuilderGateway, "getActiveCycleGuard">,
     dispatch: Dispatch<TrainingCycleBuilderAction>,
-    state: Pick<TrainingCycleBuilderState, "activeCycleCloseState">,
+    state: Pick<
+      TrainingCycleBuilderState,
+      "activeCycleCloseState" | "activeCycleId" | "committedSyncPending" | "workflow"
+    >,
     origin: TrainingCycleBuilderOrigin,
     screen: TrainingCycleBuilderScreen,
   ) {
-    if (this.intentRunning || state.activeCycleCloseState === "closing") return;
+    if (this.intentRunning || state.committedSyncPending || state.activeCycleCloseState === "closing") return;
     this.intentRunning = true;
     try {
-      await requestTrainingCycleNewCycle(gateway, dispatch, origin, screen);
+      await requestTrainingCycleNewCycle(
+        gateway,
+        dispatch,
+        origin,
+        screen,
+        state.workflow === "active_edit" ? state.activeCycleId : null,
+      );
     } finally {
       this.intentRunning = false;
     }
@@ -174,7 +198,7 @@ export class TrainingCycleNewCycleOperationOwner {
     dispatch: Dispatch<TrainingCycleBuilderAction>,
     state: Pick<
       TrainingCycleBuilderState,
-      "activeCycleCloseId" | "activeCycleCloseState" | "pendingNewCycleIntent" | "draft"
+      "activeCycleId" | "activeCycleCloseId" | "activeCycleCloseState" | "pendingNewCycleIntent" | "draft"
     >,
   ) {
     if (this.closeRunning || state.activeCycleCloseState === "closing") return;
@@ -298,11 +322,16 @@ export function useTrainingCycleBuilderController({
     await newCycleOwner.request(
       gatewayRef.current,
       dispatch,
-      { activeCycleCloseState: state.activeCycleCloseState },
+      {
+        activeCycleCloseState: state.activeCycleCloseState,
+        activeCycleId: state.activeCycleId,
+        committedSyncPending: state.committedSyncPending,
+        workflow: state.workflow,
+      },
       origin,
       screen,
     );
-  }, [newCycleOwner, state.activeCycleCloseState]);
+  }, [newCycleOwner, state.activeCycleCloseState, state.activeCycleId, state.committedSyncPending, state.workflow]);
 
   const confirmActiveCycleClose = useCallback(async () => {
     if (
@@ -310,6 +339,7 @@ export function useTrainingCycleBuilderController({
       || !state.pendingNewCycleIntent
     ) return;
     await newCycleOwner.confirm(gatewayRef.current, dispatch, {
+      activeCycleId: state.activeCycleId,
       activeCycleCloseId: state.activeCycleCloseId,
       activeCycleCloseState: state.activeCycleCloseState,
       pendingNewCycleIntent: state.pendingNewCycleIntent,
@@ -317,6 +347,7 @@ export function useTrainingCycleBuilderController({
     });
   }, [
     newCycleOwner,
+    state.activeCycleId,
     state.activeCycleCloseId,
     state.activeCycleCloseState,
     state.draft,

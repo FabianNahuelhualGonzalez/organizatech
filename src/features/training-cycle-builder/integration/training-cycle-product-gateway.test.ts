@@ -172,6 +172,7 @@ test("false de sincronización post-commit no se presenta como éxito ni se repi
       });
       return gateway.completeActiveCycle({
         expectedActiveCycleId: ACTIVE_CYCLE_ID, startDate: "2026-09-01", endDate: "2026-10-13",
+        origin: "duplicate",
       });
     };
     await assert.rejects(invoke, TrainingCycleCommittedMutationError);
@@ -259,6 +260,7 @@ test("reemplazar el activo prepara el borrador nuevo antes de editarlo", async (
     expectedActiveCycleId: ACTIVE_CYCLE_ID,
     startDate: "2026-09-01",
     endDate: "2026-10-13",
+    origin: "duplicate",
   });
   await gateway.saveDraft(saveInput("duplicate"));
 
@@ -291,6 +293,7 @@ test("una respuesta de cierre para otro aggregate falla cerrado", async () => {
       expectedActiveCycleId: ACTIVE_CYCLE_ID,
       startDate: "2026-09-01",
       endDate: "2026-10-13",
+      origin: "duplicate",
     }),
     (error) => error instanceof TrainingCycleCommittedMutationError,
   );
@@ -315,6 +318,7 @@ test("una respuesta de reemplazo inválida no adopta referencias ni dirige el si
     expectedActiveCycleId: ACTIVE_CYCLE_ID,
     startDate: "2026-09-01",
     endDate: "2026-10-13",
+    origin: "duplicate",
   }), (error) => error instanceof TrainingCycleCommittedMutationError);
   await assert.rejects(() => gateway.saveDraft(saveInput("duplicate")), TrainingCycleCommittedMutationError);
   assert.deepEqual(rpc.calls, []);
@@ -335,6 +339,7 @@ test("un callback onCycleReplaced fallido se clasifica committed y conserva refe
     expectedActiveCycleId: ACTIVE_CYCLE_ID,
     startDate: "2026-09-01",
     endDate: "2026-10-13",
+    origin: "duplicate",
   }), (error) => error instanceof TrainingCycleCommittedMutationError);
   await assert.rejects(() => gateway.saveDraft(saveInput("duplicate")), TrainingCycleCommittedMutationError);
   assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`]);
@@ -359,6 +364,7 @@ test("un callback onDraftPersisted fallido también conserva el draft committed"
     expectedActiveCycleId: ACTIVE_CYCLE_ID,
     startDate: "2026-09-01",
     endDate: "2026-10-13",
+    origin: "duplicate",
   }), (error) => error instanceof TrainingCycleCommittedMutationError);
   await assert.rejects(() => gateway.saveDraft(saveInput("duplicate")), TrainingCycleCommittedMutationError);
   assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`]);
@@ -398,6 +404,7 @@ test("legacy sin catálogo adopta el descriptor custom creado en la respuesta at
     expectedActiveCycleId: ACTIVE_CYCLE_ID,
     startDate: "2026-09-01",
     endDate: "2026-10-13",
+    origin: "duplicate",
   });
 
   assert.equal(draft.draftId, NEW_DRAFT_ID);
@@ -430,6 +437,7 @@ test("descriptor ausente después del commit informa sincronización pendiente s
   await owner.confirm(gateway, dispatch, state);
 
   assert.equal(state.activeCycleId, null);
+  assert.equal(state.committedSyncPending, true);
   assert.match(state.activeCycleCloseErrorMessage ?? "", /terminó.*sincronizar/i);
   assert.doesNotMatch(state.activeCycleCloseErrorMessage ?? "", /sigue activo/i);
   assert.equal(state.draft.draftId, createTrainingCycleBuilderTestViewModel().draft.draftId);
@@ -460,8 +468,51 @@ test("notify post-commit fallido deja activo nulo y sincronización pendiente", 
   await owner.confirm(gateway, dispatch, state);
 
   assert.equal(state.activeCycleId, null);
+  assert.equal(state.committedSyncPending, true);
   assert.match(state.activeCycleCloseErrorMessage ?? "", /terminó.*sincronizar/i);
   assert.doesNotMatch(state.activeCycleCloseErrorMessage ?? "", /sigue activo/i);
+
+  await owner.request(gateway, dispatch, state, "manual", "setup");
+  await owner.confirm(gateway, dispatch, state);
+  assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`]);
+});
+
+test("fallar al limpiar el draft post-commit no repite el reemplazo ni finge rollback", async () => {
+  const rpc = fakeRpc({ activeGuard: { cycleId: ACTIVE_CYCLE_ID, hasCanonicalPlan: true } });
+  let cleanWrites = 0;
+  rpc.saveDraft = async () => {
+    cleanWrites += 1;
+    throw new TrainingCycleTransportError("service_unavailable", "clean-sync-failed");
+  };
+  const gateway = createTrainingCycleProductGateway({
+    rpc,
+    catalog: CATALOG,
+    remoteDraft: null,
+    sourceCycleId: null,
+    activeCycle: { ...snapshot(4), cycleId: ACTIVE_CYCLE_ID },
+  });
+  let state = trainingCycleBuilderReducer(createTrainingCycleBuilderState({
+    ...createTrainingCycleBuilderTestViewModel(),
+    initialScreen: "active",
+    activeCycleId: ACTIVE_CYCLE_ID,
+    activeCycleRevision: "4",
+  }), { type: "show_active" });
+  state = trainingCycleBuilderReducer(state, { type: "begin_active_edit" });
+  const dispatch = (action: TrainingCycleBuilderAction) => {
+    state = trainingCycleBuilderReducer(state, action);
+  };
+  const owner = new TrainingCycleNewCycleOperationOwner();
+
+  await owner.request(gateway, dispatch, state, "manual", "setup");
+  await owner.confirm(gateway, dispatch, state);
+  await owner.request(gateway, dispatch, state, "manual", "setup");
+  await owner.confirm(gateway, dispatch, state);
+
+  assert.equal(state.activeCycleId, null);
+  assert.equal(state.committedSyncPending, true);
+  assert.match(state.activeCycleCloseErrorMessage ?? "", /terminó.*sincronizar/i);
+  assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`]);
+  assert.equal(cleanWrites, 1);
 });
 
 test("rechazo pre-commit mantiene el ciclo activo y usa el mensaje de cierre no realizado", async () => {
@@ -491,6 +542,7 @@ test("rechazo pre-commit mantiene el ciclo activo y usa el mensaje de cierre no 
   await owner.confirm(gateway, dispatch, state);
 
   assert.equal(state.activeCycleId, ACTIVE_CYCLE_ID);
+  assert.equal(state.committedSyncPending, false);
   assert.match(state.activeCycleCloseErrorMessage ?? "", /sigue activo/i);
   assert.doesNotMatch(state.activeCycleCloseErrorMessage ?? "", /terminó.*sincronizar/i);
 });
@@ -519,20 +571,23 @@ test("flujo completo: No conserva el activo y produce cero writes", async () => 
     state = trainingCycleBuilderReducer(state, action);
   };
   const owner = new TrainingCycleNewCycleOperationOwner();
+  state = trainingCycleBuilderReducer(state, { type: "begin_active_edit" });
+  const editingDraft = state.draft;
 
-  await owner.request(gateway, dispatch, state, "duplicate", "duplicate");
-  assert.deepEqual(state.pendingNewCycleIntent, { origin: "duplicate", screen: "duplicate" });
+  await owner.request(gateway, dispatch, state, "manual", "setup");
+  assert.deepEqual(state.pendingNewCycleIntent, { origin: "manual", screen: "setup" });
   dispatch({ type: "cancel_active_cycle_close" });
 
-  assert.equal(state.screen, "active");
-  assert.equal(state.workflow, "active");
+  assert.equal(state.screen, "setup");
+  assert.equal(state.workflow, "active_edit");
   assert.equal(state.activeCycleId, ACTIVE_CYCLE_ID);
   assert.equal(state.activeCycleRevision, "4");
+  assert.equal(state.draft, editingDraft);
   assert.equal(state.pendingNewCycleIntent, null);
   assert.deepEqual(rpc.calls, []);
 });
 
-test("flujo completo: Sí cierra una vez, conserva montaje e intención y duplica el recién cerrado", async () => {
+test("flujo completo: Sí reemplaza una vez y muestra un borrador limpio", async () => {
   const rpc = fakeRpc({
     activeGuard: { cycleId: ACTIVE_CYCLE_ID, hasCanonicalPlan: true },
   });
@@ -568,28 +623,73 @@ test("flujo completo: Sí cierra una vez, conserva montaje e intención y duplic
   };
   const owner = new TrainingCycleNewCycleOperationOwner();
   const mountedKey = trainingCycleBuilderInstanceKey();
+  state = trainingCycleBuilderReducer(state, { type: "begin_active_edit" });
 
-  await owner.request(gateway, dispatch, state, "duplicate", "duplicate");
+  await owner.request(gateway, dispatch, state, "manual", "setup");
   const firstClose = owner.confirm(gateway, dispatch, state);
   const replayedClose = owner.confirm(gateway, dispatch, state);
   await Promise.all([firstClose, replayedClose]);
 
   assert.equal(trainingCycleBuilderInstanceKey(), mountedKey);
   assert.equal(state.workflow, "draft");
-  assert.equal(state.origin, "duplicate");
-  assert.equal(state.screen, "duplicate");
+  assert.equal(state.origin, "manual");
+  assert.equal(state.screen, "setup");
   assert.equal(state.draft.draftId, NEW_DRAFT_ID);
+  assert.deepEqual(state.draft.selectedDays, []);
+  assert.ok(Object.values(state.draft.routines).every((routine) => (
+    routine.name === "" && routine.exercises.length === 0
+  )));
   assert.equal(state.sourceDraft.draftId, NEW_DRAFT_ID);
   assert.equal(productData.activeCycle, null);
   assert.equal(productData.lastCycle?.cycleId, ACTIVE_CYCLE_ID);
   assert.equal(productData.draft?.draftId, NEW_DRAFT_ID);
   assert.equal(productData.draft?.sourceCycleId, ACTIVE_CYCLE_ID);
+  assert.equal(productData.draft?.version, 2);
+  assert.deepEqual(productData.draft?.plan.days, []);
 
-  await gateway.saveDraft(saveInput("duplicate"));
-  assert.deepEqual(rpc.calls, [
-    `replace:${ACTIVE_CYCLE_ID}`,
-    "save:1",
-  ]);
+  assert.deepEqual(rpc.calls, [`replace:${ACTIVE_CYCLE_ID}`, "save:1"]);
+  assert.equal(rpc.calls.filter((call) => call.startsWith("replace:")).length, 1);
+});
+
+test("un ciclo activo distinto invalida la intención antes de abrir la confirmación", async () => {
+  const rpc = fakeRpc({
+    activeGuard: { cycleId: SOURCE_CYCLE_ID, hasCanonicalPlan: true },
+  });
+  const gateway = createTrainingCycleProductGateway({
+    rpc,
+    catalog: CATALOG,
+    remoteDraft: null,
+    sourceCycleId: null,
+    activeCycle: { ...snapshot(4), cycleId: ACTIVE_CYCLE_ID },
+  });
+  let state = trainingCycleBuilderReducer(
+    createTrainingCycleBuilderState({
+      ...createTrainingCycleBuilderTestViewModel(),
+      initialScreen: "active",
+      activeCycleId: ACTIVE_CYCLE_ID,
+      activeCycleRevision: "4",
+    }),
+    { type: "show_active" },
+  );
+  state = trainingCycleBuilderReducer(state, { type: "begin_active_edit" });
+  const dispatch = (action: TrainingCycleBuilderAction) => {
+    state = trainingCycleBuilderReducer(state, action);
+  };
+
+  await new TrainingCycleNewCycleOperationOwner().request(
+    gateway,
+    dispatch,
+    state,
+    "manual",
+    "setup",
+  );
+
+  assert.equal(state.workflow, "active_edit");
+  assert.equal(state.activeCycleId, ACTIVE_CYCLE_ID);
+  assert.equal(state.pendingNewCycleIntent, null);
+  assert.equal(state.activeCycleCloseId, null);
+  assert.match(state.activeCycleCloseErrorMessage ?? "", /cambió/i);
+  assert.deepEqual(rpc.calls, []);
 });
 
 test("activo más borrador remoto reemplaza el borrador incompatible sin sobrescribirlo", async () => {
@@ -609,6 +709,7 @@ test("activo más borrador remoto reemplaza el borrador incompatible sin sobresc
     expectedActiveCycleId: ACTIVE_CYCLE_ID,
     startDate: "2026-09-01",
     endDate: "2026-10-13",
+    origin: "duplicate",
   });
   await gateway.saveDraft(saveInput("duplicate"));
 

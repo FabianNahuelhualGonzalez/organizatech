@@ -243,6 +243,7 @@ export interface TrainingCycleCompleteActiveInput {
   readonly expectedActiveCycleId: string;
   readonly startDate: string;
   readonly endDate: string;
+  readonly origin: Exclude<TrainingCycleBuilderOrigin, "resume">;
 }
 
 export interface TrainingCycleExtendInput {

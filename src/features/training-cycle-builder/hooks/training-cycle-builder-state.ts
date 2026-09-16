@@ -1072,6 +1072,7 @@ export function trainingCycleBuilderReducer(
         ...state,
         activeCycleId: null,
         activeCycleRevision: null,
+        committedSyncPending: true,
         pendingNewCycleIntent: null,
         activeCycleCloseId: null,
         activeCycleCloseState: "error",
@@ -1079,8 +1080,15 @@ export function trainingCycleBuilderReducer(
       };
     case "active_cycle_close_succeeded": {
       const intent = state.pendingNewCycleIntent;
+      const replacementSource = intent?.origin === "manual"
+        ? { ...action.draft, selectedDays: [] }
+        : action.draft;
       return intent
-        ? applyOriginChoice({ ...state, sourceDraft: action.draft, draft: action.draft }, intent.origin, intent.screen)
+        ? applyOriginChoice(
+            { ...state, sourceDraft: replacementSource, draft: replacementSource },
+            intent.origin,
+            intent.screen,
+          )
         : state;
     }
     case "set_save_state":

@@ -1389,73 +1389,83 @@ test("editar el ciclo activo nunca abre ni ejecuta el reemplazo", () => {
   assert.equal(editing.activeCycleCloseState, "idle");
 });
 
-test("rechazar el reemplazo conserva el ciclo activo sin entrar al constructor", () => {
+test("rechazar el reemplazo conserva exactamente la edición activa", () => {
   const active = reduce(createState(), { type: "show_active" });
-  const confirmation = reduce(active, {
+  const editing = reduce(active, { type: "begin_active_edit" });
+  const confirmation = reduce(editing, {
     type: "active_cycle_close_confirmation_required",
     cycleId: "40000000-0000-4000-8000-000000000002",
-    origin: "duplicate",
-    screen: "duplicate",
+    origin: "manual",
+    screen: "setup",
   });
   const cancelled = reduce(confirmation, { type: "cancel_active_cycle_close" });
 
-  assert.equal(cancelled.workflow, "active");
-  assert.equal(cancelled.screen, "active");
+  assert.equal(cancelled.workflow, "active_edit");
+  assert.equal(cancelled.screen, "setup");
   assert.equal(cancelled.activeCycleId, active.activeCycleId);
   assert.equal(cancelled.activeCycleRevision, active.activeCycleRevision);
+  assert.equal(cancelled.draft, editing.draft);
+  assert.deepEqual(cancelled.history, editing.history);
   assert.equal(cancelled.pendingNewCycleIntent, null);
   assert.equal(cancelled.activeCycleCloseId, null);
-  assert.equal(cancelled.revision, active.revision);
+  assert.equal(cancelled.revision, editing.revision);
 });
 
-test("confirmar el cierre entra al duplicado editable sólo después del éxito", () => {
+test("confirmar el cierre prepara un borrador manual limpio sólo después del éxito", () => {
   const active = reduce(createState(), { type: "show_active" });
-  const confirmation = reduce(active, {
+  const editing = reduce(active, { type: "begin_active_edit" });
+  const confirmation = reduce(editing, {
     type: "active_cycle_close_confirmation_required",
     cycleId: "40000000-0000-4000-8000-000000000002",
-    origin: "duplicate",
-    screen: "duplicate",
+    origin: "manual",
+    screen: "setup",
   });
   const closing = reduce(confirmation, { type: "active_cycle_close_started" });
-  assert.equal(closing.screen, "active");
-  assert.equal(closing.workflow, "active");
+  assert.equal(closing.screen, "setup");
+  assert.equal(closing.workflow, "active_edit");
   assert.equal(closing.activeCycleCloseState, "closing");
   assert.equal(reduce(closing, { type: "active_cycle_close_started" }), closing);
 
   const committedDraft = { ...closing.draft, draftId: "30000000-0000-4000-8000-000000000099" };
-  const duplicate = reduce(closing, { type: "active_cycle_close_succeeded", draft: committedDraft });
-  assert.equal(duplicate.workflow, "draft");
-  assert.equal(duplicate.origin, "duplicate");
-  assert.equal(duplicate.screen, "duplicate");
-  assert.equal(duplicate.activeCycleId, null);
-  assert.equal(duplicate.activeCycleRevision, null);
-  assert.equal(duplicate.pendingNewCycleIntent, null);
-  assert.equal(duplicate.activeCycleCloseId, null);
-  assert.equal(duplicate.draft, committedDraft);
-  assert.equal(duplicate.sourceDraft, committedDraft);
+  const clean = reduce(closing, { type: "active_cycle_close_succeeded", draft: committedDraft });
+  assert.equal(clean.workflow, "draft");
+  assert.equal(clean.origin, "manual");
+  assert.equal(clean.screen, "setup");
+  assert.equal(clean.activeCycleId, null);
+  assert.equal(clean.activeCycleRevision, null);
+  assert.equal(clean.pendingNewCycleIntent, null);
+  assert.equal(clean.activeCycleCloseId, null);
+  assert.equal(clean.draft.draftId, committedDraft.draftId);
+  assert.deepEqual(clean.draft.selectedDays, []);
+  assert.ok(Object.values(clean.draft.routines).every((routine) => (
+    routine.name === "" && routine.exercises.length === 0
+  )));
+  assert.equal(clean.sourceDraft.draftId, committedDraft.draftId);
+  assert.deepEqual(clean.sourceDraft.selectedDays, []);
 });
 
 test("un error de cierre mantiene el activo y permite reintentar la misma confirmación", () => {
   const active = reduce(createState(), { type: "show_active" });
+  const editing = reduce(active, { type: "begin_active_edit" });
   const failed = reduce(
-    active,
+    editing,
     {
       type: "active_cycle_close_confirmation_required",
       cycleId: "40000000-0000-4000-8000-000000000002",
-      origin: "duplicate",
-      screen: "duplicate",
+      origin: "manual",
+      screen: "setup",
     },
     { type: "active_cycle_close_started" },
     { type: "active_cycle_close_failed", message: "El ciclo sigue activo" },
   );
 
-  assert.equal(failed.workflow, "active");
-  assert.equal(failed.screen, "active");
+  assert.equal(failed.workflow, "active_edit");
+  assert.equal(failed.screen, "setup");
   assert.equal(failed.activeCycleId, active.activeCycleId);
   assert.equal(failed.activeCycleCloseState, "error");
   assert.deepEqual(failed.pendingNewCycleIntent, {
-    origin: "duplicate",
-    screen: "duplicate",
+    origin: "manual",
+    screen: "setup",
   });
 });
 

@@ -39,6 +39,7 @@ const productControllerSource = read(`${FEATURE_ROOT}/hooks/use-training-cycle-p
 const rpcGatewaySource = read(`${FEATURE_ROOT}/data/supabase-training-cycle-rpc-gateway.ts`);
 const contractsSource = read(`${FEATURE_ROOT}/components/training-cycle-builder-contracts.ts`);
 const controllerSource = read(`${FEATURE_ROOT}/hooks/use-training-cycle-builder-controller.ts`);
+const creationScreensSource = read(`${FEATURE_ROOT}/components/cycle-creation-screens.tsx`);
 const lifecycleScreensSource = read(`${FEATURE_ROOT}/components/cycle-review-lifecycle-screens.tsx`);
 const autosaveSource = read(`${FEATURE_ROOT}/hooks/training-cycle-draft-autosave.ts`);
 const stateSource = read(`${FEATURE_ROOT}/hooks/training-cycle-builder-state.ts`);
@@ -381,10 +382,16 @@ assert.match(controllerSource, /newCycleOwner\.request\(/);
 assert.match(controllerSource, /newCycleOwner\.confirm\(/);
 assert.match(controllerSource, /getActiveCycleGuard/);
 assert.match(controllerSource, /completeActiveCycle/);
-assert.match(featureSource, /¿Quieres finalizar tu ciclo actual\?/);
-assert.match(featureSource, /No, mantenerlo/);
-assert.match(featureSource, /Sí, finalizar y continuar/);
+assert.match(featureSource, /¿Estás seguro de que quieres crear uno nuevo\?/);
+assert.match(featureSource, /Cerraremos el ciclo que tienes actualmente en curso\./);
+assert.match(featureSource, /cancelLabel="No"/);
+assert.match(featureSource, /confirmLabel="Sí"/);
+assert.match(featureSource, /requestNewCycle\("manual", "setup"\)/);
 assert.match(lifecycleScreensSource, /Editar objetivo, días y rutinas/);
+assert.match(
+  creationScreensSource,
+  /\{isActiveEdit \? \([\s\S]*Crear un nuevo ciclo de entrenamiento[\s\S]*\) : null\}/,
+);
 assert.doesNotMatch(
   lifecycleScreensSource.match(/export function CycleActiveScreen[\s\S]*?export function CycleAlertsScreen/)?.[0] ?? "",
   /Extender la fecha de término|Crear un nuevo ciclo de entrenamiento|Ver avisos de vencimiento|Ver qué pasa si no lo extiendo|PrimaryAction/,

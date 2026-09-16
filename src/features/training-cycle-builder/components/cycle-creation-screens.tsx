@@ -233,10 +233,12 @@ export function CycleSetupScreen({
   state,
   dispatch,
   onGenerateSuggestion,
+  onRequestNewCycle,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly dispatch: BuilderDispatch;
   readonly onGenerateSuggestion: () => void;
+  readonly onRequestNewCycle: () => void;
 }) {
   const validation = getTrainingCycleDraftValidation(state.draft);
   const isActiveEdit = state.workflow === "active_edit";
@@ -343,6 +345,14 @@ export function CycleSetupScreen({
       >
         {generating ? "Generando una rutina editable…" : continueLabel}
       </PrimaryAction>
+      {isActiveEdit ? (
+        <SecondaryAction
+          disabled={state.committedSyncPending}
+          onClick={onRequestNewCycle}
+        >
+          Crear un nuevo ciclo de entrenamiento
+        </SecondaryAction>
+      ) : null}
     </div>
   );
 }
