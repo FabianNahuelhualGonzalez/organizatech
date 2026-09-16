@@ -21,6 +21,8 @@ export interface TrainingCycle {
   status: TrainingCycleStatus;
   planSnapshot: TrainingCycleSnapshot;
   summarySnapshot: TrainingCycleSnapshot | null;
+  /** Presente cuando el ciclo usa el plan versionado del builder canónico. */
+  currentPlanVersionId?: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -335,6 +337,7 @@ function mapTrainingCycleRow(row: TrainingCycleRow): TrainingCycle {
     status: readTrainingCycleStatus(row.status),
     planSnapshot: readSnapshot(row.plan_snapshot),
     summarySnapshot: row.summary_snapshot === null ? null : readSnapshot(row.summary_snapshot),
+    currentPlanVersionId: row.current_plan_version_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
@@ -384,6 +387,7 @@ const TRAINING_CYCLE_COLUMNS = [
   "status",
   "plan_snapshot",
   "summary_snapshot",
+  "current_plan_version_id",
   "created_at",
   "updated_at",
   "deleted_at",
@@ -402,6 +406,7 @@ interface TrainingCycleRow {
   status: string;
   plan_snapshot: unknown;
   summary_snapshot: unknown | null;
+  current_plan_version_id: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

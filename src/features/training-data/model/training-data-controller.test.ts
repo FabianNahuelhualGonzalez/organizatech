@@ -111,6 +111,14 @@ function createCycle(id: string, source = "cycle-scoped"): TrainingCycle {
   };
 }
 
+function createRpcActivatedCycle(id: string): TrainingCycle {
+  return {
+    ...createCycle(id, "unmarked-versioned-plan"),
+    planSnapshot: { days: [{ day: "monday" }] },
+    currentPlanVersionId: "30000000-0000-4000-8000-000000000001",
+  };
+}
+
 function createPlan(cycleId: string, empty = false): CycleScopedTrainingPlan {
   return {
     routines: empty ? [] : [{
@@ -320,6 +328,30 @@ test("elige un solo canon: scoped evita legacy y fallback legacy sigue funcionan
   await legacyController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
   assert.deepEqual(calls, { legacy: 1, plan: 1, sessions: 1 });
   assert.equal(selectTrainingDataView(legacyController.getState(), createDefaultTrainingPlan()).mode, "legacy");
+});
+
+test("un ciclo activado por el RPC canónico carga su plan tras la lectura posterior", async () => {
+  const identity = createIdentityHarness();
+  const calls = { legacy: 0, plan: 0, sessions: 0 };
+  const dataController = controller(identity, source({
+    loadActiveCycle: async () => createRpcActivatedCycle("cycle-rpc"),
+    loadLegacySnapshot: async () => { calls.legacy += 1; return appData("legacy"); },
+    loadCyclePlan: async (cycleId) => { calls.plan += 1; return createPlan(cycleId); },
+    loadCycleSessionRows: async () => {
+      calls.sessions += 1;
+      return rawSessionData({ sessions: [], entries: [] });
+    },
+  }));
+  dataController.reset({ cyclesEnabled: true });
+
+  const result = await dataController.refreshForIdentity({ mode: "supabase", cyclesEnabled: true });
+
+  assert.equal(result.kind, "success");
+  assert.deepEqual(calls, { legacy: 0, plan: 1, sessions: 1 });
+  const view = selectTrainingDataView(dataController.getState(), createDefaultTrainingPlan());
+  assert.equal(view.mode, "cycle-scoped");
+  assert.equal(view.activeCycle?.id, "cycle-rpc");
+  assert.equal(view.exercises[0]?.name, "Press cycle-rpc");
 });
 
 test("plan y sesiones se publican atómicamente", async () => {
@@ -573,6 +605,7 @@ function createCriticalReadHarness(scenario: CriticalReadScenario) {
       cycle_type: "meso", goal: "Hipertrofia", started_at: "2026-08-01T00:00:00.000Z",
       ended_at: null, planned_start_date: "2026-08-01", planned_end_date: "2026-08-31",
       status: "active", plan_snapshot: { source: "cycle-scoped" }, summary_snapshot: null,
+      current_plan_version_id: "30000000-0000-4000-8000-000000000001",
       created_at: "2026-08-01T00:00:00.000Z", updated_at: "2026-08-01T00:00:00.000Z",
       deleted_at: null,
     }],
@@ -825,6 +858,13 @@ test("PERF-05C real incluye login y respeta ≤12 requests/≤6 ondas", async ()
     assert.ok(measurement.requestCount <= 12);
     assert.ok(measurement.waves.length <= 6);
     assert.ok(measurement.state.cycleScoped.status === "ready" || measurement.state.cycleScoped.status === "empty");
+    assert.equal(
+      measurement.state.cycles.status === "ready"
+        ? measurement.state.cycles.data.active?.currentPlanVersionId
+        : null,
+      "30000000-0000-4000-8000-000000000001",
+      "la lectura posterior conserva la identidad del plan canónico",
+    );
   }
   assert.deepEqual(
     noSessions.sessionData && {

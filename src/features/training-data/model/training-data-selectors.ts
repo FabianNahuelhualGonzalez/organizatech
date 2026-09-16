@@ -219,7 +219,9 @@ export function createExerciseTemplatesFromCycleScopedPlan(
 
 export function isCycleScopedTrainingCycle(cycle: TrainingCycle): boolean {
   const snapshotSource = readSnapshotString(cycle.planSnapshot, "source");
-  return snapshotSource === "cycle-scoped-qa" || snapshotSource === "cycle-scoped";
+  return Boolean(cycle.currentPlanVersionId)
+    || snapshotSource === "cycle-scoped-qa"
+    || snapshotSource === "cycle-scoped";
 }
 
 export function createTrainingPlanFromPersistedCycle(
