@@ -4,6 +4,11 @@
 
 Esta política evita que un cambio visible para usuarios llegue al repositorio o a producción sin aprobación explícita del dueño de producto. Aplica a toda persona, agente o automatización que proponga, implemente, revise o despliegue cambios.
 
+## Invariantes visuales aprobados
+
+- El fondo base del canvas de producto es `#07101A`. Debe existir como un token global único y cubrir `html`, `body`, shells y estados de carga. Cards, inputs, modales y superficies elevadas pueden usar tonos diferenciados para mantener jerarquía y accesibilidad.
+- Toda acción visible de volver debe reutilizar un componente React compartido con el icono canónico `arrow-narrow-left-dashed`: `viewBox="0 0 24 24"`, trazo `currentColor`, ancho `2`, extremos y uniones redondeados, y paths `M5 12h6m3 0h1.5m3 0h.5`, `M5 12l4 4`, `M5 12l4 -4`. Debe llamarse accesiblemente `Volver`, tener un target táctil adecuado y usar la navegación contextual existente. No usar `history.back()` si existe un controller ni mostrar el control cuando no hay destino real.
+
 Una auditoría técnica valida aspectos como calidad, seguridad, accesibilidad o ausencia de regresiones. **Una auditoría técnica no equivale a aprobación de producto** y nunca reemplaza los gates definidos aquí.
 
 ## Qué se considera un cambio visual
