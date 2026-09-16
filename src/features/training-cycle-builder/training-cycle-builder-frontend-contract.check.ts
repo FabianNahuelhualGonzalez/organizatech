@@ -433,6 +433,7 @@ assert.match(featureSource, /confirmLabel="Sí"/);
 assert.match(featureSource, /requestNewCycle\("duplicate", "start"\)/);
 assert.match(featureSource, /actionLabel=\{state\.committedSyncPending \? "Recargar ahora" : undefined\}/);
 assert.match(featureSource, /window\.location\.reload\(\)/);
+assert.match(creationScreensSource, /state\.recoverableDraftAvailable/);
 assert.match(lifecycleScreensSource, /Editar objetivo, días y rutinas/);
 const setupScreenSource = creationScreensSource.match(/export function CycleSetupScreen[\s\S]*$/)?.[0] ?? "";
 const activeScreenSource = lifecycleScreensSource.match(/export function CycleActiveScreen[\s\S]*?export function CycleAlertsScreen/)?.[0] ?? "";

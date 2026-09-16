@@ -88,6 +88,8 @@ export interface TrainingCycleBuilderState {
   readonly saveState: TrainingCycleSaveState;
   readonly savedAtLabel: string;
   readonly saveErrorMessage: string | null;
+  /** Sólo es recuperable el borrador que ya existía al abrir esta sesión. */
+  readonly recoverableDraftAvailable: boolean;
   readonly recoveredDraftBannerOpen: boolean;
   readonly activationState: "idle" | "activating" | "error";
   readonly activationErrorMessage: string | null;
@@ -283,6 +285,7 @@ export function createTrainingCycleBuilderState(
     saveState: viewModel.saveState ?? "pending",
     savedAtLabel: "Guardado hace un momento",
     saveErrorMessage: null,
+    recoverableDraftAvailable: viewModel.hasRecoverableDraft,
     recoveredDraftBannerOpen: false,
     activationState: "idle",
     committedSyncPending: false,
@@ -337,6 +340,7 @@ function applyOriginChoice(
     suggestionState: "idle",
     suggestionErrorMessage: null,
     activeEditSavedMessage: null,
+    recoverableDraftAvailable: false,
     recoveredDraftBannerOpen: origin === "resume",
     activeCycleId: null,
     activeCycleRevision: null,
@@ -1086,6 +1090,7 @@ export function trainingCycleBuilderReducer(
         history: [],
         saveState: "saved",
         saveErrorMessage: null,
+        recoverableDraftAvailable: false,
         recoveredDraftBannerOpen: false,
         revision: 0,
       };

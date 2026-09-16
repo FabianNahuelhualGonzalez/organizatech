@@ -1497,6 +1497,19 @@ test("confirmar un ciclo nuevo desde Mi ciclo abre el selector de alternativas",
   assert.equal(next.draft.draftId, committedDraft.draftId);
   assert.ok(next.sourceDraft.selectedDays.length > 0);
   assert.ok(next.sourceDraft.routines.monday.exercises.length > 0);
+  assert.equal(next.recoverableDraftAvailable, false);
+});
+
+test("Retomar sólo se ofrece para un borrador que ya existía al abrir", () => {
+  const recovered = createState();
+  assert.equal(recovered.recoverableDraftAvailable, true);
+
+  const chosen = reduce(recovered, {
+    type: "choose_origin",
+    origin: "duplicate",
+    screen: "start",
+  });
+  assert.equal(chosen.recoverableDraftAvailable, false);
 });
 
 test("un error de cierre mantiene el activo y permite reintentar la misma confirmación", () => {

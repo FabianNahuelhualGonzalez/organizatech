@@ -121,7 +121,7 @@ export function CycleStartScreen({
           onClick={() => onChooseOrigin("suggested", "setup")}
         />
       </div>
-      {viewModel.hasRecoverableDraft ? (
+      {state.recoverableDraftAvailable ? (
         <section className={styles.resumeDraft}>
           <div>
             <strong>Tienes un borrador sin terminar</strong>
