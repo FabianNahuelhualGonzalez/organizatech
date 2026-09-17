@@ -9,3 +9,6 @@ verify_jwt = true
 
 [functions.send-calendar-reminders]
 verify_jwt = false
+
+[functions.send-coach-link-emails]
+verify_jwt = true

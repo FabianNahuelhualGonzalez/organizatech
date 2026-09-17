@@ -16,6 +16,7 @@ export type AppNotificationSection =
   | "training-carousel"
   | "weekly-progress"
   | "coach"
+  | "coach-linking"
   | "weekly-comparison";
 
 export type AppNotificationCategory =
@@ -43,6 +44,8 @@ export interface AppNotification {
   dedupeKey: string;
   target: AppNotificationTarget;
   section?: AppNotificationSection;
+  /** Opaque feature reference used only by the destination boundary. */
+  referenceId?: string;
   day?: string;
   kind: AppNotificationKind;
   createdAt: string;
@@ -95,6 +98,7 @@ export interface NotificationOpenIntent {
   dashboardDayOverride: string | null;
   comparisonDayOverride: string | null;
   section: AppNotificationSection | null;
+  referenceId: string | null;
 }
 
 /** Identificador semántico del ícono por categoría — la capa de UI decide qué componente React renderizar para cada clave. */

@@ -863,7 +863,15 @@ function assertUserProfileVisualHierarchy(source: string) {
     imports.includes("@/lib/profile/profile-view-model"),
     "UI-NAV-01V Perfil: debe conservar ProfileViewModel como fuente",
   );
-  for (const forbiddenImport of ["coach", "supabase", "repository", "@/lib/auth/"]) {
+  assert.deepEqual(
+    imports.filter((modulePath) => modulePath.toLowerCase().includes("coach")),
+    [
+      "@/features/coach-linking/components/coach-linking-card",
+      "@/features/coach-linking/hooks/use-coach-linking-controller",
+    ],
+    "UI-NAV-01V Perfil: sólo puede montar la boundary tipada de Coach Linking aprobada",
+  );
+  for (const forbiddenImport of ["supabase", "repository", "@/lib/auth/"]) {
     assert.ok(
       imports.every((modulePath) => !modulePath.toLowerCase().includes(forbiddenImport)),
       `UI-NAV-01V Perfil: ProfileScreen no puede importar ${forbiddenImport}`,
@@ -1038,7 +1046,7 @@ const userProfileVisualMutationProbes = [
   {
     name: "importar Perfil Coach",
     target: "tsx" as const,
-    expectedFailure: "ProfileScreen no puede importar coach",
+    expectedFailure: "sólo puede montar la boundary tipada de Coach Linking aprobada",
     mutate: (source: string) => `import { CoachPortal } from "@/features/coach-portal/components/coach-portal";\n${source}`,
   },
   {

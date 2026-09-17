@@ -496,9 +496,14 @@ export function useCoachWorkspaceController(input: {
       openClient(id: string) {
         if (active.items.some((item) => item.id === id)) {
           setSelected({ kind: "relationship", id });
+          setTab("active");
+          setScreen("clients");
+          return true;
         } else if (pending.items.some((item) => item.id === id)) {
           setSelected({ kind: "invitation", id });
+          return true;
         }
+        return false;
       },
       closeClient: () => setSelected(null),
       openAddClient: () => creationController?.open(),

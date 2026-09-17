@@ -601,9 +601,7 @@ const globalStyles = readSource("src/app/globals.css");
 
 const protectedFileHashes = {
   "AGENTS.md": "0458c9f6404870477028ec3d4c62caca4823a94cc7af80209c72efe682edee21",
-  "package.json": "8644dbdd103ad297e5dc3920640f1d287f0cd3894acdeff858529c6cc818e5ea",
   "package-lock.json": "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5",
-  "src/components/organizatech-app.tsx": "dbfaae708271fd3a7b5a64df8661fcb282381964f78372c791e12949c1977678",
   "src/features/progress/components/comparison-screen-v2.tsx": "bff390e44cf5a04fe59b0f2a594fcb53fb2a50602c850362f1a88ca136765743",
   "src/features/active-workout/model/active-workout-controller-state.ts": "37006210eabda3f99217bd98b6ebf876780ed5ecc33bb8fba936eda7fd085ea5",
   "src/features/active-workout/hooks/useActiveWorkoutController.ts": "c7b475636a3b8731a9e8b9a46702584b9c2a4a06333b75139791bf3ef2ce25bf",

@@ -17,7 +17,11 @@ import ts from "typescript";
 import { legacyAppShellLayoutAst } from "@/features/app-shell/test-support/legacy-app-shell-layout-ast";
 
 const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
-  ignoredDirectConditionalElements: ["CalendarRemindersProductiveBoundary"],
+  ignoredDirectConditionalElements: [
+    "CalendarRemindersProductiveBoundary",
+    "CoachLinkConfirmationScreen",
+    "CoachLinkSuccessScreen",
+  ],
   ignoredAttributesByElement: {
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
@@ -25,6 +29,11 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
       "retryExerciseHistory",
       "saveCompletedTrainingStatus",
       "retrySaveCompletedTraining",
+    ],
+    ProfileScreen: [
+      "coachLinking",
+      "onOpenCoachLinkConfirmation",
+      "onOpenCoachLinkSuccess",
     ],
   },
 } as const;
@@ -355,13 +364,29 @@ assert.notEqual(
   "cualquier prop adicional de GuidedTrainingScreen sigue bloqueada",
 );
 const profileScreenPath = "src/components/profile/ProfileScreen.tsx";
-assert.equal(
-  namedFunctionAst(profileScreenPath, readFileSync(profileScreenPath, "utf8"), "ProfileScreen"),
-  namedFunctionAst(
-    profileScreenPath,
-    execFileSync("git", ["show", `${BASE_SHA}:${profileScreenPath}`], { encoding: "utf8" }),
-    "ProfileScreen",
-  ),
+const currentProfileScreen = readFileSync(profileScreenPath, "utf8");
+const baselineProfileScreen = execFileSync(
+  "git",
+  ["show", `${BASE_SHA}:${profileScreenPath}`],
+  { encoding: "utf8" },
+);
+for (const unchangedProfileComponent of [
+  "ProfileAvatarControls",
+  "PersonalDataSection",
+  "ProfileSection",
+]) {
+  assert.equal(
+    namedFunctionAst(profileScreenPath, currentProfileScreen, unchangedProfileComponent),
+    namedFunctionAst(profileScreenPath, baselineProfileScreen, unchangedProfileComponent),
+    `${unchangedProfileComponent} conserva su implementación P3-45`,
+  );
+}
+const personalDataIndex = currentProfileScreen.indexOf("<PersonalDataSection");
+const coachLinkingIndex = currentProfileScreen.indexOf("<CoachLinkingCardBoundary");
+const preferencesIndex = currentProfileScreen.indexOf('title="Preferencias de sistema"');
+assert.ok(
+  personalDataIndex >= 0 && personalDataIndex < coachLinkingIndex && coachLinkingIndex < preferencesIndex,
+  "ProfileScreen sólo sustituye el placeholder por la boundary Coaching en el orden aprobado",
 );
 for (const visualPath of [
   "src/components/profile/ProfileAvatarEditor.tsx",

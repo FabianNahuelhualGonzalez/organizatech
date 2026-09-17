@@ -67,6 +67,16 @@ export interface CoachPortalBoundaryProps {
     ownerUserId: string;
     sequence: number;
   }) => void;
+  clientOpenRequest: {
+    ownerUserId: string;
+    episodeId: string;
+    sequence: number;
+  } | null;
+  onClientOpenRequestConsumed: (request: {
+    ownerUserId: string;
+    episodeId: string;
+    sequence: number;
+  }) => void;
   onLogout: () => void | Promise<void>;
 }
 
@@ -81,6 +91,8 @@ export function CoachPortalBoundary({
   onToggleNotifications,
   calendarOpenRequest,
   onCalendarOpenRequestConsumed,
+  clientOpenRequest,
+  onClientOpenRequestConsumed,
   onLogout,
 }: CoachPortalBoundaryProps) {
   const [state, dispatch] = useReducer(
@@ -99,6 +111,12 @@ export function CoachPortalBoundary({
       onCalendarOpenRequestConsumed(calendarOpenRequest);
     }
   }, [calendarOpenRequest, onCalendarOpenRequestConsumed, session.userId]);
+
+  useEffect(() => {
+    if (clientOpenRequest?.ownerUserId !== session.userId) return;
+    dispatch({ type: "home_opened" });
+    setIsCalendarOpen(false);
+  }, [clientOpenRequest, session.userId]);
 
   function handleLogout() {
     dispatch({ type: "reset" });
@@ -180,6 +198,8 @@ export function CoachPortalBoundary({
           coachName={profile.fullName}
           identityGeneration={coachDataIdentityGeneration}
           onOpenCalendar={() => setIsCalendarOpen(true)}
+          clientOpenRequest={clientOpenRequest}
+          onClientOpenRequestConsumed={onClientOpenRequestConsumed}
         />
       ) : (
         <CoachPortalProfile

@@ -110,6 +110,17 @@ import { NotificationPanel } from "@/features/notifications/components/Notificat
 import { useNotificationsController } from "@/features/notifications/hooks/useNotificationsController";
 import { usePersistedCalendarNotifications } from "@/features/notifications/hooks/usePersistedCalendarNotifications";
 import { useProfileController } from "@/features/profile/hooks/useProfileController";
+import {
+  CoachLinkAuthGate,
+  CoachLinkConfirmationScreen,
+  CoachLinkSuccessScreen,
+} from "@/features/coach-linking/components/coach-linking-screens";
+import { useCoachLinkingController } from "@/features/coach-linking/hooks/use-coach-linking-controller";
+import { useCoachLinkNotifications } from "@/features/coach-linking/hooks/use-coach-link-notifications";
+import type {
+  CoachLinkNotificationDestination,
+  CoachLinkStoredEntry,
+} from "@/features/coach-linking/model/coach-linking";
 import { UserPortalShell } from "@/features/user-portal-shell/components/user-portal-shell";
 import {
   createUserPortalNavigationModel,
@@ -448,6 +459,8 @@ interface OrganizatechAppProps {
   trainingCyclesSnapshotSource?: "ui-main-production" | "ui-main-qa";
   trainingWorkoutReadinessV2Enabled?: boolean;
   initialAuthRoute?: AuthRouteState;
+  initialCoachLinkEntry?: CoachLinkStoredEntry | null;
+  initialCoachLinkNotificationDestination?: CoachLinkNotificationDestination | null;
   googleOAuth: GoogleOAuthBoundary;
 }
 
@@ -456,9 +469,12 @@ export function OrganizatechApp({
   trainingCyclesSnapshotSource = "ui-main-qa",
   trainingWorkoutReadinessV2Enabled = false,
   initialAuthRoute = DEFAULT_AUTH_ROUTE,
+  initialCoachLinkEntry = null,
+  initialCoachLinkNotificationDestination = null,
   googleOAuth,
 }: OrganizatechAppProps) {
   const initialSignupConfirmationRef = useRef<SignupConfirmationSnapshot | null>(null);
+  const initialCoachLinkNotificationDestinationRef = useRef(initialCoachLinkNotificationDestination);
   const initialSignupConfirmation = initialSignupConfirmationRef.current
     ?? getSignupConfirmationSnapshot();
   initialSignupConfirmationRef.current = initialSignupConfirmation;
@@ -488,6 +504,11 @@ export function OrganizatechApp({
   const [coachPortalSession, setCoachPortalSession] = useState<CoachPortalSession | null>(null);
   const [coachCalendarOpenRequest, setCoachCalendarOpenRequest] = useState<{
     ownerUserId: string;
+    sequence: number;
+  } | null>(null);
+  const [coachClientOpenRequest, setCoachClientOpenRequest] = useState<{
+    ownerUserId: string;
+    episodeId: string;
     sequence: number;
   } | null>(null);
   const coachPortalSessionRef = useRef<CoachPortalSession | null>(null);
@@ -699,6 +720,15 @@ export function OrganizatechApp({
     handleUploadProfileAvatar,
     handleProfileAvatarImageError,
   } = profileBoundary;
+  const coachLinking = useCoachLinkingController({
+    identityKey: supabaseUser?.id ?? null,
+    enabled: canEditProfilePersonalData,
+    initialEntry: initialCoachLinkEntry,
+    onResumeProfile: () => navigation.reset("perfil"),
+    onResumeConfirmation: () => navigation.reset("coach-link-confirmation"),
+    onResumeSuccess: () => navigation.reset("coach-link-success"),
+    onSessionExpired: expireCoachLinkSession,
+  });
   const legacyCycleHistoryBoundary = useLegacyCycleHistoryController({
     identity: trainingDataIdentityPort,
     scope: activeFeatureStorageScope,
@@ -1621,12 +1651,24 @@ export function OrganizatechApp({
     supabaseUser?.id ?? null,
     coachPortalSession ? "coach" : "usuario",
   );
+  const persistedCoachLinkNotifications = useCoachLinkNotifications(
+    supabaseUser?.id ?? null,
+    coachPortalSession ? "coach" : "usuario",
+  );
+  const persistedNotifications = useMemo(() => [
+    ...persistedCalendarNotifications.notifications,
+    ...persistedCoachLinkNotifications.notifications,
+  ], [persistedCalendarNotifications.notifications, persistedCoachLinkNotifications.notifications]);
+  const persistedSeenRecords = useMemo(() => [
+    ...persistedCalendarNotifications.seenRecords,
+    ...persistedCoachLinkNotifications.seenRecords,
+  ], [persistedCalendarNotifications.seenRecords, persistedCoachLinkNotifications.seenRecords]);
   const notificationsBoundary = useNotificationsController({
     identity: trainingDataIdentityPort,
     scope: activeFeatureStorageScope,
     catalogInput: notificationCatalogInput,
-    additionalNotifications: persistedCalendarNotifications.notifications,
-    persistedSeenRecords: persistedCalendarNotifications.seenRecords,
+    additionalNotifications: persistedNotifications,
+    persistedSeenRecords,
     includeCatalogNotifications: !coachPortalSession,
     onOpenIntent: handleNotificationOpenIntent,
   });
@@ -1692,6 +1734,7 @@ export function OrganizatechApp({
   function replaceCoachPortalSession(session: CoachPortalSession | null) {
     if (session?.userId !== coachPortalSessionRef.current?.userId) {
       setCoachCalendarOpenRequest(null);
+      setCoachClientOpenRequest(null);
     }
     if (session) replaceUserPortalAuthorizationProof(null);
     coachPortalSessionRef.current = session;
@@ -1834,6 +1877,15 @@ export function OrganizatechApp({
 
         authenticatedSessionCoordinatorRef.current.reset();
         replaceCoachPortalSession(nextCoachPortalSession);
+        const coachLinkDestination = initialCoachLinkNotificationDestinationRef.current;
+        if (coachLinkDestination?.kind === "coach-student") {
+          initialCoachLinkNotificationDestinationRef.current = null;
+          setCoachClientOpenRequest((current) => ({
+            ownerUserId: nextCoachPortalSession.userId,
+            episodeId: coachLinkDestination.episodeId,
+            sequence: current?.ownerUserId === nextCoachPortalSession.userId ? current.sequence + 1 : 1,
+          }));
+        }
         setIsAuthLoading(false);
         clearCompletedAuthForm();
         setAuthStatus("", "info");
@@ -1861,6 +1913,13 @@ export function OrganizatechApp({
         onComplete: (completedIntent) => {
           setIsAuthLoading(false);
           clearCompletedAuthForm();
+          const coachLinkDestination = initialCoachLinkNotificationDestinationRef.current;
+          if (coachLinkDestination?.kind === "student-coaching") {
+            initialCoachLinkNotificationDestinationRef.current = null;
+            navigation.transition(createAuthNavigationReset("perfil", "session-established"));
+            scrollToNotificationSection("coach-linking");
+            return;
+          }
           if (
             completedIntent === "restore-active-flow" &&
             restoreActiveFlowForSession(authState.dataMode, authState.user?.id)
@@ -4309,6 +4368,20 @@ export function OrganizatechApp({
     setAuthFieldErrors({});
   }
 
+  function expireCoachLinkSession() {
+    clearUserSessionState(
+      "Tu sesión expiró. Inicia sesión nuevamente.",
+      activeBrowserStorageScopeRef.current,
+      { statusTone: "error" },
+    );
+  }
+
+  function openCoachLinkAuth(mode: "login" | "registro") {
+    coachLinking.actions.continueFromGate();
+    authRouteController.replace({ mode, accountType: "usuario" });
+    navigation.transition(createAuthNavigationReset(mode, "auth-screen-switch"));
+  }
+
   function switchAuthScreen(nextScreen: "login" | "registro" | "recuperar-password") {
     passwordRecoveryUserIdRef.current = null;
     passwordRecoveryIdentityScopeRef.current = null;
@@ -4390,6 +4463,15 @@ export function OrganizatechApp({
     );
   }
 
+  if (coachLinking.snapshot.authGateOpen && !hasSupabaseSession) {
+    return (
+      <CoachLinkAuthGate
+        onLogin={() => openCoachLinkAuth("login")}
+        onRegister={() => openCoachLinkAuth("registro")}
+      />
+    );
+  }
+
   const notificationOverlay = (
     <NotificationPanel
       isOpen={isNotificationPanelOpen}
@@ -4424,6 +4506,16 @@ export function OrganizatechApp({
         onCalendarOpenRequestConsumed={(request) => {
           setCoachCalendarOpenRequest((current) => (
             current?.ownerUserId === request.ownerUserId
+              && current.sequence === request.sequence
+              ? null
+              : current
+          ));
+        }}
+        clientOpenRequest={coachClientOpenRequest}
+        onClientOpenRequestConsumed={(request) => {
+          setCoachClientOpenRequest((current) => (
+            current?.ownerUserId === request.ownerUserId
+              && current.episodeId === request.episodeId
               && current.sequence === request.sequence
               ? null
               : current
@@ -4494,7 +4586,10 @@ export function OrganizatechApp({
   }
 
   function toggleNotifications() {
-    if (!isNotificationPanelOpen) void persistedCalendarNotifications.reload();
+    if (!isNotificationPanelOpen) {
+      void persistedCalendarNotifications.reload();
+      void persistedCoachLinkNotifications.reload();
+    }
     appShell.toggleNotifications();
   }
 
@@ -4502,11 +4597,29 @@ export function OrganizatechApp({
     if (intent.notificationId.startsWith("calendar:")) {
       void persistedCalendarNotifications.markRead(intent.notificationId);
     }
+    if (intent.notificationId.startsWith("coach-link:")) {
+      void persistedCoachLinkNotifications.markRead(intent.notificationId);
+    }
     if (coachPortalSessionRef.current && intent.target === "calendario") {
       const ownerUserId = coachPortalSessionRef.current.userId;
       appShell.closeNotifications();
       setCoachCalendarOpenRequest((current) => ({
         ownerUserId,
+        sequence: current?.ownerUserId === ownerUserId ? current.sequence + 1 : 1,
+      }));
+      return;
+    }
+    if (
+      coachPortalSessionRef.current
+      && intent.notificationId.startsWith("coach-link:")
+      && intent.target === "dashboard"
+      && intent.referenceId
+    ) {
+      const ownerUserId = coachPortalSessionRef.current.userId;
+      appShell.closeNotifications();
+      setCoachClientOpenRequest((current) => ({
+        ownerUserId,
+        episodeId: intent.referenceId!,
         sequence: current?.ownerUserId === ownerUserId ? current.sequence + 1 : 1,
       }));
       return;
@@ -4746,6 +4859,23 @@ export function OrganizatechApp({
           onSavePersonalData={handleSaveProfilePersonalData}
           onUploadAvatar={handleUploadProfileAvatar}
           cycleContextLabel={`${trainingTopbarMeta?.cycleLabel ?? "Ciclo"} + ${trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`}`}
+          coachLinking={coachLinking}
+          onOpenCoachLinkConfirmation={() => navigateTo("coach-link-confirmation")}
+          onOpenCoachLinkSuccess={() => navigateTo("coach-link-success")}
+        />
+      )}
+      {screen === "coach-link-confirmation" && (
+        <CoachLinkConfirmationScreen
+          controller={coachLinking}
+          onSuccess={() => navigateTo("coach-link-success")}
+          onCancel={goBack}
+        />
+      )}
+      {screen === "coach-link-success" && (
+        <CoachLinkSuccessScreen
+          controller={coachLinking}
+          onTrain={() => navigation.reset("entrenamiento")}
+          onProfile={() => navigation.reset("perfil")}
         />
       )}
       {screen === "calendario" && supabaseUser?.id && (

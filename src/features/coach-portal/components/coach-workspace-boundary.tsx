@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 import { CoachAddClientSheet } from "@/features/coach-clients/components/coach-add-client-sheet";
 import { CoachClientDetailSheet } from "@/features/coach-clients/components/coach-client-detail-sheet";
@@ -22,11 +22,23 @@ export function CoachWorkspaceBoundary({
   coachName,
   identityGeneration,
   onOpenCalendar,
+  clientOpenRequest,
+  onClientOpenRequestConsumed,
 }: {
   readonly userId: string;
   readonly coachName: string;
   readonly identityGeneration: number | null;
   readonly onOpenCalendar: () => void;
+  readonly clientOpenRequest: {
+    readonly ownerUserId: string;
+    readonly episodeId: string;
+    readonly sequence: number;
+  } | null;
+  readonly onClientOpenRequestConsumed: (request: {
+    readonly ownerUserId: string;
+    readonly episodeId: string;
+    readonly sequence: number;
+  }) => void;
 }) {
   const controller = useCoachWorkspaceController({ userId, coachName, identityGeneration });
   const backgroundRef = useRef<HTMLDivElement>(null);
@@ -34,6 +46,16 @@ export function CoachWorkspaceBoundary({
   const chatTriggerRef = useRef<HTMLElement>(null);
   const addTriggerRef = useRef<HTMLElement>(null);
   const detailTriggerRef = useRef<HTMLElement>(null);
+  const consumedRequestRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!clientOpenRequest || clientOpenRequest.ownerUserId !== userId) return;
+    const requestKey = `${clientOpenRequest.ownerUserId}:${clientOpenRequest.episodeId}:${clientOpenRequest.sequence}`;
+    if (consumedRequestRef.current === requestKey) return;
+    if (!controller.actions.openClient(clientOpenRequest.episodeId)) return;
+    consumedRequestRef.current = requestKey;
+    onClientOpenRequestConsumed(clientOpenRequest);
+  }, [clientOpenRequest, controller, onClientOpenRequestConsumed, userId]);
 
   const openAddClient = () => {
     captureActiveElement(addTriggerRef);
