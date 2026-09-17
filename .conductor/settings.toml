@@ -1,0 +1,14 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+# Reemplaza el patrón predeterminado .env*; no copiar archivos ignorados a worktrees.
+file_include_globs = ""
+
+[scripts]
+setup = "npm ci"
+run_mode = "concurrent"
+
+[scripts.run.dev]
+available_in = [ "local" ]
+command = "npm run dev -- --port $CONDUCTOR_PORT"
+default = true
+icon = "play"
