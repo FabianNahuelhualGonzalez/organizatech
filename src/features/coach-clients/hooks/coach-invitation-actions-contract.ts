@@ -1,10 +1,12 @@
 export type CoachInvitationActionKind = "resend" | "regenerate";
 export interface CoachInvitationActionsSelection { readonly invitationId: string }
-/** Authorized server state; no email, code, identity or delivery fields. */
+/** Authorized own-invitation state used for code fallback and generation-bound actions. */
 export interface CoachInvitationActionsRead {
   readonly id: string;
   readonly generation: number;
   readonly state: "pending" | "expired" | "cancelled" | "accepted";
+  readonly expiresAt: string;
+  readonly code: string | null;
 }
 export interface CoachInvitationActionsCommand {
   readonly invitationId: string;

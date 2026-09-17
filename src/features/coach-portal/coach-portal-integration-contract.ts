@@ -66,6 +66,8 @@ const COACH_INVITATION_GENERATION_MIGRATION_PATH =
   "supabase/migrations/20260909120120_coach_invitation_generation_binding.sql";
 const STUDENT_COACH_LINK_ACCEPTANCE_MIGRATION_PATH =
   "supabase/migrations/20260917000000_student_coach_link_acceptance.sql";
+const COACH_INVITATION_CODE_DELIVERY_MIGRATION_PATH =
+  "supabase/migrations/20260917120000_coach_invitation_code_delivery.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -565,6 +567,7 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== COACH_ACTIVE_RELATIONSHIPS_LIST_MIGRATION_PATH
         && path !== COACH_INVITATION_GENERATION_MIGRATION_PATH
         && path !== STUDENT_COACH_LINK_ACCEPTANCE_MIGRATION_PATH
+        && path !== COACH_INVITATION_CODE_DELIVERY_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH

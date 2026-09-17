@@ -11,7 +11,7 @@ export interface CoachInvitationCreationRuntimeInput {
   readonly createRequestId: () => string;
 }
 
-/** Reservation only: no UI, email dispatch, provider receipt, code or profile access.
+/** Reservation plus authorized own-invitation receipt; email dispatch remains a separate runtime.
  * The screen owner must dispose on exit/account/generation/portal changes. */
 export function createCoachInvitationCreationRuntime(input: CoachInvitationCreationRuntimeInput): CoachInvitationCreationController {
   const configuration = snapshotCoachPublicRpcRuntime(input.connection);
@@ -49,9 +49,9 @@ export function createCoachInvitationCreationRuntime(input: CoachInvitationCreat
     },
     async readInvitation(invitationId, options) {
       const detail = await repository.readInvitation(invitationId, options);
-      // Drop even an authorized pending code: this consumer does not need it.
       return Object.freeze({ id: detail.id, recipientEmail: detail.recipientEmail,
-        generation: detail.generation, state: detail.state });
+        generation: detail.generation, state: detail.state, issuedAt: detail.issuedAt,
+        expiresAt: detail.expiresAt, code: detail.code });
     },
   };
   return createCoachInvitationCreationController({ source, isCurrent,

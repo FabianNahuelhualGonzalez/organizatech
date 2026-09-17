@@ -39,7 +39,8 @@ const focus = { backgroundRef: { current: null }, restoreFocusRef: { current: nu
 const click = { currentTarget: {} as HTMLElement };
 function code(): CoachClientCodeView {
   return { code: "AB2-CD3-EF4", isBusy: false, isCopied: false, isResent: false, canCopy: true, canShare: true, canResend: true,
-    resendLabel: "Reenviar correo", deliveryLabel: "Estado de entrega provisto", expiryLabel: "Vencimiento provisto", hint: "Ayuda aprobada provista", message: null };
+    resendLabel: "Reenviar correo", canRetryDelivery: true, retryDeliveryLabel: "Reintentar entrega pendiente",
+    deliveryLabel: "Estado de entrega provisto", expiryLabel: "Vencimiento provisto", hint: "Ayuda aprobada provista", message: null };
 }
 function active(): Extract<CoachClientDetailView, { state: "active" }> {
   return { id: "client-active", state: "active", isOpen: true, isBusy: false, canClose: true, email: "active@example.test", identity: { name: "Identidad consentida", initials: "IC" },
@@ -178,23 +179,26 @@ test("unresolved operation can recover but cannot close or cancel its invitation
   assert.equal(recovered, 1);
 });
 
-test("copy/share/resend dispatch callbacks only; copied and resent never become optimistic successes", () => {
+test("copy/share/resend/retry dispatch callbacks only; copied and resent never become optimistic successes", () => {
   const calls: string[] = []; const view = code();
-  const props = { view, onCopy: () => calls.push("copy"), onShare: () => calls.push("share"), onResend: () => calls.push("resend") };
+  const props = { view, onCopy: () => calls.push("copy"), onShare: () => calls.push("share"),
+    onResend: () => calls.push("resend"), onRetryDelivery: () => calls.push("retry") };
   const { tree, markup } = capture(CoachClientCodeCard, props);
   assert.deepEqual(calls, []);
   buttons(tree).forEach((button) => button.props.onClick?.(click));
-  assert.deepEqual(calls, ["copy", "share", "resend"]);
+  assert.deepEqual(calls, ["copy", "share", "resend", "retry"]);
   const after = capture(CoachClientCodeCard, props).markup;
   assert.equal(after, markup); assert.doesNotMatch(after, /Copiado|Correo reenviado|data-done="true"|data-copied="true"/);
 });
 
-test("only confirmed copy/resent props show confirmation, while new resend eligibility remains authoritative", () => {
+test("only confirmed copy/resent props show confirmation, while delivery capabilities remain authoritative", () => {
   let calls = 0;
-  const view = { ...code(), isCopied: true, isResent: true, resendLabel: "Correo reenviado", canResend: true };
+  const view = { ...code(), isCopied: true, isResent: true, resendLabel: "Correo reenviado",
+    canResend: true, canRetryDelivery: false };
   const { tree, markup } = capture(CoachClientCodeCard, { view, onResend: () => { calls++; } });
   assert.match(markup, /data-copied="true"/); assert.match(markup, /role="status" aria-live="polite">Copiado/);
   assert.match(markup, /data-done="true"/); assert.match(markup, /Correo reenviado/);
+  assert.doesNotMatch(markup, /Reintentar entrega pendiente/);
   const resend = buttons(tree).find((button) => button.props["data-done"] === true)!;
   assert.equal(resend.props.disabled, false); resend.props.onClick?.(click); assert.equal(calls, 1);
   const denied = capture(CoachClientCodeCard, { view: { ...view, canResend: false }, onResend: () => assert.fail("server denied") });
@@ -212,8 +216,8 @@ test("code missing/null cannot be copied or shared and delivery/expiry remain ex
 });
 
 test("busy/disabled/missing code callbacks remove actions without DOM clipboard or navigation work", () => {
-  for (const props of [{ view: { ...code(), isBusy: true }, onCopy: () => {}, onShare: () => {}, onResend: () => {} },
-    { view: code(), disabled: true, onCopy: () => {}, onShare: () => {}, onResend: () => {} }, { view: code() }]) {
+  for (const props of [{ view: { ...code(), isBusy: true }, onCopy: () => {}, onShare: () => {}, onResend: () => {}, onRetryDelivery: () => {} },
+    { view: code(), disabled: true, onCopy: () => {}, onShare: () => {}, onResend: () => {}, onRetryDelivery: () => {} }, { view: code() }]) {
     const { tree } = capture(CoachClientCodeCard, props);
     for (const button of buttons(tree)) { assert.equal(button.props.disabled, true); assert.equal(button.props.onClick, undefined); }
   }

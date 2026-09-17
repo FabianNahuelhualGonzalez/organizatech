@@ -17,7 +17,8 @@ function deferred<T>() {
 async function flush() { await Promise.resolve(); await Promise.resolve(); }
 async function settlesFalse(promise: Promise<boolean>) { assert.equal(await Promise.race([promise, Promise.resolve("pending")]), false); }
 function detail(generation = 1, state: CoachInvitationActionsRead["state"] = "pending"): CoachInvitationActionsRead {
-  return { id: "invitation-A", generation, state };
+  return { id: "invitation-A", generation, state,
+    expiresAt: "2026-09-16T12:00:00.123456Z", code: state === "pending" ? "AB2-CD3-EF4" : null };
 }
 function operation(action: CoachInvitationActionKind, command: CoachInvitationActionsCommand): CoachInvitationActionsOperation {
   return { ...command, action, generation: command.expectedGeneration + (action === "regenerate" ? 1 : 0),
@@ -82,7 +83,7 @@ test("construction is idle without callbacks/I/O; action readiness requires expl
   assert.equal(h.ids(), 0); off();
 });
 
-test("server pending/expired/closed determines action without implicit clocks, codes or generation defaults", async () => {
+test("server pending/expired/closed determines action without implicit clocks or generation defaults", async () => {
   for (const state of ["pending", "expired", "cancelled", "accepted"] as const) {
     const h = harness(detail(7, state)); await ready(h);
     assert.equal(h.controller.canResend(), state === "pending");
@@ -168,8 +169,8 @@ test("load failure is not empty/zero/closed and invalid selections never reach s
   assert.equal(h.calls.length, 1);
 });
 
-test("allowlist copies omit code/email/provider/ownership without touching getters or freezing originals", async () => {
-  const original = { ...detail(4), recipientEmail: "private", ownerId: "private", get code() { throw Error("must not read"); } };
+test("allowlist copies authorized code but omits email/provider/ownership without touching unrelated getters", async () => {
+  const original = { ...detail(4), recipientEmail: "private", ownerId: "private", get privateValue() { throw Error("must not read"); } };
   const h = harness(original); await ready(h);
   assert.deepEqual(h.controller.getSnapshot().confirmed, detail(4));
   assert.equal(Object.isFrozen(original), false);
@@ -186,7 +187,8 @@ test("allowlist copies omit code/email/provider/ownership without touching gette
   assert.equal(Object.isFrozen(s), true); assert.equal(Object.isFrozen(s.attempt), true);
   assert.equal(Object.isFrozen(s.attempt!.operation), true); assert.equal(Object.isFrozen(s.confirmed), true);
   assert.deepEqual(Object.keys(s.attempt!.operation!).sort(), ["requestId", "action", "state", "invitationId", "expectedGeneration", "generation", "reservedAt"].sort());
-  assert.doesNotMatch(JSON.stringify(s), /private|provider|delivery|recipientEmail|ownerId|"code"/);
+  assert.equal(s.confirmed?.code, "AB2-CD3-EF4");
+  assert.doesNotMatch(JSON.stringify(s), /private|provider|delivery|recipientEmail|ownerId|privateValue/);
 });
 
 test("double taps and cross-action calls are single-flight through post-write detail read", async () => {
@@ -612,7 +614,7 @@ test("malformed source methods and reentrant response proxies are sanitized befo
   assert.equal(proxy.controller.getSnapshot().disposed, true);
 });
 
-test("actions remain pure, feature-local and incapable of v1 fallback, code/email/provider or automatic I/O", () => {
+test("actions remain pure, feature-local and incapable of v1 fallback, email/provider or automatic I/O", () => {
   const controller = readFileSync(new URL("./coach-invitation-actions-controller.ts", import.meta.url), "utf8");
   const helper = readFileSync(new URL("./coach-invitation-actions-reconciliation.ts", import.meta.url), "utf8");
   const contract = readFileSync(new URL("./coach-invitation-actions-contract.ts", import.meta.url), "utf8");
@@ -622,7 +624,7 @@ test("actions remain pure, feature-local and incapable of v1 fallback, code/emai
   for (const code of [controller, helper]) {
     assert.doesNotMatch(code, /\b(?:fetch|setTimeout|setInterval|getUser|localStorage|sessionStorage)\s*\(|Date\.now|new Date|Math\.random|crypto\./);
     assert.doesNotMatch(code, /supabase|\.rpc\s*\(|["']use client["']|normalizeRecipientEmail|source\.(?:cancel|create|revoke)/);
-    assert.doesNotMatch(code, /actionField\(value,\s*["'](?:code|recipientEmail|provider|delivery)["']\)/);
+    assert.doesNotMatch(code, /actionField\(value,\s*["'](?:recipientEmail|provider|delivery)["']\)/);
   }
-  assert.doesNotMatch(contract, /readonly (?:code|email|recipientEmail|provider|delivery|canCopy|canShare)\s*[?:]/);
+  assert.doesNotMatch(contract, /readonly (?:email|recipientEmail|provider|delivery|canCopy|canShare)\s*[?:]/);
 });

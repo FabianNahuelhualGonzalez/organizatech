@@ -19,6 +19,10 @@ import {
   resolveCoachInvitationDetailAction,
 } from "@/features/coach-clients/integration/coach-invitation-actions-presentation";
 import { createCoachInvitationCreationRuntime } from "@/features/coach-clients/integration/coach-invitation-creation-runtime";
+import {
+  createCoachInvitationDeliveryRuntime,
+  type CoachInvitationDeliveryState,
+} from "@/features/coach-clients/data/coach-invitation-delivery-runtime";
 import { resolveCoachInvitationCreationAction } from "@/features/coach-clients/integration/coach-invitation-creation-presentation";
 import { createCoachPendingInvitationsRuntime } from "@/features/coach-clients/integration/coach-pending-invitations-runtime";
 import type { CoachPublicRpcRuntimeInput } from "@/features/coach-clients/data/coach-public-rpc-runtime";
@@ -171,6 +175,18 @@ export function useCoachWorkspaceController(input: {
   const [tab, setTab] = useState<CoachClientTab>("active");
   const [query, setQuery] = useState("");
   const [creationEpoch, setCreationEpoch] = useState(0);
+  const [creationDelivery, setCreationDelivery] = useState<{
+    readonly requestId: string;
+    readonly state: CoachInvitationDeliveryState;
+  } | null>(null);
+  const [detailDelivery, setDetailDelivery] = useState<{
+    readonly invitationId: string;
+    readonly requestId: string | null;
+    readonly state: CoachInvitationDeliveryState;
+  } | null>(null);
+  const [detailDeliveryPendingInvitationId, setDetailDeliveryPendingInvitationId] = useState<string | null>(null);
+  const detailDeliveryPendingRef = useRef<string | null>(null);
+  const [copiedInvitationId, setCopiedInvitationId] = useState<string | null>(null);
   const [selected, setSelected] = useState<{
     readonly kind: "invitation" | "relationship";
     readonly id: string;
@@ -221,6 +237,22 @@ export function useCoachWorkspaceController(input: {
   }, [connection, creationEpoch]);
   useEffect(() => () => creationController?.dispose(), [creationController]);
   const creation = useControllerSnapshot(creationController, EMPTY_CREATION);
+  const deliveryRuntime = useMemo(() => {
+    if (!connection) return null;
+    try { return createCoachInvitationDeliveryRuntime({ connection }); }
+    catch { return null; }
+  }, [connection]);
+  useEffect(() => {
+    if (!deliveryRuntime) return;
+    void deliveryRuntime.recover().catch(() => undefined);
+  }, [deliveryRuntime]);
+  useEffect(() => {
+    setCreationDelivery(null);
+    setDetailDelivery(null);
+    detailDeliveryPendingRef.current = null;
+    setDetailDeliveryPendingInvitationId(null);
+    setCopiedInvitationId(null);
+  }, [connection, creationEpoch]);
 
   const selectionControllers = useMemo(() => {
     if (!connection || !selected) return null;
@@ -281,6 +313,11 @@ export function useCoachWorkspaceController(input: {
   const selectedPending = selected?.kind === "invitation"
     ? pending.items.find((item) => item.id === selected.id) ?? null
     : null;
+  const selectedInvitationCode = selectedPending
+    && invitationActions.confirmed?.id === selectedPending.id
+    && invitationActions.confirmed.state === "pending"
+    ? invitationActions.confirmed.code
+    : null;
 
   const detail: CoachClientDetailView | null = selectedActive
     ? Object.freeze({
@@ -314,7 +351,8 @@ export function useCoachWorkspaceController(input: {
       ? Object.freeze({
         id: selectedPending.id,
         isOpen: true,
-        isBusy: disconnection.pending !== null || invitationActions.pending !== null,
+        isBusy: disconnection.pending !== null || invitationActions.pending !== null
+          || detailDeliveryPendingInvitationId !== null,
         canClose: !invitationActionUnresolved,
         state: "pending" as const,
         email: selectedPending.recipientEmail,
@@ -324,22 +362,37 @@ export function useCoachWorkspaceController(input: {
           waitingLabel: selectedPending.state === "expired" ? "Vencida" : "Pendiente",
         }),
         code: Object.freeze({
-          code: null,
-          isBusy: invitationActions.pending !== null,
-          isCopied: null,
-          isResent: null,
-          canCopy: false,
-          canShare: false,
+          code: selectedInvitationCode,
+          isBusy: invitationActions.pending !== null
+            || detailDeliveryPendingInvitationId !== null,
+          isCopied: copiedInvitationId === selectedPending.id,
+          isResent: detailDelivery?.invitationId === selectedPending.id
+            ? detailDelivery.state === "provider-accepted" : null,
+          canCopy: selectedInvitationCode !== null,
+          canShare: selectedInvitationCode !== null,
           canResend: invitationDetailAction !== null,
           resendLabel: invitationDetailAction === "reconcile"
             ? "Revisar estado"
             : invitationDetailAction === "retry"
               ? invitationActions.attempt?.action === "regenerate" ? "Reintentar generación" : "Reintentar reenvío"
               : invitationDetailAction === "regenerate" ? "Generar nuevo código" : "Reenviar código",
-          deliveryLabel: null,
+          canRetryDelivery: selectedInvitationCode !== null && deliveryRuntime !== null
+            && detailDeliveryPendingInvitationId === null
+            && !(detailDelivery?.invitationId === selectedPending.id
+              && detailDelivery.state === "provider-accepted"),
+          retryDeliveryLabel: "Reintentar entrega pendiente",
+          deliveryLabel: detailDelivery?.invitationId === selectedPending.id
+            ? detailDelivery.state === "provider-accepted"
+              ? "Brevo aceptó los dos correos de esta operación."
+              : "La entrega por correo sigue pendiente; el código no cambió."
+            : null,
           expiryLabel: `Vence ${formatDate(selectedPending.expiresAt) ?? "próximamente"}`,
-          hint: "La operación se registra sin afirmar entrega del correo.",
-          message: invitationActions.attempt?.resolution === "reserved"
+          hint: selectedInvitationCode === null
+            ? "El código sólo está disponible mientras la invitación vigente está confirmada."
+            : "Puedes copiarlo o compartirlo desde el selector seguro del dispositivo.",
+          message: detailDelivery?.invitationId === selectedPending.id
+            ? null
+            : invitationActions.attempt?.resolution === "reserved"
             ? Object.freeze({
               tone: "polite" as const,
               label: "Operación registrada. La entrega del correo aún no está confirmada.",
@@ -400,10 +453,39 @@ export function useCoachWorkspaceController(input: {
           : creation.issue
       ? Object.freeze({ tone: "error" as const, label: "No pudimos registrar la solicitud." })
       : null;
-  const addClient: CoachAddClientView = Object.freeze({
+  const creationReceipt = creation.confirmed?.state === "pending"
+    && creation.confirmed.code !== null
+    && creation.attempt?.resolution === "reserved"
+    && creation.attempt.operation?.requestId === creation.attempt.requestId
+    ? Object.freeze({
+      source: "server" as const,
+      delivery: creationDelivery?.requestId === creation.attempt.requestId
+        ? creationDelivery.state : "pending" as const,
+      id: creation.confirmed.id,
+      email: creation.confirmed.recipientEmail,
+      code: creation.confirmed.code,
+      headingLabel: "Código de vinculación creado",
+      descriptionLabel: "La invitación queda pendiente hasta que el alumno ingrese el código.",
+      deliveryLabel: creationDelivery?.requestId === creation.attempt.requestId
+        && creationDelivery.state === "provider-accepted"
+        ? "Brevo aceptó los correos para coach y alumno."
+        : "La entrega por correo está pendiente; el código sigue vigente.",
+      copyHint: "Cópialo o compártelo como respaldo. Nunca se agrega a la URL.",
+      footerHint: `Vence ${formatDate(creation.confirmed.expiresAt) ?? "en 7 días"}.`,
+      steps: Object.freeze([
+        Object.freeze({ id: "account", label: "El alumno inicia sesión o crea su cuenta con el correo invitado." }),
+        Object.freeze({ id: "profile", label: "Va a Perfil > Coaching e ingresa este código." }),
+        Object.freeze({ id: "accept", label: "El vínculo se activa sólo tras su aceptación autenticada." }),
+      ]) as CoachClientInstructionSteps,
+      isCopied: copiedInvitationId === creation.confirmed.id,
+      canCopy: true,
+      canShare: true,
+      canOpenPending: true,
+    })
+    : null;
+  const addClientBase = {
     isOpen: creation.isOpen,
-    isBusy: creation.pending !== null,
-    step: "email" as const,
+    isBusy: creation.pending !== null || detailDeliveryPendingInvitationId !== null,
     draft: Object.freeze({
       emailRaw: creationAction === "submit"
         ? creation.emailRaw
@@ -435,8 +517,11 @@ export function useCoachWorkspaceController(input: {
         Object.freeze({ id: "accept", label: "El vínculo se activa sólo después de la aceptación del alumno." }),
       ]) as CoachClientInstructionSteps,
     }),
-    message: invitationMessage,
-  });
+    message: creationReceipt ? null : invitationMessage,
+  };
+  const addClient: CoachAddClientView = creationReceipt
+    ? Object.freeze({ ...addClientBase, step: "receipt" as const, receipt: creationReceipt })
+    : Object.freeze({ ...addClientBase, step: "email" as const });
 
   const dashboardView = buildCoachDashboardView({
     coachName: input.coachName,
@@ -455,6 +540,42 @@ export function useCoachWorkspaceController(input: {
 
   async function refreshRelations() {
     await Promise.all([base?.active.reload(), base?.pending.reload()]);
+  }
+
+  function codeForInvitation(invitationId: string): { code: string; expiresAt: string } | null {
+    const created = creationController?.getSnapshot().confirmed;
+    if (created?.id === invitationId && created.state === "pending" && created.code) {
+      return { code: created.code, expiresAt: created.expiresAt };
+    }
+    const current = selectionControllers?.actions?.getSnapshot().confirmed;
+    if (current?.id === invitationId && current.state === "pending" && current.code) {
+      return { code: current.code, expiresAt: current.expiresAt };
+    }
+    return null;
+  }
+
+  async function copyInvitationCode(invitationId: string) {
+    const current = codeForInvitation(invitationId);
+    if (!current || typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(current.code);
+      if (codeForInvitation(invitationId)?.code === current.code) setCopiedInvitationId(invitationId);
+    } catch { /* The visible code remains available for manual copy. */ }
+  }
+
+  async function shareInvitationCode(invitationId: string) {
+    const current = codeForInvitation(invitationId);
+    if (!current || typeof navigator === "undefined") return;
+    const expiry = formatDate(current.expiresAt) ?? "7 días";
+    const text = `Código de vinculación Organizatech: ${current.code}. Vence ${expiry}. Inicia sesión con el correo invitado y ve a Perfil > Coaching para aceptarlo.`;
+    try {
+      if (typeof navigator.share === "function") {
+        await navigator.share({ title: "Código de vinculación Organizatech", text });
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        if (codeForInvitation(invitationId)?.code === current.code) setCopiedInvitationId(invitationId);
+      }
+    } catch { /* User cancellation and unavailable share targets are non-destructive. */ }
   }
 
   return {
@@ -522,9 +643,46 @@ export function useCoachWorkspaceController(input: {
               ? await creationController?.submit()
               : false;
         if (completed) {
-          setTab("pending");
-          setScreen("clients");
+          const resolved = creationController?.getSnapshot();
+          const requestId = resolved?.attempt?.requestId;
+          const invitationId = resolved?.confirmed?.id;
+          if (requestId && invitationId && detailDeliveryPendingRef.current === null) {
+            detailDeliveryPendingRef.current = invitationId;
+            setDetailDeliveryPendingInvitationId(invitationId);
+            setCreationDelivery({ requestId, state: "pending" });
+            try {
+              const state = await deliveryRuntime?.dispatch(requestId).catch(() => "pending" as const) ?? "pending";
+              if (creationController?.getSnapshot().attempt?.requestId === requestId) {
+                setCreationDelivery({ requestId, state });
+              }
+            } finally {
+              if (detailDeliveryPendingRef.current === invitationId) {
+                detailDeliveryPendingRef.current = null;
+                setDetailDeliveryPendingInvitationId(null);
+              }
+            }
+          }
           await base?.pending.reload();
+        }
+      },
+      copyInvitationCode: (invitationId: string) => { void copyInvitationCode(invitationId); },
+      shareInvitationCode: (invitationId: string) => { void shareInvitationCode(invitationId); },
+      async retryInvitationDelivery(invitationId: string) {
+        if (selectedRef.current?.kind !== "invitation" || selectedRef.current.id !== invitationId
+          || detailDeliveryPendingRef.current !== null || invitationActions.pending !== null) return;
+        detailDeliveryPendingRef.current = invitationId;
+        setDetailDeliveryPendingInvitationId(invitationId);
+        try {
+          setDetailDelivery({ invitationId, requestId: null, state: "pending" });
+          const state = await deliveryRuntime?.recoverInvitation(invitationId).catch(() => "pending" as const) ?? "pending";
+          if (selectedRef.current?.kind === "invitation" && selectedRef.current.id === invitationId) {
+            setDetailDelivery({ invitationId, requestId: null, state });
+          }
+        } finally {
+          if (detailDeliveryPendingRef.current === invitationId) {
+            detailDeliveryPendingRef.current = null;
+            setDetailDeliveryPendingInvitationId(null);
+          }
         }
       },
       openDisconnection: () => selectionControllers?.disconnection.openConfirmation(),
@@ -538,17 +696,39 @@ export function useCoachWorkspaceController(input: {
       },
       async resendOrRegenerate() {
         const controller = selectionControllers?.actions;
-        if (!controller) return;
-        const completed = invitationDetailAction === "retry"
-          ? await controller.retry()
-          : invitationDetailAction === "reconcile"
-            ? await controller.reconcile()
-            : invitationDetailAction === "resend"
-              ? await controller.resend()
-              : invitationDetailAction === "regenerate"
-                ? await controller.regenerate()
-                : false;
-        if (completed) await base?.pending.reload();
+        const selectedInvitationId = selectedRef.current?.kind === "invitation" ? selectedRef.current.id : null;
+        if (!controller || selectedInvitationId === null || detailDeliveryPendingRef.current !== null) return;
+        detailDeliveryPendingRef.current = selectedInvitationId;
+        setDetailDeliveryPendingInvitationId(selectedInvitationId);
+        try {
+          const completed = invitationDetailAction === "retry"
+            ? await controller.retry()
+            : invitationDetailAction === "reconcile"
+              ? await controller.reconcile()
+              : invitationDetailAction === "resend"
+                ? await controller.resend()
+                : invitationDetailAction === "regenerate"
+                  ? await controller.regenerate()
+                  : false;
+          if (completed) {
+            const resolved = controller.getSnapshot();
+            const requestId = resolved.attempt?.requestId;
+            const invitationId = resolved.attempt?.invitationId;
+            if (requestId && invitationId) {
+              setDetailDelivery({ invitationId, requestId, state: "pending" });
+              const state = await deliveryRuntime?.dispatch(requestId).catch(() => "pending" as const) ?? "pending";
+              if (selectedRef.current?.kind === "invitation" && selectedRef.current.id === invitationId) {
+                setDetailDelivery({ invitationId, requestId, state });
+              }
+            }
+            await base?.pending.reload();
+          }
+        } finally {
+          if (detailDeliveryPendingRef.current === selectedInvitationId) {
+            detailDeliveryPendingRef.current = null;
+            setDetailDeliveryPendingInvitationId(null);
+          }
+        }
       },
       openFee: () => base?.preferences.openFee(),
       editFee: (raw: string) => base?.preferences.editFee(raw),

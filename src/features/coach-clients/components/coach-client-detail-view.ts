@@ -10,6 +10,8 @@ export interface CoachClientCodeView {
   /** Server eligibility: not a per-session UI flag or a locally calculated quota. */
   readonly canResend: boolean;
   readonly resendLabel: string;
+  readonly canRetryDelivery: boolean;
+  readonly retryDeliveryLabel: string;
   readonly deliveryLabel: string | null;
   readonly expiryLabel: string | null;
   readonly hint: string | null;
@@ -74,6 +76,7 @@ export interface CoachClientDetailActions {
   readonly onCopyCode?: (id: string) => void;
   readonly onShareCode?: (id: string) => void;
   readonly onResend?: (id: string) => void;
+  readonly onRetryDelivery?: (id: string) => void;
   readonly onRelink?: (email: string) => void;
   readonly onOpenUnlink?: (id: string, state: "active" | "pending") => void;
   readonly onConfirmUnlink?: (id: string, state: "active" | "pending") => void;

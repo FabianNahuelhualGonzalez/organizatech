@@ -134,6 +134,8 @@ export function CoachWorkspaceBoundary({
           onEmailChange: controller.actions.setInvitationEmail,
           onSubmit: controller.actions.submitInvitation,
           onCancel: controller.actions.closeAddClient,
+          onCopyCode: controller.actions.copyInvitationCode,
+          onShareCode: controller.actions.shareInvitationCode,
           onOpenPendingClients: () => {
             controller.actions.closeAddClient();
             controller.actions.openClients("pending");
@@ -148,7 +150,10 @@ export function CoachWorkspaceBoundary({
           restoreFocusRef={detailTriggerRef}
           actions={{
             onCancelDetail: controller.actions.closeClient,
+            onCopyCode: controller.actions.copyInvitationCode,
+            onShareCode: controller.actions.shareInvitationCode,
             onResend: controller.actions.resendOrRegenerate,
+            onRetryDelivery: controller.actions.retryInvitationDelivery,
             onOpenUnlink: controller.actions.openDisconnection,
             onConfirmUnlink: controller.actions.confirmDisconnection,
             onCancelUnlink: controller.actions.closeDisconnection,

@@ -19,7 +19,7 @@ export interface CoachInvitationActionsRuntimeInput {
 
 /**
  * Generation-bound invitation actions only. The runtime cannot call the legacy
- * resend/regenerate RPCs and never forwards ownership, recipient data or codes.
+ * resend/regenerate RPCs and never forwards ownership or recipient data.
  */
 export function createCoachInvitationActionsRuntime(
   input: CoachInvitationActionsRuntimeInput,
@@ -102,6 +102,8 @@ export function createCoachInvitationActionsRuntime(
         id: detail.id,
         generation: detail.generation,
         state: detail.state,
+        expiresAt: detail.expiresAt,
+        code: detail.code,
       });
     },
     async readOwnOperation(requestId, options) {

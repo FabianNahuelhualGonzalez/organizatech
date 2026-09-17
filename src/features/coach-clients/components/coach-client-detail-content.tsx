@@ -10,7 +10,7 @@ const STATE_LABELS = { active: "ACTIVO", pending: "PENDIENTE", inactive: "BAJA" 
 export function CoachClientDetailContent({ view, disabled, actions }: {
   readonly view: CoachClientDetailView;
   readonly disabled: boolean;
-  readonly actions: Pick<CoachClientDetailActions, "onCopyCode" | "onShareCode" | "onResend" | "onOpenCycle">;
+  readonly actions: Pick<CoachClientDetailActions, "onCopyCode" | "onShareCode" | "onResend" | "onRetryDelivery" | "onOpenCycle">;
 }) {
   const facts = view.state === "active"
     ? [{ label: "Vinculado desde", value: view.facts.linkedOnLabel }, { label: "Último entrenamiento", value: view.facts.lastTrainingLabel }, { label: "Sesiones del ciclo", value: view.facts.sessionsLabel }]
@@ -29,7 +29,8 @@ export function CoachClientDetailContent({ view, disabled, actions }: {
     {view.state === "pending" && view.code !== null ? <CoachClientCodeCard view={view.code} disabled={disabled}
       onCopy={actions.onCopyCode ? () => actions.onCopyCode?.(view.id) : undefined}
       onShare={actions.onShareCode ? () => actions.onShareCode?.(view.id) : undefined}
-      onResend={actions.onResend ? () => actions.onResend?.(view.id) : undefined} /> : null}
+      onResend={actions.onResend ? () => actions.onResend?.(view.id) : undefined}
+      onRetryDelivery={actions.onRetryDelivery ? () => actions.onRetryDelivery?.(view.id) : undefined} /> : null}
     {view.state === "active" ? <button className={styles.cycle} type="button" disabled={!canOpenCycle}
       onClick={canOpenCycle ? () => actions.onOpenCycle?.(view.id) : undefined}>
       <CalendarDays size={16} aria-hidden="true" /><span className={styles.cycleCopy}>

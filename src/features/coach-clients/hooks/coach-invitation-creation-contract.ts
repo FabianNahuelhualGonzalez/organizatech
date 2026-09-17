@@ -7,12 +7,15 @@ export interface CoachInvitationCreationOperation {
   readonly generation: number;
   readonly reservedAt: string;
 }
-/** No code, dates, profile lookup, delivery or activity fields are needed by this consumer. */
+/** Authorized own-invitation receipt. Code is present only while this exact generation is pending. */
 export interface CoachInvitationCreationRead {
   readonly id: string;
   readonly recipientEmail: string;
   readonly generation: number;
   readonly state: "pending" | "expired" | "cancelled" | "accepted";
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+  readonly code: string | null;
 }
 export interface CoachInvitationCreationCommand {
   readonly recipientEmail: string;

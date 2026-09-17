@@ -152,8 +152,8 @@ test("busy form locks email and cancel, and identifies actual sending instead of
   const noChange = render(); assert.equal(elements(noChange.tree).find((element) => element.type === "input")?.props.disabled, true);
 });
 
-test("receipt guard requires server provenance, concrete id/email/code and accepted or delivered status", () => {
-  for (const delivery of ["provider-accepted", "delivered"] as const) assert.equal(isCoachInvitationReceiptReady({ ...receipt(), delivery }), true);
+test("receipt guard requires server provenance and concrete id/email/code even while delivery is pending", () => {
+  for (const delivery of ["pending", "provider-accepted", "delivered"] as const) assert.equal(isCoachInvitationReceiptReady({ ...receipt(), delivery }), true);
   const invalid = [null, undefined, { ...receipt(), source: "local" }, ...["queued", "reserved", "failed"].map((delivery) => ({ ...receipt(), delivery })),
     ...["id", "email", "code"].flatMap((key) => ["", "   ", null, 7].map((value) => ({ ...receipt(), [key]: value })))];
   for (const candidate of invalid) assert.equal(isCoachInvitationReceiptReady(candidate as CoachClientInvitationReceiptView | null | undefined), false);

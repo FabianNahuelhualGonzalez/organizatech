@@ -42,7 +42,11 @@ export function copyActionRead(value: unknown, invitationId: string): CoachInvit
     const currentGeneration = generation(actionField(value, "generation"));
     const state = actionField(value, "state");
     if (state !== "pending" && state !== "expired" && state !== "cancelled" && state !== "accepted") return fail();
-    return Object.freeze({ id, generation: currentGeneration, state });
+    const expiresAt = text(actionField(value, "expiresAt"));
+    const rawCode = actionField(value, "code");
+    const code = rawCode === null ? null : text(rawCode);
+    if ((state === "pending") !== (code !== null)) return fail();
+    return Object.freeze({ id, generation: currentGeneration, state, expiresAt, code });
   } catch (error) { return fail(actionIssue(error) === "request_conflict" ? "request_conflict" : "invalid_response"); }
 }
 export function copyActionOperation(value: unknown, attempt: CoachInvitationActionsAttempt): CoachInvitationActionsOperation {

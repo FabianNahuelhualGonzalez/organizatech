@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderCoachLinkEmail } from "./templates";
+import { renderCoachInvitationEmail, renderCoachLinkEmail } from "./templates";
 
 test("correo alumno conserva asunto, cuerpo, CTA y destino aprobados", () => {
   const rendered = renderCoachLinkEmail({ audience: "student", recipientFirstName: "Sofía",
@@ -30,4 +30,34 @@ test("correo coach conserva asunto, cuerpo, CTA y escapa nombres", () => {
   }
   assert.doesNotMatch(rendered.htmlContent, /Sofía <Reyes>/);
   assert.match(rendered.htmlContent, /Sofía &lt;Reyes&gt;/);
+});
+
+test("invitación a alumno sin cuenta incluye código, vencimiento y CTA de registro sin código en URL", () => {
+  const rendered = renderCoachInvitationEmail({ audience: "student", recipientFirstName: null,
+    coachName: "Coach Marcos Díaz", invitedEmail: "sofia@example.com",
+    invitationCode: "AB2-CD3-EF4", expiresAt: "2026-09-24T12:00:00.000Z",
+    recipientHasAccount: false,
+    actionUrl: "https://app.organizatech.cl/login?mode=registro&tipo=usuario&coachLinkDestination=profile-coaching" });
+  for (const copy of ["Coach Marcos Díaz te invitó", "Crea tu cuenta con exactamente este correo",
+    "Perfil > Coaching", "Código de vinculación: AB2-CD3-EF4", "Crear mi cuenta",
+    "El vínculo no se activa automáticamente"]) assert.ok(rendered.textContent.includes(copy), copy);
+  assert.doesNotMatch(rendered.htmlContent, /coachCode|AB2-CD3-EF4[^<]*href=/);
+});
+
+test("invitación a cuenta existente y copia coach conservan correo, código e instrucciones", () => {
+  const student = renderCoachInvitationEmail({ audience: "student", recipientFirstName: "Sofía",
+    coachName: "Coach Marcos Díaz", invitedEmail: "sofia@example.com",
+    invitationCode: "AB2-CD3-EF4", expiresAt: "2026-09-24T12:00:00.000Z",
+    recipientHasAccount: true,
+    actionUrl: "https://app.organizatech.cl/login?tipo=usuario&coachLinkDestination=profile-coaching" });
+  assert.match(student.textContent, /Inicia sesión con este mismo correo/);
+  assert.match(student.textContent, /Ingresar a Organizatech/);
+
+  const coach = renderCoachInvitationEmail({ audience: "coach", recipientFirstName: "Marcos",
+    coachName: "Coach Marcos Díaz", invitedEmail: "sofia@example.com",
+    invitationCode: "AB2-CD3-EF4", expiresAt: "2026-09-24T12:00:00.000Z",
+    recipientHasAccount: false, actionUrl: "https://app.organizatech.cl/login?tipo=coach" });
+  assert.equal(coach.subject, "Código de vinculación creado para sofia@example.com");
+  for (const copy of ["dirigido exclusivamente a sofia@example.com", "Código de vinculación: AB2-CD3-EF4",
+    "Perfil > Coaching", "Abrir Panel Coach"]) assert.ok(coach.textContent.includes(copy), copy);
 });

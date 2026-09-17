@@ -89,7 +89,7 @@ function fixture(state: CoachInvitationDetail["state"] = "pending") {
   };
 }
 
-test("runtime uses only generation-bound resend and strips code, email and ownership", async () => {
+test("runtime uses only generation-bound resend and preserves only the authorized code receipt", async () => {
   const fixtureState = fixture("pending");
   assert.equal(await fixtureState.controller.load(), true);
   assert.equal(fixtureState.controller.canResend(), true);
@@ -104,7 +104,8 @@ test("runtime uses only generation-bound resend and strips code, email and owner
     p_expected_generation: 2,
     p_request_id: requestId,
   });
-  assert.doesNotMatch(JSON.stringify(fixtureState.controller.getSnapshot()), /AB2-CD3-EF4|fixture@example|owner/);
+  assert.equal(fixtureState.controller.getSnapshot().confirmed?.code, "AB2-CD3-EF4");
+  assert.doesNotMatch(JSON.stringify(fixtureState.controller.getSnapshot()), /fixture@example|owner/);
   fixtureState.controller.dispose();
 });
 

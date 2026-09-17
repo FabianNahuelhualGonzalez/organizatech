@@ -97,7 +97,10 @@ export async function invokeEmailRpc(input: {
     | "claim_due_calendar_reminder_deliveries"
     | "complete_calendar_reminder_delivery"
     | "claim_own_coach_link_emails"
-    | "complete_own_coach_link_email";
+    | "complete_own_coach_link_email"
+    | "claim_own_coach_invitation_emails"
+    | "complete_own_coach_invitation_email"
+    | "own_coach_invitation_email_delivery_complete";
   readonly body: Readonly<Record<string, unknown>>;
   readonly timeoutMilliseconds?: number;
   readonly fetchImpl?: typeof fetch;

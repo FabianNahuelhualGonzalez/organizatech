@@ -80,7 +80,7 @@ function open(f: ReturnType<typeof fixture>, email = "fixture@example.invalid") 
 }
 const writes = (requests: Request[]) => requests.filter((request) => request.name === "create_own_coach_invitation");
 
-test("creation is explicit and allowlisted; a reservation never exposes code, delivery or account identity", async () => {
+test("creation is explicit and allowlisted; the authorized receipt exposes only its own current code", async () => {
   const f = fixture();
   assert.deepEqual(f.counts(), { idCalls: 0, authCalls: 0 });
   assert.equal(await f.controller.submit(), false);
@@ -94,9 +94,11 @@ test("creation is explicit and allowlisted; a reservation never exposes code, de
   assert.deepEqual(writes(f.requests)[0].body, { p_recipient_email: "fixture@example.invalid", p_request_id: requestId });
   const snapshot = f.controller.getSnapshot();
   assert.equal(snapshot.attempt?.resolution, "reserved");
-  assert.deepEqual(snapshot.confirmed, { id: invitationId, recipientEmail: "fixture@example.invalid", generation: 1, state: "pending" });
+  assert.deepEqual(snapshot.confirmed, { id: invitationId, recipientEmail: "fixture@example.invalid",
+    generation: 1, state: "pending", issuedAt: time, expiresAt: "2026-09-16T10:00:00.123456Z",
+    code: "AB2-CD3-EF4" });
   assert.deepEqual(Object.keys(snapshot.attempt!.operation!).sort(), ["action", "generation", "invitationId", "requestId", "reservedAt", "state"]);
-  assert.doesNotMatch(JSON.stringify(snapshot), /AB2-CD3-EF4|provider-accepted|delivered|episodeId|userId/);
+  assert.doesNotMatch(JSON.stringify(snapshot), /provider-accepted|delivered|episodeId|userId/);
   assert.equal(f.requests.length, 2);
   assert.equal(await f.controller.submit(), false);
   assert.equal(await f.controller.retry(), false);

@@ -27,6 +27,7 @@ test("el portal monta la composición productiva y la feature conserva sus runti
     "createCoachActiveRelationshipsRuntime",
     "createCoachPendingInvitationsRuntime",
     "createCoachInvitationCreationRuntime",
+    "createCoachInvitationDeliveryRuntime",
     "createCoachInvitationActionsRuntime",
     "createCoachClientDisconnectionRuntime",
     "createCoachPreferencesRuntime",
@@ -34,13 +35,17 @@ test("el portal monta la composición productiva y la feature conserva sus runti
   assert.match(controller, /creationController\?\.reconcile\(\)/);
   assert.match(controller, /creationController\?\.retry\(\)/);
   assert.match(controller, /setCreationEpoch\(\(value\) => value \+ 1\)/);
+  assert.match(controller, /deliveryRuntime\?\.recoverInvitation\(invitationId\)/);
+  assert.match(controller, /detailDeliveryPendingRef\.current !== null/);
+  assert.match(controller, /detailDeliveryPendingRef\.current = selectedInvitationId/);
   assert.match(controller, /\.loadNext\(\)/);
   assert.doesNotMatch(controller, /training_sessions|exercise_entries/);
 });
 
-test("la creación no promete email entregado ni inventa ingreso de código del alumno", () => {
+test("la creación distingue entrega pendiente y dirige al flujo aprobado sin código en URL", () => {
   const controller = readFileSync(CONTROLLER_PATH, "utf8");
-  assert.match(controller, /La entrega del correo aún no está confirmada/);
-  assert.match(controller, /El vínculo se activa sólo después de la aceptación del alumno/);
-  assert.doesNotMatch(controller, /pantalla.*ingresar.*código|aceptarCoachCode|linkStudentByCode/i);
+  assert.match(controller, /La entrega por correo está pendiente; el código sigue vigente/);
+  assert.match(controller, /Perfil > Coaching e ingresa este código/);
+  assert.match(controller, /navigator\.share/);
+  assert.doesNotMatch(controller, /wa\.me|coachCode=|URLSearchParams/);
 });

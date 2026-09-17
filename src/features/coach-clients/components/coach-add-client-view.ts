@@ -25,8 +25,8 @@ export interface CoachClientInviteDraftView {
 
 export interface CoachClientInvitationReceiptView {
   readonly source: "server";
-  /** Acceptance by the provider is not delivery to the recipient's inbox. */
-  readonly delivery: "provider-accepted" | "delivered";
+  /** Pending is recoverable; provider acceptance is not proof of inbox delivery. */
+  readonly delivery: "pending" | "provider-accepted" | "delivered";
   readonly id: string;
   readonly email: string;
   readonly code: string;
@@ -70,6 +70,6 @@ export interface CoachAddClientSheetProps extends CoachOverlayFocusProps {
 
 /** Presentation guard, not authorization. A reserved/queued request is not a receipt. */
 export function isCoachInvitationReceiptReady(receipt: CoachClientInvitationReceiptView | null | undefined): receipt is CoachClientInvitationReceiptView {
-  return receipt?.source === "server" && (receipt.delivery === "provider-accepted" || receipt.delivery === "delivered")
+  return receipt?.source === "server" && ["pending", "provider-accepted", "delivered"].includes(receipt.delivery)
     && [receipt.id, receipt.email, receipt.code].every((value) => typeof value === "string" && value.trim().length > 0);
 }

@@ -32,7 +32,10 @@ function receipt(requestId = "request-1", overrides: Partial<CoachInvitationCrea
     reservedAt: "2026-09-09T10:00:00Z", ...overrides };
 }
 function read(overrides: Partial<CoachInvitationCreationRead> = {}): CoachInvitationCreationRead {
-  return { id: "invitation-A", recipientEmail: canonicalEmail, generation: 1, state: "pending", ...overrides };
+  const state = overrides.state ?? "pending";
+  return { id: "invitation-A", recipientEmail: canonicalEmail, generation: 1, state,
+    issuedAt: "2026-09-09T10:00:00Z", expiresAt: "2026-09-16T10:00:00Z",
+    code: state === "pending" ? "AB2-CD3-EF4" : null, ...overrides };
 }
 function recorded(operation = receipt()): CoachInvitationCreationResult { return { status: "recorded", serverNow, operation }; }
 function rateLimited(): CoachInvitationCreationResult { return { status: "rate_limited", serverNow, retryAt }; }
@@ -137,19 +140,19 @@ test("normalizer callback owns exact email rules; no old TLD2/Unicode trim rule 
   assert.equal(injected.calls[0].command!.recipientEmail, "authoritative@example.1");
 });
 
-test("only allowlisted immutable copies escape; code/provider material is not read or published", async () => {
+test("only allowlisted immutable copies escape, including the authorized pending code", async () => {
   const h = harness();
   const operation = { ...receipt(), code: "not copied", ownerId: "not copied" };
   const detail = { ...read(), providerAccepted: true, cycle: null };
-  let codeReads = 0;
-  Object.defineProperty(detail, "code", { get: () => { codeReads += 1; throw new Error("must not access"); } });
+  let privateReads = 0;
+  Object.defineProperty(detail, "privateValue", { get: () => { privateReads += 1; throw new Error("must not access"); } });
   h.handler.create = async () => ({ ...recorded(operation), delivery: "delivered" });
   h.handler.readInvitation = async () => detail;
   ready(h);
   assert.equal(await h.controller.submit(), true);
   const snapshot = h.controller.getSnapshot();
-  assert.equal(codeReads, 0);
-  assert.deepEqual(Object.keys(snapshot.confirmed!).sort(), ["generation", "id", "recipientEmail", "state"]);
+  assert.equal(privateReads, 0);
+  assert.deepEqual(Object.keys(snapshot.confirmed!).sort(), ["code", "expiresAt", "generation", "id", "issuedAt", "recipientEmail", "state"]);
   assert.deepEqual(Object.keys(snapshot.attempt!.operation!).sort(), ["action", "generation", "invitationId", "requestId", "reservedAt", "state"]);
   assert.deepEqual(Object.keys(h.calls[0].command!).sort(), ["recipientEmail", "requestId"]);
   for (const value of [snapshot, snapshot.attempt, snapshot.attempt!.operation, snapshot.confirmed, h.calls[0].command]) assert.equal(Object.isFrozen(value), true);
@@ -157,7 +160,8 @@ test("only allowlisted immutable copies escape; code/provider material is not re
   operation.generation = 8; detail.recipientEmail = "changed@example.test";
   assert.equal(snapshot.attempt!.operation!.generation, 1);
   assert.equal(snapshot.confirmed!.recipientEmail, canonicalEmail);
-  assert.doesNotMatch(JSON.stringify(snapshot), /code|provider|delivery|canCopy|canShare|cycle|ownerId/);
+  assert.equal(snapshot.confirmed?.code, "AB2-CD3-EF4");
+  assert.doesNotMatch(JSON.stringify(snapshot), /provider|delivery|canCopy|canShare|cycle|ownerId|privateValue/);
 });
 
 test("single-flight spans reservation and subsequent detail; duplicate clicks never generate another id", async () => {
@@ -750,7 +754,7 @@ test("reentrant data proxy invalidation is observed before any detail dispatch o
   assert.equal(h.controller.getSnapshot().attempt, null);
 });
 
-test("creation lifecycle stays local and has no code/provider/UI/lookup/clock/automatic retry capability", () => {
+test("creation lifecycle stays local and has no provider/UI/lookup/clock/automatic retry capability", () => {
   const controller = readFileSync(new URL("./coach-invitation-creation-controller.ts", import.meta.url), "utf8");
   const helper = readFileSync(new URL("./coach-invitation-creation-reconciliation.ts", import.meta.url), "utf8");
   const contract = readFileSync(new URL("./coach-invitation-creation-contract.ts", import.meta.url), "utf8");
@@ -760,7 +764,7 @@ test("creation lifecycle stays local and has no code/provider/UI/lookup/clock/au
   for (const code of [controller, helper]) {
     assert.doesNotMatch(code, /\b(?:fetch|setTimeout|setInterval|getUser|localStorage|sessionStorage)\s*\(|Date\.now|new Date|Math\.random|crypto\./);
     assert.doesNotMatch(code, /["']use client["']|supabase|\.rpc\s*\(|\.from\s*\(["']|checkCoachInvitationEmail/);
-    assert.doesNotMatch(code, /field\(value,\s*["'](?:code|provider|delivery)["']\)/);
+    assert.doesNotMatch(code, /field\(value,\s*["'](?:provider|delivery)["']\)/);
   }
-  assert.doesNotMatch(contract, /readonly (?:code|provider|delivery|canCopy|canShare|cycle|studentName|studentId)\s*[?:]/);
+  assert.doesNotMatch(contract, /readonly (?:provider|delivery|canCopy|canShare|cycle|studentName|studentId)\s*[?:]/);
 });

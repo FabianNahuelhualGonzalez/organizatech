@@ -73,11 +73,17 @@ export function resolveCreationRead(value: unknown, attempt: CoachInvitationCrea
     const currentGeneration = generation(field(value, "generation"));
     const state = field(value, "state");
     if (state !== "pending" && state !== "expired" && state !== "cancelled" && state !== "accepted") return fail();
+    const issuedAt = text(field(value, "issuedAt"));
+    const expiresAt = text(field(value, "expiresAt"));
+    const rawCode = field(value, "code");
+    const code = rawCode === null ? null : text(rawCode);
+    if ((state === "pending") !== (code !== null)) return fail();
     if (currentGeneration < operation.generation) return fail();
     // Another generation is not this reservation. Do not adopt its identity snapshot or material.
     if (currentGeneration > operation.generation) return Object.freeze({ confirmed: null, resolution: "inactive" });
     if (operation.state === "cancelled" && state === "pending") return fail();
-    const confirmed = Object.freeze({ id, recipientEmail, generation: currentGeneration, state });
+    const confirmed = Object.freeze({ id, recipientEmail, generation: currentGeneration, state,
+      issuedAt, expiresAt, code });
     return Object.freeze({ confirmed, resolution: state === "pending" ? "reserved" : "inactive" });
   } catch (error) {
     return fail(creationIssue(error) === "request_conflict" ? "request_conflict" : "invalid_response");
