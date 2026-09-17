@@ -68,7 +68,7 @@ test("perfil Coach deriva edad desde birth_date y correo desde Auth", () => {
   });
 });
 
-test("inicio, orden del menú y navegación local permanecen cerrados", () => {
+test("Panel principal queda habilitado y el resto del menú conserva su cierre", () => {
   assert.equal(COACH_HOME_WELCOME, "bienvenido Coach.");
   assert.equal(
     COACH_HOME_MESSAGE,
@@ -87,7 +87,7 @@ test("inicio, orden del menú y navegación local permanecen cerrados", () => {
   ]);
   assert.deepEqual(COACH_PORTAL_MENU_ITEMS.map(({ availability }) => availability), [
     "enabled",
-    "disabled",
+    "enabled",
     "disabled",
     "disabled",
     "disabled",

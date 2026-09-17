@@ -1,0 +1,7 @@
+.empty { border: 1px dashed rgba(255, 255, 255, .2); border-radius: 15px; padding: 30px 20px; text-align: center; overflow-wrap: anywhere; }
+.icon { width: 44px; height: 44px; display: grid; place-items: center; margin: 0 auto 14px; border-radius: 12px; background: rgba(255, 255, 255, .06); color: rgba(255, 255, 255, .55); }
+.title { margin: 0 0 7px; font-size: 14px; font-weight: 700; }
+.body { margin: 0 0 18px; font-size: 11px; line-height: 1.55; color: rgba(255, 255, 255, .55); }
+.action { min-width: 44px; min-height: 44px; max-width: 100%; padding: 8px 18px; border: 0; border-radius: 22px; background: #3c7aff; color: #fff; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.action:disabled { cursor: default; background: rgba(60, 122, 255, .2); color: rgba(255, 255, 255, .55); }
+.action:focus-visible { outline: 2px solid #8fb2ff; outline-offset: 2px; }

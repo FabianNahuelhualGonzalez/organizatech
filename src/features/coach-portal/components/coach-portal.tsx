@@ -20,8 +20,6 @@ import {
 import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import {
-  COACH_HOME_MESSAGE,
-  COACH_HOME_WELCOME,
   COACH_PORTAL_MENU_ITEMS,
   createCoachPortalProfileViewModel,
   createInitialCoachPortalState,
@@ -36,6 +34,7 @@ import {
 } from "@/ui/overlays/use-overlay-focus-management";
 
 import styles from "./coach-portal.module.css";
+import { CoachWorkspaceBoundary } from "./coach-workspace-boundary";
 
 const COACH_PORTAL_DRAWER_ID = "coach-portal-navigation-drawer";
 
@@ -53,6 +52,7 @@ const coachMenuIcons: Record<(typeof COACH_PORTAL_MENU_ITEMS)[number]["id"], Luc
 
 export interface CoachPortalBoundaryProps {
   session: CoachPortalSession;
+  coachDataIdentityGeneration: number | null;
   isLoggingOut: boolean;
   isNotificationPanelOpen: boolean;
   notificationBadgeText: string | null;
@@ -67,11 +67,22 @@ export interface CoachPortalBoundaryProps {
     ownerUserId: string;
     sequence: number;
   }) => void;
+  clientOpenRequest: {
+    ownerUserId: string;
+    episodeId: string;
+    sequence: number;
+  } | null;
+  onClientOpenRequestConsumed: (request: {
+    ownerUserId: string;
+    episodeId: string;
+    sequence: number;
+  }) => void;
   onLogout: () => void | Promise<void>;
 }
 
 export function CoachPortalBoundary({
   session,
+  coachDataIdentityGeneration,
   isLoggingOut,
   isNotificationPanelOpen,
   notificationBadgeText,
@@ -80,6 +91,8 @@ export function CoachPortalBoundary({
   onToggleNotifications,
   calendarOpenRequest,
   onCalendarOpenRequestConsumed,
+  clientOpenRequest,
+  onClientOpenRequestConsumed,
   onLogout,
 }: CoachPortalBoundaryProps) {
   const [state, dispatch] = useReducer(
@@ -98,6 +111,12 @@ export function CoachPortalBoundary({
       onCalendarOpenRequestConsumed(calendarOpenRequest);
     }
   }, [calendarOpenRequest, onCalendarOpenRequestConsumed, session.userId]);
+
+  useEffect(() => {
+    if (clientOpenRequest?.ownerUserId !== session.userId) return;
+    dispatch({ type: "home_opened" });
+    setIsCalendarOpen(false);
+  }, [clientOpenRequest, session.userId]);
 
   function handleLogout() {
     dispatch({ type: "reset" });
@@ -156,6 +175,10 @@ export function CoachPortalBoundary({
           setIsCalendarOpen(false);
           dispatch({ type: "profile_opened" });
         }}
+        onOpenDashboard={() => {
+          setIsCalendarOpen(false);
+          dispatch({ type: "home_opened" });
+        }}
         onOpenCalendar={() => {
           dispatch({ type: "menu_closed" });
           setIsCalendarOpen(true);
@@ -170,7 +193,14 @@ export function CoachPortalBoundary({
           onBack={() => setIsCalendarOpen(false)}
         />
       ) : state.screen === "home" ? (
-        <CoachPortalHome fullName={profile.fullName} />
+        <CoachWorkspaceBoundary
+          userId={session.userId}
+          coachName={profile.fullName}
+          identityGeneration={coachDataIdentityGeneration}
+          onOpenCalendar={() => setIsCalendarOpen(true)}
+          clientOpenRequest={clientOpenRequest}
+          onClientOpenRequestConsumed={onClientOpenRequestConsumed}
+        />
       ) : (
         <CoachPortalProfile
           session={session}
@@ -179,16 +209,6 @@ export function CoachPortalBoundary({
         />
       )}
     </main>
-  );
-}
-
-function CoachPortalHome({ fullName }: { fullName: string }) {
-  return (
-    <section className={styles.home} aria-labelledby="coach-home-title">
-      <p className={styles.welcome}>{COACH_HOME_WELCOME}</p>
-      <h2 id="coach-home-title">{fullName}</h2>
-      <p className={styles.homeMessage}>{COACH_HOME_MESSAGE}</p>
-    </section>
   );
 }
 
@@ -274,6 +294,7 @@ function CoachPortalNavigationDrawer({
   restoreFocusRef,
   onClose,
   onOpenProfile,
+  onOpenDashboard,
   onOpenCalendar,
   onLogout,
 }: {
@@ -286,6 +307,7 @@ function CoachPortalNavigationDrawer({
   restoreFocusRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onOpenProfile: () => void;
+  onOpenDashboard: () => void;
   onOpenCalendar: () => void;
   onLogout: () => void;
 }) {
@@ -355,6 +377,22 @@ function CoachPortalNavigationDrawer({
                       type="button"
                       aria-current={!isCalendarOpen && activeScreen === "profile" ? "page" : undefined}
                       onClick={onOpenProfile}
+                    >
+                      <ItemIcon aria-hidden="true" size={19} />
+                      <span>{item.label}</span>
+                    </button>
+                  </li>
+                );
+              }
+
+              if (item.id === "dashboard") {
+                return (
+                  <li key={item.id}>
+                    <button
+                      className={styles.menuItem}
+                      type="button"
+                      aria-current={!isCalendarOpen && activeScreen === "home" ? "page" : undefined}
+                      onClick={onOpenDashboard}
                     >
                       <ItemIcon aria-hidden="true" size={19} />
                       <span>{item.label}</span>

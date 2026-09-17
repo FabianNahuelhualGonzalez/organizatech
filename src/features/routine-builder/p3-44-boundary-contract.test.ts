@@ -15,7 +15,11 @@ import { pathToFileURL } from "node:url";
 import { legacyAppShellLayoutAst } from "@/features/app-shell/test-support/legacy-app-shell-layout-ast";
 
 const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
-  ignoredDirectConditionalElements: ["CalendarRemindersProductiveBoundary"],
+  ignoredDirectConditionalElements: [
+    "CalendarRemindersProductiveBoundary",
+    "CoachLinkConfirmationScreen",
+    "CoachLinkSuccessScreen",
+  ],
   ignoredAttributesByElement: {
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
@@ -23,6 +27,11 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
       "retryExerciseHistory",
       "saveCompletedTrainingStatus",
       "retrySaveCompletedTraining",
+    ],
+    ProfileScreen: [
+      "coachLinking",
+      "onOpenCoachLinkConfirmation",
+      "onOpenCoachLinkSuccess",
     ],
   },
 } as const;

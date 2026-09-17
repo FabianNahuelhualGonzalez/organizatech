@@ -1,11 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { OrganizatechApp } from "@/components/organizatech-app";
 import { AuthLoadingScreen } from "@/features/auth/components/auth-screen";
 import { useGoogleOAuthCallbackGate } from "@/features/auth/hooks/use-google-oauth-callback-gate";
 import { resolveAuthRouteState } from "@/features/auth/model/auth-route";
+import {
+  captureCoachLinkEntry,
+  captureCoachLinkNotificationDestination,
+} from "@/features/coach-linking/model/coach-linking";
 
 interface AuthEntryClientProps {
   trainingCyclesRepositoryEnabled: boolean;
@@ -19,6 +24,16 @@ export function AuthEntryClient({
   trainingWorkoutReadinessV2Enabled,
 }: AuthEntryClientProps) {
   const searchParams = useSearchParams();
+  const [initialCoachLinkEntry] = useState(() => captureCoachLinkEntry(
+    searchParams.get("coachCode"),
+    typeof window === "undefined" ? null : window.sessionStorage,
+  ));
+  const [initialCoachLinkNotificationDestination] = useState(() => (
+    captureCoachLinkNotificationDestination(
+      searchParams.get("coachLinkDestination"),
+      searchParams.get("coachLinkEpisode"),
+    )
+  ));
   const googleOAuth = useGoogleOAuthCallbackGate();
   if (googleOAuth.state === "checking") return <AuthLoadingScreen />;
   const initialAuthRoute = resolveAuthRouteState({
@@ -34,6 +49,8 @@ export function AuthEntryClient({
     <OrganizatechApp
       googleOAuth={googleOAuth}
       initialAuthRoute={initialAuthRoute}
+      initialCoachLinkEntry={initialCoachLinkEntry}
+      initialCoachLinkNotificationDestination={initialCoachLinkNotificationDestination}
       trainingCyclesRepositoryEnabled={trainingCyclesRepositoryEnabled}
       trainingCyclesSnapshotSource={trainingCyclesSnapshotSource}
       trainingWorkoutReadinessV2Enabled={trainingWorkoutReadinessV2Enabled}

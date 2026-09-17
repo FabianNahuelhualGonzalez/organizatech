@@ -1,0 +1,15 @@
+.tiles { display: flex; gap: 8px; margin-bottom: 20px; }
+.tile { flex: 1; min-width: 44px; min-height: 112px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 14px 9px; border: 1px solid rgba(255, 255, 255, .2); border-radius: 14px; background: transparent; color: inherit; text-align: center; font: inherit; }
+.tile:disabled { cursor: default; }
+.tile:focus-visible { outline: 2px solid #8fb2ff; outline-offset: 2px; }
+.tile svg { flex: none; }
+.title { margin-top: 9px; font-size: 12px; font-weight: 700; }
+.subtitle { margin-top: 4px; color: rgba(255, 255, 255, .55); font-size: 9px; line-height: 1.4; }
+.soon { position: relative; border: 1px dashed rgba(143, 178, 255, .45); background: rgba(60, 122, 255, .06); }
+.soon svg { color: #8fb2ff; }
+.badge { position: absolute; top: 8px; right: 8px; padding: 2px 5px; border: 1px solid rgba(143, 178, 255, .4); border-radius: 9px; color: #8fb2ff; font-size: 7.5px; font-weight: 700; letter-spacing: .05em; }
+@container (max-width: 359px) {
+  .tiles { flex-wrap: wrap; }
+  .tile { flex: 1 1 calc(50% - 4px); min-height: 96px; }
+  .soon { flex-basis: 100%; }
+}

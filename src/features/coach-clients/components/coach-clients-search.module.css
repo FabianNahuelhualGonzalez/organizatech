@@ -1,0 +1,43 @@
+.wrap { flex: none; padding: 12px 14px 0; }
+.search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  height: 48px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 12px;
+}
+.search > svg { flex: none; color: rgba(255, 255, 255, .55); }
+.search input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 16px;
+}
+.search input::placeholder { color: rgba(255, 255, 255, .55); }
+.search input:focus { outline: none; box-shadow: none; }
+.search:focus-within { outline: 2px solid #8fb2ff; outline-offset: 2px; }
+.clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-right: -8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, .7);
+  cursor: pointer;
+}
+.clear span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: rgba(255, 255, 255, .1); }
+.clear:disabled { cursor: default; }
+.clear:focus-visible { outline: 2px solid #8fb2ff; outline-offset: 2px; border-radius: 8px; }

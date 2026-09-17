@@ -1,0 +1,26 @@
+.header { flex: none; display: flex; align-items: flex-start; gap: 10px; padding: 18px 17px 15px; border-bottom: 1px solid rgba(255, 255, 255, .1); }
+.heading { flex: 1; min-width: 0; }
+.eyebrow { margin: 0 0 6px; font-size: 9.5px; letter-spacing: .06em; color: #4ade80; font-weight: 700; }
+.heading h2 { margin: 0 0 5px; font-size: 17px; font-weight: 700; line-height: 1.3; }
+.description { margin: 0; font-size: 10.5px; color: rgba(255, 255, 255, .55); line-height: 1.45; }
+.close { flex: none; display: grid; place-items: center; min-width: 44px; min-height: 44px; margin: -8px -8px -8px 0; border: 0; padding: 0; background: transparent; color: rgba(255, 255, 255, .75); cursor: pointer; }
+.close span { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 255, 255, .08); }
+.body { flex: 1; min-height: 0; min-width: 0; padding: 16px 17px 0; overflow-y: auto; overscroll-behavior-y: contain; }
+.body > * { flex: none; }
+.fields { display: flex; gap: 9px; margin-bottom: 12px; }
+.fields > div { flex: 1; min-width: 0; }
+.fields label { display: block; margin-bottom: 6px; font-size: 10px; font-weight: 600; color: rgba(255, 255, 255, .55); }
+.fields input { display: block; box-sizing: border-box; width: 100%; min-width: 0; min-height: 50px; padding: 0 11px; border: 1px solid rgba(255, 255, 255, .28); border-radius: 12px; background: transparent; color: #fff; font: inherit; font-size: 16px; font-weight: 600; color-scheme: dark; }
+.fields input::-webkit-date-and-time-value { min-width: 0; text-align: left; }
+.fields input[aria-invalid="true"] { border-color: #f87171; }
+.close:disabled { cursor: default; }
+.close:focus-visible, .fields input:focus-visible { outline: 2px solid #8fb2ff; outline-offset: 2px; }
+.note { display: flex; gap: 9px; padding: 11px 12px; margin-bottom: 7px; border: 1px solid rgba(74, 222, 128, .4); background: rgba(74, 222, 128, .06); border-radius: 12px; }
+.note > span { flex: none; width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: #4ade80; }
+.note > p { flex: 1; min-width: 0; margin: 0; font-size: 10.5px; line-height: 1.5; color: rgba(255, 255, 255, .7); overflow-wrap: anywhere; }
+.note[data-kind="warn"] { border-color: rgba(251, 191, 36, .4); background: rgba(251, 191, 36, .06); }
+.note[data-kind="warn"] > span { background: #fbbf24; }
+.note[data-kind="err"] { border-color: rgba(248, 113, 113, .4); background: rgba(248, 113, 113, .06); }
+.note[data-kind="err"] > span { background: #f87171; }
+.pause { margin: 0 0 4px; padding-inline: 2px; font-size: 10px; line-height: 1.5; color: rgba(255, 255, 255, .55); overflow-wrap: anywhere; }
+@container (max-width: 359px) { .fields { flex-direction: column; } }
