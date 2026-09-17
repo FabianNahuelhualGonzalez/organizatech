@@ -2114,6 +2114,7 @@
 
 .successMark {
   display: grid;
+  justify-self: center;
   width: 62px;
   height: 62px;
   place-items: center;

@@ -450,11 +450,13 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(lifecycleScreensSource, /begin_active_edit[\s\S]{0,200}active_cycle_close/);
 const successScreenSource = lifecycleScreensSource.match(/export function CycleSuccessScreen[\s\S]*?export function CycleActiveScreen/)?.[0] ?? "";
+const successMarkRule = cssSource.match(/\.successMark\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
 assert.match(lifecycleScreensSource, /const SUCCESS_HOME_ACTION_LABEL = \["Volver", "al", "inicio"\]\.join\(" "\)/);
 assert.match(successScreenSource, /<PrimaryAction onClick=\{onExit\}>\{SUCCESS_HOME_ACTION_LABEL\}<\/PrimaryAction>/);
 assert.match(successScreenSource, /<SecondaryAction onClick=\{onStartTraining\}>Comenzar a entrenar<\/SecondaryAction>/);
 assert.ok(successScreenSource.indexOf("Volver al inicio") < successScreenSource.indexOf("Comenzar a entrenar"));
 assert.doesNotMatch(successScreenSource, /Revisar mi ciclo|history\.back/);
+assert.match(successMarkRule, /justify-self:\s*center/);
 assert.match(controllerSource, /state\.workflow !== "draft"/);
 assert.match(stateSource, /expectedRevision/);
 assert.match(stateSource, /durationDays/);
