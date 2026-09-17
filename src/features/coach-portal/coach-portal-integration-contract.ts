@@ -52,22 +52,6 @@ const TRAINING_RESOURCE_BOUNDS_MIGRATION_PATH =
   "supabase/migrations/20260902163716_sec_training_rpc_resource_bounds.sql";
 const TRAINING_INTEGER_CAST_FIX_MIGRATION_PATH =
   "supabase/migrations/20260902183335_sec_training_integer_cast_fix.sql";
-const COACH_DASHBOARD_PREFERENCES_MIGRATION_PATH =
-  "supabase/migrations/20260908201518_coach_dashboard_private_preferences.sql";
-const COACH_INVITATIONS_MIGRATION_PATH =
-  "supabase/migrations/20260909044235_coach_invitation_persistence.sql";
-const COACH_PAID_PERIODS_MIGRATION_PATH =
-  "supabase/migrations/20260909054933_coach_paid_period_persistence.sql";
-const COACH_PENDING_INVITATIONS_LIST_MIGRATION_PATH =
-  "supabase/migrations/20260909085022_coach_pending_invitations_list.sql";
-const COACH_ACTIVE_RELATIONSHIPS_LIST_MIGRATION_PATH =
-  "supabase/migrations/20260909100428_coach_active_relationships_list.sql";
-const COACH_INVITATION_GENERATION_MIGRATION_PATH =
-  "supabase/migrations/20260909120120_coach_invitation_generation_binding.sql";
-const STUDENT_COACH_LINK_ACCEPTANCE_MIGRATION_PATH =
-  "supabase/migrations/20260917000000_student_coach_link_acceptance.sql";
-const COACH_INVITATION_CODE_DELIVERY_MIGRATION_PATH =
-  "supabase/migrations/20260917120000_coach_invitation_code_delivery.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -560,14 +544,6 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== READINESS_RESOURCE_BOUNDS_MIGRATION_PATH
         && path !== TRAINING_RESOURCE_BOUNDS_MIGRATION_PATH
         && path !== TRAINING_INTEGER_CAST_FIX_MIGRATION_PATH
-        && path !== COACH_DASHBOARD_PREFERENCES_MIGRATION_PATH
-        && path !== COACH_INVITATIONS_MIGRATION_PATH
-        && path !== COACH_PAID_PERIODS_MIGRATION_PATH
-        && path !== COACH_PENDING_INVITATIONS_LIST_MIGRATION_PATH
-        && path !== COACH_ACTIVE_RELATIONSHIPS_LIST_MIGRATION_PATH
-        && path !== COACH_INVITATION_GENERATION_MIGRATION_PATH
-        && path !== STUDENT_COACH_LINK_ACCEPTANCE_MIGRATION_PATH
-        && path !== COACH_INVITATION_CODE_DELIVERY_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
@@ -743,8 +719,8 @@ const mutations = [
     expectedFailure: FAILURE.menuOrder,
     apply: (value: string) => replaceExactlyOnce(
       value,
-      '  { id: "dashboard", label: "Panel principal", availability: "enabled" },\n  { id: "training", label: "Entrenemos", availability: "disabled" },',
-      '  { id: "training", label: "Entrenemos", availability: "disabled" },\n  { id: "dashboard", label: "Panel principal", availability: "enabled" },',
+      '  { id: "dashboard", label: "Panel principal", availability: "disabled" },\n  { id: "training", label: "Entrenemos", availability: "disabled" },',
+      '  { id: "training", label: "Entrenemos", availability: "disabled" },\n  { id: "dashboard", label: "Panel principal", availability: "disabled" },',
       "M08",
     ),
   },

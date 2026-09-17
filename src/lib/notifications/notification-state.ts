@@ -58,6 +58,5 @@ export function resolveNotificationOpenIntent(notification: AppNotification): No
     dashboardDayOverride: notification.day && notification.target === "dashboard" ? notification.day : null,
     comparisonDayOverride: notification.day && notification.target === "comparacion" ? notification.day : null,
     section: notification.section ?? null,
-    referenceId: notification.referenceId ?? null,
   };
 }

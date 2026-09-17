@@ -56,8 +56,6 @@ export const USER_PORTAL_DESTINATION_SCREENS = {
 
 const USER_PORTAL_ACTIVE_DESTINATIONS = {
   perfil: "profile",
-  "coach-link-confirmation": "profile",
-  "coach-link-success": "profile",
   dashboard: "dashboard",
   entrenamiento: "training",
   "training-summary": "training",
@@ -69,8 +67,6 @@ const USER_PORTAL_ACTIVE_DESTINATIONS = {
 
 const USER_PORTAL_RENDERABLE_SCREENS: readonly Screen[] = [
   "perfil",
-  "coach-link-confirmation",
-  "coach-link-success",
   "dashboard",
   "entrenamiento",
   "training-summary",

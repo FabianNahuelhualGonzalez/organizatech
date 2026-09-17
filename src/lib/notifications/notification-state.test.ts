@@ -112,7 +112,6 @@ function testResolveNotificationOpenIntentSetsDashboardDayOverrideOnlyForDashboa
     dashboardDayOverride: "Jueves",
     comparisonDayOverride: null,
     section: "training-carousel",
-    referenceId: null,
   });
 }
 
@@ -126,7 +125,6 @@ function testResolveNotificationOpenIntentSetsComparisonDayOverrideOnlyForCompar
     dashboardDayOverride: null,
     comparisonDayOverride: "Lunes",
     section: "weekly-comparison",
-    referenceId: null,
   });
 }
 

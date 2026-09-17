@@ -11,9 +11,7 @@ export type Screen =
   | "comparacion"
   | "historial-ciclos"
   | "calendario"
-  | "perfil"
-  | "coach-link-confirmation"
-  | "coach-link-success";
+  | "perfil";
 
 export type ActiveFlow =
   | "dashboard"
@@ -82,8 +80,6 @@ const appScreens: readonly Screen[] = [
   "historial-ciclos",
   "calendario",
   "perfil",
-  "coach-link-confirmation",
-  "coach-link-success",
 ];
 
 const activeFlows: readonly ActiveFlow[] = [
@@ -113,8 +109,6 @@ const screenLabels: Record<Screen, string> = {
   calendario: "Calendario",
   comparacion: "Comparación semanal",
   perfil: "Mi perfil",
-  "coach-link-confirmation": "Confirmar vinculación",
-  "coach-link-success": "Vinculación completada",
 };
 
 export function getActiveFlow(
@@ -135,7 +129,7 @@ export function getActiveFlow(
   if (screen === "comparacion") return "comparison";
   if (screen === "historial-ciclos") return "cycle_history";
   if (screen === "calendario") return "calendar";
-  if (screen === "perfil" || screen === "coach-link-confirmation" || screen === "coach-link-success") return "profile";
+  if (screen === "perfil") return "profile";
   return "dashboard";
 }
 
