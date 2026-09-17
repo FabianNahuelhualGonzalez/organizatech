@@ -48,6 +48,22 @@ const CALENDAR_RESOURCE_BOUNDS_MIGRATION_PATH =
   "supabase/migrations/20260828192434_sec_calendar_resource_bounds.sql";
 const READINESS_RESOURCE_BOUNDS_MIGRATION_PATH =
   "supabase/migrations/20260828192436_sec_readiness_resource_bounds.sql";
+const CYCLE_REDESIGN_SCHEMA_MIGRATION_PATH =
+  "supabase/migrations/20260829200846_cycle_redesign_schema.sql";
+const CYCLE_REDESIGN_API_MIGRATION_PATH =
+  "supabase/migrations/20260829200847_cycle_redesign_api.sql";
+const CYCLE_ACTIVE_REPLACEMENT_MIGRATION_PATH =
+  "supabase/migrations/20260831213114_cycle_active_replacement.sql";
+const CYCLE_ACTIVE_ATOMIC_REPLACEMENT_MIGRATION_PATH =
+  "supabase/migrations/20260831230440_cycle_active_atomic_replacement.sql";
+const CYCLE_ACTIVE_REPLACEMENT_SNAPSHOT_MIGRATION_PATH =
+  "supabase/migrations/20260831233757_cycle_active_replacement_snapshot_response.sql";
+const CYCLE_ACTIVE_REPLACEMENT_DESCRIPTORS_MIGRATION_PATH =
+  "supabase/migrations/20260901002250_cycle_active_replacement_exercise_descriptors.sql";
+const CYCLE_LEGACY_COMPATIBILITY_MIGRATION_PATH =
+  "supabase/migrations/20260905201420_cycle_legacy_compatibility_expiry_youtube.sql";
+const CYCLE_GENERATED_METADATA_COMPATIBILITY_MIGRATION_PATH =
+  "supabase/migrations/20260908162143_cycle_legacy_generated_metadata_compatibility.sql";
 const TRAINING_RESOURCE_BOUNDS_MIGRATION_PATH =
   "supabase/migrations/20260902163716_sec_training_rpc_resource_bounds.sql";
 const TRAINING_INTEGER_CAST_FIX_MIGRATION_PATH =
@@ -542,6 +558,14 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== NOTIFICATIONS_PORTAL_SEPARATION_MIGRATION_PATH
         && path !== CALENDAR_RESOURCE_BOUNDS_MIGRATION_PATH
         && path !== READINESS_RESOURCE_BOUNDS_MIGRATION_PATH
+        && path !== CYCLE_REDESIGN_SCHEMA_MIGRATION_PATH
+        && path !== CYCLE_REDESIGN_API_MIGRATION_PATH
+        && path !== CYCLE_ACTIVE_REPLACEMENT_MIGRATION_PATH
+        && path !== CYCLE_ACTIVE_ATOMIC_REPLACEMENT_MIGRATION_PATH
+        && path !== CYCLE_ACTIVE_REPLACEMENT_SNAPSHOT_MIGRATION_PATH
+        && path !== CYCLE_ACTIVE_REPLACEMENT_DESCRIPTORS_MIGRATION_PATH
+        && path !== CYCLE_LEGACY_COMPATIBILITY_MIGRATION_PATH
+        && path !== CYCLE_GENERATED_METADATA_COMPATIBILITY_MIGRATION_PATH
         && path !== TRAINING_RESOURCE_BOUNDS_MIGRATION_PATH
         && path !== TRAINING_INTEGER_CAST_FIX_MIGRATION_PATH
         && !(

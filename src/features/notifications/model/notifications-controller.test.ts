@@ -36,6 +36,22 @@ const secondNotification: AppNotification = {
   section: "personal-data",
 };
 
+const persistedCalendarNotification: AppNotification = {
+  ...notification,
+  id: "calendar:20000000-0000-4000-8000-000000000001",
+  dedupeKey: "calendar:20000000-0000-4000-8000-000000000001",
+  target: "calendario",
+  kind: "calendar",
+};
+
+const persistedTrainingCycleNotification: AppNotification = {
+  ...notification,
+  id: "training-cycle:30000000-0000-4000-8000-000000000001",
+  dedupeKey: "training-cycle:30000000-0000-4000-8000-000000000001",
+  target: "registro-entrenamiento",
+  kind: "training-cycle",
+};
+
 function createIntentCounters() {
   const counters = { intents: 0, navigations: 0, scrolls: 0 };
   return {
@@ -173,4 +189,30 @@ test("mark seen es inmutable, idempotente y mantiene el ref autoritativo", () =>
   const currentReference = controller.getSeenRecords();
   commands.markSeen(["a"]);
   assert.equal(controller.getSeenRecords(), currentReference);
+});
+
+test("notificaciones persistidas Calendar y Ciclo delegan read_at al servidor", () => {
+  const { controller, writes } = harness();
+  const commands = controller.captureCommands();
+  const opened: string[] = [];
+
+  assert.equal(commands.open(persistedCalendarNotification, (intent) => opened.push(intent.notificationId)), true);
+  assert.equal(commands.open(persistedTrainingCycleNotification, (intent) => opened.push(intent.notificationId)), true);
+  assert.deepEqual(opened, [persistedCalendarNotification.id, persistedTrainingCycleNotification.id]);
+  assert.equal(writes.length, 0);
+  assert.deepEqual(controller.getSeenRecords(), []);
+});
+
+test("kind persistido con prefijo incorrecto no evade persistencia local", () => {
+  const { controller, writes } = harness();
+  const commands = controller.captureCommands();
+  const malformed: AppNotification = {
+    ...persistedTrainingCycleNotification,
+    id: "notice-with-wrong-prefix",
+    dedupeKey: "notice-with-wrong-prefix",
+  };
+
+  assert.equal(commands.open(malformed, () => undefined), true);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(controller.getSeenRecords().map((record) => record.id), [malformed.id]);
 });

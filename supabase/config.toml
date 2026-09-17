@@ -9,3 +9,8 @@ verify_jwt = true
 
 [functions.send-calendar-reminders]
 verify_jwt = false
+
+# Deployment metadata only. QA must configure the scheduler bearer secret, the
+# distinct Vault-backed RPC capability, and the cron invocation manually.
+[functions.process-training-cycle-lifecycle]
+verify_jwt = false

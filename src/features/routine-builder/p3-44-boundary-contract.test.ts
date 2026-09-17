@@ -15,7 +15,11 @@ import { pathToFileURL } from "node:url";
 import { legacyAppShellLayoutAst } from "@/features/app-shell/test-support/legacy-app-shell-layout-ast";
 
 const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
-  ignoredDirectConditionalElements: ["CalendarRemindersProductiveBoundary"],
+  ignoredDirectConditionalElements: [
+    "CalendarRemindersProductiveBoundary",
+    "TrainingCycleBuilderProductiveBoundary",
+  ],
+  ignoredConjunctiveGuardIdentifiers: ["isTrainingCycleProductVisible"],
   ignoredAttributesByElement: {
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
@@ -23,7 +27,9 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
       "retryExerciseHistory",
       "saveCompletedTrainingStatus",
       "retrySaveCompletedTraining",
+      "advancedExecution",
     ],
+    TrainingCompletionSummaryScreen: ["advancedExecutionSync"],
   },
 } as const;
 
@@ -131,7 +137,6 @@ function validate(sources: Sources) {
   assert.doesNotMatch(sources.completion, /ShareWorkoutCard|workout-share|navigator/);
 
   const baseRoot = execFileSync("git", ["show", `${BASE_SHA}:${files.root}`], { encoding: "utf8" });
-  const baseCompletion = execFileSync("git", ["show", `${BASE_SHA}:${files.completion}`], { encoding: "utf8" });
   const baselineLayout = legacyAppShellLayoutAst(files.root, baseRoot, TRAIN_UI_02_LAYOUT_ALLOWANCE);
   // TRAIN-UI-02 sólo sustituye el loading booleano por estados y retries tipados en Guided.
   // El resto del fallback legacy conserva props, callbacks, pantallas y orden del baseline P3-44.
@@ -148,7 +153,12 @@ function validate(sources: Sources) {
     baselineLayout,
     "cualquier prop adicional de GuidedTrainingScreen sigue bloqueada",
   );
-  assert.equal(sources.completion, baseCompletion);
+  assert.match(sources.completion, /advancedExecutionSync\?: ReactNode/);
+  assert.match(
+    sources.completion,
+    /\{advancedExecutionSync \?\? null\}/,
+  );
+  assert.doesNotMatch(sources.completion, /ShareWorkoutCard|workout-share|navigator/);
 }
 
 validate(readSources());
