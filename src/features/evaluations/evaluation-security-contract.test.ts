@@ -10,7 +10,7 @@ const handler = readFileSync("supabase/functions/send-evaluation-emails/handler.
 const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
 
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
-  "20260918000000_coach_student_evaluations.sql": "33f8ca74d5a00d66bbf868553a133fb2e6190015c6c0ac4f5d91c5d93801b32a",
+  "20260918000000_coach_student_evaluations.sql": "5e6e46bdc585fbb79d6c6b06e1b5d79193fc9861fae1e75a5be7316898b43e83",
 } as const;
 
 test("las tablas canónicas son privadas, RLS forzada y sin writes directos del cliente", () => {
@@ -38,6 +38,12 @@ test("ownership, vínculo activo, snapshots, vencimiento e idempotencia se resue
   assert.match(migration, /evaluation_recipient_not_linked/);
   assert.match(migration, /case when response\.state = 'completed' then response\.answers else '\{\}'::jsonb end/);
   assert.match(migration, /assignment\.student_user_id = v_student[\s\S]*episode\.ended_at is null for update of assignment/);
+});
+
+test("la validación de respuestas obligatorias conserva condiciones PL/pgSQL cerradas", () => {
+  assert.match(migration, /v_answer is null or jsonb_typeof\(v_answer\) <> 'string'[\s\S]*\)\) then raise exception 'evaluation_required_answers_missing'/);
+  assert.match(migration, /v_answer is null or jsonb_typeof\(v_answer->'rows'\) <> 'array'[\s\S]*\)\) then raise exception 'evaluation_required_answers_missing'/);
+  assert.doesNotMatch(migration, /pg_catalog\.coalesce/);
 });
 
 test("notificaciones y correo permanecen aislados de vinculación y sin secretos privilegiados", () => {

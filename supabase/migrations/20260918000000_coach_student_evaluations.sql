@@ -329,7 +329,7 @@ begin
       end if;
       v_values := '{}'::jsonb;
       for v_column in select value from jsonb_array_elements(v_question->'columns') loop
-        v_value := pg_catalog.coalesce(v_row->'values'->>(v_column->>'id'), '');
+        v_value := coalesce(v_row->'values'->>(v_column->>'id'), '');
         if char_length(v_value) > 1000 then
           raise exception 'evaluation_invalid_answers' using errcode = '22023';
         end if;
@@ -353,14 +353,14 @@ begin
       v_answer := p_answers->(v_question->>'id');
       if (v_question->>'mode' = 'text' and (
           v_answer is null or jsonb_typeof(v_answer) <> 'string' or btrim(v_answer #>> '{}') = ''
-        ) then raise exception 'evaluation_required_answers_missing' using errcode = '22023'; end if;
+        )) then raise exception 'evaluation_required_answers_missing' using errcode = '22023'; end if;
       if (v_question->>'mode' = 'table' and (
           v_answer is null or jsonb_typeof(v_answer->'rows') <> 'array'
           or jsonb_array_length(v_answer->'rows') = 0
-        ) then raise exception 'evaluation_required_answers_missing' using errcode = '22023'; end if;
+        )) then raise exception 'evaluation_required_answers_missing' using errcode = '22023'; end if;
     end if;
   end loop;
-  if (p_snapshot->>'sensitive')::boolean and not pg_catalog.coalesce(p_consent, false) then
+  if (p_snapshot->>'sensitive')::boolean and not coalesce(p_consent, false) then
     raise exception 'evaluation_consent_required' using errcode = '22023';
   end if;
 end;
@@ -454,7 +454,7 @@ create function public.list_own_evaluation_templates()
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare v_owner uuid := private.lock_coach_invitation_owner();
 begin
-  return pg_catalog.coalesce((select jsonb_agg(jsonb_build_object(
+  return coalesce((select jsonb_agg(jsonb_build_object(
     'id', template.id, 'name', template.name, 'questions', template.questions,
     'createdAt', template.created_at, 'updatedAt', template.updated_at
   ) order by template.created_at desc, template.id desc)
@@ -527,7 +527,7 @@ create function public.list_own_evaluation_students()
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare v_owner uuid := private.lock_coach_invitation_owner();
 begin
-  return pg_catalog.coalesce((select jsonb_agg(jsonb_build_object(
+  return coalesce((select jsonb_agg(jsonb_build_object(
     'episodeId', episode.id, 'name', episode.student_name_snapshot, 'email', episode.student_email_snapshot
   ) order by episode.student_name_snapshot, episode.id)
   from private.coach_relationship_episodes episode
@@ -627,7 +627,7 @@ create function public.list_own_coach_evaluation_assignments()
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare v_owner uuid := private.lock_coach_invitation_owner(); v_now timestamptz := clock_timestamp();
 begin
-  return pg_catalog.coalesce((select jsonb_agg(jsonb_build_object(
+  return coalesce((select jsonb_agg(jsonb_build_object(
     'id', assignment.id, 'sendBatchId', assignment.send_batch_id,
     'studentName', assignment.student_name_snapshot,
     'snapshot', assignment.snapshot,
@@ -637,9 +637,9 @@ begin
     'sentAt', assignment.sent_at, 'dueAt', assignment.due_at, 'completedAt', response.completed_at,
     'consentConfirmed', case when response.state = 'completed' then response.consent_confirmed else false end,
     'answers', case when response.state = 'completed' then response.answers else '{}'::jsonb end,
-    'canMutate', episode.ended_at is null and pg_catalog.coalesce(response.state, 'pending') <> 'completed',
+    'canMutate', episode.ended_at is null and coalesce(response.state, 'pending') <> 'completed',
     'canRemind', episode.ended_at is null
-      and pg_catalog.coalesce(response.state, 'pending') in ('pending', 'draft')
+      and coalesce(response.state, 'pending') in ('pending', 'draft')
       and assignment.due_at > v_now and assignment.due_at <= v_now + interval '48 hours'
       and not exists (select 1 from private.evaluation_notifications recent_reminder
         where recent_reminder.assignment_id = assignment.id
@@ -677,7 +677,7 @@ begin
   join private.coach_relationship_episodes episode on episode.id = assignment.relationship_episode_id
   left join private.evaluation_responses response on response.assignment_id = assignment.id
   where assignment.id = p_assignment_id and assignment.coach_user_id = v_owner
-    and episode.ended_at is null and pg_catalog.coalesce(response.state, 'pending') <> 'completed' for update of assignment;
+    and episode.ended_at is null and coalesce(response.state, 'pending') <> 'completed' for update of assignment;
   if not found then raise exception 'evaluation_assignment_forbidden' using errcode = '42501'; end if;
   update private.evaluation_assignments assignment
     set due_at = v_due_at, reopened_at = v_now where assignment.id = p_assignment_id;
@@ -733,7 +733,7 @@ begin
   join private.coach_relationship_episodes episode on episode.id = assignment.relationship_episode_id
   left join private.evaluation_responses response on response.assignment_id = assignment.id
   where assignment.id = p_assignment_id and assignment.coach_user_id = v_owner
-    and episode.ended_at is null and pg_catalog.coalesce(response.state, 'pending') in ('pending', 'draft')
+    and episode.ended_at is null and coalesce(response.state, 'pending') in ('pending', 'draft')
     and assignment.due_at > v_now and assignment.due_at <= v_now + interval '48 hours'
     for update of assignment;
   if not found then raise exception 'evaluation_assignment_forbidden' using errcode = '42501'; end if;
@@ -772,8 +772,8 @@ returns jsonb language sql stable security definer set search_path = '' as $$
       assignment.due_at, response.state, response.draft_updated_at, assignment.reopened_at, p_now
     ),
     'sentAt', assignment.sent_at, 'dueAt', assignment.due_at, 'completedAt', response.completed_at,
-    'consentConfirmed', pg_catalog.coalesce(response.consent_confirmed, false),
-    'answers', pg_catalog.coalesce(response.answers, '{}'::jsonb)
+    'consentConfirmed', coalesce(response.consent_confirmed, false),
+    'answers', coalesce(response.answers, '{}'::jsonb)
   ) from private.evaluation_assignments assignment
   left join private.evaluation_responses response on response.assignment_id = assignment.id
   join private.coach_relationship_episodes episode on episode.id = assignment.relationship_episode_id
@@ -786,7 +786,7 @@ create function public.list_own_student_evaluations()
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare v_student uuid := private.student_evaluation_identity(); v_now timestamptz := clock_timestamp();
 begin
-  return pg_catalog.coalesce((select jsonb_agg(private.student_evaluation_view(assignment.id, v_student, v_now)
+  return coalesce((select jsonb_agg(private.student_evaluation_view(assignment.id, v_student, v_now)
     order by assignment.sent_at desc, assignment.id desc)
     from private.evaluation_assignments assignment
     join private.coach_relationship_episodes episode on episode.id = assignment.relationship_episode_id
@@ -936,7 +936,7 @@ begin
     or cardinality(p_notification_ids) not between 1 and 100 then
     raise exception 'evaluation_notifications_forbidden' using errcode = '42501';
   end if;
-  update private.evaluation_notifications notification set read_at = pg_catalog.coalesce(notification.read_at, clock_timestamp())
+  update private.evaluation_notifications notification set read_at = coalesce(notification.read_at, clock_timestamp())
     where notification.recipient_user_id = v_user and notification.portal_scope = p_portal_scope
       and notification.id = any(p_notification_ids);
   get diagnostics v_count = row_count;
@@ -981,7 +981,7 @@ begin
         on episode.id = assignment.relationship_episode_id and episode.ended_at is null
       left join private.evaluation_responses response on response.assignment_id = assignment.id
       where assignment.due_at > v_now and assignment.due_at <= v_now + interval '48 hours'
-        and pg_catalog.coalesce(response.state, 'pending') in ('pending', 'draft')
+        and coalesce(response.state, 'pending') in ('pending', 'draft')
         and not exists (select 1 from private.evaluation_notifications existing
           where existing.assignment_id = assignment.id and existing.reminder_origin = 'automatic')
       on conflict do nothing;
