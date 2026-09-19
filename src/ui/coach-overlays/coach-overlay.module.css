@@ -24,7 +24,7 @@
 .sheet * { box-sizing: border-box; }
 .sheet[data-variant="fee"] { max-height: 80%; }
 .sheet[data-variant="detail"] { max-height: 86%; }
-.sheet[data-variant="client-add"] { inset-inline: 16px; max-width: 398px; max-height: 88%; }
+.sheet[data-variant="client-add"] { width: min(100%, 430px); max-height: 88%; }
 .sheet[data-variant="client-detail"] { max-height: 88%; }
 .layer[data-variant="dates"] { z-index: 30; }
 .layer[data-variant="client-confirm"] { z-index: 30; }

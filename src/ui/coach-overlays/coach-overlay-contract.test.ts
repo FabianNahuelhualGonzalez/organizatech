@@ -18,7 +18,7 @@ test("shared Coach wrapper owns visuals and background leases, not a second focu
 
 test("client variants preserve dashboard variants with red centered confirmation and independent stacking", () => {
   const css = readFileSync(`${directory}coach-overlay.module.css`, "utf8");
-  assert.match(css, /data-variant="client-add".*inset-inline: 16px; max-width: 398px; max-height: 88%/);
+  assert.match(css, /data-variant="client-add".*width: min\(100%, 430px\); max-height: 88%/);
   assert.match(css, /data-variant="client-detail".*max-height: 88%/);
   assert.match(css, /data-variant="client-confirm".*z-index: 30/);
   assert.match(css, /data-variant="client-confirm".*border-color: rgba\(248, 113, 113, \.3\)/);
