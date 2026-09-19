@@ -18,11 +18,12 @@ export const COACH_PORTAL_MENU_ITEMS = [
   { id: "edit-cycle", label: "Modificar ciclo de entrenamiento", availability: "disabled" },
   { id: "cycle-history", label: "Historial ciclo de entrenamiento", availability: "disabled" },
   { id: "calendar", label: "Calendario", availability: "enabled" },
+  { id: "evaluations", label: "Evaluaciones", availability: "enabled" },
   { id: "messages", label: "Mensajes", availability: "disabled" },
   { id: "logout", label: "Cerrar sesión", availability: "action" },
 ] as const;
 
-export type CoachPortalScreen = "home" | "profile";
+export type CoachPortalScreen = "home" | "profile" | "evaluations";
 
 export interface CoachPortalState {
   readonly screen: CoachPortalScreen;
@@ -33,6 +34,7 @@ export type CoachPortalAction =
   | { type: "menu_opened" }
   | { type: "menu_closed" }
   | { type: "profile_opened" }
+  | { type: "evaluations_opened" }
   | { type: "home_opened" }
   | { type: "reset" };
 
@@ -68,6 +70,8 @@ export function reduceCoachPortalState(
       return state.isMenuOpen ? { ...state, isMenuOpen: false } : state;
     case "profile_opened":
       return { screen: "profile", isMenuOpen: false };
+    case "evaluations_opened":
+      return { screen: "evaluations", isMenuOpen: false };
     case "home_opened":
     case "reset":
       return createInitialCoachPortalState();

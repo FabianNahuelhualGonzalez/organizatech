@@ -82,6 +82,7 @@ test("Panel principal queda habilitado y el resto del menú conserva su cierre",
     "Modificar ciclo de entrenamiento",
     "Historial ciclo de entrenamiento",
     "Calendario",
+    "Evaluaciones",
     "Mensajes",
     "Cerrar sesión",
   ]);
@@ -93,6 +94,7 @@ test("Panel principal queda habilitado y el resto del menú conserva su cierre",
     "disabled",
     "disabled",
     "enabled",
+    "enabled",
     "disabled",
     "action",
   ]);
@@ -101,6 +103,10 @@ test("Panel principal queda habilitado y el resto del menú conserva su cierre",
   assert.deepEqual(menuState, { screen: "home", isMenuOpen: true });
   assert.deepEqual(reduceCoachPortalState(menuState, { type: "profile_opened" }), {
     screen: "profile",
+    isMenuOpen: false,
+  });
+  assert.deepEqual(reduceCoachPortalState(menuState, { type: "evaluations_opened" }), {
+    screen: "evaluations",
     isMenuOpen: false,
   });
   assert.deepEqual(reduceCoachPortalState(menuState, { type: "reset" }), {

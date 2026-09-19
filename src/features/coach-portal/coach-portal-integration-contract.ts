@@ -68,6 +68,8 @@ const STUDENT_COACH_LINK_ACCEPTANCE_MIGRATION_PATH =
   "supabase/migrations/20260917000000_student_coach_link_acceptance.sql";
 const COACH_INVITATION_CODE_DELIVERY_MIGRATION_PATH =
   "supabase/migrations/20260917120000_coach_invitation_code_delivery.sql";
+const COACH_STUDENT_EVALUATIONS_MIGRATION_PATH =
+  "supabase/migrations/20260918000000_coach_student_evaluations.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -329,6 +331,7 @@ function auditExactCopyAndMenu(sources: Sources) {
       "Modificar ciclo de entrenamiento",
       "Historial ciclo de entrenamiento",
       "Calendario",
+      "Evaluaciones",
       "Mensajes",
       "Cerrar sesión",
     ]),
@@ -350,7 +353,7 @@ function auditClosedCoachNavigation(sources: Sources) {
   );
 
   assertContract(
-    /export type CoachPortalScreen\s*=\s*"home"\s*\|\s*"profile"\s*;/.test(sources.model)
+    /export type CoachPortalScreen\s*=\s*"home"\s*\|\s*"profile"\s*\|\s*"evaluations"\s*;/.test(sources.model)
     && !/screen:\s*"(?:dashboard|training|comparison|calendar|messages|cycle)/.test(sources.model),
     FAILURE.futureScreen,
   );
@@ -568,6 +571,7 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== COACH_INVITATION_GENERATION_MIGRATION_PATH
         && path !== STUDENT_COACH_LINK_ACCEPTANCE_MIGRATION_PATH
         && path !== COACH_INVITATION_CODE_DELIVERY_MIGRATION_PATH
+        && path !== COACH_STUDENT_EVALUATIONS_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
@@ -765,8 +769,8 @@ const mutations = [
     expectedFailure: FAILURE.futureScreen,
     apply: (value: string) => replaceExactlyOnce(
       value,
-      'export type CoachPortalScreen = "home" | "profile";',
-      'export type CoachPortalScreen = "home" | "profile" | "dashboard";',
+      'export type CoachPortalScreen = "home" | "profile" | "evaluations";',
+      'export type CoachPortalScreen = "home" | "profile" | "evaluations" | "dashboard";',
       "M10",
     ),
   },

@@ -100,7 +100,9 @@ export async function invokeEmailRpc(input: {
     | "complete_own_coach_link_email"
     | "claim_own_coach_invitation_emails"
     | "complete_own_coach_invitation_email"
-    | "own_coach_invitation_email_delivery_complete";
+    | "own_coach_invitation_email_delivery_complete"
+    | "claim_evaluation_email_deliveries"
+    | "complete_evaluation_email_delivery";
   readonly body: Readonly<Record<string, unknown>>;
   readonly timeoutMilliseconds?: number;
   readonly fetchImpl?: typeof fetch;

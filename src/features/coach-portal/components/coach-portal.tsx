@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Bell,
   ChartNoAxesCombined,
+  ClipboardCheck,
   Dumbbell,
   History,
   LayoutDashboard,
@@ -27,6 +28,7 @@ import {
   type CoachPortalSession,
 } from "@/features/coach-portal/model/coach-portal";
 import { CalendarRemindersProductiveBoundary } from "@/features/calendar-reminders";
+import { CoachEvaluations } from "@/features/evaluations/components/coach-evaluations";
 import { AppBackButton } from "@/ui/navigation/app-back-button";
 import {
   OVERLAY_INITIAL_FOCUS_ATTRIBUTE,
@@ -46,6 +48,7 @@ const coachMenuIcons: Record<(typeof COACH_PORTAL_MENU_ITEMS)[number]["id"], Luc
   "edit-cycle": Settings2,
   "cycle-history": History,
   calendar: CalendarDays,
+  evaluations: ClipboardCheck,
   messages: MessagesSquare,
   logout: LogOut,
 };
@@ -77,6 +80,14 @@ export interface CoachPortalBoundaryProps {
     episodeId: string;
     sequence: number;
   }) => void;
+  evaluationOpenRequest: {
+    ownerUserId: string;
+    sequence: number;
+  } | null;
+  onEvaluationOpenRequestConsumed: (request: {
+    ownerUserId: string;
+    sequence: number;
+  }) => void;
   onLogout: () => void | Promise<void>;
 }
 
@@ -93,6 +104,8 @@ export function CoachPortalBoundary({
   onCalendarOpenRequestConsumed,
   clientOpenRequest,
   onClientOpenRequestConsumed,
+  evaluationOpenRequest,
+  onEvaluationOpenRequestConsumed,
   onLogout,
 }: CoachPortalBoundaryProps) {
   const [state, dispatch] = useReducer(
@@ -117,6 +130,13 @@ export function CoachPortalBoundary({
     dispatch({ type: "home_opened" });
     setIsCalendarOpen(false);
   }, [clientOpenRequest, session.userId]);
+
+  useEffect(() => {
+    if (evaluationOpenRequest?.ownerUserId !== session.userId) return;
+    setIsCalendarOpen(false);
+    dispatch({ type: "evaluations_opened" });
+    onEvaluationOpenRequestConsumed(evaluationOpenRequest);
+  }, [evaluationOpenRequest, onEvaluationOpenRequestConsumed, session.userId]);
 
   function handleLogout() {
     dispatch({ type: "reset" });
@@ -183,6 +203,10 @@ export function CoachPortalBoundary({
           dispatch({ type: "menu_closed" });
           setIsCalendarOpen(true);
         }}
+        onOpenEvaluations={() => {
+          setIsCalendarOpen(false);
+          dispatch({ type: "evaluations_opened" });
+        }}
         onLogout={handleLogout}
       />
 
@@ -200,6 +224,11 @@ export function CoachPortalBoundary({
           onOpenCalendar={() => setIsCalendarOpen(true)}
           clientOpenRequest={clientOpenRequest}
           onClientOpenRequestConsumed={onClientOpenRequestConsumed}
+        />
+      ) : state.screen === "evaluations" ? (
+        <CoachEvaluations
+          expectedUserId={session.userId}
+          onBack={() => dispatch({ type: "home_opened" })}
         />
       ) : (
         <CoachPortalProfile
@@ -296,10 +325,11 @@ function CoachPortalNavigationDrawer({
   onOpenProfile,
   onOpenDashboard,
   onOpenCalendar,
+  onOpenEvaluations,
   onLogout,
 }: {
   isOpen: boolean;
-  activeScreen: "home" | "profile";
+  activeScreen: "home" | "profile" | "evaluations";
   isCalendarOpen: boolean;
   fullName: string;
   professionalTitle: string;
@@ -309,6 +339,7 @@ function CoachPortalNavigationDrawer({
   onOpenProfile: () => void;
   onOpenDashboard: () => void;
   onOpenCalendar: () => void;
+  onOpenEvaluations: () => void;
   onLogout: () => void;
 }) {
   const drawerRef = useOverlayFocusManagement<HTMLDivElement>({
@@ -409,6 +440,22 @@ function CoachPortalNavigationDrawer({
                       type="button"
                       aria-current={isCalendarOpen ? "page" : undefined}
                       onClick={onOpenCalendar}
+                    >
+                      <ItemIcon aria-hidden="true" size={19} />
+                      <span>{item.label}</span>
+                    </button>
+                  </li>
+                );
+              }
+
+              if (item.id === "evaluations") {
+                return (
+                  <li key={item.id}>
+                    <button
+                      className={styles.menuItem}
+                      type="button"
+                      aria-current={!isCalendarOpen && activeScreen === "evaluations" ? "page" : undefined}
+                      onClick={onOpenEvaluations}
                     >
                       <ItemIcon aria-hidden="true" size={19} />
                       <span>{item.label}</span>

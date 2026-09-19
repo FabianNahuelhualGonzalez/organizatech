@@ -42,6 +42,7 @@ export type UserPortalScreen = Extract<
   | "registro-entrenamiento"
   | "historial-ciclos"
   | "calendario"
+  | "evaluaciones"
 >;
 
 export const USER_PORTAL_DESTINATION_SCREENS = {
@@ -78,6 +79,7 @@ const USER_PORTAL_RENDERABLE_SCREENS: readonly Screen[] = [
   "registro-entrenamiento",
   "historial-ciclos",
   "calendario",
+  "evaluaciones",
 ];
 
 export interface UserPortalNavigationModel {

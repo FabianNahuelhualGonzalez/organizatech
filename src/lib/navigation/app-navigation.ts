@@ -11,6 +11,7 @@ export type Screen =
   | "comparacion"
   | "historial-ciclos"
   | "calendario"
+  | "evaluaciones"
   | "perfil"
   | "coach-link-confirmation"
   | "coach-link-success";
@@ -25,6 +26,7 @@ export type ActiveFlow =
   | "comparison"
   | "cycle_history"
   | "calendar"
+  | "evaluations"
   | "profile";
 
 export interface ContextualNavigationState {
@@ -81,6 +83,7 @@ const appScreens: readonly Screen[] = [
   "comparacion",
   "historial-ciclos",
   "calendario",
+  "evaluaciones",
   "perfil",
   "coach-link-confirmation",
   "coach-link-success",
@@ -96,6 +99,7 @@ const activeFlows: readonly ActiveFlow[] = [
   "comparison",
   "cycle_history",
   "calendar",
+  "evaluations",
   "profile",
 ];
 
@@ -111,6 +115,7 @@ const screenLabels: Record<Screen, string> = {
   "registro-entrenamiento": "Modificar ciclo de entrenamiento",
   "historial-ciclos": "Historial ciclo de entrenamiento",
   calendario: "Calendario",
+  evaluaciones: "Evaluaciones",
   comparacion: "Comparación semanal",
   perfil: "Mi perfil",
   "coach-link-confirmation": "Confirmar vinculación",
@@ -135,6 +140,7 @@ export function getActiveFlow(
   if (screen === "comparacion") return "comparison";
   if (screen === "historial-ciclos") return "cycle_history";
   if (screen === "calendario") return "calendar";
+  if (screen === "evaluaciones") return "evaluations";
   if (screen === "perfil" || screen === "coach-link-confirmation" || screen === "coach-link-success") return "profile";
   return "dashboard";
 }
@@ -273,11 +279,12 @@ export function resolveActiveFlowRestoration(flow: unknown): ActiveFlowRestorati
     return { kind: "screen", screen: "entrenamiento", resetTrainingStart: true };
   }
 
-  const screenByFlow: Record<"dashboard" | "comparison" | "cycle_history" | "calendar" | "profile", Screen> = {
+  const screenByFlow: Record<"dashboard" | "comparison" | "cycle_history" | "calendar" | "evaluations" | "profile", Screen> = {
     dashboard: "dashboard",
     comparison: "comparacion",
     cycle_history: "historial-ciclos",
     calendar: "calendario",
+    evaluations: "evaluaciones",
     profile: "perfil",
   };
 

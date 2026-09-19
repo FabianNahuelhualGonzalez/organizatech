@@ -19,8 +19,12 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
     "CalendarRemindersProductiveBoundary",
     "CoachLinkConfirmationScreen",
     "CoachLinkSuccessScreen",
+    "StudentEvaluations",
   ],
   ignoredAttributesByElement: {
+    DashboardScreen: [
+      "evaluationsEntry",
+    ],
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
       "latestExercisePerformanceStatus",
@@ -30,6 +34,7 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
     ],
     ProfileScreen: [
       "coachLinking",
+      "evaluationsEntry",
       "onOpenCoachLinkConfirmation",
       "onOpenCoachLinkSuccess",
     ],
@@ -141,7 +146,13 @@ function validate(sources: Sources) {
 
   const baseRoot = execFileSync("git", ["show", `${BASE_SHA}:${files.root}`], { encoding: "utf8" });
   const baseCompletion = execFileSync("git", ["show", `${BASE_SHA}:${files.completion}`], { encoding: "utf8" });
-  const baselineLayout = legacyAppShellLayoutAst(files.root, baseRoot, TRAIN_UI_02_LAYOUT_ALLOWANCE);
+  const screenHeaderMarker = "screenHeader={canGoBackFromScreen(screen) ? <AppScreenHeader onBack={goBack} /> : null}";
+  assert.equal(baseRoot.split(screenHeaderMarker).length - 1, 1, "baseline P3-44 conserva el header esperado");
+  const evaluationAwareBaseRoot = baseRoot.replace(
+    screenHeaderMarker,
+    'screenHeader={screen !== "evaluaciones" && canGoBackFromScreen(screen) ? <AppScreenHeader onBack={goBack} /> : null}',
+  );
+  const baselineLayout = legacyAppShellLayoutAst(files.root, evaluationAwareBaseRoot, TRAIN_UI_02_LAYOUT_ALLOWANCE);
   // TRAIN-UI-02 sólo sustituye el loading booleano por estados y retries tipados en Guided.
   // El resto del fallback legacy conserva props, callbacks, pantallas y orden del baseline P3-44.
   assert.equal(

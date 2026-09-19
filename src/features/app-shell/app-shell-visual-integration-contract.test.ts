@@ -345,7 +345,7 @@ assert.match(components.drawer, /onClick={\(\) => onNavigate\(item\.id\)}/);
 
 // 9e. Back button: AppScreenHeader solo se pasa cuando canGoBackFromScreen(screen) es true — el
 //     componente en si no tiene guard interno, asi que el gating debe vivir en el root.
-assert.match(appSource, /const screenHeader = canGoBackFromScreen\(screen\)[\s\S]*?\? <AppScreenHeader onBack=\{goBack\} \/>[\s\S]*?: null;/);
+assert.match(appSource, /const screenHeader = screen !== "evaluaciones" && canGoBackFromScreen\(screen\)[\s\S]*?\? <AppScreenHeader onBack=\{goBack\} \/>[\s\S]*?: null;/);
 assert.match(appSource, /screenHeader=\{screenHeader\}/);
 assert.doesNotMatch(components.screenHeader, /screen !== "dashboard"|canGoBackFromScreen/, "AppScreenHeader no debe reimplementar el gating, lo recibe del root");
 
@@ -401,6 +401,7 @@ interface CanonicalBackAuditSources {
   screenHeader: string;
   authScreen: string;
   coachLinkScreens: string;
+  evaluationComponents: string;
   otherProductComponents: string;
 }
 
@@ -625,6 +626,16 @@ function assertCanonicalBackAuditContracts(sources: CanonicalBackAuditSources) {
     1,
     "el éxito de Coaching conserva la única acción secundaria aprobada por Producto",
   );
+  assertNoDivergentBackVisuals(
+    "src/features/evaluations/components",
+    sources.evaluationComponents,
+    new Set([
+      "Volver",
+      "Volver a mis evaluaciones",
+      "Volver a mis plantillas",
+      "Volver al estado de envío",
+    ]),
+  );
   assertNoDivergentBackVisuals("resto de superficies productivas", sources.otherProductComponents);
 
   assert.match(sources.appBackButton, /aria-label="Volver"/);
@@ -632,7 +643,7 @@ function assertCanonicalBackAuditContracts(sources: CanonicalBackAuditSources) {
   assert.equal((sources.appBackButton.match(/<path\b/g) ?? []).length, 4);
   assert.doesNotMatch(sources.appBackButton, /history\.back|dangerouslySetInnerHTML|ChevronLeft/);
   assert.equal(
-    ([sources.appBackButton, sources.screenHeader, sources.authScreen, sources.coachLinkScreens, sources.otherProductComponents]
+    ([sources.appBackButton, sources.screenHeader, sources.authScreen, sources.coachLinkScreens, sources.evaluationComponents, sources.otherProductComponents]
       .join("\n")
       .match(/d="M5 12h6m3 0h1\.5m3 0h\.5"/g) ?? []).length,
     1,
@@ -667,13 +678,17 @@ const canonicalBackAuditSources: CanonicalBackAuditSources = {
   screenHeader: components.screenHeader,
   authScreen: authScreenSource,
   coachLinkScreens: readSource("src/features/coach-linking/components/coach-linking-screens.tsx"),
+  evaluationComponents: productTsxFiles
+    .filter((file) => file.path.startsWith("src/features/evaluations/components/"))
+    .map((file) => file.source)
+    .join("\n"),
   otherProductComponents: productTsxFiles
     .filter((file) => ![
       "src/features/app-shell/components/app-screen-header.tsx",
       "src/features/auth/components/auth-screen.tsx",
       "src/features/coach-linking/components/coach-linking-screens.tsx",
       "src/ui/navigation/app-back-button.tsx",
-    ].includes(file.path))
+    ].includes(file.path) && !file.path.startsWith("src/features/evaluations/components/"))
     .map((file) => file.source)
     .join("\n"),
 };

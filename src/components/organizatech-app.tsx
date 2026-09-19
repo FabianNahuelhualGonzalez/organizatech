@@ -106,6 +106,8 @@ import {
 } from "@/features/coach-portal/model/coach-portal";
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
+import { StudentEvaluations, StudentEvaluationsEntry } from "@/features/evaluations/components/student-evaluations";
+import { useEvaluationNotifications } from "@/features/evaluations/hooks/use-evaluation-notifications";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
 import { useNotificationsController } from "@/features/notifications/hooks/useNotificationsController";
 import { usePersistedCalendarNotifications } from "@/features/notifications/hooks/usePersistedCalendarNotifications";
@@ -509,6 +511,10 @@ export function OrganizatechApp({
   const [coachClientOpenRequest, setCoachClientOpenRequest] = useState<{
     ownerUserId: string;
     episodeId: string;
+    sequence: number;
+  } | null>(null);
+  const [coachEvaluationOpenRequest, setCoachEvaluationOpenRequest] = useState<{
+    ownerUserId: string;
     sequence: number;
   } | null>(null);
   const coachPortalSessionRef = useRef<CoachPortalSession | null>(null);
@@ -1655,14 +1661,20 @@ export function OrganizatechApp({
     supabaseUser?.id ?? null,
     coachPortalSession ? "coach" : "usuario",
   );
+  const persistedEvaluationNotifications = useEvaluationNotifications(
+    supabaseUser?.id ?? null,
+    coachPortalSession ? "coach" : "usuario",
+  );
   const persistedNotifications = useMemo(() => [
     ...persistedCalendarNotifications.notifications,
     ...persistedCoachLinkNotifications.notifications,
-  ], [persistedCalendarNotifications.notifications, persistedCoachLinkNotifications.notifications]);
+    ...persistedEvaluationNotifications.notifications,
+  ], [persistedCalendarNotifications.notifications, persistedCoachLinkNotifications.notifications, persistedEvaluationNotifications.notifications]);
   const persistedSeenRecords = useMemo(() => [
     ...persistedCalendarNotifications.seenRecords,
     ...persistedCoachLinkNotifications.seenRecords,
-  ], [persistedCalendarNotifications.seenRecords, persistedCoachLinkNotifications.seenRecords]);
+    ...persistedEvaluationNotifications.seenRecords,
+  ], [persistedCalendarNotifications.seenRecords, persistedCoachLinkNotifications.seenRecords, persistedEvaluationNotifications.seenRecords]);
   const notificationsBoundary = useNotificationsController({
     identity: trainingDataIdentityPort,
     scope: activeFeatureStorageScope,
@@ -4521,6 +4533,14 @@ export function OrganizatechApp({
               : current
           ));
         }}
+        evaluationOpenRequest={coachEvaluationOpenRequest}
+        onEvaluationOpenRequestConsumed={(request) => {
+          setCoachEvaluationOpenRequest((current) => (
+            current?.ownerUserId === request.ownerUserId && current.sequence === request.sequence
+              ? null
+              : current
+          ));
+        }}
         onLogout={handleLogout}
       />
     );
@@ -4589,6 +4609,7 @@ export function OrganizatechApp({
     if (!isNotificationPanelOpen) {
       void persistedCalendarNotifications.reload();
       void persistedCoachLinkNotifications.reload();
+      void persistedEvaluationNotifications.reload();
     }
     appShell.toggleNotifications();
   }
@@ -4599,6 +4620,9 @@ export function OrganizatechApp({
     }
     if (intent.notificationId.startsWith("coach-link:")) {
       void persistedCoachLinkNotifications.markRead(intent.notificationId);
+    }
+    if (intent.notificationId.startsWith("evaluation:")) {
+      void persistedEvaluationNotifications.markRead(intent.notificationId);
     }
     if (coachPortalSessionRef.current && intent.target === "calendario") {
       const ownerUserId = coachPortalSessionRef.current.userId;
@@ -4620,6 +4644,15 @@ export function OrganizatechApp({
       setCoachClientOpenRequest((current) => ({
         ownerUserId,
         episodeId: intent.referenceId!,
+        sequence: current?.ownerUserId === ownerUserId ? current.sequence + 1 : 1,
+      }));
+      return;
+    }
+    if (coachPortalSessionRef.current && intent.target === "evaluaciones") {
+      const ownerUserId = coachPortalSessionRef.current.userId;
+      appShell.closeNotifications();
+      setCoachEvaluationOpenRequest((current) => ({
+        ownerUserId,
         sequence: current?.ownerUserId === ownerUserId ? current.sequence + 1 : 1,
       }));
       return;
@@ -4688,7 +4721,7 @@ export function OrganizatechApp({
     });
   }
 
-  const screenHeader = canGoBackFromScreen(screen)
+  const screenHeader = screen !== "evaluaciones" && canGoBackFromScreen(screen)
     ? <AppScreenHeader onBack={goBack} />
     : null;
   const portalScreenContent = (
@@ -4717,6 +4750,9 @@ export function OrganizatechApp({
               navigateTo("comparacion");
             }}
             switchDay={setDashboardDayOverride}
+            evaluationsEntry={supabaseUser?.id ? (
+              <StudentEvaluationsEntry expectedUserId={supabaseUser.id} location="home" onOpen={() => navigateTo("evaluaciones")} />
+            ) : null}
           />
         )
       )}
@@ -4862,6 +4898,9 @@ export function OrganizatechApp({
           coachLinking={coachLinking}
           onOpenCoachLinkConfirmation={() => navigateTo("coach-link-confirmation")}
           onOpenCoachLinkSuccess={() => navigateTo("coach-link-success")}
+          evaluationsEntry={supabaseUser?.id ? (
+            <StudentEvaluationsEntry expectedUserId={supabaseUser.id} location="profile" onOpen={() => navigateTo("evaluaciones")} />
+          ) : null}
         />
       )}
       {screen === "coach-link-confirmation" && (
@@ -4886,6 +4925,9 @@ export function OrganizatechApp({
           onBack={goBack}
           showBackButton={false}
         />
+      )}
+      {screen === "evaluaciones" && supabaseUser?.id && (
+        <StudentEvaluations expectedUserId={supabaseUser.id} onBack={goBack} />
       )}
       {isNewCycleConfirmOpen && (
         <ConfirmNewCycleModal

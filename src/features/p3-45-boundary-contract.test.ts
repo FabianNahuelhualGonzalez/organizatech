@@ -21,8 +21,12 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
     "CalendarRemindersProductiveBoundary",
     "CoachLinkConfirmationScreen",
     "CoachLinkSuccessScreen",
+    "StudentEvaluations",
   ],
   ignoredAttributesByElement: {
+    DashboardScreen: [
+      "evaluationsEntry",
+    ],
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
       "latestExercisePerformanceStatus",
@@ -32,6 +36,7 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
     ],
     ProfileScreen: [
       "coachLinking",
+      "evaluationsEntry",
       "onOpenCoachLinkConfirmation",
       "onOpenCoachLinkSuccess",
     ],
@@ -347,7 +352,13 @@ const sources = readSources();
 validate(sources);
 
 const baselineRoot = execFileSync("git", ["show", `${BASE_SHA}:${files.root}`], { encoding: "utf8" });
-const baselineLayout = legacyAppShellLayoutAst(files.root, baselineRoot, TRAIN_UI_02_LAYOUT_ALLOWANCE);
+const evaluationAwareBaselineRoot = replaceExactlyOnce(
+  baselineRoot,
+  "screenHeader={canGoBackFromScreen(screen) ? <AppScreenHeader onBack={goBack} /> : null}",
+  'screenHeader={screen !== "evaluaciones" && canGoBackFromScreen(screen) ? <AppScreenHeader onBack={goBack} /> : null}',
+  "Evaluaciones usa su back interno para navegar lista/formulario sin duplicarlo",
+);
+const baselineLayout = legacyAppShellLayoutAst(files.root, evaluationAwareBaselineRoot, TRAIN_UI_02_LAYOUT_ALLOWANCE);
 // TRAIN-UI-02 sólo sustituye el loading booleano por estados y retries tipados en Guided.
 // El resto del fallback legacy conserva props, callbacks, pantallas y orden del baseline P3-45.
 assert.equal(
