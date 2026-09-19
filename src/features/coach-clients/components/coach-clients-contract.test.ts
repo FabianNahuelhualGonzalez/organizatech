@@ -107,5 +107,5 @@ test("add instructions preserve distinct blue, amber and green steps, supplied c
   for (const file of ["coach-add-client-sheet.tsx", "coach-client-invite-email-step.tsx", "coach-client-invite-receipt-step.tsx", "coach-client-code-button.tsx"]) {
     assert.doesNotMatch(read(file), /navigator\.|window\.|clipboard|new RegExp|setState|useState|addEventListener|onKeyDown|querySelector/, file);
   }
-  assert.match(read("coach-add-client-sheet.tsx"), /<CoachOverlay variant="client-detail"/);
+  assert.match(read("coach-add-client-sheet.tsx"), /<CoachOverlay variant="client-add"/);
 });

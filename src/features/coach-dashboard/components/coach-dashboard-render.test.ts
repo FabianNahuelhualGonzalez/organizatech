@@ -253,11 +253,12 @@ test("renewal callbacks use stable row IDs and unavailable actions are inert", (
 
 test("unknown renewal distribution draws no invented segments and retains unavailable money", () => {
   const { markup } = capture(CoachRenewalsCard, { view: {
-    ...dashboard().renewals, atStake: unknown, stack: null, rows: [], retentionLabel: null,
+    ...dashboard().renewals, atStake: metric(null, "—"), stack: null, rows: [],
+    emptyLabel: "Aún no hay datos de renovaciones.", retentionLabel: null,
   } });
-  assert.match(markup, /Sin información/);
-  assert.match(markup, /Sin renovaciones en este período/);
-  assert.doesNotMatch(markup, /role="img"|class="segment"|\$0/);
+  assert.match(markup, /data-known="false">—</);
+  assert.match(markup, /Aún no hay datos de renovaciones\./);
+  assert.doesNotMatch(markup, /Sin información|en juego|role="img"|class="segment"|\$0/);
 });
 
 test("the composed alert footer forwards only the explicit alert portfolio intent", () => {

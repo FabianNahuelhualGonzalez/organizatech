@@ -20,7 +20,7 @@ export function CoachAddClientSheet({ view, actions, backgroundRef, restoreFocus
     && Boolean(actions.onSubmit);
   const canOpenPending = view.isOpen && !view.isBusy && receipt?.canOpenPending === true && Boolean(actions.onOpenPendingClients);
   const canCancel = view.isOpen && !view.isBusy && Boolean(actions.onCancel);
-  return <CoachOverlay variant="client-detail" isOpen={view.isOpen} isBusy={view.isBusy} titleId={`${id}-title`}
+  return <CoachOverlay variant="client-add" isOpen={view.isOpen} isBusy={view.isBusy} titleId={`${id}-title`}
     backgroundRef={backgroundRef} restoreFocusRef={restoreFocusRef} onCancel={actions.onCancel}
     footer={<>
       {receipt ? <button className={shared.primary} type="button" disabled={!canOpenPending}
@@ -43,7 +43,7 @@ export function CoachAddClientSheet({ view, actions, backgroundRef, restoreFocus
     <div className={styles.body}>
       {receipt ? <CoachClientInviteReceiptStep view={receipt} isBusy={view.isBusy} onCopy={actions.onCopyCode} onShare={actions.onShareCode} />
         : <CoachClientInviteEmailStep view={view.draft} isBusy={view.isBusy} formId={`${id}-form`} inputId={`${id}-email`} hintId={`${id}-hint`}
-          canSubmit={canSubmit} onChange={view.draft.action === "submit" ? actions.onEmailChange : undefined} onSubmit={actions.onSubmit} />}
+          canSubmit={canSubmit} onChange={view.draft.canEdit ? actions.onEmailChange : undefined} onSubmit={actions.onSubmit} />}
       {view.message ? <StatusMessage className={shared.message} tone={view.message.tone}>{view.message.label}</StatusMessage> : null}
     </div>
   </CoachOverlay>;

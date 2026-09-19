@@ -40,7 +40,7 @@ function elements(node: ReactNode): ReactElement<Props>[] {
 const controls = (node: ReactNode) => elements(node).filter((element) => element.type === "button");
 const focus = { backgroundRef: { current: null }, restoreFocusRef: { current: null } };
 function draft(): CoachClientInviteDraftView {
-  return { emailRaw: "draft@example.test", validation: { tone: "ok", errorLabel: null }, canSubmit: true, action: "submit",
+  return { emailRaw: "draft@example.test", canEdit: true, validation: { tone: "ok", errorLabel: null }, canSubmit: true, action: "submit",
     submitLabel: "Enviar solicitud", busyLabel: "Enviando…",
     hint: "Ayuda del envío aprobada", steps: [{ id: "send", label: "Paso de envío aprobado" }, { id: "accept", label: "Paso de aceptación aprobado" }, { id: "manage", label: "Paso posterior aprobado" }] };
 }
@@ -85,6 +85,19 @@ test("raw email changes are delegated exactly and do not mutate the controlled d
   assert.deepEqual(calls, ["  NEW@Example.test "]); assert.equal(view.draft.emailRaw, "draft@example.test");
 });
 
+test("empty and invalid drafts remain editable for immediate typing and native paste", () => {
+  for (const emailRaw of ["", "a"]) {
+    const view = { ...emailView(), draft: { ...draft(), emailRaw, action: null,
+      validation: { tone: "neutral" as const, errorLabel: null }, canSubmit: false } };
+    const { tree } = render(view, { onEmailChange: () => {} });
+    const input = elements(tree).find((element) => element.type === "input")!;
+    assert.equal(input.props.disabled, false);
+    assert.equal(input.props.readOnly, undefined);
+    assert.equal(input.props["data-modal-initial-focus"], "");
+    assert.equal(typeof input.props.onChange, "function");
+  }
+});
+
 test("neutral validation does not show a red error at the first letter or run its own email validator", () => {
   const view = { ...emailView(), draft: { ...draft(), emailRaw: "a", validation: { tone: "neutral" as const, errorLabel: "NOT_VISIBLE_YET" } } };
   const { markup, tree } = render(view, { onEmailChange: () => {}, onSubmit: () => assert.fail("not eligible") });
@@ -116,7 +129,7 @@ test("submit prevents navigation and only emits intent, never switching the view
 
 test("submit and busy labels are controlled for explicit retry or reconciliation", () => {
   const retry = { ...emailView(), draft: { ...draft(), action: "retry" as const, emailRaw: "frozen@example.test",
-    validation: { tone: "neutral" as const, errorLabel: null }, submitLabel: "Reintentar solicitud" } };
+    canEdit: false, validation: { tone: "neutral" as const, errorLabel: null }, submitLabel: "Reintentar solicitud" } };
   const retryRendered = render(retry, { onEmailChange: () => assert.fail("frozen"), onSubmit: () => {} });
   assert.match(retryRendered.markup, /Reintentar solicitud/);
   assert.equal(elements(retryRendered.tree).find((element) => element.type === "input")?.props.disabled, true);
@@ -232,6 +245,7 @@ test("X and scrim only emit cancel in either step, never creating or changing an
     const { tree } = render(view, actions);
     controls(tree).find((button) => button.props["aria-label"] === "Cerrar")?.props.onClick?.(); assert.equal(cancelled, 1);
     const overlay = elements(tree).find((element) => element.type === CoachOverlay)!;
+    assert.equal(overlay.props.variant, "client-add");
     assert.equal(overlay.props.backgroundRef, focus.backgroundRef); assert.equal(overlay.props.restoreFocusRef, focus.restoreFocusRef);
     const expanded = capture(CoachOverlay, overlay.props as unknown as Parameters<typeof CoachOverlay>[0]);
     controls(expanded.tree).find((button) => button.props.className === "scrim")?.props.onClick?.(); assert.equal(cancelled, 2);

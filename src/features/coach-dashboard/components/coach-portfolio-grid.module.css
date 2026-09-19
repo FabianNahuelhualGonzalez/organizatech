@@ -8,6 +8,7 @@
 .cardHead { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
 .label { min-width: 0; color: rgba(255, 255, 255, .55); font-size: 9.5px; font-weight: 700; letter-spacing: .03em; overflow-wrap: anywhere; }
 .value { display: block; font-size: 24px; line-height: 1.15; font-weight: 700; }
+.value[data-known="false"] { font-size: 19px; overflow-wrap: normal; word-break: normal; hyphens: none; }
 .card[data-state="alert"] .value { color: #fbbf24; }
 .card[data-state="inactive"] .value { color: rgba(255, 255, 255, .55); }
 .note { display: block; margin-top: 4px; color: rgba(255, 255, 255, .55); font-size: 9.5px; line-height: 1.35; }
