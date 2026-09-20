@@ -179,6 +179,22 @@ test("SIGNED_IN, INITIAL_SESSION y TOKEN_REFRESHED de la misma identidad conserv
   }
 });
 
+test("foreground A→A conserva el shell autorizado sin loading ni navegación nueva", () => {
+  const proof = createUserPortalAuthorizationProof({
+    access: USER_ACCESS,
+    sessionUserId: USER_ID,
+    authenticatedUserId: USER_ID,
+  });
+  assert.ok(proof);
+
+  const decision = resolveUserPortalSessionRevalidation(revalidationInput(proof, {
+    event: "TOKEN_REFRESHED",
+  }));
+  assert.equal(decision.kind, "silent_revalidation");
+  assert.equal(decision.authorizationProof, proof);
+  assert.equal(shouldMountAuthorizedUserPortal(mountInput(decision.authorizationProof)), true);
+});
+
 test("eventos redundantes y en ráfaga conservan exactamente la misma capacidad en memoria", () => {
   const proof = createUserPortalAuthorizationProof({
     access: USER_ACCESS,
@@ -323,8 +339,9 @@ test("bootstrap, identidad nueva y condiciones de seguridad fallan cerradas", ()
 
   assert.equal(failClosedCases.length, 11);
   for (const candidate of failClosedCases) {
+    const decision = resolveUserPortalSessionRevalidation(candidate.input);
     assert.equal(
-      resolveUserPortalSessionRevalidation(candidate.input),
+      decision,
       FAIL_CLOSED_USER_PORTAL_SESSION_REVALIDATION,
       candidate.name,
     );

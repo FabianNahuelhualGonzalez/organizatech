@@ -36,14 +36,16 @@ interface EvaluationClient {
     readonly error: { readonly code?: string; readonly message?: string } | null;
   }>;
   readonly functions: {
-    invoke(name: "send-evaluation-emails", options: { readonly body: Readonly<Record<string, never>> }): Promise<unknown>;
+    invoke(name: "send-evaluation-emails", options: {
+      readonly body: Readonly<Record<string, never>>;
+    }): Promise<{ readonly data: unknown; readonly error: unknown }>;
   };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class EvaluationRepositoryError extends Error {
-  constructor(readonly code: "unavailable" | "forbidden" | "invalid" | "expired" | "conflict" | "rate_limited") {
+  constructor(readonly code: "unavailable" | "forbidden" | "invalid" | "expired" | "conflict" | "rate_limited" | "email_pending") {
     super(code);
     this.name = "EvaluationRepositoryError";
   }
@@ -245,12 +247,42 @@ async function rpc(expectedUserId: string, name: EvaluationRpcName, args: Readon
 }
 
 async function requestEmailDelivery(expectedUserId: string) {
+  const operation = await capture(expectedUserId);
+  let deliveryError: unknown = null;
   try {
-    const operation = await capture(expectedUserId);
-    await operation.client.functions.invoke("send-evaluation-emails", { body: {} });
-    await operation.verify();
-  } catch {
-    // La cola SQL es durable. El worker programado reintentará sin duplicar.
+    const invocation = await operation.client.functions.invoke("send-evaluation-emails", { body: {} });
+    assertEvaluationEmailInvocationSucceeded(invocation);
+  } catch (error) {
+    deliveryError = error;
+  }
+  await operation.verify();
+  if (deliveryError) throw new EvaluationRepositoryError("email_pending");
+}
+
+export function assertEvaluationEmailInvocationSucceeded(invocation: {
+  readonly data: unknown;
+  readonly error: unknown;
+}): void {
+  if (invocation.error) throw new EvaluationRepositoryError("unavailable");
+  const payload = record(invocation.data);
+  const keys = ["claimed", "sent", "failed", "ambiguous", "completionFailed"] as const;
+  if (payload.accepted !== true || typeof payload.truncated !== "boolean" || keys.some((key) => (
+    !Number.isInteger(payload[key])
+    || Number(payload[key]) < 0
+    || Number(payload[key]) > 75
+  ))) throw new EvaluationRepositoryError("unavailable");
+
+  const claimed = Number(payload.claimed);
+  const sent = Number(payload.sent);
+  const failed = Number(payload.failed);
+  const ambiguous = Number(payload.ambiguous);
+  const completionFailed = Number(payload.completionFailed);
+  if (
+    sent + failed + ambiguous !== claimed
+    || completionFailed > ambiguous
+  ) throw new EvaluationRepositoryError("unavailable");
+  if (claimed === 0 || failed > 0 || ambiguous > 0 || payload.truncated) {
+    throw new EvaluationRepositoryError("email_pending");
   }
 }
 
@@ -299,7 +331,7 @@ export async function sendOwnEvaluationTemplate(expectedUserId: string, input: {
     p_sensitive: input.sensitive,
     p_request_id: input.requestId,
   }));
-  void requestEmailDelivery(expectedUserId);
+  await requestEmailDelivery(expectedUserId);
   return { created: Number(result.created ?? 0) };
 }
 
@@ -317,7 +349,7 @@ export async function remindOwnEvaluationAssignment(expectedUserId: string, assi
   await rpc(expectedUserId, "remind_own_evaluation_assignment", {
     p_assignment_id: assignmentId, p_request_id: requestId,
   });
-  void requestEmailDelivery(expectedUserId);
+  await requestEmailDelivery(expectedUserId);
 }
 
 export async function listOwnStudentEvaluations(expectedUserId: string) {
@@ -352,7 +384,7 @@ export async function submitOwnEvaluation(expectedUserId: string, input: {
     p_assignment_id: input.assignmentId, p_answers: input.answers,
     p_consent_confirmed: input.consentConfirmed, p_request_id: input.requestId,
   });
-  void requestEmailDelivery(expectedUserId);
+  await requestEmailDelivery(expectedUserId);
 }
 
 export type EvaluationSupabaseClient = SupabaseClient;

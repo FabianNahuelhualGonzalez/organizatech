@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Pencil, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   EvaluationRepositoryError,
@@ -53,6 +53,7 @@ export function StudentEvaluations({
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [toast, setToast] = useState("");
+  const submitOperationRef = useRef<{ readonly fingerprint: string; readonly requestId: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -143,11 +144,23 @@ export function StudentEvaluations({
     const nextErrors = validateEvaluationForSubmit(active.snapshot, answers, consent);
     setErrors(nextErrors);
     if (nextErrors.size > 0) return setToast("Completa los campos obligatorios antes de enviar");
+    const fingerprint = JSON.stringify({
+      assignmentId: active.id,
+      answers,
+      consentConfirmed: consent,
+    });
+    if (submitOperationRef.current?.fingerprint !== fingerprint) {
+      submitOperationRef.current = { fingerprint, requestId: createEvaluationId() };
+    }
     setBusy(true);
     try {
       await submitOwnEvaluation(expectedUserId, {
-        assignmentId: active.id, answers, consentConfirmed: consent, requestId: createEvaluationId(),
+        assignmentId: active.id,
+        answers,
+        consentConfirmed: consent,
+        requestId: submitOperationRef.current.requestId,
       });
+      submitOperationRef.current = null;
       setActive({ ...active, status: "completed", answers, consentConfirmed: consent, completedAt: new Date().toISOString() });
       setView("success");
       await load();
@@ -158,6 +171,8 @@ export function StudentEvaluations({
       } else if (caught instanceof EvaluationRepositoryError && caught.code === "conflict") {
         setToast("Esta evaluación ya fue enviada y no admite cambios.");
         await openAssignment(active.id);
+      } else if (caught instanceof EvaluationRepositoryError && caught.code === "email_pending") {
+        setToast("La evaluación fue enviada, pero el correo al coach está pendiente de reintento.");
       } else setToast("No se pudo enviar. Lo escrito permanece en pantalla para reintentar.");
     } finally {
       setBusy(false);

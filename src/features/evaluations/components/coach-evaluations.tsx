@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Pencil, Send, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   EvaluationRepositoryError,
@@ -72,6 +72,8 @@ export function CoachEvaluations({
   const [detailId, setDetailId] = useState<string | null>(null);
   const [extendTarget, setExtendTarget] = useState<CoachEvaluationAssignment | null>(null);
   const [extendDate, setExtendDate] = useState("");
+  const sendOperationRef = useRef<{ readonly fingerprint: string; readonly requestId: string } | null>(null);
+  const reminderOperationIdsRef = useRef(new Map<string, string>());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -201,6 +203,15 @@ export function CoachEvaluations({
 
   async function sendTemplate() {
     if (!selectedTemplate || recipients.length === 0) return;
+    const fingerprint = JSON.stringify({
+      templateId: selectedTemplate.id,
+      episodeIds: recipients.map((student) => student.episodeId),
+      dueDate: dueDate || null,
+      sensitive,
+    });
+    if (sendOperationRef.current?.fingerprint !== fingerprint) {
+      sendOperationRef.current = { fingerprint, requestId: createEvaluationId() };
+    }
     setBusy(true);
     try {
       await sendOwnEvaluationTemplate(expectedUserId, {
@@ -208,15 +219,20 @@ export function CoachEvaluations({
         episodeIds: recipients.map((student) => student.episodeId),
         dueDate: dueDate || null,
         sensitive,
-        requestId: createEvaluationId(),
+        requestId: sendOperationRef.current.requestId,
       });
       setSentRecipients(recipients);
       await load();
+      sendOperationRef.current = null;
       setView("sent");
     } catch (caught) {
-      setToast(caught instanceof EvaluationRepositoryError && caught.code === "forbidden"
-        ? "Uno de los alumnos ya no está vinculado"
-        : "No pudimos enviar la evaluación");
+      setToast(caught instanceof EvaluationRepositoryError
+        ? caught.code === "forbidden"
+          ? "Uno de los alumnos ya no está vinculado"
+          : caught.code === "email_pending"
+            ? "La evaluación fue creada, pero el correo está pendiente de reintento"
+            : "No pudimos confirmar el envío del correo; la evaluación pudo haberse creado"
+        : "No pudimos confirmar el envío del correo; la evaluación pudo haberse creado");
     } finally {
       setBusy(false);
     }
@@ -238,14 +254,21 @@ export function CoachEvaluations({
   }
 
   async function remind(assignment: CoachEvaluationAssignment) {
+    const requestId = reminderOperationIdsRef.current.get(assignment.id) ?? createEvaluationId();
+    reminderOperationIdsRef.current.set(assignment.id, requestId);
     setBusy(true);
     try {
-      await remindOwnEvaluationAssignment(expectedUserId, assignment.id, createEvaluationId());
+      await remindOwnEvaluationAssignment(expectedUserId, assignment.id, requestId);
+      reminderOperationIdsRef.current.delete(assignment.id);
       setToast(`Recordatorio enviado a ${assignment.studentName}`);
     } catch (caught) {
-      setToast(caught instanceof EvaluationRepositoryError && caught.code === "rate_limited"
-        ? "Ya enviaste un recordatorio durante las últimas 48 horas"
-        : "No pudimos enviar el recordatorio");
+      setToast(caught instanceof EvaluationRepositoryError
+        ? caught.code === "rate_limited"
+          ? "Ya enviaste un recordatorio durante las últimas 48 horas"
+          : caught.code === "email_pending"
+            ? "El recordatorio fue creado, pero el correo está pendiente de reintento"
+            : "No pudimos confirmar el envío del correo del recordatorio"
+        : "No pudimos confirmar el envío del correo del recordatorio");
     } finally {
       setBusy(false);
     }

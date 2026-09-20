@@ -23,8 +23,17 @@ interface Delivery {
   readonly attemptToken: string;
 }
 
+type DeliveryOutcome = "sent" | "failed" | "ambiguous";
+
+interface DeliveryAttemptResult {
+  readonly outcome: DeliveryOutcome;
+  readonly completionFailed: boolean;
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL = /^[^\s@\u0000-\u001F\u007F]+@[^\s@\u0000-\u001F\u007F]+\.[^\s@\u0000-\u001F\u007F]+$/;
+const CLAIM_LIMIT = 25;
+const MAX_CLAIM_BATCHES = 3;
 
 function constantTimeEqual(left: string, right: string) {
   const encoder = new TextEncoder();
@@ -79,13 +88,55 @@ function actionUrl(appUrl: string, delivery: Delivery) {
 
 async function complete(environment: EvaluationEmailEnvironment, authorization: string, delivery: Delivery,
   outcome: "sent" | "failed" | "ambiguous", value: string, capability: string | null, fetchImpl?: typeof fetch) {
-  await invokeEmailRpc({
+  const completed = await invokeEmailRpc({
     supabaseUrl: environment.supabaseUrl, anonKey: environment.supabaseAnonKey, authorization,
     functionName: "complete_evaluation_email_delivery",
     body: { p_capability: capability, p_delivery_id: delivery.deliveryId, p_attempt_token: delivery.attemptToken,
       p_outcome: outcome, p_provider_message_id: outcome === "sent" ? value : null,
       p_provider_error_code: outcome === "sent" ? null : value }, fetchImpl,
   });
+  if (completed !== true) throw new TypeError("evaluation email completion rejected");
+}
+
+async function attemptDelivery(
+  environment: EvaluationEmailEnvironment,
+  authorization: string,
+  capability: string | null,
+  delivery: Delivery,
+  fetchImpl?: typeof fetch,
+): Promise<DeliveryAttemptResult> {
+  try {
+    const rendered = renderEvaluationEmail({
+      eventKind: delivery.eventKind,
+      templateName: String(delivery.payload.templateName ?? ""),
+      coachName: delivery.payload.coachName === undefined ? undefined : String(delivery.payload.coachName),
+      studentName: delivery.payload.studentName === undefined ? undefined : String(delivery.payload.studentName),
+      studentNames: delivery.payload.studentNames === undefined ? undefined : String(delivery.payload.studentNames),
+      dueAt: delivery.payload.dueAt === null || delivery.payload.dueAt === undefined ? null : String(delivery.payload.dueAt),
+      dueLabel: delivery.payload.dueLabel === null || delivery.payload.dueLabel === undefined ? null : String(delivery.payload.dueLabel),
+      actionUrl: actionUrl(environment.appUrl, delivery),
+    });
+    const sent = await sendBrevoTransactionalEmail({
+      apiKey: environment.brevoApiKey, senderEmail: environment.senderEmail,
+      senderName: environment.senderName, recipientEmail: delivery.recipientEmail,
+      ...rendered, idempotencyKey: delivery.idempotencyKey, fetchImpl,
+    });
+    try {
+      await complete(environment, authorization, delivery, "sent", sent.messageId, capability, fetchImpl);
+      return { outcome: "sent", completionFailed: false };
+    } catch {
+      return { outcome: "ambiguous", completionFailed: true };
+    }
+  } catch (error) {
+    const outcome = error instanceof BrevoEmailError && error.ambiguous ? "ambiguous" : "failed";
+    const code = error instanceof BrevoEmailError ? error.code : "invalid_configuration";
+    try {
+      await complete(environment, authorization, delivery, outcome, code, capability, fetchImpl);
+      return { outcome, completionFailed: false };
+    } catch {
+      return { outcome: "ambiguous", completionFailed: true };
+    }
+  }
 }
 
 export function createEvaluationEmailHandler(environment: EvaluationEmailEnvironment, fetchImpl?: typeof fetch) {
@@ -105,37 +156,32 @@ export function createEvaluationEmailHandler(environment: EvaluationEmailEnviron
     const authorization = scheduler ? `Bearer ${environment.supabaseAnonKey}` : `Bearer ${bearer}`;
     const capability = environment.evaluationRpcSecret;
     try {
-      const claimed = await invokeEmailRpc({
-        supabaseUrl: environment.supabaseUrl, anonKey: environment.supabaseAnonKey, authorization,
-        functionName: "claim_evaluation_email_deliveries",
-        body: { p_capability: capability, p_limit: 25 }, fetchImpl,
-      });
-      const deliveries = parseDeliveries(claimed);
-      await Promise.allSettled(deliveries.map(async (delivery) => {
-        try {
-          const rendered = renderEvaluationEmail({
-            eventKind: delivery.eventKind,
-            templateName: String(delivery.payload.templateName ?? ""),
-            coachName: delivery.payload.coachName === undefined ? undefined : String(delivery.payload.coachName),
-            studentName: delivery.payload.studentName === undefined ? undefined : String(delivery.payload.studentName),
-            studentNames: delivery.payload.studentNames === undefined ? undefined : String(delivery.payload.studentNames),
-            dueAt: delivery.payload.dueAt === null || delivery.payload.dueAt === undefined ? null : String(delivery.payload.dueAt),
-            dueLabel: delivery.payload.dueLabel === null || delivery.payload.dueLabel === undefined ? null : String(delivery.payload.dueLabel),
-            actionUrl: actionUrl(environment.appUrl, delivery),
-          });
-          const sent = await sendBrevoTransactionalEmail({
-            apiKey: environment.brevoApiKey, senderEmail: environment.senderEmail,
-            senderName: environment.senderName, recipientEmail: delivery.recipientEmail,
-            ...rendered, idempotencyKey: delivery.idempotencyKey, fetchImpl,
-          });
-          await complete(environment, authorization, delivery, "sent", sent.messageId, capability, fetchImpl).catch(() => undefined);
-        } catch (error) {
-          const ambiguous = error instanceof BrevoEmailError && error.ambiguous;
-          const code = error instanceof BrevoEmailError ? error.code : "invalid_configuration";
-          await complete(environment, authorization, delivery, ambiguous ? "ambiguous" : "failed", code, capability, fetchImpl).catch(() => undefined);
+      const aggregate = { claimed: 0, sent: 0, failed: 0, ambiguous: 0, completionFailed: 0 };
+      let truncated = false;
+      for (let batch = 0; batch < MAX_CLAIM_BATCHES; batch += 1) {
+        const claimed = await invokeEmailRpc({
+          supabaseUrl: environment.supabaseUrl, anonKey: environment.supabaseAnonKey, authorization,
+          functionName: "claim_evaluation_email_deliveries",
+          body: { p_capability: capability, p_limit: CLAIM_LIMIT }, fetchImpl,
+        });
+        const deliveries = parseDeliveries(claimed);
+        aggregate.claimed += deliveries.length;
+        const settled = await Promise.allSettled(deliveries.map((delivery) => (
+          attemptDelivery(environment, authorization, capability, delivery, fetchImpl)
+        )));
+        for (const result of settled) {
+          if (result.status === "rejected") {
+            aggregate.ambiguous += 1;
+            aggregate.completionFailed += 1;
+          } else {
+            aggregate[result.value.outcome] += 1;
+            if (result.value.completionFailed) aggregate.completionFailed += 1;
+          }
         }
-      }));
-      return response(202, { accepted: true, claimed: deliveries.length }, origin);
+        if (deliveries.length < CLAIM_LIMIT) break;
+        if (batch === MAX_CLAIM_BATCHES - 1) truncated = true;
+      }
+      return response(202, { accepted: true, ...aggregate, truncated }, origin);
     } catch {
       return response(503, { error: "worker_unavailable" }, origin);
     }

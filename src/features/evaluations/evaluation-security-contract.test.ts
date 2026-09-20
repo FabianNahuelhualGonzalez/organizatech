@@ -58,6 +58,20 @@ test("notificaciones y correo permanecen aislados de vinculación y sin secretos
   assert.doesNotMatch(migration, /training_sessions|exercise_entries/);
 });
 
+test("cada write con correo espera y valida functions.invoke sin prometer un scheduler", () => {
+  assert.match(
+    repository,
+    /const invocation = await operation\.client\.functions\.invoke\("send-evaluation-emails", \{ body: \{\} \}\);[\s\S]*assertEvaluationEmailInvocationSucceeded\(invocation\);/,
+  );
+  assert.equal((repository.match(/await requestEmailDelivery\(expectedUserId\);/g) ?? []).length, 3);
+  assert.match(handler, /accepted: true, \.\.\.aggregate, truncated/);
+  for (const counter of ["sent", "failed", "ambiguous", "completionFailed"]) {
+    assert.match(handler, new RegExp(`${counter}: 0`));
+  }
+  assert.match(repository, /claimed === 0 \|\| failed > 0 \|\| ambiguous > 0 \|\| payload\.truncated/);
+  assert.doesNotMatch(repository, /void requestEmailDelivery|worker programado|reintentar[aá] autom[aá]ticamente/i);
+});
+
 test("la migración canónica conserva el hash contractual post PERF-06", () => {
   assert.equal(createHash("sha256").update(migration).digest("hex"), POST_PERF_06_MIGRATION_OWNERSHIP[migrationFilename]);
 });

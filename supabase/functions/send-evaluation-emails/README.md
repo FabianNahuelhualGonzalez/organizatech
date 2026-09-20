@@ -4,6 +4,8 @@ Esta función usa el JWT del usuario y no usa `service_role`:
 
 - La app puede solicitar el drenaje inmediato de sus propios envíos con el JWT del usuario y un `Origin` igual a `ORGANIZATECH_APP_URL`.
 - Los recordatorios de vencimiento sólo se envían cuando el coach los solicita manualmente desde la app. No hay un recordatorio automático periódico.
+- La cola conserva estado e idempotencia, pero no se drena sola: cada intento depende de una invocación explícita autorizada. Un estado `failed` o `ambiguous` no implica reintento automático.
+- La respuesta sólo expone contadores agregados (`claimed`, `sent`, `failed`, `ambiguous`, `completionFailed` y `truncated`). Un fallo al completar el estado durable se contabiliza como `ambiguous`; `truncated` impide confirmar éxito si el drenaje acotado de tres lotes no alcanzó a vaciar el trabajo reclamable. Nunca se devuelven destinatarios ni contenido del correo.
 
 > Decisión de producto: no crear ni activar un scheduler de Evaluaciones, y en particular nunca invocar esta función cada 15 minutos. Cualquier automatización futura requiere una decisión de producto y una autorización de despliegue nuevas.
 

@@ -16,6 +16,8 @@ test("Coach cubre biblioteca, constructor, envío, snapshot y revisión aprobado
   assert.match(coach, /deleteOwnEvaluationTemplate/);
   assert.match(coach, /EVALUATION_TABLE_PRESETS/);
   assert.match(coach, /listOwnEvaluationStudents/);
+  assert.match(coach, /La evaluación fue creada, pero el correo está pendiente de reintento/);
+  assert.match(coach, /El recordatorio fue creado, pero el correo está pendiente de reintento/);
 });
 
 test("envío móvil mantiene controles equivalentes sin overflow horizontal", () => {
@@ -41,4 +43,5 @@ test("Alumno cubre tabs, borrador, vencimiento, consentimiento exacto y tablas a
   }
   assert.match(model, /Confirmo que la información entregada \(salud, lesiones, medicación o alimentación\) es correcta y autorizo a mi coach vinculado a acceder a ella para ajustar mi plan\./);
   assert.doesNotMatch(student, /overflow-x|<table/);
+  assert.match(student, /La evaluación fue enviada, pero el correo al coach está pendiente de reintento/);
 });
