@@ -4,12 +4,19 @@ Esta entrega prepara código y migración local. No configura ni modifica QA o P
 
 ## Google Cloud y Supabase
 
-- Crear cliente OAuth Web con orígenes exactos de QA y PROD, sin comodines.
-- Registrar el callback de Supabase mostrado por el proveedor Google.
-- Configurar en Supabase las redirect URLs exactas `/login?flow=google-oauth...` para cada ambiente.
+- Mantener clientes OAuth separados para QA y PROD, sin compartir secretos.
+- Registrar en Google únicamente el callback de Supabase mostrado por el proveedor para el proyecto QA; la aplicación vuelve desde Supabase al dominio QA mediante `redirectTo`.
+- Usar como `Site URL` de Supabase Auth QA el dominio exacto y estable de la rama `qa`: `https://<qa-branch-url>.vercel.app`.
+- Agregar una sola vez `https://<qa-branch-url>.vercel.app/**` a las Redirect URLs de Supabase Auth QA. Ese patrón permite `/login` y su query dinámica sólo en el host QA exacto; no es un wildcard de subdominio.
+- Abrir QA siempre desde ese dominio de rama. No usar la URL inmutable de un commit ni cambiar el callback por deploy.
+- Configurar `ORGANIZATECH_APP_URL` y `ORGANIZATECH_EVALUATION_ALLOWED_ORIGINS` con esa misma URL exacta. OAuth, Preview, botones de correo y CORS no pueden usar dominios QA distintos.
 - Habilitar solamente `openid`, `email` y `profile`; no solicitar acceso offline.
 - Mantener Client Secret exclusivamente en Google/Supabase; nunca en variables `NEXT_PUBLIC_*`.
 - Verificar `skip_nonce_check = false`, Site URL correcta y branding/dominio del ambiente.
+
+El callback de aplicación permanece same-origin en `/login?flow=google-oauth&intent=<opaco>`. El `intent` y el verificador PKCE viven en `sessionStorage`, que está aislado por origen. Cambiar de origen durante el flujo no puede compartir esa evidencia y debe fallar cerrado. Si Supabase no acepta el `redirectTo`, cae en su `Site URL`; por eso todos los puntos QA deben coincidir con el alias estable que usa el dueño para probar.
+
+No agregar un wildcard global de `vercel.app`, URLs inmutables por commit ni otros patrones que admitan proyectos ajenos. El único wildcard QA aprobado es el de ruta del host estable indicado arriba. Desarrollo local puede conservar únicamente sus Redirect URLs aprobadas (`http://localhost:3000/**` y `http://localhost:3066/**`).
 
 ## Orden de liberación
 

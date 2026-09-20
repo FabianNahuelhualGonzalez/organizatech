@@ -233,8 +233,16 @@ assertSignupConfirmationCleanupOrder(root);
 test("error de signOut limpia el fragmento y publica sólo estado controlado", async () => {
   await assertSignupConfirmationSignOutFailureIsContained(root);
 });
-assert.doesNotMatch(`${authConfirmationDesign}\n${environmentsDesign}`, /https:\/\/\*\.vercel\.app\/\*\*/);
-assert.match(environmentsDesign, /https:\/\/\*-<team-or-account-slug>\.vercel\.app\/\*\*/);
+assert.doesNotMatch(
+  `${authConfirmationDesign}\n${environmentsDesign}`,
+  /https:\/\/(?:\*|\*-<team-or-account-slug>)\.vercel\.app\/\*\*/,
+);
+assert.match(environmentsDesign, /Site URL[\s\S]*https:\/\/<qa-branch-url>\.vercel\.app/);
+assert.match(authConfirmationDesign, /Site URL[\s\S]*https:\/\/<qa-branch-url>\.vercel\.app/);
+assert.match(environmentsDesign, /Redirect URL[\s\S]*https:\/\/<qa-branch-url>\.vercel\.app\/\*\*/);
+assert.match(authConfirmationDesign, /Redirect URLs[\s\S]*https:\/\/<qa-branch-url>\.vercel\.app\/\*\*/);
+assert.match(environmentsDesign, /ORGANIZATECH_APP_URL=https:\/\/<qa-branch-url>\.vercel\.app/);
+assert.match(environmentsDesign, /ORGANIZATECH_EVALUATION_ALLOWED_ORIGINS=https:\/\/<qa-branch-url>\.vercel\.app/);
 
 // Presentación y accesibilidad de login/registro.
 for (const marker of [

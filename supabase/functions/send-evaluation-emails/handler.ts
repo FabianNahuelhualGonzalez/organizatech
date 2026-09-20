@@ -11,6 +11,7 @@ export interface EvaluationEmailEnvironment {
   readonly senderEmail: string;
   readonly senderName: string;
   readonly appUrl: string;
+  readonly allowedOrigins: string;
 }
 
 interface Delivery {
@@ -52,9 +53,33 @@ function response(status: number, body: Record<string, unknown>, origin = "") {
   return new Response(JSON.stringify(body), { status, headers });
 }
 
-function allowedOrigin(request: Request, appUrl: string) {
+function exactHttpsOrigin(value: string) {
+  const candidate = value.trim();
+  if (!candidate || candidate.includes("*")) throw new TypeError("invalid allowed origin");
+  const url = new URL(candidate);
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || url.pathname !== "/"
+    || url.search
+    || url.hash
+  ) throw new TypeError("invalid allowed origin");
+  return url.origin;
+}
+
+function configuredAllowedOrigins(environment: EvaluationEmailEnvironment) {
+  const origins = new Set<string>();
+  origins.add(exactHttpsOrigin(environment.appUrl));
+  for (const candidate of environment.allowedOrigins.split(",")) {
+    if (candidate.trim()) origins.add(exactHttpsOrigin(candidate));
+  }
+  return origins;
+}
+
+function allowedOrigin(request: Request, allowedOrigins: ReadonlySet<string>) {
   const origin = request.headers.get("origin") ?? "";
-  try { return origin && origin === new URL(appUrl).origin ? origin : ""; } catch { return ""; }
+  return allowedOrigins.has(origin) ? origin : "";
 }
 
 function parseDeliveries(value: unknown): Delivery[] {
@@ -140,8 +165,9 @@ async function attemptDelivery(
 }
 
 export function createEvaluationEmailHandler(environment: EvaluationEmailEnvironment, fetchImpl?: typeof fetch) {
+  const allowedOrigins = configuredAllowedOrigins(environment);
   return async (request: Request) => {
-    const origin = allowedOrigin(request, environment.appUrl);
+    const origin = allowedOrigin(request, allowedOrigins);
     if (request.method === "OPTIONS") {
       if (!origin) return response(403, { error: "origin_not_allowed" });
       return new Response(null, { status: 204, headers: {

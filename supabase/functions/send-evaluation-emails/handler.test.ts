@@ -11,7 +11,8 @@ const environment = {
   brevoApiKey: "brevo-key",
   senderEmail: "noreply@example.com",
   senderName: "Organizatech",
-  appUrl: "https://app.example.com",
+  appUrl: "https://organizatech-git-qa-owner.vercel.app",
+  allowedOrigins: "https://organizatech-git-qa-owner.vercel.app",
 };
 
 const delivery = {
@@ -27,7 +28,7 @@ const delivery = {
 function userRequest() {
   return new Request("https://function.example.com", {
     method: "POST",
-    headers: { origin: "https://app.example.com", authorization: "Bearer user-jwt" },
+    headers: { origin: environment.appUrl, authorization: "Bearer user-jwt" },
   });
 }
 
@@ -54,6 +55,72 @@ test("rechaza invocaciones sin sesión ni secreto del scheduler", async () => {
   const handler = createEvaluationEmailHandler(environment, async () => new Response("[]"));
   const response = await handler(new Request("https://function.example.com", { method: "POST" }));
   assert.equal(response.status, 401);
+});
+
+test("acepta sólo el origin QA estable configurado y refleja ese valor exacto", async () => {
+  const handler = createEvaluationEmailHandler(environment, async () => json([]));
+  const origin = "https://organizatech-git-qa-owner.vercel.app";
+  assert.equal(environment.appUrl, origin);
+  assert.equal(environment.allowedOrigins, origin);
+  const preflight = await handler(new Request("https://function.example.com", {
+    method: "OPTIONS",
+    headers: { origin },
+  }));
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), origin);
+  assert.equal(preflight.headers.get("vary"), "origin");
+
+  const invocation = await handler(new Request("https://function.example.com", {
+    method: "POST",
+    headers: { origin, authorization: "Bearer user-jwt" },
+  }));
+  assert.equal(invocation.status, 202);
+  assert.equal(invocation.headers.get("access-control-allow-origin"), origin);
+});
+
+test("rechaza previews no allowlisted y hosts que sólo imitan el sufijo permitido", async () => {
+  const handler = createEvaluationEmailHandler(environment, async () => json([]));
+  for (const origin of [
+    "https://organizatech-commit-owner.vercel.app",
+    "https://organizatech-git-qa-owner.vercel.app.attacker.test",
+    "null",
+  ]) {
+    const preflight = await handler(new Request("https://function.example.com", {
+      method: "OPTIONS",
+      headers: { origin },
+    }));
+    assert.equal(preflight.status, 403);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), null);
+
+    const invocation = await handler(new Request("https://function.example.com", {
+      method: "POST",
+      headers: { origin, authorization: "Bearer user-jwt" },
+    }));
+    assert.equal(invocation.status, 401);
+    assert.equal(invocation.headers.get("access-control-allow-origin"), null);
+  }
+});
+
+test("la configuración de origins falla cerrada ante comodines, paths o protocolos inseguros", () => {
+  for (const allowedOrigins of [
+    "https://*.vercel.app",
+    "https://organizatech-git-qa-owner.vercel.app/login",
+    "http://organizatech-git-qa-owner.vercel.app",
+  ]) {
+    assert.throws(
+      () => createEvaluationEmailHandler({ ...environment, allowedOrigins }),
+      /invalid allowed origin/,
+    );
+  }
+  for (const appUrl of [
+    "https://user@app.example.com",
+    "https://app.example.com/hidden-path",
+  ]) {
+    assert.throws(
+      () => createEvaluationEmailHandler({ ...environment, appUrl }),
+      /invalid allowed origin/,
+    );
+  }
 });
 
 test("el scheduler reclama con capacidad aislada y no usa service_role", async () => {
@@ -88,7 +155,7 @@ test("la invocación del usuario conserva su JWT y agrega la capacidad sólo en 
   });
   const response = await handler(new Request("https://function.example.com", {
     method: "POST",
-    headers: { origin: "https://app.example.com", authorization: "Bearer user-jwt" },
+    headers: { origin: environment.appUrl, authorization: "Bearer user-jwt" },
   }));
   assert.equal(response.status, 202);
   assert.equal(requests[0]!.authorization, "Bearer user-jwt");
@@ -97,10 +164,14 @@ test("la invocación del usuario conserva su JWT y agrega la capacidad sólo en 
 
 test("informa una entrega exitosa con agregados sin datos sensibles", async () => {
   const completions: Record<string, unknown>[] = [];
+  const providerBodies: string[] = [];
   const handler = createEvaluationEmailHandler(environment, async (input, init) => {
     const url = String(input);
     if (url.endsWith("claim_evaluation_email_deliveries")) return json([delivery]);
-    if (url.includes("api.brevo.com")) return json({ messageId: "brevo-message-id" });
+    if (url.includes("api.brevo.com")) {
+      providerBodies.push(String(init?.body));
+      return json({ messageId: "brevo-message-id" });
+    }
     completions.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
     return json(true);
   });
@@ -113,6 +184,7 @@ test("informa una entrega exitosa con agregados sin datos sensibles", async () =
   });
   assert.equal(completions[0]?.p_outcome, "sent");
   assert.doesNotMatch(JSON.stringify(payload), /student@example|Seguimiento|Coach QA/i);
+  assert.match(providerBodies[0] ?? "", /https:\/\/organizatech-git-qa-owner\.vercel\.app\/login/);
 });
 
 test("informa fallo Brevo sólo después de persistir el estado failed", async () => {

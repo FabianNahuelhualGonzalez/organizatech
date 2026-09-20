@@ -135,15 +135,20 @@ identidad para impedir respuestas cruzadas A/B.
 
 Configurar primero en QA y sólo después de QA PASS. No se realizó ningún cambio remoto.
 
-QA debe usar una de estas opciones, reemplazando los placeholders por valores aprobados:
+QA debe usar como `Site URL` el alias exacto y estable de la rama `qa`:
+`https://<qa-branch-url>.vercel.app`. Como el callback usa `/login` y query dinámica, la
+allowlist de Redirect URLs debe incluir una sola vez
+`https://<qa-branch-url>.vercel.app/**`. El `/**` sólo cubre rutas dentro de ese host QA
+exacto y no agrega otro origen ni una URL por commit. Desarrollo local puede conservar
+`http://localhost:3000/**` y `http://localhost:3066/**` como Redirect URLs adicionales.
 
-- alias Preview QA exacto: `https://<qa-preview-alias>.vercel.app/**`; o
-- patrón limitado al owner real: `https://*-<team-or-account-slug>.vercel.app/**`;
-- `http://localhost:3000/**`;
-- `http://localhost:3066/**`.
+El dueño debe abrir ese mismo alias como Preview QA. `ORGANIZATECH_APP_URL` y
+`ORGANIZATECH_EVALUATION_ALLOWED_ORIGINS` también deben contener exactamente ese valor,
+para que Auth, PKCE, botones de correo y Evaluaciones compartan un único origen QA.
 
-Está prohibido usar un wildcard que acepte cualquier subdominio de `vercel.app`. El slug
-real debe ser confirmado por el dueño antes de modificar Supabase.
+Está prohibido usar un wildcard global que acepte cualquier subdominio de `vercel.app`, agregar
+URLs inmutables por commit o iniciar un callback en un origen y terminarlo en otro. El
+dominio de rama real debe ser confirmado por el dueño antes de modificar Supabase QA.
 
 Producción continúa limitada a:
 

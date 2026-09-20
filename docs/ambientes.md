@@ -69,17 +69,39 @@ El archivo `.env.local` no debe subirse al repositorio.
 
 ### Supabase QA
 
-QA debe aceptar solo URLs de prueba y desarrollo:
+El punto de entrada persistente de QA debe ser el dominio de rama que Vercel asigna a `qa`. Ese dominio se actualiza con cada push y no cambia por commit:
 
 ```text
-https://<qa-preview-alias>.vercel.app/**
-# Alternativa sólo después de confirmar el owner real:
-https://*-<team-or-account-slug>.vercel.app/**
+https://<qa-branch-url>.vercel.app
+```
+
+Esa es la única URL canónica de QA. Debe configurarse una sola vez, con el mismo valor exacto, en los cuatro puntos siguientes:
+
+```text
+Preview QA del dueño=https://<qa-branch-url>.vercel.app
+Supabase Auth QA Site URL=https://<qa-branch-url>.vercel.app
+ORGANIZATECH_APP_URL=https://<qa-branch-url>.vercel.app
+ORGANIZATECH_EVALUATION_ALLOWED_ORIGINS=https://<qa-branch-url>.vercel.app
+```
+
+Los callbacks de la aplicación se construyen desde el origen actual, usan `/login` y conservan el intent PKCE en `sessionStorage`; por eso OAuth, los botones de correo y las invocaciones de Evaluaciones deben permanecer en ese mismo origen.
+
+Como la aplicación envía `redirectTo` a `/login` con query dinámica, Supabase Auth QA necesita además esta regla de Redirect URL, configurada una sola vez sobre el mismo host canónico:
+
+```text
+https://<qa-branch-url>.vercel.app/**
+```
+
+El `/**` autoriza rutas y query únicamente dentro del host QA exacto; no autoriza otros subdominios ni proyectos de Vercel. Para desarrollo local, las Redirect URLs adicionales siguen limitadas a:
+
+```text
 http://localhost:3000/**
 http://localhost:3066/**
 ```
 
-QA no debe usar URLs productivas como redirect principal.
+No agregar URLs inmutables de cada deploy ni un wildcard global de `vercel.app` que permita proyectos ajenos. Si el `redirectTo` de OAuth no pertenece al `Site URL` o a la allowlist, Supabase vuelve al `Site URL`; en este flujo eso pierde el intent/verificador del origen inicial y termina nuevamente en Inicio de sesión.
+
+`ORGANIZATECH_APP_URL` construye los enlaces incluidos en correos y `ORGANIZATECH_EVALUATION_ALLOWED_ORIGINS` autoriza la invocación CORS. En QA ambas deben contener exactamente el alias estable de la rama `qa`; no se aceptan dos dominios distintos, comodines ni cambios por commit.
 
 ### Supabase Produccion
 
@@ -94,7 +116,7 @@ No agregar URLs de Preview a Supabase Produccion salvo una excepcion temporal, c
 
 ## Checklist para validar Preview
 
-1. Abrir el deploy Preview de Vercel.
+1. Abrir el dominio estable de la rama `qa` en Vercel, no la URL inmutable de un commit.
 2. Crear un usuario QA con correo controlado.
 3. Confirmar el correo si el flujo lo requiere.
 4. Iniciar sesion.

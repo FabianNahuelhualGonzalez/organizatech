@@ -53,6 +53,21 @@ test("callback es same-origin exacto y parser exige flow, code e intent", () => 
   assert.throws(() => buildGoogleOAuthCallbackUrl("javascript:alert(1)", id));
 });
 
+test("callback Google conserva el alias estable de la rama QA y su intent PKCE", () => {
+  const id = "cd".repeat(16);
+  const qaOrigin = "https://organizatech-git-qa-owner.vercel.app";
+  const callback = new URL(buildGoogleOAuthCallbackUrl(`${qaOrigin}/login?mode=login`, id));
+  callback.searchParams.set("code", "supabase-auth-code");
+
+  assert.equal(callback.origin, qaOrigin);
+  assert.equal(callback.pathname, "/login");
+  assert.deepEqual(parseGoogleOAuthCallback(callback), {
+    invalid: false,
+    code: "supabase-auth-code",
+    intentId: id,
+  });
+});
+
 test("destino post-auth tipado sobrevive al intent sin incluir PII", () => {
   const storage = memoryStorage();
   const intent = createGoogleOAuthIntent({

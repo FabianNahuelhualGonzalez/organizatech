@@ -11,4 +11,5 @@ Deno.serve(createEvaluationEmailHandler({
   senderEmail: Deno.env.get("ORGANIZATECH_EMAIL_SENDER") ?? "",
   senderName: Deno.env.get("ORGANIZATECH_EMAIL_SENDER_NAME") ?? "Organizatech",
   appUrl: Deno.env.get("ORGANIZATECH_APP_URL") ?? "",
+  allowedOrigins: Deno.env.get("ORGANIZATECH_EVALUATION_ALLOWED_ORIGINS") ?? "",
 }));
