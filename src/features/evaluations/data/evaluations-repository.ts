@@ -15,6 +15,7 @@ type EvaluationRpcName =
   | "list_own_evaluation_templates"
   | "save_own_evaluation_template"
   | "hide_own_evaluation_templates"
+  | "delete_own_evaluation_template"
   | "list_own_evaluation_students"
   | "send_own_evaluation_template"
   | "list_own_coach_evaluation_assignments"
@@ -274,6 +275,10 @@ export async function saveOwnEvaluationTemplate(expectedUserId: string, input: {
 
 export async function hideOwnEvaluationTemplates(expectedUserId: string, templateIds: readonly string[]) {
   await rpc(expectedUserId, "hide_own_evaluation_templates", { p_template_ids: [...templateIds] });
+}
+
+export async function deleteOwnEvaluationTemplate(expectedUserId: string, templateId: string) {
+  await rpc(expectedUserId, "delete_own_evaluation_template", { p_template_id: templateId });
 }
 
 export async function listOwnEvaluationStudents(expectedUserId: string) {

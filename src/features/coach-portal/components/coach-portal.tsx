@@ -37,6 +37,7 @@ import {
 } from "@/ui/overlays/use-overlay-focus-management";
 
 import styles from "./coach-portal.module.css";
+import { CoachSameIdentityActivation } from "./coach-same-identity-activation";
 import { CoachWorkspaceBoundary } from "./coach-workspace-boundary";
 
 const COACH_PORTAL_DRAWER_ID = "coach-portal-navigation-drawer";
@@ -296,6 +297,8 @@ function CoachPortalProfile({
           <CoachProfileField label="Título profesional" value={registration.professionalTitle} />
         </dl>
       </section>
+
+      <CoachSameIdentityActivation expectedUserId={session.userId} />
     </section>
   );
 }

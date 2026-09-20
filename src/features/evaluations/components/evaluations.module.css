@@ -117,6 +117,7 @@
 .pillButton {
   border-radius: 999px;
   padding: 0 18px;
+  white-space: nowrap;
 }
 
 .card,
@@ -164,6 +165,8 @@
 .textarea,
 .select {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   box-sizing: border-box;
   min-height: 46px;
   border: 1px solid rgba(255, 255, 255, 0.28);
@@ -220,6 +223,21 @@
   flex: none;
   margin-top: 1px;
   accent-color: #3c7aff;
+}
+
+.checkboxCopy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.checkboxCopy strong {
+  font-size: 12px;
+}
+
+.checkboxCopy > span {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 10.5px;
 }
 
 .questionHeading strong,
@@ -303,13 +321,14 @@
   padding: 10px;
 }
 
-.templateRow[data-selected="true"] {
-  background: rgba(248, 113, 113, 0.08);
-}
-
 .templateCopy,
 .recipientCopy {
   min-width: 0;
+}
+
+.templateActions {
+  display: flex;
+  gap: 6px;
 }
 
 .templateCopy strong,
@@ -346,6 +365,19 @@
 .selectedRecipients {
   display: grid;
   gap: 7px;
+}
+
+.sendForm,
+.sendControl {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.dateField {
+  display: block;
+  min-height: 46px;
 }
 
 .recipientRow {
@@ -504,6 +536,11 @@
   .screen { padding-inline: 0; }
   .actions { align-items: stretch; flex-direction: column; }
   .actions > * { width: 100%; }
-  .templateRow { grid-template-columns: minmax(0, 1fr) 44px; }
+  .templateRow { grid-template-columns: minmax(0, 1fr) auto; }
+  .templateActions { grid-column: 2; grid-row: 1; }
   .templateRow .pillButton { grid-column: 1 / -1; width: 100%; }
+  .sendForm { overflow-x: clip; }
+  .sendControl,
+  .sendControl > .field,
+  .sendControl > .select { inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; }
 }

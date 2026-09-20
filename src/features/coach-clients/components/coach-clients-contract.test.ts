@@ -77,7 +77,7 @@ test("detail and code cards keep scoped scrolling, 44px targets and stacked acti
     assert.match(css, /min-width: 44px/); assert.match(css, /min-height: (?:44|50|56)px/); assert.match(css, /:focus-visible/);
     assert.doesNotMatch(css, /:root|\bhtml\b|font-weight: 800|@media\s*\((?:min|max)-width/);
   }
-  assert.match(code, /@container \(max-width: 359px\).*flex-direction: column/);
+  assert.match(code, /@container \(max-width: 430px\)[\s\S]*grid-template-columns: minmax\(0, 1fr\)[\s\S]*width: 100%/);
   assert.match(read("coach-client-code-button.module.css"), /font-size: 14px; letter-spacing: \.1em/);
   assert.match(confirmation, /border: 1px solid rgba\(248, 113, 113, \.5\)/);
 });

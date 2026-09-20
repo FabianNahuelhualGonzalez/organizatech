@@ -44,6 +44,26 @@
   max-height: 88%;
 }
 .sheet[data-variant="client-detail"] { max-height: 88%; }
+.layer[data-variant="client-detail"] {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+}
+.layer[data-variant="client-detail"] .scrim {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+}
+.sheet[data-variant="client-detail"] {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  width: min(100%, 430px);
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px));
+}
 .layer[data-variant="dates"] { z-index: 30; }
 .layer[data-variant="client-confirm"] { z-index: 30; }
 .layer[data-variant="dates"] .scrim { z-index: 30; background: rgba(2, 8, 14, .78); }
@@ -79,7 +99,8 @@
 @keyframes rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 430px) {
-  .sheet[data-variant="client-add"] {
+  .sheet[data-variant="client-add"],
+  .sheet[data-variant="client-detail"] {
     width: 100%;
     max-width: none;
     max-height: calc(100dvh - env(safe-area-inset-top, 0px));

@@ -1,12 +1,12 @@
 "use client";
 
-import { Check, Pencil, Plus, Send, Trash2, X } from "lucide-react";
+import { Check, Pencil, Send, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   EvaluationRepositoryError,
+  deleteOwnEvaluationTemplate,
   extendOwnEvaluationAssignment,
-  hideOwnEvaluationTemplates,
   listOwnCoachEvaluationAssignments,
   listOwnEvaluationStudents,
   listOwnEvaluationTemplates,
@@ -57,9 +57,7 @@ export function CoachEvaluations({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftQuestions, setDraftQuestions] = useState<readonly EvaluationQuestion[]>([createEvaluationQuestion()]);
-  const [deleteMode, setDeleteMode] = useState(false);
-  const [deleteSelection, setDeleteSelection] = useState<ReadonlySet<string>>(new Set());
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<EvaluationTemplate | null>(null);
   const [sendTemplateId, setSendTemplateId] = useState("");
   const [query, setQuery] = useState("");
   const [recipients, setRecipients] = useState<readonly EvaluationStudent[]>([]);
@@ -169,18 +167,16 @@ export function CoachEvaluations({
     }
   }
 
-  async function hideTemplates() {
-    if (deleteSelection.size === 0) return;
+  async function deleteTemplate() {
+    if (!deleteTarget) return;
     setBusy(true);
     try {
-      await hideOwnEvaluationTemplates(expectedUserId, [...deleteSelection]);
+      await deleteOwnEvaluationTemplate(expectedUserId, deleteTarget.id);
       await load();
-      setDeleteMode(false);
-      setDeleteSelection(new Set());
-      setDeleteOpen(false);
-      setToast("Plantilla oculta; los envíos se conservaron");
+      setDeleteTarget(null);
+      setToast("Plantilla eliminada; las evaluaciones enviadas se conservaron");
     } catch {
-      setToast("No pudimos ocultar la plantilla");
+      setToast("No pudimos eliminar la plantilla");
     } finally {
       setBusy(false);
     }
@@ -267,39 +263,24 @@ export function CoachEvaluations({
             <p className={styles.subtitle}>Crea formularios reutilizables, envíalos a tus alumnos vinculados y revisa sus respuestas.</p>
           </header>
           <div className={styles.toolbar}>
-            <button className={styles.pillButton} type="button" onClick={() => openBuilder()}><Plus size={16} /> Agregar</button>
-            <button className={styles.buttonDanger} type="button" onClick={() => {
-              if (deleteMode) {
-                if (deleteSelection.size === 0) setToast("Selecciona al menos una plantilla");
-                else setDeleteOpen(true);
-              } else if (templates.length === 0) setToast("No tienes plantillas para ocultar");
-              else setDeleteMode(true);
-            }}>Ocultar{deleteMode ? ` (${deleteSelection.size})` : ""}</button>
-            {deleteMode ? <button className={styles.buttonSecondary} type="button" onClick={() => { setDeleteMode(false); setDeleteSelection(new Set()); }}>Cancelar</button> : null}
+            <button className={styles.pillButton} type="button" onClick={() => openBuilder()}>+ Agregar</button>
             <button className={styles.buttonSecondary} type="button" onClick={() => setView("review")}>Evaluaciones enviadas</button>
           </div>
           {templates.length === 0 ? <div className={styles.empty}>Sin registro de plantilla</div> : (
             <div className={`${styles.card} ${styles.stack}`}>
-              {templates.map((template) => {
-                const checked = deleteSelection.has(template.id);
-                return (
-                  <div className={styles.templateRow} data-selected={checked} key={template.id}>
-                    {deleteMode ? (
-                      <button className={styles.checkButton} type="button" aria-label={`Seleccionar ${template.name}`} onClick={() => setDeleteSelection((current) => {
-                        const next = new Set(current);
-                        if (next.has(template.id)) next.delete(template.id); else next.add(template.id);
-                        return next;
-                      })}>{checked ? <Check size={20} /> : <span aria-hidden="true">○</span>}</button>
-                    ) : null}
+              {templates.map((template) => (
+                  <div className={styles.templateRow} key={template.id}>
                     <div className={styles.templateCopy}>
                       <strong>{template.name}</strong>
                       <span>{template.questions.length} {template.questions.length === 1 ? "pregunta" : "preguntas"} · Creada: {formatEvaluationDate(template.createdAt)}</span>
                     </div>
-                    {!deleteMode ? <button className={styles.iconButton} type="button" aria-label={`Editar ${template.name}`} onClick={() => openBuilder(template)}><Pencil size={16} /></button> : null}
-                    {!deleteMode ? <button className={styles.pillButton} type="button" onClick={() => openSend(template.id)}><Send size={14} /> Enviar</button> : null}
+                    <div className={styles.templateActions}>
+                      <button className={styles.iconButton} type="button" aria-label={`Editar ${template.name}`} onClick={() => openBuilder(template)}><Pencil size={16} /></button>
+                      <button className={`${styles.iconButton} ${styles.iconDanger}`} type="button" aria-label={`Eliminar ${template.name}`} onClick={() => setDeleteTarget(template)}><Trash2 size={16} /></button>
+                    </div>
+                    <button className={styles.pillButton} type="button" onClick={() => openSend(template.id)}><Send size={14} /> Enviar</button>
                   </div>
-                );
-              })}
+              ))}
             </div>
           )}
         </>
@@ -352,14 +333,14 @@ export function CoachEvaluations({
       {!loading && !error && view === "send" ? (
         <>
           <h2 id="coach-evaluations-title" className={styles.title}>Selecciona la plantilla que enviarás</h2>
-          <div className={`${styles.card} ${styles.stack}`}>
-            <label className={styles.label}>Plantilla<select className={styles.select} value={sendTemplateId} onChange={(event) => setSendTemplateId(event.target.value)}>{templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select></label>
-            <label className={styles.label}>Busca a quien se la quieres enviar<input className={styles.field} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Busca a tu alumno vinculado…" /></label>
+          <div className={`${styles.card} ${styles.stack} ${styles.sendForm}`}>
+            <label className={`${styles.label} ${styles.sendControl}`}>Plantilla<select className={styles.select} value={sendTemplateId} onChange={(event) => setSendTemplateId(event.target.value)}>{templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select></label>
+            <label className={`${styles.label} ${styles.sendControl}`}>Busca a quien se la quieres enviar<input className={styles.field} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Busca a tu alumno vinculado…" /></label>
             {filteredStudents.map((student) => <button className={styles.listButton} type="button" key={student.episodeId} onClick={() => { setRecipients((current) => [...current, student]); setQuery(""); }}><strong>{student.name}</strong><span className={styles.meta}>{student.email}</span></button>)}
             {query.trim() && filteredStudents.length === 0 ? <p className={styles.muted}>Sin alumnos vinculados que coincidan con «{query.trim()}»</p> : null}
             <div className={styles.selectedRecipients}>{recipients.map((student) => <div className={styles.recipientRow} key={student.episodeId}><span className={styles.avatar}>{initialsForEvaluation(student.name)}</span><div className={styles.recipientCopy}><strong>{student.name}</strong><span>{student.email}</span></div><button className={styles.iconButton} type="button" aria-label={`Quitar ${student.name}`} onClick={() => setRecipients((current) => current.filter((item) => item.episodeId !== student.episodeId))}><X size={15} /></button></div>)}</div>
-            <label className={styles.label}>Fecha límite para responderla <span className={styles.meta}>(opcional)</span><input className={styles.field} type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
-            <label className={styles.checkboxLine}><input type="checkbox" checked={sensitive} onChange={(event) => setSensitive(event.target.checked)} /><span>Esta evaluación contiene información sensible de salud, lesiones, medicación o alimentación.</span></label>
+            <label className={`${styles.label} ${styles.sendControl}`}>Fecha límite para responderla <span className={styles.meta}>(opcional)</span><input className={`${styles.field} ${styles.dateField}`} type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
+            <label className={styles.checkboxLine}><input type="checkbox" checked={sensitive} onChange={(event) => setSensitive(event.target.checked)} /><span className={styles.checkboxCopy}><strong>Esta evaluación solicita datos sensibles.</strong><span>Al marcarla, el alumno deberá aceptar responder preguntas sobre salud, lesiones, medicación o alimentación.</span></span></label>
             <button className={styles.button} type="button" disabled={busy || !selectedTemplate || recipients.length === 0} onClick={() => void sendTemplate()}>Enviar</button>
           </div>
         </>
@@ -384,7 +365,7 @@ export function CoachEvaluations({
 
           {!loading && !error && view === "detail" && detail ? <CoachEvaluationDetail assignment={detail} onCloseDetail={() => setView("review")} /> : null}
 
-      {deleteOpen ? <><button className={styles.scrim} type="button" aria-label="Cancelar" onClick={() => setDeleteOpen(false)} /><div className={`${styles.modal} ${styles.stack}`} role="dialog" aria-modal="true"><h3>¿Ocultar {deleteSelection.size} plantilla{deleteSelection.size === 1 ? "" : "s"}?</h3><p className={styles.muted}>Dejarán de aparecer en tu biblioteca. Los snapshots, asignaciones y respuestas ya enviadas se conservarán.</p><button className={styles.buttonDanger} type="button" disabled={busy} onClick={() => void hideTemplates()}>Sí, ocultar</button><button className={styles.button} type="button" onClick={() => setDeleteOpen(false)}>Cancelar</button></div></> : null}
+      {deleteTarget ? <><button className={styles.scrim} type="button" aria-label="Cancelar eliminación" disabled={busy} onClick={() => setDeleteTarget(null)} /><div className={`${styles.modal} ${styles.stack}`} role="dialog" aria-modal="true" aria-labelledby="delete-evaluation-template-title"><h3 id="delete-evaluation-template-title">¿Eliminar «{deleteTarget.name}»?</h3><p className={styles.muted}>La plantilla dejará de aparecer en tu biblioteca. Las evaluaciones enviadas, sus respuestas y el historial se conservarán.</p><button className={styles.buttonDanger} type="button" disabled={busy} onClick={() => void deleteTemplate()}>{busy ? "Eliminando…" : "Confirmar eliminación"}</button><button className={styles.button} type="button" disabled={busy} onClick={() => setDeleteTarget(null)}>Cancelar</button></div></> : null}
       {extendTarget ? <><button className={styles.scrim} type="button" aria-label="Cancelar" onClick={() => setExtendTarget(null)} /><div className={`${styles.modal} ${styles.stack}`} role="dialog" aria-modal="true"><h3>Extender fecha límite</h3><p className={styles.muted}>Nueva fecha para {extendTarget.studentName}</p><input className={styles.field} type="date" value={extendDate} onChange={(event) => setExtendDate(event.target.value)} /><button className={styles.button} type="button" disabled={busy || !extendDate} onClick={() => void extendAssignment()}>Guardar nueva fecha</button><button className={styles.buttonSecondary} type="button" onClick={() => setExtendTarget(null)}>Cancelar</button></div></> : null}
       {toast ? <div className={styles.toast} role="status">{toast}</div> : null}
     </section>
