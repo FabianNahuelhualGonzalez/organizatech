@@ -84,11 +84,16 @@ test("detail and code cards keep scoped scrolling, 44px targets and stacked acti
 
 test("add sheet keeps scroll below its heading, readable email, touch targets and reduced-motion sending", () => {
   const sheet = read("coach-add-client-sheet.module.css");
+  const component = read("coach-add-client-sheet.tsx");
   const email = read("coach-client-invite-email-step.module.css");
   const receipt = read("coach-client-invite-receipt-step.module.css");
   const code = read("coach-client-code-button.module.css");
   assert.match(sheet, /\.header \{ flex: none/); assert.match(sheet, /\.body \{ flex: 1; min-height: 0; min-width: 0/);
   assert.match(sheet, /overflow-y: auto/); assert.match(sheet, /overscroll-behavior-y: contain/);
+  assert.match(component, /document\.body\.style\.overflow = "hidden"/);
+  assert.match(component, /document\.documentElement\.style\.overflow = "hidden"/);
+  assert.match(component, /document\.body\.style\.overflow = bodyOverflow/);
+  assert.match(component, /document\.documentElement\.style\.overflow = rootOverflow/);
   assert.match(sheet, /min-width: 44px; min-height: 44px/); assert.match(sheet, /prefers-reduced-motion: reduce/);
   assert.match(email, /min-width: 0; width: 100%; min-height: 44px/); assert.match(email, /font-size: 16px/);
   assert.match(receipt, /min-width: 44px; min-height: 50px/); assert.match(receipt, /text-overflow: ellipsis/);

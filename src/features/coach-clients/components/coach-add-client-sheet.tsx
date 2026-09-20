@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useEffect, useId } from "react";
 import { X } from "lucide-react";
 import { CoachOverlay } from "@/ui/coach-overlays/coach-overlay";
 import { StatusMessage } from "@/ui/feedback/status-message";
@@ -12,6 +12,17 @@ import styles from "./coach-add-client-sheet.module.css";
 
 export function CoachAddClientSheet({ view, actions, backgroundRef, restoreFocusRef }: CoachAddClientSheetProps) {
   const id = useId();
+  useEffect(() => {
+    if (!view.isOpen) return;
+    const bodyOverflow = document.body.style.overflow;
+    const rootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = rootOverflow;
+    };
+  }, [view.isOpen]);
   const receipt = view.step === "receipt" && isCoachInvitationReceiptReady(view.receipt) ? view.receipt : null;
   const canSubmit = view.isOpen && !view.isBusy && view.step === "email" && view.draft.canSubmit
     && view.draft.action !== null

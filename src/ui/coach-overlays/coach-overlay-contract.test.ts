@@ -18,7 +18,10 @@ test("shared Coach wrapper owns visuals and background leases, not a second focu
 
 test("client variants preserve dashboard variants with red centered confirmation and independent stacking", () => {
   const css = readFileSync(`${directory}coach-overlay.module.css`, "utf8");
-  assert.match(css, /data-variant="client-add".*width: min\(100%, 430px\); max-height: 88%/);
+  assert.match(css, /\.layer\[data-variant="client-add"\] \{[\s\S]*position: fixed;[\s\S]*height: 100dvh;/);
+  assert.match(css, /\.layer\[data-variant="client-add"\] \.scrim \{[\s\S]*position: fixed;[\s\S]*height: 100dvh;/);
+  assert.match(css, /\.sheet\[data-variant="client-add"\] \{[\s\S]*position: fixed;[\s\S]*bottom: 0;[\s\S]*width: min\(100%, 430px\);[\s\S]*max-height: 88%;/);
+  assert.match(css, /@media \(max-width: 430px\) \{[\s\S]*width: 100%;[\s\S]*max-width: none;[\s\S]*max-height: calc\(100dvh - env\(safe-area-inset-top, 0px\)\);[\s\S]*margin-inline: 0;/);
   assert.match(css, /data-variant="client-detail".*max-height: 88%/);
   assert.match(css, /data-variant="client-confirm".*z-index: 30/);
   assert.match(css, /data-variant="client-confirm".*border-color: rgba\(248, 113, 113, \.3\)/);
