@@ -106,8 +106,12 @@ import {
 } from "@/features/coach-portal/model/coach-portal";
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
-import { StudentEvaluations, StudentEvaluationsEntry } from "@/features/evaluations/components/student-evaluations";
+import { StudentEvaluations } from "@/features/evaluations/components/student-evaluations";
 import { useEvaluationNotifications } from "@/features/evaluations/hooks/use-evaluation-notifications";
+import {
+  createEvaluationOpenRequest,
+  type EvaluationOpenRequest,
+} from "@/features/evaluations/model/evaluation-navigation";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
 import { useNotificationsController } from "@/features/notifications/hooks/useNotificationsController";
 import { usePersistedCalendarNotifications } from "@/features/notifications/hooks/usePersistedCalendarNotifications";
@@ -440,7 +444,7 @@ const ComparisonScreenV2 = dynamic<ComparisonScreenV2Props>(
     .then((module) => module.ComparisonScreenV2),
 );
 
-const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos", "calendario"];
+const primaryScreens: Screen[] = ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos", "calendario", "evaluaciones"];
 const NOTIFICATION_SECTION_HIGHLIGHT_MS = 1800;
 const objectiveDescriptions: Record<string, string> = {
   Fuerza: "Busca aumentar la capacidad de levantar más carga. Prioriza ejercicios base, descansos amplios y progresión controlada de peso.",
@@ -518,10 +522,10 @@ export function OrganizatechApp({
     episodeId: string;
     sequence: number;
   } | null>(null);
-  const [coachEvaluationOpenRequest, setCoachEvaluationOpenRequest] = useState<{
-    ownerUserId: string;
-    sequence: number;
-  } | null>(null);
+  const [coachEvaluationOpenRequest, setCoachEvaluationOpenRequest] =
+    useState<EvaluationOpenRequest | null>(null);
+  const [studentEvaluationOpenRequest, setStudentEvaluationOpenRequest] =
+    useState<EvaluationOpenRequest | null>(null);
   const coachPortalSessionRef = useRef<CoachPortalSession | null>(null);
   const [userPortalAuthorizationProof, setUserPortalAuthorizationProof] =
     useState<UserPortalAuthorizationProof | null>(null);
@@ -2075,6 +2079,8 @@ export function OrganizatechApp({
     replaceCoachPortalSession(null);
     const hasExactDurableStoragePurge = options.purgeDurableStorage === true
       && storageScope !== null;
+    setCoachEvaluationOpenRequest(null);
+    setStudentEvaluationOpenRequest(null);
     if (
       activeBrowserStorageScopeRef.current === null &&
       sessionDataEpochRef.current.userId === null &&
@@ -4733,10 +4739,11 @@ export function OrganizatechApp({
     if (coachPortalSessionRef.current && intent.target === "evaluaciones") {
       const ownerUserId = coachPortalSessionRef.current.userId;
       appShell.closeNotifications();
-      setCoachEvaluationOpenRequest((current) => ({
+      setCoachEvaluationOpenRequest((current) => createEvaluationOpenRequest(
+        current,
         ownerUserId,
-        sequence: current?.ownerUserId === ownerUserId ? current.sequence + 1 : 1,
-      }));
+        intent.referenceId,
+      ));
       return;
     }
     if (
@@ -4753,6 +4760,13 @@ export function OrganizatechApp({
         sequence: current?.ownerUserId === ownerUserId ? current.sequence + 1 : 1,
       }));
       return;
+    }
+    if (!coachPortalSessionRef.current && intent.target === "evaluaciones" && supabaseUser?.id) {
+      setStudentEvaluationOpenRequest((current) => createEvaluationOpenRequest(
+        current,
+        supabaseUser.id,
+        intent.referenceId,
+      ));
     }
     appShell.closeNotifications();
     activeWorkoutActions.clearTrainingCompletionSummary();
@@ -4842,9 +4856,6 @@ export function OrganizatechApp({
               navigateTo("comparacion");
             }}
             switchDay={setDashboardDayOverride}
-            evaluationsEntry={supabaseUser?.id ? (
-              <StudentEvaluationsEntry expectedUserId={supabaseUser.id} location="home" onOpen={() => navigateTo("evaluaciones")} />
-            ) : null}
           />
         )
       )}
@@ -5007,9 +5018,6 @@ export function OrganizatechApp({
           coachLinking={coachLinking}
           onOpenCoachLinkConfirmation={() => navigateTo("coach-link-confirmation")}
           onOpenCoachLinkSuccess={() => navigateTo("coach-link-success")}
-          evaluationsEntry={supabaseUser?.id ? (
-            <StudentEvaluationsEntry expectedUserId={supabaseUser.id} location="profile" onOpen={() => navigateTo("evaluaciones")} />
-          ) : null}
         />
       )}
       {screen === "coach-link-confirmation" && (
@@ -5036,7 +5044,18 @@ export function OrganizatechApp({
         />
       )}
       {screen === "evaluaciones" && supabaseUser?.id && (
-        <StudentEvaluations expectedUserId={supabaseUser.id} onBack={goBack} />
+        <StudentEvaluations
+          expectedUserId={supabaseUser.id}
+          notificationOpenRequest={studentEvaluationOpenRequest}
+          onNotificationOpenRequestConsumed={(request) => {
+            setStudentEvaluationOpenRequest((current) => (
+              current?.ownerUserId === request.ownerUserId && current.sequence === request.sequence
+                ? null
+                : current
+            ));
+          }}
+          onBack={goBack}
+        />
       )}
       {isNewCycleConfirmOpen && (
         <ConfirmNewCycleModal

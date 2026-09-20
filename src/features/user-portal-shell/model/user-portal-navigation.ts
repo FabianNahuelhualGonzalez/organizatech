@@ -25,6 +25,7 @@ export const USER_PORTAL_NAVIGATION_ITEMS = [
     availability: "enabled",
   },
   { id: "calendar", label: "Calendario", kind: "destination", availability: "enabled" },
+  { id: "evaluations", label: "Evaluaciones", kind: "destination", availability: "enabled" },
   { id: "logout", label: "Cerrar sesión", kind: "logout", availability: "action" },
 ] as const;
 
@@ -53,6 +54,7 @@ export const USER_PORTAL_DESTINATION_SCREENS = {
   "edit-cycle": "registro-entrenamiento",
   "cycle-history": "historial-ciclos",
   calendar: "calendario",
+  evaluations: "evaluaciones",
 } as const satisfies Record<UserPortalDestinationId, UserPortalScreen>;
 
 const USER_PORTAL_ACTIVE_DESTINATIONS = {
@@ -66,6 +68,7 @@ const USER_PORTAL_ACTIVE_DESTINATIONS = {
   "registro-entrenamiento": "edit-cycle",
   "historial-ciclos": "cycle-history",
   calendario: "calendar",
+  evaluaciones: "evaluations",
 } as const satisfies Partial<Record<Screen, UserPortalDestinationId>>;
 
 const USER_PORTAL_RENDERABLE_SCREENS: readonly Screen[] = [

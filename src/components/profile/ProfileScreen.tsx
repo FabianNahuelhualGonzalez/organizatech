@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Plus } from "lucide-react";
 
 import {
@@ -50,7 +50,6 @@ export function ProfileScreen({
   coachLinking,
   onOpenCoachLinkConfirmation,
   onOpenCoachLinkSuccess,
-  evaluationsEntry,
 }: {
   profile: ProfileViewModel;
   personalData: ProfilePersonalData | null;
@@ -69,7 +68,6 @@ export function ProfileScreen({
   coachLinking: CoachLinkingController;
   onOpenCoachLinkConfirmation: () => void;
   onOpenCoachLinkSuccess: () => void;
-  evaluationsEntry?: ReactNode;
 }) {
   const ageLabel = formatProfileAgeLabel(personalData?.birthDate ?? null);
 
@@ -109,8 +107,6 @@ export function ProfileScreen({
         onOpenConfirmation={onOpenCoachLinkConfirmation}
         onOpenSuccess={onOpenCoachLinkSuccess}
       />
-
-      {evaluationsEntry}
 
       <ProfileSection
         title="Preferencias de sistema"

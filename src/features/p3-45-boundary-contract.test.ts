@@ -26,9 +26,6 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
   ],
   ignoredConjunctiveGuardIdentifiers: ["isTrainingCycleProductVisible"],
   ignoredAttributesByElement: {
-    DashboardScreen: [
-      "evaluationsEntry",
-    ],
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
       "latestExercisePerformanceStatus",
@@ -40,7 +37,6 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
     TrainingCompletionSummaryScreen: ["advancedExecutionSync"],
     ProfileScreen: [
       "coachLinking",
-      "evaluationsEntry",
       "onOpenCoachLinkConfirmation",
       "onOpenCoachLinkSuccess",
     ],

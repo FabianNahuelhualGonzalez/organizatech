@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 
 import { DashboardCoachCard } from "@/features/dashboard/components/dashboard-coach-card";
 import { DashboardDayDots } from "@/features/dashboard/components/dashboard-day-dots";
@@ -70,7 +70,6 @@ export interface DashboardScreenProps {
   goToRoutine: () => void;
   viewSummary: (day: string) => void;
   switchDay: (day: string) => void;
-  evaluationsEntry?: ReactNode;
 }
 
 export function DashboardScreen({
@@ -90,7 +89,6 @@ export function DashboardScreen({
   goToRoutine,
   viewSummary,
   switchDay,
-  evaluationsEntry,
 }: DashboardScreenProps) {
   const hasTodayRoutine = dayExercises.length > 0;
   const carouselRef = useRef<HTMLDivElement | null>(null);
@@ -239,13 +237,12 @@ export function DashboardScreen({
   }
 
   if (cardVisibility.emptyState === "no-plan") {
-    return <>{evaluationsEntry}<EmptyDashboard startRegistration={startRegistration} /></>;
+    return <EmptyDashboard startRegistration={startRegistration} />;
   }
 
   if (cardVisibility.emptyState === "no-entries") {
     return (
       <section className="screen">
-        {evaluationsEntry}
         <div className="card wide dashboard-empty-progress">
           <p className="eyebrow">Rutina creada</p>
           <h3>Aún no registras progreso</h3>
@@ -281,7 +278,6 @@ export function DashboardScreen({
 
   return (
     <section className="screen">
-      {evaluationsEntry}
       <MetricGrid summary={summary} />
       <div className="card wide dashboard-progress-card" data-section="weekly-progress">
         <div className="weekly-progress-summary">

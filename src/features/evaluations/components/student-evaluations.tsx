@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronRight, Pencil, Trash2 } from "lucide-react";
+import { Check, Pencil, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -20,6 +20,7 @@ import {
   type EvaluationTableRow,
   type StudentEvaluationAssignment,
 } from "@/features/evaluations/model/evaluation-types";
+import type { EvaluationOpenRequest } from "@/features/evaluations/model/evaluation-navigation";
 import { AppBackButton } from "@/ui/navigation/app-back-button";
 
 import { StatusBadge } from "./coach-evaluations";
@@ -29,8 +30,15 @@ type StudentTab = "pending" | "expired" | "completed";
 type StudentView = "list" | "form" | "success";
 type RowEditor = { readonly questionId: string; readonly rowId: string | null; readonly values: Record<string, string> };
 
-export function StudentEvaluations({ expectedUserId, onBack }: {
+export function StudentEvaluations({
+  expectedUserId,
+  notificationOpenRequest,
+  onNotificationOpenRequestConsumed,
+  onBack,
+}: {
   readonly expectedUserId: string;
+  readonly notificationOpenRequest: EvaluationOpenRequest | null;
+  readonly onNotificationOpenRequestConsumed: (request: EvaluationOpenRequest) => void;
   readonly onBack: () => void;
 }) {
   const [assignments, setAssignments] = useState<readonly StudentEvaluationAssignment[]>([]);
@@ -71,7 +79,7 @@ export function StudentEvaluations({ expectedUserId, onBack }: {
     : assignment.status === tab);
   const readOnly = active?.status === "expired" || active?.status === "completed";
 
-  async function openAssignment(id: string) {
+  const openAssignment = useCallback(async (id: string) => {
     setBusy(true);
     try {
       const assignment = await getOwnStudentEvaluation(expectedUserId, id);
@@ -88,7 +96,27 @@ export function StudentEvaluations({ expectedUserId, onBack }: {
     } finally {
       setBusy(false);
     }
-  }
+  }, [expectedUserId, load]);
+
+  useEffect(() => {
+    if (
+      loading
+      || loadError
+      || notificationOpenRequest?.ownerUserId !== expectedUserId
+    ) return;
+
+    onNotificationOpenRequestConsumed(notificationOpenRequest);
+    if (notificationOpenRequest.assignmentId) {
+      void openAssignment(notificationOpenRequest.assignmentId);
+    }
+  }, [
+    expectedUserId,
+    loadError,
+    loading,
+    notificationOpenRequest,
+    onNotificationOpenRequestConsumed,
+    openAssignment,
+  ]);
 
   async function saveDraft() {
     if (!active || readOnly) return;
@@ -205,20 +233,4 @@ function StudentQuestion({ question, answer, readOnly, hasError, editor, onText,
 }) {
   const rows = answer && typeof answer !== "string" ? answer.rows : [];
   return <article className={`${styles.questionCard} ${styles.stack}`}><div className={styles.questionHeading}><strong>{question.text}</strong>{question.required ? <span className={styles.required}>OBLIGATORIA</span> : null}</div>{question.mode === "text" ? <textarea className={styles.textarea} value={typeof answer === "string" ? answer : ""} disabled={readOnly} onChange={(event) => onText(event.target.value)} placeholder="Escribe tu respuesta…" /> : <>{question.guidance ? <p className={styles.guidance}>{question.guidance}</p> : null}<div className={styles.stack}>{rows.map((row) => <div className={styles.answerRow} key={row.id}><dl>{(question.columns ?? []).map((column) => <div key={column.id}><dt>{column.label}:</dt><dd>{row.values[column.id] || "—"}</dd></div>)}</dl>{!readOnly ? <div className={styles.inlineActions}><button className={styles.iconButton} type="button" aria-label="Editar fila" onClick={() => onEdit(row)}><Pencil size={15} /></button><button className={`${styles.iconButton} ${styles.iconDanger}`} type="button" aria-label="Eliminar fila" onClick={() => onRemove(row.id)}><Trash2 size={15} /></button></div> : null}</div>)}</div>{editor ? <div className={styles.rowEditor}>{(question.columns ?? []).map((column) => <label className={styles.label} key={column.id}>{column.label}<input className={styles.field} value={editor.values[column.id] ?? ""} onChange={(event) => onEditorChange(column.id, event.target.value)} /></label>)}<div className={styles.inlineActions}><button className={styles.button} type="button" onClick={onSaveRow}>Guardar fila</button><button className={styles.buttonSecondary} type="button" onClick={onCancelRow}>Cancelar</button></div></div> : null}{!readOnly && !editor ? <button className={styles.buttonSecondary} type="button" onClick={onAdd}>+ Agregar fila</button> : null}</>}{hasError ? <span className={styles.fieldError}>Este campo es obligatorio</span> : null}</article>;
-}
-
-export function StudentEvaluationsEntry({ expectedUserId, location, onOpen }: {
-  readonly expectedUserId: string;
-  readonly location: "home" | "profile";
-  readonly onOpen: () => void;
-}) {
-  const [count, setCount] = useState<number | null>(null);
-  useEffect(() => {
-    let active = true;
-    void listOwnStudentEvaluations(expectedUserId).then((items) => {
-      if (active) setCount(items.filter((item) => item.status !== "completed").length);
-    }).catch(() => { if (active) setCount(null); });
-    return () => { active = false; };
-  }, [expectedUserId]);
-  return <button className={styles.entryCard} type="button" data-evaluations-entry={location} onClick={onOpen}><span><strong>Evaluaciones</strong><span>{location === "home" ? "Revisa y responde los formularios enviados por tu coach." : "Pendientes, vencidas y evaluaciones completadas."}</span></span>{count && count > 0 ? <span className={styles.counter} aria-label={`${count} evaluaciones pendientes o vencidas`}>{count}</span> : <ChevronRight size={20} aria-hidden="true" />}</button>;
 }

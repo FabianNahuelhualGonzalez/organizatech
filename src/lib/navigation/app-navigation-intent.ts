@@ -33,6 +33,7 @@ export function resolveMenuScreens(
     item === "comparacion" ||
     item === "registro-entrenamiento" ||
     item === "calendario" ||
+    item === "evaluaciones" ||
     (item === "historial-ciclos" && visibleCycleHistoryCount > 0)
   );
 }

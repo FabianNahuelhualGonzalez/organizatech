@@ -23,6 +23,7 @@ const PRIMARY_SCREENS: readonly Screen[] = [
   "registro-entrenamiento",
   "historial-ciclos",
   "calendario",
+  "evaluaciones",
 ];
 
 const EXPECTED_IDS = [
@@ -33,6 +34,7 @@ const EXPECTED_IDS = [
   "edit-cycle",
   "cycle-history",
   "calendar",
+  "evaluations",
   "logout",
 ] as const;
 
@@ -44,6 +46,7 @@ const EXPECTED_LABELS = [
   "Modificar ciclo de entrenamiento",
   "Historial ciclo de entrenamiento",
   "Calendario",
+  "Evaluaciones",
   "Cerrar sesión",
 ] as const;
 
@@ -53,7 +56,7 @@ test("el menú Usuario conserva orden, IDs, etiquetas y sólo opciones aprobadas
   const labels = USER_PORTAL_NAVIGATION_ITEMS.map(({ label }) => String(label));
   assert.equal(labels.includes("Calendario"), true);
   assert.equal(labels.includes("Mensajes"), false);
-  assert.equal(USER_PORTAL_NAVIGATION_ITEMS.filter(isUserPortalDestination).length, 7);
+  assert.equal(USER_PORTAL_NAVIGATION_ITEMS.filter(isUserPortalDestination).length, 8);
 });
 
 test("el mapeo visual a Screen es exacto, total y reversible", () => {
@@ -65,6 +68,7 @@ test("el mapeo visual a Screen es exacto, total y reversible", () => {
     "edit-cycle": "registro-entrenamiento",
     "cycle-history": "historial-ciclos",
     calendar: "calendario",
+    evaluations: "evaluaciones",
   });
 
   for (const destinationId of Object.keys(
@@ -84,7 +88,7 @@ test("el modelo consume la visibilidad canónica y nunca deshabilita destinos of
 
   assert.deepEqual(
     model.items.map(({ id }) => id),
-    ["profile", "dashboard", "training", "comparison", "edit-cycle", "calendar", "logout"],
+    ["profile", "dashboard", "training", "comparison", "edit-cycle", "calendar", "evaluations", "logout"],
   );
   assert.equal(model.items.every((item) => (
     item.kind === "logout" || item.availability === "enabled"
@@ -108,6 +112,7 @@ test("la opción activa deriva de la pantalla real e incluye el resumen interno 
     ["registro-entrenamiento", "edit-cycle"],
     ["historial-ciclos", "cycle-history"],
     ["calendario", "calendar"],
+    ["evaluaciones", "evaluations"],
   ]);
 
   for (const [screen, activeItemId] of expected) {
@@ -135,7 +140,7 @@ test("cada destino visual ejecuta una sola navegación tipada", () => {
   }
 
   assert.deepEqual(calls, PRIMARY_SCREENS);
-  assert.equal(calls.length, 7);
+  assert.equal(calls.length, 8);
 });
 
 test("el modelo visual identifica únicamente las pantallas productivas del portal Usuario", () => {

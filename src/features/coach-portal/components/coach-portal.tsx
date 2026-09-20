@@ -29,6 +29,7 @@ import {
 } from "@/features/coach-portal/model/coach-portal";
 import { CalendarRemindersProductiveBoundary } from "@/features/calendar-reminders";
 import { CoachEvaluations } from "@/features/evaluations/components/coach-evaluations";
+import type { EvaluationOpenRequest } from "@/features/evaluations/model/evaluation-navigation";
 import { AppBackButton } from "@/ui/navigation/app-back-button";
 import {
   OVERLAY_INITIAL_FOCUS_ATTRIBUTE,
@@ -80,14 +81,8 @@ export interface CoachPortalBoundaryProps {
     episodeId: string;
     sequence: number;
   }) => void;
-  evaluationOpenRequest: {
-    ownerUserId: string;
-    sequence: number;
-  } | null;
-  onEvaluationOpenRequestConsumed: (request: {
-    ownerUserId: string;
-    sequence: number;
-  }) => void;
+  evaluationOpenRequest: EvaluationOpenRequest | null;
+  onEvaluationOpenRequestConsumed: (request: EvaluationOpenRequest) => void;
   onLogout: () => void | Promise<void>;
 }
 
@@ -135,8 +130,7 @@ export function CoachPortalBoundary({
     if (evaluationOpenRequest?.ownerUserId !== session.userId) return;
     setIsCalendarOpen(false);
     dispatch({ type: "evaluations_opened" });
-    onEvaluationOpenRequestConsumed(evaluationOpenRequest);
-  }, [evaluationOpenRequest, onEvaluationOpenRequestConsumed, session.userId]);
+  }, [evaluationOpenRequest, session.userId]);
 
   function handleLogout() {
     dispatch({ type: "reset" });
@@ -228,6 +222,8 @@ export function CoachPortalBoundary({
       ) : state.screen === "evaluations" ? (
         <CoachEvaluations
           expectedUserId={session.userId}
+          notificationOpenRequest={evaluationOpenRequest}
+          onNotificationOpenRequestConsumed={onEvaluationOpenRequestConsumed}
           onBack={() => dispatch({ type: "home_opened" })}
         />
       ) : (

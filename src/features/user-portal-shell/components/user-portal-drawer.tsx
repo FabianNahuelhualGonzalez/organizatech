@@ -3,6 +3,7 @@
 import {
   CalendarDays,
   ChartNoAxesCombined,
+  ClipboardCheck,
   Dumbbell,
   History,
   LayoutDashboard,
@@ -34,6 +35,7 @@ const userPortalDestinationIcons: Record<UserPortalDestinationId, LucideIcon> = 
   "edit-cycle": Settings2,
   "cycle-history": History,
   calendar: CalendarDays,
+  evaluations: ClipboardCheck,
 };
 
 export interface UserPortalDrawerProps {

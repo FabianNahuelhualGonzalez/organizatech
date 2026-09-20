@@ -28,14 +28,22 @@ import {
   type EvaluationTablePreset,
   type EvaluationTemplate,
 } from "@/features/evaluations/model/evaluation-types";
+import type { EvaluationOpenRequest } from "@/features/evaluations/model/evaluation-navigation";
 import { AppBackButton } from "@/ui/navigation/app-back-button";
 
 import styles from "./evaluations.module.css";
 
 type CoachView = "library" | "builder" | "send" | "sent" | "review" | "detail";
 
-export function CoachEvaluations({ expectedUserId, onBack }: {
+export function CoachEvaluations({
+  expectedUserId,
+  notificationOpenRequest,
+  onNotificationOpenRequestConsumed,
+  onBack,
+}: {
   readonly expectedUserId: string;
+  readonly notificationOpenRequest: EvaluationOpenRequest | null;
+  readonly onNotificationOpenRequestConsumed: (request: EvaluationOpenRequest) => void;
   readonly onBack: () => void;
 }) {
   const [view, setView] = useState<CoachView>("library");
@@ -87,6 +95,27 @@ export function CoachEvaluations({ expectedUserId, onBack }: {
     const timeout = window.setTimeout(() => setToast(""), 2600);
     return () => window.clearTimeout(timeout);
   }, [toast]);
+  useEffect(() => {
+    if (
+      loading
+      || error
+      || notificationOpenRequest?.ownerUserId !== expectedUserId
+    ) return;
+
+    const requestedAssignment = notificationOpenRequest.assignmentId
+      ? assignments.find((assignment) => assignment.id === notificationOpenRequest.assignmentId)
+      : null;
+    setDetailId(requestedAssignment?.id ?? null);
+    setView(requestedAssignment ? "detail" : "review");
+    onNotificationOpenRequestConsumed(notificationOpenRequest);
+  }, [
+    assignments,
+    error,
+    expectedUserId,
+    loading,
+    notificationOpenRequest,
+    onNotificationOpenRequestConsumed,
+  ]);
 
   const selectedTemplate = templates.find((template) => template.id === sendTemplateId) ?? null;
   const detail = assignments.find((assignment) => assignment.id === detailId) ?? null;

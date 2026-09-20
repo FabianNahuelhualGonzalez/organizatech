@@ -48,6 +48,7 @@ const EXPECTED_MAPPING = {
   "edit-cycle": "registro-entrenamiento",
   "cycle-history": "historial-ciclos",
   calendar: "calendario",
+  evaluations: "evaluaciones",
 };
 
 const EXPECTED_IDS = [
@@ -58,6 +59,7 @@ const EXPECTED_IDS = [
   "edit-cycle",
   "cycle-history",
   "calendar",
+  "evaluations",
   "logout",
 ];
 
@@ -69,6 +71,7 @@ const EXPECTED_LABELS = [
   "Modificar ciclo de entrenamiento",
   "Historial ciclo de entrenamiento",
   "Calendario",
+  "Evaluaciones",
   "Cerrar sesión",
 ];
 
