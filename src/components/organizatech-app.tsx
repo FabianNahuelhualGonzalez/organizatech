@@ -502,6 +502,7 @@ export function OrganizatechApp({
   const multiportalAuth = useMultiportalAuthBoundary({
     initialRoute: initialAuthRoute,
     currentRoute: authRouteController.route,
+    isGoogleOAuthBlocked: googleOAuth.isPortalResolutionBlocked,
     initialPasswordRecoveryActive: initialPasswordRecoveryRouteState === "active",
   });
   const [sessionName, setSessionName] = useState("");
@@ -1228,6 +1229,10 @@ export function OrganizatechApp({
         requestToken = captureSessionDataRequestToken();
         if (authState.session) {
           const portalDecision = multiportalAuth.resolveInitialSessionDecision(authState.session.user.id);
+          if (portalDecision === "defer" || portalDecision === "reject_oauth") {
+            if (portalDecision === "reject_oauth") setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+            return;
+          }
           if (
             portalDecision === "hold_user_registration"
             || portalDecision === "hold_coach_registration"
@@ -1383,6 +1388,11 @@ export function OrganizatechApp({
         return;
       }
       if (portalEventDecision === "defer") return;
+      if (portalEventDecision === "reject_oauth") {
+        setIsAuthLoading(false);
+        setAuthStatus(MULTIPORTAL_AUTH_ERROR_MESSAGE, "error");
+        return;
+      }
       if (
         portalEventDecision === "hold_user_registration" ||
         portalEventDecision === "hold_coach_registration" ||
@@ -2524,6 +2534,8 @@ export function OrganizatechApp({
       return;
     }
 
+    googleOAuth.cancelRegistration();
+    multiportalAuth.resetOAuthHandoff();
     if (mode === "registro") registrationForm.controller.clearFieldErrors();
     else setAuthFieldErrors({});
     setAuthStatus("", "info");

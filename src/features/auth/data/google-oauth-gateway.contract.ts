@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { useMultiportalAuthBoundary } from "../hooks/use-multiportal-auth-boundary";
+import { resolveAuthRouteState } from "../model/auth-route";
+import { createGoogleOAuthPortalHandoffGuard, GOOGLE_OAUTH_HANDOFF_KEY } from "../model/google-oauth-portal-handoff";
+import { createMultiportalAuthController, type MultiportalAuthGateway } from "../model/multiportal-auth-controller";
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
@@ -192,6 +199,7 @@ interface FakeClientOptions {
   activatedSessionUserId?: string;
   activatedIdentityUserId?: string;
   provider?: string;
+  onSetSession?: () => void;
   onGetUser?: (count: number) => void;
   onGetSession?: (count: number) => void;
   onWelcome?: () => void;
@@ -246,6 +254,7 @@ function fakeClient(options: FakeClientOptions = {}) {
         const activatedUserId = options.activatedUserId ?? USER_A;
         const activatedSessionUserId = options.activatedSessionUserId ?? activatedUserId;
         currentUserId = activatedSessionUserId;
+        options.onSetSession?.();
         return {
           data: {
             session: oauthSession(activatedSessionUserId),
@@ -313,7 +322,7 @@ async function pendingOperation(input: {
     guard,
     transientClient: transient.client,
   });
-  return { operation, transient, guard };
+  return { operation, transient, guard, storage };
 }
 
 const userPayload = {
@@ -525,4 +534,145 @@ test("B inyectado en el último await transitorio produce cero setSession, signO
   assert.equal(principal.setSessionCalls.length, 0);
   assert.equal(principal.signOutCalls, 0);
   assert.equal(navigationCalls, 0);
+});
+
+
+// Exercise the actual gateway transfer and boundary decisions without timers or network.
+function renderPortalBoundary(storage: OAuthIntentStorage, location: URL) {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: {
+    locks: { request: async (_name: string, _options: unknown, run: () => Promise<unknown>) => run() },
+  } });
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { sessionStorage: storage, location } });
+  let boundary!: ReturnType<typeof useMultiportalAuthBoundary>;
+  function Probe() {
+    const route = resolveAuthRouteState(Object.fromEntries(location.searchParams));
+    boundary = useMultiportalAuthBoundary({ initialRoute: route, currentRoute: route });
+    return null;
+  }
+  renderToStaticMarkup(createElement(Probe));
+  return {
+    boundary,
+    restore() {
+      if (previousNavigator) Object.defineProperty(globalThis, "navigator", previousNavigator);
+      else Reflect.deleteProperty(globalThis, "navigator");
+      if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+      else Reflect.deleteProperty(globalThis, "window");
+    },
+  };
+}
+
+for (const portal of ["coach", "usuario"] as const) {
+  for (const order of ["session-before-navigation", "navigation-before-session"] as const) {
+    test(`dual role + Login ${portal}: primer intento, ${order}`, async () => {
+      const { operation, guard, storage } = await pendingOperation({ portal, mode: "login" });
+      const mounted: ReturnType<typeof renderPortalBoundary>[] = [];
+      const backendReads: string[] = [];
+      const publications: string[] = [];
+      let location = new URL("https://example.test/login"); // Root captured the default Usuario route.
+      let root = renderPortalBoundary(storage, location);
+      mounted.push(root);
+      root.boundary.completeInitialResolution();
+      const principal = fakeClient({
+        userId: null,
+        onSetSession: () => {
+          // Supabase can synchronously publish SIGNED_IN before setSession resolves.
+          assert.equal(root.boundary.resolveInitialSessionDecision(USER_A), "defer");
+          if (order === "session-before-navigation") {
+            assert.equal(root.boundary.resolveSessionEventDecision("SIGNED_IN", USER_A), "defer");
+          }
+        },
+      });
+      try {
+        await transferGoogleOAuthAndNavigate({
+          guard,
+          transfer: () => operation.transferToPrincipal(principal.client, guard),
+          navigate() {
+            location = new URL(`https://example.test/login?mode=login&tipo=${portal}`);
+            root = renderPortalBoundary(storage, location);
+            mounted.push(root);
+          },
+        });
+        // Both clean-page bootstrap and late events must select the same portal.
+        const initialDecision = root.boundary.resolveInitialSessionDecision(USER_A);
+        root.boundary.completeInitialResolution();
+        const eventDecision = root.boundary.resolveSessionEventDecision("SIGNED_IN", USER_A);
+        const expected = portal === "coach" ? "authorize_coach" : "authorize_user";
+        assert.equal(initialDecision, expected);
+        assert.equal(eventDecision, expected);
+        const handoff = createGoogleOAuthPortalHandoffGuard({ storage, location: () => location });
+        assert.equal(await handoff.validate(USER_A, portal), true);
+        const owner = root.boundary.beginPortalResolution(USER_A);
+        const gateway = {
+          getCurrentIdentity: async () => ({ userId: USER_A, email: null, authState: {} }),
+          hasUserRegistration: async () => { backendReads.push("usuario"); return true; },
+          getCoachRegistration: async () => {
+            backendReads.push("coach");
+            return { userId: USER_A, createdAt: "", firstName: "", lastName: "", birthDate: "", gender: "", phoneNumber: "", professionalTitle: "", contactEmail: "" };
+          },
+          signOut: async () => "signed_out",
+        } as unknown as MultiportalAuthGateway<object>;
+        const access = await createMultiportalAuthController<object>().resolvePortalAccess({
+          requestedPortal: portal, expectedUserId: USER_A, owner,
+        }, gateway);
+        if (access.state === "coach_authorized" || access.state === "user_authorized") publications.push(access.requestedPortal);
+        assert.deepEqual(publications, [portal]);
+        assert.deepEqual(backendReads, [portal]);
+        assert.equal(principal.setSessionCalls.length, 1);
+        handoff.complete();
+        assert.equal(storage.getItem(GOOGLE_OAUTH_HANDOFF_KEY), null);
+        assert.equal(handoff.decision(), expected, "late events retain the chosen portal in memory");
+        assert.equal(await handoff.validate(USER_B, portal), false);
+      } finally {
+        for (const mount of mounted.reverse()) mount.restore();
+      }
+    });
+  }
+}
+
+test("handoff OAuth no concede Coach cuando backend no tiene membresía", async () => {
+  const { operation, guard, storage } = await pendingOperation({ portal: "coach", mode: "login" });
+  await operation.transferToPrincipal(fakeClient({ userId: null }).client, guard);
+  const location = new URL("https://example.test/login?mode=login&tipo=coach");
+  const handoff = createGoogleOAuthPortalHandoffGuard({ storage, location: () => location });
+  assert.equal(await handoff.validate(USER_A, "coach"), true);
+  const mount = renderPortalBoundary(storage, location);
+  let signOuts = 0;
+  try {
+    const owner = mount.boundary.beginPortalResolution(USER_A);
+    const access = await createMultiportalAuthController<object>().resolvePortalAccess({
+      requestedPortal: "coach", expectedUserId: USER_A, owner,
+    }, {
+      getCurrentIdentity: async () => ({ userId: USER_A, authState: {}, email: null }),
+      getCoachRegistration: async () => null,
+      hasUserRegistration: async () => assert.fail("no fallback a Usuario"),
+      signOut: async () => { signOuts++; return "signed_out"; },
+    } as unknown as MultiportalAuthGateway<object>);
+    assert.equal(access.state, "coach_registration_required");
+    assert.equal(signOuts, 1);
+  } finally { mount.restore(); }
+});
+
+test("handoff transferido no persiste tokens, correo ni identidad en claro", async () => {
+  const { operation, guard, storage } = await pendingOperation({ portal: "coach", mode: "login" });
+  await operation.transferToPrincipal(fakeClient({ userId: null }).client, guard);
+  const raw = storage.getItem(GOOGLE_OAUTH_HANDOFF_KEY)!;
+  assert.deepEqual(Object.keys(JSON.parse(raw)).sort(), ["createdAt", "intentId", "phase", "portal", "subject", "version"]);
+  assert.ok(!raw.includes(USER_A));
+  assert.doesNotMatch(raw, /@|email|password|token|session-/i);
+});
+
+
+test("URL limpia con root aún capturado en Usuario respeta la intención Coach", async () => {
+  const { operation, guard, storage } = await pendingOperation({ portal: "coach", mode: "login" });
+  const location = new URL("https://example.test/login");
+  const mount = renderPortalBoundary(storage, location);
+  try {
+    await operation.transferToPrincipal(fakeClient({ userId: null }).client, guard);
+    location.search = "?mode=login&tipo=coach";
+    assert.equal(mount.boundary.resolveInitialSessionDecision(USER_A), "authorize_coach");
+    mount.boundary.completeInitialResolution();
+    assert.equal(mount.boundary.resolveSessionEventDecision("SIGNED_IN", USER_A), "authorize_coach");
+  } finally { mount.restore(); }
 });

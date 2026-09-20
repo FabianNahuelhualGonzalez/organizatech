@@ -2,6 +2,9 @@
 
 import { useEffect, useRef } from "react";
 
+import { createGoogleOAuthPortalHandoffGuard } from "@/features/auth/model/google-oauth-portal-handoff";
+import { getBrowserSessionStorage } from "@/lib/storage/browser-storage";
+
 import { createSupabaseMultiportalAuthGateway } from "@/features/auth/data/supabase-multiportal-auth-gateway";
 import type {
   CoachRegistrationSubmission,
@@ -50,6 +53,7 @@ import type { SupabaseAuthRefreshIdentityScope } from "@/lib/supabase/auth-resil
 import type { SupabaseSessionState } from "@/lib/supabase/session";
 
 export type PortalSessionEventDecision =
+  | "reject_oauth"
   | "continue"
   | "defer"
   | "complete_signup_confirmation"
@@ -64,7 +68,16 @@ export function useMultiportalAuthBoundary(input: {
   initialRoute: AuthRouteState;
   currentRoute: AuthRouteState;
   initialPasswordRecoveryActive?: boolean;
+  isGoogleOAuthBlocked?: () => boolean;
 }) {
+  const oauthHandoffRef = useRef<ReturnType<typeof createGoogleOAuthPortalHandoffGuard> | null>(null);
+  if (!oauthHandoffRef.current) {
+    oauthHandoffRef.current = createGoogleOAuthPortalHandoffGuard({
+      storage: getBrowserSessionStorage(),
+      location: () => typeof window === "undefined" ? { pathname: "", search: "" } : window.location,
+    });
+  }
+  const oauthMountPermitsRef = useRef(new WeakMap<PortalResolutionOwner, () => boolean>());
   const routeRef = useRef(input.currentRoute);
   routeRef.current = input.currentRoute;
   const controllerRef = useRef<MultiportalAuthController<SupabaseSessionState> | null>(null);
@@ -114,6 +127,7 @@ export function useMultiportalAuthBoundary(input: {
     currentUserIdRef.current = expectedUserId;
     portalResolutionOwnersRef.current.acceptIdentity(expectedUserId);
     const owner = portalResolutionOwnersRef.current.begin(expectedUserId);
+    oauthMountPermitsRef.current.set(owner, oauthHandoffRef.current!.capturePermit());
     passwordRecoveryMountPermitsRef.current.set(
       owner,
       passwordRecoveryPortalGuardRef.current!.capturePortalMountPermit(),
@@ -124,10 +138,13 @@ export function useMultiportalAuthBoundary(input: {
   function endPortalResolution(owner: PortalResolutionOwner) {
     portalResolutionOwnersRef.current.end(owner);
     passwordRecoveryMountPermitsRef.current.delete(owner);
+    oauthMountPermitsRef.current.delete(owner);
   }
 
   function isPortalResolutionCurrent(owner: PortalResolutionOwner) {
-    return portalResolutionOwnersRef.current.isCurrent(owner)
+    return !input.isGoogleOAuthBlocked?.()
+      && oauthMountPermitsRef.current.get(owner)?.() === true
+      && portalResolutionOwnersRef.current.isCurrent(owner)
       && passwordRecoveryMountPermitsRef.current.get(owner)?.isCurrent() === true;
   }
 
@@ -231,6 +248,7 @@ export function useMultiportalAuthBoundary(input: {
       return "defer";
     }
     if (event === "SIGNED_OUT") {
+      oauthHandoffRef.current!.reset();
       const pendingSignupConfirmation = signupConfirmationRef.current;
       invalidatePortalOperations();
       currentUserIdRef.current = null;
@@ -259,6 +277,9 @@ export function useMultiportalAuthBoundary(input: {
       return "defer";
     }
 
+    if (input.isGoogleOAuthBlocked?.()) return "defer";
+    const oauthDecision = oauthHandoffRef.current!.decision();
+    if (oauthDecision !== "continue") return oauthDecision;
     const route = routeRef.current;
     if (route.mode === "registro") {
       return route.accountType === "coach"
@@ -276,6 +297,9 @@ export function useMultiportalAuthBoundary(input: {
     coachRegistrationOwnersRef.current.acceptIdentity(currentUserId);
     userRegistrationOwnersRef.current.acceptIdentity(currentUserId);
     signupConfirmationOwnersRef.current.acceptIdentity(currentUserId);
+    if (input.isGoogleOAuthBlocked?.()) return "defer";
+    const oauthDecision = oauthHandoffRef.current!.decision();
+    if (oauthDecision !== "continue") return oauthDecision;
     if (input.initialRoute.mode === "registro") {
       return input.initialRoute.accountType === "coach"
         ? "hold_coach_registration"
@@ -303,10 +327,20 @@ export function useMultiportalAuthBoundary(input: {
       return { state: "stale", requestedPortal };
     }
     if (!supabase) return controlledPortalError(requestedPortal);
-    return controllerRef.current!.resolvePortalAccess(
-      { requestedPortal, expectedUserId, owner },
+    if (input.isGoogleOAuthBlocked?.()
+      || !await oauthHandoffRef.current!.validate(expectedUserId, requestedPortal)) {
+      return controlledPortalError(requestedPortal);
+    }
+    if (!isPortalResolutionCurrent(owner)) return { state: "stale", requestedPortal };
+    const access = await controllerRef.current!.resolvePortalAccess(
+      { requestedPortal, expectedUserId, owner: { ...owner, isCurrent: () => isPortalResolutionCurrent(owner) } },
       createGateway(supabase),
     );
+    if (isPortalResolutionCurrent(owner)
+      && (access.state === "coach_authorized" || access.state === "user_authorized")) {
+      oauthHandoffRef.current!.complete();
+    }
+    return access;
   }
 
   async function registerCoach(
@@ -493,6 +527,7 @@ export function useMultiportalAuthBoundary(input: {
   }
 
   return {
+    resetOAuthHandoff: () => oauthHandoffRef.current!.reset(),
     beginPortalResolution,
     endPortalResolution,
     isPortalResolutionCurrent,

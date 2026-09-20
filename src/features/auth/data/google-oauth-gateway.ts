@@ -19,6 +19,8 @@ import {
 import type { AuthAccountType, AuthMode } from "../model/auth-route";
 import type { PostAuthNavigationDestination } from "../model/post-auth-navigation-intent";
 
+import { blockGoogleOAuthPortal, prepareGoogleOAuthPortalHandoff } from "../model/google-oauth-portal-handoff";
+
 const PKCE_STORAGE_PREFIX = "organizatech:google-oauth:pkce:";
 
 export interface GoogleOAuthOperationGuard {
@@ -113,6 +115,7 @@ export async function startGoogleOAuth(input: {
   const storage = getBrowserSessionStorage();
   if (!storage) throw new Error("OAuth storage is unavailable.");
   const intent = createGoogleOAuthIntent(input);
+  blockGoogleOAuthPortal(storage);
   persistGoogleOAuthIntent(storage, intent);
   const client = createTransientGoogleOAuthClient(intent.id, storage);
   const { error } = await client.auth.signInWithOAuth({
@@ -134,6 +137,7 @@ export async function completeGoogleOAuth(input: {
   readonly transientClient?: SupabaseClient;
 }): Promise<GoogleOAuthPendingOperation> {
   assertCurrent(input.guard);
+  blockGoogleOAuthPortal(input.storage);
   const intent = consumeGoogleOAuthIntent(input.storage, input.intentId);
   if (!intent) throw new Error("OAuth intent is invalid or expired.");
   const transient = input.transientClient
@@ -150,11 +154,12 @@ export async function completeGoogleOAuth(input: {
   await assertTransientIdentity(transient, userId, input.guard);
   assertCurrent(input.guard);
 
-  return createPendingOperation({ intent, transient, userId });
+  return createPendingOperation({ intent, transient, userId, storage: input.storage });
 }
 
 function createPendingOperation(input: {
   intent: GoogleOAuthIntent;
+  storage: OAuthIntentStorage;
   transient: SupabaseClient;
   userId: string;
 }): GoogleOAuthPendingOperation {
@@ -221,6 +226,8 @@ function createPendingOperation(input: {
         throw sessionResult.error ?? new Error("OAuth session is unavailable.");
       }
 
+      const handoff = await prepareGoogleOAuthPortalHandoff(input.storage, intent, userId, () => assertCurrent(guard));
+      assertCurrent(guard);
       await runSupabasePrincipalIdentityOperation(async () => {
         const principalUserId = await readPrincipalUserId(principal, guard);
         assertCurrent(guard);
@@ -246,6 +253,8 @@ function createPendingOperation(input: {
         const activatedUserId = await readPrincipalUserId(principal, guard);
         if (activatedUserId !== userId) throw new GoogleOAuthStaleOperationError();
       });
+      assertCurrent(guard);
+      handoff.ready();
     },
   });
 }

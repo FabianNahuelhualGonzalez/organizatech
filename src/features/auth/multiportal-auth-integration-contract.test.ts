@@ -2127,7 +2127,7 @@ function auditIntegration(sources: Sources) {
     `${TOKEN_REFRESHED_AUTHORIZATION_FAILURE} TOKEN_REFRESHED comparte el camino autoritativo`,
   );
   assert.match(hook, /beginPortalResolution\(expectedUserId: string\)/);
-  assert.match(hook, /\{ requestedPortal, expectedUserId, owner \}/);
+  assert.match(hook, /\{ requestedPortal, expectedUserId, owner: \{ \.\.\.owner, isCurrent: \(\) => isPortalResolutionCurrent\(owner\) \} \}/);
   assert.match(hook, /beginCoachRegistrationSubmit\([\s\S]*independentIdentity: flow === "separate"/);
   assert.match(
     hook,

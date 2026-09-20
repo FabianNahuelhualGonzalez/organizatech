@@ -774,11 +774,8 @@ const H1_MUTATION_PROBES: readonly H1MutationProbe[] = [
     mutate(source) {
       return replaceExactlyOnce(
         source,
-        [
-          "    return portalResolutionOwnersRef.current.isCurrent(owner)",
-          "      && passwordRecoveryMountPermitsRef.current.get(owner)?.isCurrent() === true;",
-        ].join("\n"),
-        "    return portalResolutionOwnersRef.current.isCurrent(owner);",
+        "      && passwordRecoveryMountPermitsRef.current.get(owner)?.isCurrent() === true;",
+        ";",
         this.id,
       );
     },
@@ -788,11 +785,17 @@ const H1_MUTATION_PROBES: readonly H1MutationProbe[] = [
     source: "boundary",
     expectedFailure: H1_FAILURES.portalAccess,
     mutate(source) {
-      return replaceExactlyOnce(
+      const withoutInitialGuard = replaceExactlyOnce(
         source,
         "      || !isPortalResolutionCurrent(owner)",
         "      || !portalResolutionOwnersRef.current.isCurrent(owner)",
         this.id,
+      );
+      return replaceExactlyOnce(
+        withoutInitialGuard,
+        '    if (!isPortalResolutionCurrent(owner)) return { state: "stale", requestedPortal };',
+        '    if (!portalResolutionOwnersRef.current.isCurrent(owner)) return { state: "stale", requestedPortal };',
+        this.id + ".after-oauth-validation",
       );
     },
   },

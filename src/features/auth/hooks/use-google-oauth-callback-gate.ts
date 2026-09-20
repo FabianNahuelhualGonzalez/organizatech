@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { blockGoogleOAuthPortal, GOOGLE_OAUTH_HANDOFF_KEY } from "@/features/auth/model/google-oauth-portal-handoff";
+
 import {
   completeGoogleOAuth,
   isGoogleOAuthStaleOperationError,
@@ -58,6 +60,7 @@ export interface GoogleOAuthBoundary extends GoogleOAuthBoundaryState {
     formGuard: GoogleOAuthFormRevisionGuard,
   ): Promise<GoogleOAuthRegistrationResult>;
   cancelRegistration(): void;
+  isPortalResolutionBlocked(): boolean;
 }
 
 const READY_STATE: GoogleOAuthBoundaryState = {
@@ -78,6 +81,9 @@ export function useGoogleOAuthCallbackGate(options: {
       ? { ...READY_STATE, state: "checking" }
       : READY_STATE;
   });
+  const portalResolutionBlockedRef = useRef(
+    typeof window !== "undefined" && Boolean(parseGoogleOAuthCallback(window.location)),
+  );
   const ownerControllerRef = useRef(createGoogleOAuthOperationOwnerController());
   const pendingOperationRef = useRef<GoogleOAuthPendingOperation | null>(null);
   const pendingOwnerRef = useRef<GoogleOAuthOperationOwner | null>(null);
@@ -109,6 +115,7 @@ export function useGoogleOAuthCallbackGate(options: {
       };
     }
     if (callback.invalid || !principal) {
+      try { blockGoogleOAuthPortal(window.sessionStorage); } catch { /* Storage failure stays on login. */ }
       window.history.replaceState(null, "", "/login");
       setState({ ...READY_STATE, message: MULTIPORTAL_AUTH_ERROR_MESSAGE, statusTone: "error" });
       return () => {
@@ -168,6 +175,8 @@ export function useGoogleOAuthCallbackGate(options: {
           return;
         }
 
+        window.sessionStorage.removeItem(GOOGLE_OAUTH_HANDOFF_KEY);
+        portalResolutionBlockedRef.current = false;
         const cleanRegistrationLocation = cleanRegistrationUrl(operation.intent.portal);
         window.history.replaceState(null, "", cleanRegistrationLocation);
         if (!owner.isCurrent()) return;
@@ -196,6 +205,7 @@ export function useGoogleOAuthCallbackGate(options: {
   }, []);
 
   function resetPendingRegistration() {
+    portalResolutionBlockedRef.current = false;
     ownerControllerRef.current.invalidate();
     pendingOperationRef.current = null;
     pendingOwnerRef.current = null;
@@ -213,6 +223,7 @@ export function useGoogleOAuthCallbackGate(options: {
     return startControllerRef.current.start(`${input.mode}:${input.portal}`, async () => {
       resetPendingRegistration();
       const owner = ownerControllerRef.current.begin();
+      portalResolutionBlockedRef.current = true;
       setState({ ...READY_STATE, isBusy: true });
       try {
         await startGoogleOAuth({
@@ -268,6 +279,7 @@ export function useGoogleOAuthCallbackGate(options: {
         if (!combinedGuard.isCurrent()) return { state: "stale" } as const;
         const principal = getSupabaseBrowserClient();
         if (!principal) throw new Error("Supabase is not configured.");
+        portalResolutionBlockedRef.current = true;
         const navigated = await transferGoogleOAuthAndNavigate({
           transfer: () => operation.transferToPrincipal(principal, combinedGuard),
           guard: combinedGuard,
@@ -307,6 +319,7 @@ export function useGoogleOAuthCallbackGate(options: {
     start,
     submitRegistration,
     cancelRegistration,
+    isPortalResolutionBlocked: () => portalResolutionBlockedRef.current,
   };
 }
 

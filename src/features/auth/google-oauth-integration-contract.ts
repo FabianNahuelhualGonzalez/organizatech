@@ -229,3 +229,21 @@ test("RPC Google derivan autorización sólo de auth.uid y auth.identities", () 
   assert.match(migration, /revoke all on function public\.register_own_google_user[\s\S]*?from public/);
   assert.match(migration, /grant execute on function public\.register_own_google_coach[\s\S]*?to authenticated/);
 });
+
+test("bootstrap y eventos respetan la barrera OAuth antes de continuar sesión", () => {
+  const multiportal = read("./hooks/use-multiportal-auth-boundary.ts");
+  const bootstrap = root.slice(root.indexOf("async function bootstrapSession()"), root.indexOf("void bootstrapSession();"));
+  const decision = bootstrap.indexOf("multiportalAuth.resolveInitialSessionDecision");
+  const block = bootstrap.indexOf('portalDecision === "defer" || portalDecision === "reject_oauth"', decision);
+  const fallback = bootstrap.indexOf("await continueAuthenticatedSession", decision);
+  assert.ok(decision >= 0 && block > decision && fallback > block);
+  assert.match(bootstrap.slice(block, fallback), /return;/);
+  assert.match(root, /isGoogleOAuthBlocked: googleOAuth\.isPortalResolutionBlocked/);
+  assert.match(root, /if \(portalEventDecision === "reject_oauth"\) \{[\s\S]*?return;/);
+  assert.equal((multiportal.match(/oauthHandoffRef\.current!\.decision\(\)/g) ?? []).length, 2);
+  assert.match(multiportal, /await oauthHandoffRef\.current!\.validate\(expectedUserId, requestedPortal\)/);
+  assert.match(multiportal, /owner: \{ \.\.\.owner, isCurrent: \(\) => isPortalResolutionCurrent\(owner\) \}/);
+  const transfer = gateway.slice(gateway.indexOf("async transferToPrincipal"));
+  assert.ok(transfer.indexOf("prepareGoogleOAuthPortalHandoff") < transfer.indexOf("principal.auth.setSession"));
+  assert.ok(transfer.indexOf("handoff.ready()") > transfer.indexOf("await activation"));
+});
