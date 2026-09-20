@@ -36,11 +36,13 @@ import type { EvaluationOpenRequest } from "@/features/evaluations/model/evaluat
 import { AppBackButton } from "@/ui/navigation/app-back-button";
 import {
   clearNavigationRestoration,
+  isNavigationRestorationReadyForScope,
   loadNavigationRestoration,
+  resolveCoachNavigationRestorationDestination,
   saveNavigationRestoration,
   type CoachNavigationDestination,
 } from "@/lib/navigation/navigation-restoration";
-import { getBrowserStorageScope } from "@/lib/storage/browser-storage";
+import { getBrowserStorageScope, type BrowserStorageScope } from "@/lib/storage/browser-storage";
 import {
   OVERLAY_INITIAL_FOCUS_ATTRIBUTE,
   useOverlayFocusManagement,
@@ -124,14 +126,14 @@ export function CoachPortalBoundary({
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [evaluationRestorableView, setEvaluationRestorableView] =
     useState<CoachEvaluationRestorableView>("library");
-  const [navigationRestorationReady, setNavigationRestorationReady] = useState(false);
+  const [restoredNavigationScope, setRestoredNavigationScope] = useState<BrowserStorageScope | null>(null);
   const profile = useMemo(() => createCoachPortalProfileViewModel(session), [session]);
 
   useEffect(() => {
     const restored = navigationScope
       ? loadNavigationRestoration(navigationScope, "coach")
       : null;
-    const destination = restored?.portal === "coach" ? restored.destination : "home";
+    const destination = resolveCoachNavigationRestorationDestination(restored);
     setIsCalendarOpen(destination === "calendar");
     setEvaluationRestorableView(destination === "evaluations-send" ? "send" : "library");
     if (destination === "profile") dispatch({ type: "profile_opened" });
@@ -140,7 +142,7 @@ export function CoachPortalBoundary({
     } else {
       dispatch({ type: "home_opened" });
     }
-    setNavigationRestorationReady(true);
+    setRestoredNavigationScope(navigationScope);
   }, [navigationScope]);
 
   useEffect(() => {
@@ -164,7 +166,8 @@ export function CoachPortalBoundary({
   }, [evaluationOpenRequest, session.userId]);
 
   useEffect(() => {
-    if (!navigationScope || !navigationRestorationReady) return;
+    const scope = navigationScope;
+    if (!scope || !isNavigationRestorationReadyForScope(scope, restoredNavigationScope)) return;
     const destination: CoachNavigationDestination = isCalendarOpen
       ? "calendar"
       : state.screen === "profile"
@@ -174,7 +177,7 @@ export function CoachPortalBoundary({
           : "home";
 
     const persistDestination = () => {
-      saveNavigationRestoration(navigationScope, { portal: "coach", destination });
+      saveNavigationRestoration(scope, { portal: "coach", destination });
     };
     persistDestination();
     window.addEventListener("pagehide", persistDestination);
@@ -186,12 +189,13 @@ export function CoachPortalBoundary({
   }, [
     evaluationRestorableView,
     isCalendarOpen,
-    navigationRestorationReady,
     navigationScope,
+    restoredNavigationScope,
     state.screen,
   ]);
 
   function handleLogout() {
+    setRestoredNavigationScope(null);
     clearNavigationRestoration(navigationScope, "coach");
     dispatch({ type: "reset" });
     void onLogout();

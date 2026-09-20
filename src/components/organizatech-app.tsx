@@ -2055,6 +2055,9 @@ export function OrganizatechApp({
             completedIntent === "restore-active-flow" &&
             restoreActiveFlowForSession(authState.dataMode, authState.user?.id)
           ) return;
+          // El root sólo decide cuándo la sesión ya resolvió su navegación. El controller
+          // conserva el scope restaurado y habilita desde ahí su persistencia aislada.
+          navigation.allowNavigationPersistence(authState.dataMode, authState.user?.id);
           navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
         },
       },
@@ -2575,6 +2578,7 @@ export function OrganizatechApp({
       if (!isSessionDataRequestCurrent(appliedIdentityToken)) return;
       setAuthStatus(getMissingSupabaseMessage(), "info");
       clearAuthForms();
+      navigation.allowNavigationPersistence("demo", undefined);
       navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
       return;
     }

@@ -70,6 +70,10 @@ export interface AppNavigationController {
     userId: string | undefined,
     ports: AppNavigationRestorePorts,
   ): boolean;
+  allowNavigationPersistence(
+    mode: AppNavigationPersistenceContext["dataMode"],
+    userId: string | undefined,
+  ): void;
 }
 
 export function applyActiveWorkoutReentry(

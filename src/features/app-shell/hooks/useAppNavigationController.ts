@@ -27,6 +27,7 @@ import {
 import type { ScreenTransition } from "@/lib/navigation/app-navigation-transition";
 import {
   getNavigationRestorationScope,
+  isNavigationRestorationReadyForScope,
   loadNavigationRestoration,
   saveNavigationRestoration,
 } from "@/lib/navigation/navigation-restoration";
@@ -38,6 +39,8 @@ export function useAppNavigationController(
   const [state, setState] = useState<ContextualNavigationState>(() => (
     resetContextualNavigation(initialScreen)
   ));
+  const [restoredNavigationScope, setRestoredNavigationScope] =
+    useState<AppNavigationPersistenceContext["activeStorageScope"]>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -110,6 +113,9 @@ export function useAppNavigationController(
     ports: AppNavigationRestorePorts,
   ) => {
     const recoveryScope = getNavigationRestorationScope(mode, userId);
+    // La restauración se habilita antes de volver al dashboard: así el efecto de
+    // persistencia no puede sustituir el destino guardado durante la carga de sesión.
+    setRestoredNavigationScope(recoveryScope);
     const target = recoveryScope
       ? loadNavigationRestoration(recoveryScope, "usuario")
       : null;
@@ -140,6 +146,13 @@ export function useAppNavigationController(
     return true;
   }, [reset]);
 
+  const allowNavigationPersistence = useCallback((
+    mode: AppNavigationPersistenceContext["dataMode"],
+    userId: string | undefined,
+  ) => {
+    setRestoredNavigationScope(getNavigationRestorationScope(mode, userId));
+  }, []);
+
   useEffect(() => {
     const activeFlow = resolvePersistedActiveFlow({
       screen: state.screen,
@@ -150,7 +163,11 @@ export function useAppNavigationController(
     });
     if (!activeFlow) return;
     const userKey = getNavigationRestorationScope(persistence.dataMode, persistence.userId);
-    if (!userKey || persistence.activeStorageScope !== userKey) return;
+    if (
+      !userKey
+      || persistence.activeStorageScope !== userKey
+      || !isNavigationRestorationReadyForScope(userKey, restoredNavigationScope)
+    ) return;
     const flowToPersist = activeFlow;
     const userKeyToPersist = userKey;
 
@@ -176,6 +193,7 @@ export function useAppNavigationController(
     persistence.isEditingRoutinePlan,
     persistence.readiness,
     persistence.userId,
+    restoredNavigationScope,
     state.screen,
   ]);
 
@@ -190,6 +208,7 @@ export function useAppNavigationController(
     back,
     reenterActiveWorkout,
     restoreActiveFlow,
+    allowNavigationPersistence,
   };
 }
 

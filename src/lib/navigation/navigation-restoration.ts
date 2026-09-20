@@ -111,6 +111,24 @@ export function getNavigationRestorationScope(
   return getBrowserStorageScope(mode, userId);
 }
 
+/**
+ * Evita que el render inicial de una identidad nueva reemplace un destino que
+ * todavía no se ha restaurado. El scope, y no un booleano global, mantiene el
+ * aislamiento entre usuarios y entre demo/Supabase.
+ */
+export function isNavigationRestorationReadyForScope(
+  activeScope: BrowserStorageScope | null,
+  restoredScope: BrowserStorageScope | null,
+): boolean {
+  return activeScope !== null && activeScope === restoredScope;
+}
+
+export function resolveCoachNavigationRestorationDestination(
+  target: NavigationRestorationTarget | null,
+): CoachNavigationDestination {
+  return target?.portal === "coach" ? target.destination : "home";
+}
+
 function getNavigationRestorationKey(userKey: BrowserStorageScope, portal: AuthenticatedPortal) {
   return `${getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.navigationRestoration, userKey)}:${portal}`;
 }
