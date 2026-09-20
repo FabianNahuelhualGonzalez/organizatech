@@ -18,7 +18,7 @@ const relationshipBase = readFileSync(
   "utf8",
 );
 const evaluationBase = readFileSync(
-  "supabase/migrations/20260918000000_coach_student_evaluations.sql",
+  "supabase/migrations/20260919225532_coach_student_evaluations.sql",
   "utf8",
 );
 const activationBoundary = readFileSync(

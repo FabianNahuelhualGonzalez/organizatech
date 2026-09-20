@@ -3,14 +3,14 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const migrationFilename = "20260918000000_coach_student_evaluations.sql";
+const migrationFilename = "20260919225532_coach_student_evaluations.sql";
 const migration = readFileSync(`supabase/migrations/${migrationFilename}`, "utf8");
 const repository = readFileSync("src/features/evaluations/data/evaluations-repository.ts", "utf8");
 const handler = readFileSync("supabase/functions/send-evaluation-emails/handler.ts", "utf8");
 const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
 
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
-  "20260918000000_coach_student_evaluations.sql": "5e6e46bdc585fbb79d6c6b06e1b5d79193fc9861fae1e75a5be7316898b43e83",
+  "20260919225532_coach_student_evaluations.sql": "5e6e46bdc585fbb79d6c6b06e1b5d79193fc9861fae1e75a5be7316898b43e83",
 } as const;
 
 test("las tablas canónicas son privadas, RLS forzada y sin writes directos del cliente", () => {

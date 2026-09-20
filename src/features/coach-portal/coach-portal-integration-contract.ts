@@ -85,7 +85,7 @@ const STUDENT_COACH_LINK_ACCEPTANCE_MIGRATION_PATH =
 const COACH_INVITATION_CODE_DELIVERY_MIGRATION_PATH =
   "supabase/migrations/20260917120000_coach_invitation_code_delivery.sql";
 const COACH_STUDENT_EVALUATIONS_MIGRATION_PATH =
-  "supabase/migrations/20260918000000_coach_student_evaluations.sql";
+  "supabase/migrations/20260919225532_coach_student_evaluations.sql";
 const COACH_SELF_STUDENT_AND_EVALUATION_TEMPLATE_DELETION_MIGRATION_PATH =
   "supabase/migrations/20260920060000_coach_self_student_and_evaluation_template_deletion.sql";
 
@@ -560,6 +560,17 @@ function auditProhibitedArtifacts(sources: Sources) {
       entryStatus === "??"
       && path === AUTH_SEPARATE_CONTACT_MIGRATION_PATH
     ));
+  const coachStudentEvaluationsMigrationRenameInProgress =
+    !existsSync("supabase/migrations/20260918000000_coach_student_evaluations.sql")
+    && existsSync(COACH_STUDENT_EVALUATIONS_MIGRATION_PATH)
+    && changedEntries.some(({ path, status: entryStatus }) => (
+      entryStatus === " D"
+      && path === "supabase/migrations/20260918000000_coach_student_evaluations.sql"
+    ))
+    && changedEntries.some(({ path, status: entryStatus }) => (
+      entryStatus === "??"
+      && path === COACH_STUDENT_EVALUATIONS_MIGRATION_PATH
+    ));
   const allSources = Object.values(sources).join("\n");
   assertContract(
     !dependencyNames.some((name) => /resend|sendgrid|postmark|mailgun|nodemailer|emailjs/i.test(name))
@@ -602,6 +613,10 @@ function auditProhibitedArtifacts(sources: Sources) {
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
+        )
+        && !(
+          coachStudentEvaluationsMigrationRenameInProgress
+          && path === "supabase/migrations/20260918000000_coach_student_evaluations.sql"
         )
       )
       || /(^|\/)\.env(?:\.|$)/.test(path)

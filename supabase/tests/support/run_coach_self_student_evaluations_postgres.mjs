@@ -143,7 +143,7 @@ try {
       private.transactional_email_idempotency_uuid(text) from public, anon, authenticated;
   `);
   await admin.query(readSql("supabase/migrations/20260917000000_student_coach_link_acceptance.sql"));
-  await admin.query(readSql("supabase/migrations/20260918000000_coach_student_evaluations.sql"));
+  await admin.query(readSql("supabase/migrations/20260919225532_coach_student_evaluations.sql"));
   await admin.query(readSql("supabase/migrations/20260920060000_coach_self_student_and_evaluation_template_deletion.sql"));
 
   const selfExisting = await connect(ids[0]);
