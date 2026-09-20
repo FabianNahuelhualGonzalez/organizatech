@@ -23,7 +23,7 @@ export function CoachRenewalsCard({ view, onSelect }: {
         <p className={common.description}>{view.description}</p>
         <div className={styles.figure}>
           <span className={`${styles.amount} ${common.number}`} data-known={view.atStake.value !== null}>{view.atStake.label}</span>
-          <span className={styles.unit}>en juego</span>
+          {view.atStake.value !== null ? <span className={styles.unit}>en juego</span> : null}
         </div>
         {view.stack !== null ? (
           <>

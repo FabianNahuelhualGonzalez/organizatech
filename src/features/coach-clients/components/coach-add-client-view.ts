@@ -9,6 +9,8 @@ export type CoachClientInstructionSteps = readonly [CoachClientInstructionView, 
 
 export interface CoachClientInviteDraftView {
   readonly emailRaw: string;
+  /** Editing is independent from whether the current draft is ready to submit. */
+  readonly canEdit: boolean;
   readonly validation: {
     readonly tone: "neutral" | "ok" | "err";
     /** Already mapped safely: pending duplicates may identify only the email. */

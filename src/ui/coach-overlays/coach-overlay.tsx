@@ -15,7 +15,7 @@ export function CoachOverlay({ isOpen, isBusy, isObscured = false, titleId, vari
   readonly isBusy: boolean;
   readonly isObscured?: boolean;
   readonly titleId: string;
-  readonly variant: "fee" | "chat" | "detail" | "dates" | "client-detail" | "client-confirm";
+  readonly variant: "fee" | "chat" | "detail" | "dates" | "client-add" | "client-detail" | "client-confirm";
   readonly onCancel?: () => void;
   readonly children: ReactNode;
   readonly footer: ReactNode;

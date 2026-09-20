@@ -16,7 +16,7 @@ export function CoachClientInviteEmailStep({ view, formId, inputId, hintId, isBu
   readonly onChange?: (raw: string) => void;
   readonly onSubmit?: () => void;
 }) {
-  const editable = view.action === "submit" && !isBusy && Boolean(onChange);
+  const editable = view.canEdit && !isBusy && Boolean(onChange);
   const error = view.validation.tone === "err" ? view.validation.errorLabel : null;
   return <form id={formId} className={styles.form} noValidate onSubmit={(event) => {
     event.preventDefault(); if (canSubmit && !isBusy) onSubmit?.();

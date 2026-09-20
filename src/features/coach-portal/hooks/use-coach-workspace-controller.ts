@@ -490,6 +490,10 @@ export function useCoachWorkspaceController(input: {
       emailRaw: creationAction === "submit"
         ? creation.emailRaw
         : creation.attempt?.recipientEmail ?? creation.emailRaw,
+      canEdit: creation.isOpen
+        && creation.pending === null
+        && !creation.disposed
+        && (creation.attempt === null || creation.attempt.phase === "rejected"),
       validation: Object.freeze({
         tone: creationAction !== "submit"
           ? "neutral" as const

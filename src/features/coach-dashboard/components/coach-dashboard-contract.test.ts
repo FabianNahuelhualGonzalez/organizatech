@@ -54,8 +54,13 @@ test("view uses the global canvas token and a named local container, without rep
 });
 
 test("responsive modules preserve small-width targets, graph bar minimum and reduced motion", () => {
+  const portfolio = read("coach-portfolio-grid.module.css");
   const quick = read("coach-quick-actions.module.css");
   const chart = read("coach-monthly-chart.module.css");
+  assert.match(portfolio, /\.value\[data-known="false"\][^}]*font-size:\s*19px/);
+  assert.match(portfolio, /\.value\[data-known="false"\][^}]*overflow-wrap:\s*normal/);
+  assert.match(portfolio, /\.value\[data-known="false"\][^}]*word-break:\s*normal/);
+  assert.match(portfolio, /\.value\[data-known="false"\][^}]*hyphens:\s*none/);
   assert.match(quick, /@container\s*\(max-width:\s*359px\)/);
   assert.match(quick, /flex-basis:\s*100%/);
   assert.match(chart, /minmax\(44px,\s*1fr\)/);

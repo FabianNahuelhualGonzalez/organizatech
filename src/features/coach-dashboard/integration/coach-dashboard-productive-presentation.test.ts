@@ -79,7 +79,8 @@ test("separa invitaciones pendientes de pagos y conserva métricas sin fuente co
   assert.equal(view.income.potentialLabel, "SI ACEPTAN LAS INVITACIONES");
   assert.equal(view.income.atRisk.value, null);
   assert.equal(view.chart.months.length, 0);
-  assert.equal(view.renewals.atStake.value, null);
+  assert.deepEqual(view.renewals.atStake, { value: null, label: "—" });
+  assert.equal(view.renewals.emptyLabel, "Aún no hay datos de renovaciones.");
   assert.equal(view.renewals.rows.length, 0);
 });
 

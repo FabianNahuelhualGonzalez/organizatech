@@ -108,10 +108,10 @@ export function buildCoachDashboardView(input: {
     renewals: Object.freeze({
       title: "Renovaciones",
       description: "Períodos pagados independientes del ciclo de entrenamiento.",
-      atStake: moneyMetric(null),
+      atStake: metric(null, "—"),
       stack: null,
       rows: Object.freeze([]),
-      emptyLabel: "Renovaciones no disponibles",
+      emptyLabel: "Aún no hay datos de renovaciones.",
       retentionLabel: null,
     }),
   });
