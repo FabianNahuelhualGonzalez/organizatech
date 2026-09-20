@@ -53,6 +53,8 @@ export type CoachLinkActiveResult =
   | { readonly status: "none" }
   | { readonly status: "linked"; readonly coachName: string };
 
+export type CoachLinkActiveState = "loading" | "none" | "linked";
+
 export const COACH_LINK_MESSAGES: Readonly<Record<Exclude<CoachLinkLookupStatus, "idle">, string>> = {
   incompleto: "Escribe los 9 caracteres del código.",
   validando: "Validando código…",

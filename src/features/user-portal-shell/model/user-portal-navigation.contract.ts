@@ -80,7 +80,7 @@ test("el mapeo visual a Screen es exacto, total y reversible", () => {
 });
 
 test("el modelo consume la visibilidad canónica y nunca deshabilita destinos ofrecidos", () => {
-  const withoutEntries = resolveMenuScreens(PRIMARY_SCREENS, false, 0);
+  const withoutEntries = resolveMenuScreens(PRIMARY_SCREENS, false, 0, true);
   const model = createUserPortalNavigationModel({
     currentScreen: "dashboard",
     visibleScreens: withoutEntries,
@@ -96,10 +96,16 @@ test("el modelo consume la visibilidad canónica y nunca deshabilita destinos of
 
   const withHistory = createUserPortalNavigationModel({
     currentScreen: "historial-ciclos",
-    visibleScreens: resolveMenuScreens(PRIMARY_SCREENS, false, 1),
+    visibleScreens: resolveMenuScreens(PRIMARY_SCREENS, false, 1, true),
   });
   assert.equal(withHistory.items.some(({ id }) => id === "cycle-history"), true);
   assert.equal(withHistory.activeItemId, "cycle-history");
+
+  const withoutActiveCoachLink = createUserPortalNavigationModel({
+    currentScreen: "dashboard",
+    visibleScreens: resolveMenuScreens(PRIMARY_SCREENS, true, 1, false),
+  });
+  assert.equal(withoutActiveCoachLink.items.some(({ id }) => id === "evaluations"), false);
 });
 
 test("la opción activa deriva de la pantalla real e incluye el resumen interno de entrenamiento", () => {
@@ -125,7 +131,7 @@ test("la opción activa deriva de la pantalla real e incluye el resumen interno 
 
   const hiddenActive = createUserPortalNavigationModel({
     currentScreen: "historial-ciclos",
-    visibleScreens: resolveMenuScreens(PRIMARY_SCREENS, false, 0),
+    visibleScreens: resolveMenuScreens(PRIMARY_SCREENS, false, 0, true),
   });
   assert.equal(hiddenActive.activeItemId, null, "no declara activa una opción ausente");
 });

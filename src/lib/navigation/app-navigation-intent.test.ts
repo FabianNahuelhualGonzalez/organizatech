@@ -24,25 +24,37 @@ const allScreens: Screen[] = [
   "comparacion", "historial-ciclos", "perfil", "calendario", "evaluaciones",
 ];
 
-// CASO — resolveMenuScreens: con entradas de entrenamiento, muestra todas las primaryScreens.
-assert.deepEqual(resolveMenuScreens(primaryScreens, true, 0), primaryScreens);
-assert.deepEqual(resolveMenuScreens(primaryScreens, true, 5), primaryScreens);
+// CASO — con entradas y vínculo activo, muestra todas las primaryScreens.
+assert.deepEqual(resolveMenuScreens(primaryScreens, true, 0, true), primaryScreens);
+assert.deepEqual(resolveMenuScreens(primaryScreens, true, 5, true), primaryScreens);
 assert.notEqual(
-  resolveMenuScreens(primaryScreens, true, 0),
+  resolveMenuScreens(primaryScreens, true, 0, true),
   primaryScreens,
   "retorna un arreglo nuevo, no la misma referencia (mejora deliberada de pureza)",
 );
 
+// CASO — sin vínculo activo, Evaluaciones queda fuera aunque existan entrenamientos.
+assert.deepEqual(
+  resolveMenuScreens(primaryScreens, true, 5, false),
+  ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos", "calendario"],
+);
+
 // CASO — sin entradas y sin ciclos visibles: historial-ciclos se excluye.
 assert.deepEqual(
-  resolveMenuScreens(primaryScreens, false, 0),
+  resolveMenuScreens(primaryScreens, false, 0, true),
   ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "calendario", "evaluaciones"],
 );
 
 // CASO — sin entradas pero con ciclos visibles: historial-ciclos se conserva.
 assert.deepEqual(
-  resolveMenuScreens(primaryScreens, false, 3),
+  resolveMenuScreens(primaryScreens, false, 3, true),
   ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "historial-ciclos", "calendario", "evaluaciones"],
+);
+
+// CASO — sin entradas ni vínculo activo, tampoco aparece Evaluaciones.
+assert.deepEqual(
+  resolveMenuScreens(primaryScreens, false, 0, false),
+  ["perfil", "dashboard", "entrenamiento", "comparacion", "registro-entrenamiento", "calendario"],
 );
 
 // CASO — cada pantalla válida: canGoBackFromScreen para las 14 pantallas conocidas.

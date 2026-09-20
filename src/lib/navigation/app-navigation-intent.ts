@@ -14,19 +14,23 @@ import type { AppNotificationSection } from "@/lib/notifications/notification-ty
 
 /**
  * Sin entradas de entrenamiento registradas, el drawer se recorta a un subconjunto fijo de
- * pantallas (más "historial-ciclos"
+ * pantallas autorizadas (más "historial-ciclos"
  * solo si hay ciclos visibles); con entradas, se muestran todas las `primaryScreens`. Retorna
  * siempre un arreglo nuevo (no la misma referencia de `primaryScreens`) — una mejora de pureza
- * deliberada y segura: no se observó ningún punto del código que dependa de la identidad de
- * referencia del arreglo original.
+ * deliberada y segura. `evaluaciones` queda fuera en ambos casos si el vínculo Coach–Alumno
+ * canónico no está activo.
  */
 export function resolveMenuScreens(
   primaryScreens: readonly Screen[],
   hasTrainingEntries: boolean,
   visibleCycleHistoryCount: number,
+  hasActiveCoachLink: boolean,
 ): Screen[] {
-  if (hasTrainingEntries) return [...primaryScreens];
-  return primaryScreens.filter((item) =>
+  const authorizedScreens = hasActiveCoachLink
+    ? primaryScreens
+    : primaryScreens.filter((item) => item !== "evaluaciones");
+  if (hasTrainingEntries) return [...authorizedScreens];
+  return authorizedScreens.filter((item) =>
     item === "dashboard" ||
     item === "entrenamiento" ||
     item === "perfil" ||

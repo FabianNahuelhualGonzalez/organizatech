@@ -109,7 +109,9 @@ import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard"
 import { StudentEvaluations } from "@/features/evaluations/components/student-evaluations";
 import { useEvaluationNotifications } from "@/features/evaluations/hooks/use-evaluation-notifications";
 import {
+  canAccessStudentEvaluations,
   createEvaluationOpenRequest,
+  resolveStudentEvaluationNotificationTarget,
   type EvaluationOpenRequest,
 } from "@/features/evaluations/model/evaluation-navigation";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
@@ -752,6 +754,11 @@ export function OrganizatechApp({
     onResumeConfirmation: () => navigation.reset("coach-link-confirmation"),
     onResumeSuccess: () => navigation.reset("coach-link-success"),
     onSessionExpired: expireCoachLinkSession,
+  });
+  const hasStudentEvaluationsAccess = canAccessStudentEvaluations({
+    expectedUserId: supabaseUser?.id ?? null,
+    activeCoachLinkState: coachLinking.snapshot.activeState,
+    activeCoachLinkIdentityKey: coachLinking.snapshot.activeStateIdentityKey,
   });
   const legacyCycleHistoryBoundary = useLegacyCycleHistoryController({
     identity: trainingDataIdentityPort,
@@ -4761,12 +4768,21 @@ export function OrganizatechApp({
       }));
       return;
     }
-    if (!coachPortalSessionRef.current && intent.target === "evaluaciones" && supabaseUser?.id) {
-      setStudentEvaluationOpenRequest((current) => createEvaluationOpenRequest(
-        current,
-        supabaseUser.id,
-        intent.referenceId,
-      ));
+    if (!coachPortalSessionRef.current && intent.target === "evaluaciones") {
+      const target = resolveStudentEvaluationNotificationTarget(hasStudentEvaluationsAccess);
+      appShell.closeNotifications();
+      activeWorkoutActions.clearTrainingCompletionSummary();
+      if (target === "evaluaciones" && supabaseUser?.id) {
+        setStudentEvaluationOpenRequest((current) => createEvaluationOpenRequest(
+          current,
+          supabaseUser.id,
+          intent.referenceId,
+        ));
+      } else {
+        setStudentEvaluationOpenRequest(null);
+      }
+      navigateTo(target);
+      return;
     }
     appShell.closeNotifications();
     activeWorkoutActions.clearTrainingCompletionSummary();
@@ -4796,7 +4812,12 @@ export function OrganizatechApp({
     }, 160);
   }
 
-  const menuScreens = resolveMenuScreens(primaryScreens, hasTrainingEntries, visibleCycleHistoryCount);
+  const menuScreens = resolveMenuScreens(
+    primaryScreens,
+    hasTrainingEntries,
+    visibleCycleHistoryCount,
+    hasStudentEvaluationsAccess,
+  );
   const userPortalNavigation = createUserPortalNavigationModel({
     currentScreen: screen,
     visibleScreens: menuScreens,
@@ -5043,7 +5064,7 @@ export function OrganizatechApp({
           showBackButton={false}
         />
       )}
-      {screen === "evaluaciones" && supabaseUser?.id && (
+      {screen === "evaluaciones" && supabaseUser?.id && hasStudentEvaluationsAccess && (
         <StudentEvaluations
           expectedUserId={supabaseUser.id}
           notificationOpenRequest={studentEvaluationOpenRequest}

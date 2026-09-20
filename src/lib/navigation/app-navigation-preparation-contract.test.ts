@@ -120,7 +120,11 @@ assert.doesNotMatch(
 
 // 6. app-navigation-intent: las 4 funciones integradas; la finalización de entrenamiento
 //    pasa por resolveWorkoutCompletionTransition (P3-07B).
-assert.match(appSource, /const menuScreens = resolveMenuScreens\(primaryScreens, hasTrainingEntries, visibleCycleHistoryCount\);/);
+assert.match(
+  appSource,
+  /const menuScreens = resolveMenuScreens\(\s*primaryScreens,\s*hasTrainingEntries,\s*visibleCycleHistoryCount,\s*hasStudentEvaluationsAccess,\s*\);/,
+  "el menu debe resolverse con la autorizacion canonica de Evaluaciones",
+);
 assert.doesNotMatch(appSource, /item === "historial-ciclos" && visibleCycleHistoryCount > 0/, "el filtro inline de menuScreens debe haberse eliminado del root");
 assert.match(appSource, /canGoBackFromScreen\(screen\)/);
 assert.doesNotMatch(appSource, /screen !== "dashboard" && screen !== "training-summary"/, "la condicion inline de la fila Volver debe haberse eliminado del root");

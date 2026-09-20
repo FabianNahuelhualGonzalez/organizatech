@@ -12,12 +12,14 @@ import {
   isCompleteCoachLinkCode,
   normalizeCoachLinkCode,
   persistCoachLinkEntry,
+  type CoachLinkActiveState,
   type CoachLinkStoredEntry,
   type CoachLinkLookupStatus,
 } from "../model/coach-linking";
 
 export interface CoachLinkingSnapshot {
-  readonly activeState: "loading" | "none" | "linked";
+  readonly activeState: CoachLinkActiveState;
+  readonly activeStateIdentityKey: string | null;
   readonly cardMode: "closed" | "form";
   readonly code: string;
   readonly lookupStatus: CoachLinkLookupStatus;
@@ -55,6 +57,7 @@ function recoverPendingEmails(repository: CoachLinkingRepository, identityKey: s
 
 const EMPTY: CoachLinkingSnapshot = {
   activeState: "loading",
+  activeStateIdentityKey: null,
   cardMode: "closed",
   code: "",
   lookupStatus: "idle",
@@ -143,6 +146,7 @@ export function useCoachLinkingController(input: {
     setSnapshot((state) => switchedDirectly ? EMPTY : ({
       ...state,
       activeState: "loading",
+      activeStateIdentityKey: null,
       authGateOpen: false,
       code: pendingEntryCode.current ?? state.code,
       cardMode: pendingEntryCode.current ? "form" : state.cardMode,
@@ -162,6 +166,7 @@ export function useCoachLinkingController(input: {
           setSnapshot((state) => ({
             ...state,
             activeState: "none",
+            activeStateIdentityKey: input.identityKey,
             cardMode: "form",
             code: pendingResume.code,
             coachName: resumed.coachName,
@@ -178,6 +183,7 @@ export function useCoachLinkingController(input: {
           setSnapshot((state) => ({
             ...state,
             activeState: "linked",
+            activeStateIdentityKey: input.identityKey,
             cardMode: "closed",
             code: "",
             coachName: resumed.coachName,
@@ -193,6 +199,7 @@ export function useCoachLinkingController(input: {
         setSnapshot((state) => ({
           ...state,
           activeState: result.status === "linked" ? "linked" : "none",
+          activeStateIdentityKey: input.identityKey,
           cardMode: "form",
           code: pendingResume.code,
           confirmation: null,
@@ -208,6 +215,7 @@ export function useCoachLinkingController(input: {
         setSnapshot((state) => ({
           ...state,
           activeState: "linked",
+          activeStateIdentityKey: input.identityKey,
           cardMode: "closed",
           coachName: result.coachName,
           code: "",
@@ -215,7 +223,11 @@ export function useCoachLinkingController(input: {
         }));
         return;
       }
-      setSnapshot((state) => ({ ...state, activeState: "none" }));
+      setSnapshot((state) => ({
+        ...state,
+        activeState: "none",
+        activeStateIdentityKey: input.identityKey,
+      }));
       if (pendingEntryCode.current && !resumeHandled.current) {
         resumeHandled.current = true;
         resumeRef.current();
@@ -229,6 +241,7 @@ export function useCoachLinkingController(input: {
       setSnapshot((state) => ({
         ...state,
         activeState: "none",
+        activeStateIdentityKey: input.identityKey,
         cardMode: pendingEntryCode.current ? "form" : state.cardMode,
         code: pendingEntryCode.current ?? state.code,
         confirmation: null,
@@ -319,6 +332,7 @@ export function useCoachLinkingController(input: {
           coachName: result.coachName,
           success: { kind: "recovered", coachName: result.coachName },
           activeState: "linked",
+          activeStateIdentityKey: input.identityKey,
           cardMode: "closed",
         }));
         return "success";
@@ -363,6 +377,7 @@ export function useCoachLinkingController(input: {
           ...current,
           accepting: false,
           activeState: "linked",
+          activeStateIdentityKey: input.identityKey,
           cardMode: "closed",
           coachName: result.coachName,
           success: {
