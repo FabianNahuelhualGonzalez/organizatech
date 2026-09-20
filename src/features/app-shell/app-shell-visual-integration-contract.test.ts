@@ -345,7 +345,7 @@ assert.match(components.drawer, /onClick={\(\) => onNavigate\(item\.id\)}/);
 
 // 9e. Back button: AppScreenHeader solo se pasa cuando canGoBackFromScreen(screen) es true — el
 //     componente en si no tiene guard interno, asi que el gating debe vivir en el root.
-assert.match(appSource, /const screenHeader = canGoBackFromScreen\(screen\)[\s\S]*?\? <AppScreenHeader onBack=\{goBack\} \/>[\s\S]*?: null;/);
+assert.match(appSource, /const screenHeader = screen !== "evaluaciones" && canGoBackFromScreen\(screen\)[\s\S]*?\? <AppScreenHeader onBack=\{goBack\} \/>[\s\S]*?: null;/);
 assert.match(appSource, /screenHeader=\{screenHeader\}/);
 assert.doesNotMatch(components.screenHeader, /screen !== "dashboard"|canGoBackFromScreen/, "AppScreenHeader no debe reimplementar el gating, lo recibe del root");
 
@@ -353,8 +353,9 @@ assert.doesNotMatch(components.screenHeader, /screen !== "dashboard"|canGoBackFr
 // TRAIN-UI-01 — contrato focal ESTATICO/source-based del Back canonico. No simula click ni
 // teclado; comprueba que el elemento nativo conserva una unica conexion onClick al controller.
 // ---------------------------------------------------------------------------------------------
-assert.match(appBackButtonSource, /export interface AppBackButtonProps \{\s*onBack: \(\) => void;\s*\}/);
+assert.match(appBackButtonSource, /export interface AppBackButtonProps \{\s*onBack: \(\) => void;\s*label\?: string;\s*\}/);
 assert.match(appBackButtonSource, /<button[\s\S]*type="button"[\s\S]*aria-label="Volver"[\s\S]*onClick=\{onBack\}/);
+assert.match(appBackButtonSource, /\{label \? <span>\{label\}<\/span> : null\}/);
 assert.equal((appBackButtonSource.match(/onClick=\{onBack\}/g) ?? []).length, 1);
 assert.doesNotMatch(appBackButtonSource, /onKeyDown|onKeyUp|onKeyPress/, "el button nativo posee la activacion de teclado");
 assert.match(appBackButtonSource, /<svg[\s\S]*width="24"[\s\S]*height="24"[\s\S]*viewBox="0 0 24 24"/);
@@ -400,6 +401,8 @@ interface CanonicalBackAuditSources {
   appBackButtonStyles: string;
   screenHeader: string;
   authScreen: string;
+  coachLinkScreens: string;
+  evaluationComponents: string;
   otherProductComponents: string;
 }
 
@@ -450,7 +453,11 @@ function containsIdentifier(node: ts.Node, names: ReadonlySet<string>) {
   return found;
 }
 
-function assertNoDivergentBackVisuals(path: string, source: string) {
+function assertNoDivergentBackVisuals(
+  path: string,
+  source: string,
+  allowedActionLabels: ReadonlySet<string> = new Set(),
+) {
   const sourceFile = parseTsx(path, source);
 
   function visit(node: ts.Node) {
@@ -484,14 +491,16 @@ function assertNoDivergentBackVisuals(path: string, source: string) {
     }
 
     if (ts.isJsxText(node) && node.text.trim()) {
-      assert.doesNotMatch(node.text, alternateBackText, `${path}: texto JSX Back alternativo`);
+      if (!allowedActionLabels.has(node.text.trim())) {
+        assert.doesNotMatch(node.text, alternateBackText, `${path}: texto JSX Back alternativo`);
+      }
     }
     if (
       ts.isStringLiteralLike(node) &&
       ts.isJsxExpression(node.parent) &&
       alternateBackText.test(node.text)
     ) {
-      assert.fail(`${path}: texto JSX Back alternativo`);
+      if (!allowedActionLabels.has(node.text)) assert.fail(`${path}: texto JSX Back alternativo`);
     }
 
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
@@ -605,6 +614,29 @@ function assertCanonicalBackAuditContracts(sources: CanonicalBackAuditSources) {
   assertAuthBackAndKeyboard(sources.authScreen);
   assertNoDivergentBackVisuals("src/features/app-shell/components/app-screen-header.tsx", sources.screenHeader);
   assertNoDivergentBackVisuals("src/features/auth/components/auth-screen.tsx", sources.authScreen);
+  assertNoDivergentBackVisuals(
+    "src/features/coach-linking/components/coach-linking-screens.tsx",
+    sources.coachLinkScreens,
+    new Set([
+      "Volver a Perfil",
+      "Tu coach te invitó a Organizatech. Inicia sesión o crea tu cuenta con el correo al que te llegó la invitación — después volverás aquí mismo, sin perder el código.",
+    ]),
+  );
+  assert.equal(
+    (sources.coachLinkScreens.match(/>Volver a Perfil</g) ?? []).length,
+    1,
+    "el éxito de Coaching conserva la única acción secundaria aprobada por Producto",
+  );
+  assertNoDivergentBackVisuals(
+    "src/features/evaluations/components",
+    sources.evaluationComponents,
+    new Set([
+      "Volver",
+      "Volver a mis evaluaciones",
+      "Volver a mis plantillas",
+      "Volver al estado de envío",
+    ]),
+  );
   assertNoDivergentBackVisuals("resto de superficies productivas", sources.otherProductComponents);
 
   assert.match(sources.appBackButton, /aria-label="Volver"/);
@@ -612,7 +644,7 @@ function assertCanonicalBackAuditContracts(sources: CanonicalBackAuditSources) {
   assert.equal((sources.appBackButton.match(/<path\b/g) ?? []).length, 4);
   assert.doesNotMatch(sources.appBackButton, /history\.back|dangerouslySetInnerHTML|ChevronLeft/);
   assert.equal(
-    ([sources.appBackButton, sources.screenHeader, sources.authScreen, sources.otherProductComponents]
+    ([sources.appBackButton, sources.screenHeader, sources.authScreen, sources.coachLinkScreens, sources.evaluationComponents, sources.otherProductComponents]
       .join("\n")
       .match(/d="M5 12h6m3 0h1\.5m3 0h\.5"/g) ?? []).length,
     1,
@@ -646,12 +678,18 @@ const canonicalBackAuditSources: CanonicalBackAuditSources = {
   appBackButtonStyles,
   screenHeader: components.screenHeader,
   authScreen: authScreenSource,
+  coachLinkScreens: readSource("src/features/coach-linking/components/coach-linking-screens.tsx"),
+  evaluationComponents: productTsxFiles
+    .filter((file) => file.path.startsWith("src/features/evaluations/components/"))
+    .map((file) => file.source)
+    .join("\n"),
   otherProductComponents: productTsxFiles
     .filter((file) => ![
       "src/features/app-shell/components/app-screen-header.tsx",
       "src/features/auth/components/auth-screen.tsx",
+      "src/features/coach-linking/components/coach-linking-screens.tsx",
       "src/ui/navigation/app-back-button.tsx",
-    ].includes(file.path))
+    ].includes(file.path) && !file.path.startsWith("src/features/evaluations/components/"))
     .map((file) => file.source)
     .join("\n"),
 };

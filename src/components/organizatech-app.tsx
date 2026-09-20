@@ -106,10 +106,27 @@ import {
 } from "@/features/coach-portal/model/coach-portal";
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
+import { StudentEvaluations, StudentEvaluationsEntry } from "@/features/evaluations/components/student-evaluations";
+import { useEvaluationNotifications } from "@/features/evaluations/hooks/use-evaluation-notifications";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
 import { useNotificationsController } from "@/features/notifications/hooks/useNotificationsController";
 import { usePersistedCalendarNotifications } from "@/features/notifications/hooks/usePersistedCalendarNotifications";
+import { usePersistedTrainingCycleNotifications } from "@/features/notifications/hooks/usePersistedTrainingCycleNotifications";
+import { TrainingCycleBuilderProductiveBoundary } from "@/features/training-cycle-builder/components/training-cycle-builder-productive-boundary";
+import { useTrainingCycleProductController } from "@/features/training-cycle-builder/hooks/use-training-cycle-product-controller";
+import { useTrainingCycleActiveWorkoutController } from "@/features/training-cycle-builder/active-workout";
 import { useProfileController } from "@/features/profile/hooks/useProfileController";
+import {
+  CoachLinkAuthGate,
+  CoachLinkConfirmationScreen,
+  CoachLinkSuccessScreen,
+} from "@/features/coach-linking/components/coach-linking-screens";
+import { useCoachLinkingController } from "@/features/coach-linking/hooks/use-coach-linking-controller";
+import { useCoachLinkNotifications } from "@/features/coach-linking/hooks/use-coach-link-notifications";
+import type {
+  CoachLinkNotificationDestination,
+  CoachLinkStoredEntry,
+} from "@/features/coach-linking/model/coach-linking";
 import { UserPortalShell } from "@/features/user-portal-shell/components/user-portal-shell";
 import {
   createUserPortalNavigationModel,
@@ -448,6 +465,8 @@ interface OrganizatechAppProps {
   trainingCyclesSnapshotSource?: "ui-main-production" | "ui-main-qa";
   trainingWorkoutReadinessV2Enabled?: boolean;
   initialAuthRoute?: AuthRouteState;
+  initialCoachLinkEntry?: CoachLinkStoredEntry | null;
+  initialCoachLinkNotificationDestination?: CoachLinkNotificationDestination | null;
   googleOAuth: GoogleOAuthBoundary;
 }
 
@@ -456,9 +475,12 @@ export function OrganizatechApp({
   trainingCyclesSnapshotSource = "ui-main-qa",
   trainingWorkoutReadinessV2Enabled = false,
   initialAuthRoute = DEFAULT_AUTH_ROUTE,
+  initialCoachLinkEntry = null,
+  initialCoachLinkNotificationDestination = null,
   googleOAuth,
 }: OrganizatechAppProps) {
   const initialSignupConfirmationRef = useRef<SignupConfirmationSnapshot | null>(null);
+  const initialCoachLinkNotificationDestinationRef = useRef(initialCoachLinkNotificationDestination);
   const initialSignupConfirmation = initialSignupConfirmationRef.current
     ?? getSignupConfirmationSnapshot();
   initialSignupConfirmationRef.current = initialSignupConfirmation;
@@ -487,6 +509,16 @@ export function OrganizatechApp({
   const [supabaseUser, setSupabaseUser] = useState<SupabaseSessionState["user"]>(null);
   const [coachPortalSession, setCoachPortalSession] = useState<CoachPortalSession | null>(null);
   const [coachCalendarOpenRequest, setCoachCalendarOpenRequest] = useState<{
+    ownerUserId: string;
+    sequence: number;
+  } | null>(null);
+  const [trainingCycleAlertsOpenRequest, setTrainingCycleAlertsOpenRequest] = useState(0);
+  const [coachClientOpenRequest, setCoachClientOpenRequest] = useState<{
+    ownerUserId: string;
+    episodeId: string;
+    sequence: number;
+  } | null>(null);
+  const [coachEvaluationOpenRequest, setCoachEvaluationOpenRequest] = useState<{
     ownerUserId: string;
     sequence: number;
   } | null>(null);
@@ -675,6 +707,15 @@ export function OrganizatechApp({
     sessionUserId: supabaseSession?.user.id,
     authenticatedUserId: supabaseUser?.id,
   });
+  const useUserPortalShell = shouldMountAuthorizedUserPortal({
+    authorizationProof: userPortalAuthorizationProof,
+    sessionUserId: supabaseSession?.user.id,
+    authenticatedUserId: supabaseUser?.id,
+    hasCoachPortalSession: Boolean(coachPortalSession),
+    isAuthLoading,
+    isPasswordRecoveryBlocked: multiportalAuth.isPasswordRecoveryPortalBlocked(),
+    isRenderableScreen: isUserPortalRenderableScreen(screen),
+  });
   const canEditProfilePersonalData = Boolean(hasSupabaseSession && getSupabaseBrowserClient());
   const activeFeatureStorageScope = getBrowserStorageScope(dataMode, supabaseUser?.id);
   const trainingDataPrepared = isTrainingDataProfilePrepared(trainingDataState);
@@ -699,6 +740,15 @@ export function OrganizatechApp({
     handleUploadProfileAvatar,
     handleProfileAvatarImageError,
   } = profileBoundary;
+  const coachLinking = useCoachLinkingController({
+    identityKey: supabaseUser?.id ?? null,
+    enabled: canEditProfilePersonalData,
+    initialEntry: initialCoachLinkEntry,
+    onResumeProfile: () => navigation.reset("perfil"),
+    onResumeConfirmation: () => navigation.reset("coach-link-confirmation"),
+    onResumeSuccess: () => navigation.reset("coach-link-success"),
+    onSessionExpired: expireCoachLinkSession,
+  });
   const legacyCycleHistoryBoundary = useLegacyCycleHistoryController({
     identity: trainingDataIdentityPort,
     scope: activeFeatureStorageScope,
@@ -1621,12 +1671,72 @@ export function OrganizatechApp({
     supabaseUser?.id ?? null,
     coachPortalSession ? "coach" : "usuario",
   );
+  const persistedTrainingCycleNotifications = usePersistedTrainingCycleNotifications(
+    useUserPortalShell ? supabaseUser?.id ?? null : null,
+  );
+  const persistedCoachLinkNotifications = useCoachLinkNotifications(
+    supabaseUser?.id ?? null,
+    coachPortalSession ? "coach" : "usuario",
+  );
+  const persistedEvaluationNotifications = useEvaluationNotifications(
+    supabaseUser?.id ?? null,
+    coachPortalSession ? "coach" : "usuario",
+  );
+  const trainingCycleProduct = useTrainingCycleProductController({
+    enabled: Boolean(
+      dataMode === "supabase"
+      && hasSupabaseSession
+      && useUserPortalShell,
+    ),
+    expectedUserId: supabaseUser?.id ?? null,
+    entries: displayEntries,
+    onCycleChanged: synchronizeTrainingCycleProductWithLegacy,
+    onCycleReplaced: synchronizeTrainingCycleReplacementWithLegacy,
+    onStartTraining: () => navigateTo("entrenamiento"),
+  });
+  const trainingCycleActiveWorkout = useTrainingCycleActiveWorkoutController({
+    enabled: useUserPortalShell && trainingCycleProduct.status === "ready",
+    userId: supabaseUser?.id ?? null,
+    storageScope: activeFeatureStorageScope,
+    snapshot: trainingCycleProduct.status === "ready" ? trainingCycleProduct.activeCycle : null,
+    workoutAttemptId: activeWorkoutAttemptId,
+    performedAt: activeWorkoutStartedAt,
+    exercises: dayExercises,
+    legacyDrafts: exerciseDrafts,
+    updateLegacyDraft: updateExerciseDraft,
+    write: async (payload) => {
+      if (trainingCycleProduct.status !== "ready") throw new Error("training-cycle-sync-unavailable");
+      await trainingCycleProduct.recordExecution(payload);
+    },
+  });
+  const persistedNotifications = useMemo(() => [
+    ...persistedCalendarNotifications.notifications,
+    ...persistedTrainingCycleNotifications.notifications,
+    ...persistedCoachLinkNotifications.notifications,
+    ...persistedEvaluationNotifications.notifications,
+  ], [
+    persistedCalendarNotifications.notifications,
+    persistedTrainingCycleNotifications.notifications,
+    persistedCoachLinkNotifications.notifications,
+    persistedEvaluationNotifications.notifications,
+  ]);
+  const persistedSeenRecords = useMemo(() => [
+    ...persistedCalendarNotifications.seenRecords,
+    ...persistedTrainingCycleNotifications.seenRecords,
+    ...persistedCoachLinkNotifications.seenRecords,
+    ...persistedEvaluationNotifications.seenRecords,
+  ], [
+    persistedCalendarNotifications.seenRecords,
+    persistedTrainingCycleNotifications.seenRecords,
+    persistedCoachLinkNotifications.seenRecords,
+    persistedEvaluationNotifications.seenRecords,
+  ]);
   const notificationsBoundary = useNotificationsController({
     identity: trainingDataIdentityPort,
     scope: activeFeatureStorageScope,
     catalogInput: notificationCatalogInput,
-    additionalNotifications: persistedCalendarNotifications.notifications,
-    persistedSeenRecords: persistedCalendarNotifications.seenRecords,
+    additionalNotifications: persistedNotifications,
+    persistedSeenRecords,
     includeCatalogNotifications: !coachPortalSession,
     onOpenIntent: handleNotificationOpenIntent,
   });
@@ -1692,6 +1802,7 @@ export function OrganizatechApp({
   function replaceCoachPortalSession(session: CoachPortalSession | null) {
     if (session?.userId !== coachPortalSessionRef.current?.userId) {
       setCoachCalendarOpenRequest(null);
+      setCoachClientOpenRequest(null);
     }
     if (session) replaceUserPortalAuthorizationProof(null);
     coachPortalSessionRef.current = session;
@@ -1834,6 +1945,15 @@ export function OrganizatechApp({
 
         authenticatedSessionCoordinatorRef.current.reset();
         replaceCoachPortalSession(nextCoachPortalSession);
+        const coachLinkDestination = initialCoachLinkNotificationDestinationRef.current;
+        if (coachLinkDestination?.kind === "coach-student") {
+          initialCoachLinkNotificationDestinationRef.current = null;
+          setCoachClientOpenRequest((current) => ({
+            ownerUserId: nextCoachPortalSession.userId,
+            episodeId: coachLinkDestination.episodeId,
+            sequence: current?.ownerUserId === nextCoachPortalSession.userId ? current.sequence + 1 : 1,
+          }));
+        }
         setIsAuthLoading(false);
         clearCompletedAuthForm();
         setAuthStatus("", "info");
@@ -1861,6 +1981,13 @@ export function OrganizatechApp({
         onComplete: (completedIntent) => {
           setIsAuthLoading(false);
           clearCompletedAuthForm();
+          const coachLinkDestination = initialCoachLinkNotificationDestinationRef.current;
+          if (coachLinkDestination?.kind === "student-coaching") {
+            initialCoachLinkNotificationDestinationRef.current = null;
+            navigation.transition(createAuthNavigationReset("perfil", "session-established"));
+            scrollToNotificationSection("coach-linking");
+            return;
+          }
           if (
             completedIntent === "restore-active-flow" &&
             restoreActiveFlowForSession(authState.dataMode, authState.user?.id)
@@ -2165,6 +2292,31 @@ export function OrganizatechApp({
     return applyTrainingDataRefreshResult(
       await trainingDataController.reloadCycleSnapshot(cycleId),
     );
+  }
+
+  async function synchronizeTrainingCycleProductWithLegacy(cycleId: string) {
+    const requestToken = captureSessionDataRequestToken();
+    if (!isSessionDataRequestCurrent(requestToken)) return false;
+
+    const cyclesResult = await refreshTrainingCyclesBoundary();
+    if (!isSessionDataRequestCurrent(requestToken) || cyclesResult.kind !== "success") {
+      return false;
+    }
+
+    const snapshotResult = await reloadCycleScopedBoundary(cycleId);
+    if (!isSessionDataRequestCurrent(requestToken) || snapshotResult.kind !== "success") {
+      return false;
+    }
+
+    return true;
+  }
+
+  async function synchronizeTrainingCycleReplacementWithLegacy() {
+    const requestToken = captureSessionDataRequestToken();
+    if (!isSessionDataRequestCurrent(requestToken)) return false;
+
+    const cyclesResult = await refreshTrainingCyclesBoundary();
+    return isSessionDataRequestCurrent(requestToken) && cyclesResult.kind === "success";
   }
 
   async function createCycleScopedTrainingCycleFromSetup(
@@ -4006,6 +4158,8 @@ export function OrganizatechApp({
 
     try {
       if (isBusy) return "ignored";
+      const capturedTrainingCycleExecutionScopeKey =
+        trainingCycleActiveWorkout.captureLegacyOperationScope();
 
       const completionStart = resolveActiveWorkoutCompletionStart(
         operationContext.getRuntimeSnapshot().pendingReadinessLink,
@@ -4021,6 +4175,9 @@ export function OrganizatechApp({
           );
           if (!linked || !operationContext.isCurrent()) return;
           setStatusMessage("Entrenamiento guardado.");
+          trainingCycleActiveWorkout.syncAfterLegacyCompletion(
+            capturedTrainingCycleExecutionScopeKey,
+          );
           finishCompletedWorkout();
           navigation.transition(resolveWorkoutCompletionTransition({ hasCompletionSummary: false }));
         } catch (error) {
@@ -4188,6 +4345,9 @@ export function OrganizatechApp({
         if (!summarySnapshot || !operationContext.isCurrent()) return;
         if (!activeWorkoutActions.publishWorkoutCompletion(summarySnapshot, validExercises.map((exercise) => exercise.id))) return;
         setStatusMessage("Entrenamiento guardado.");
+        trainingCycleActiveWorkout.syncAfterLegacyCompletion(
+          capturedTrainingCycleExecutionScopeKey,
+        );
         try {
           finishCompletedWorkout();
           navigation.transition(resolveWorkoutCompletionTransition({ hasCompletionSummary: true }));
@@ -4280,6 +4440,9 @@ export function OrganizatechApp({
           return "stale";
         }
         setStatusMessage("Entrenamiento guardado.");
+        trainingCycleActiveWorkout.syncAfterLegacyCompletion(
+          capturedTrainingCycleExecutionScopeKey,
+        );
         finishCompletedWorkout();
         navigation.transition(resolveWorkoutCompletionTransition({ hasCompletionSummary: true }));
         return "success";
@@ -4307,6 +4470,20 @@ export function OrganizatechApp({
     setNewPassword("");
     setNewPasswordConfirm("");
     setAuthFieldErrors({});
+  }
+
+  function expireCoachLinkSession() {
+    clearUserSessionState(
+      "Tu sesión expiró. Inicia sesión nuevamente.",
+      activeBrowserStorageScopeRef.current,
+      { statusTone: "error" },
+    );
+  }
+
+  function openCoachLinkAuth(mode: "login" | "registro") {
+    coachLinking.actions.continueFromGate();
+    authRouteController.replace({ mode, accountType: "usuario" });
+    navigation.transition(createAuthNavigationReset(mode, "auth-screen-switch"));
   }
 
   function switchAuthScreen(nextScreen: "login" | "registro" | "recuperar-password") {
@@ -4390,6 +4567,15 @@ export function OrganizatechApp({
     );
   }
 
+  if (coachLinking.snapshot.authGateOpen && !hasSupabaseSession) {
+    return (
+      <CoachLinkAuthGate
+        onLogin={() => openCoachLinkAuth("login")}
+        onRegister={() => openCoachLinkAuth("registro")}
+      />
+    );
+  }
+
   const notificationOverlay = (
     <NotificationPanel
       isOpen={isNotificationPanelOpen}
@@ -4405,10 +4591,15 @@ export function OrganizatechApp({
   );
 
   if (coachPortalSession) {
+    const coachDataIdentityGeneration =
+      supabaseAuthIdentityScopeRef.current?.userId === coachPortalSession.userId
+        ? supabaseAuthIdentityScopeRef.current.sessionEpoch
+        : null;
     return (
       <CoachPortalBoundary
-        key={`${coachPortalSession.userId}:${coachPortalSession.registration.createdAt}`}
+        key={`${coachPortalSession.userId}:${coachPortalSession.registration.createdAt}:${coachDataIdentityGeneration ?? "unavailable"}`}
         session={coachPortalSession}
+        coachDataIdentityGeneration={coachDataIdentityGeneration}
         isLoggingOut={isBusy}
         isNotificationPanelOpen={isNotificationPanelOpen}
         notificationBadgeText={notificationBadgeText}
@@ -4420,6 +4611,24 @@ export function OrganizatechApp({
           setCoachCalendarOpenRequest((current) => (
             current?.ownerUserId === request.ownerUserId
               && current.sequence === request.sequence
+              ? null
+              : current
+          ));
+        }}
+        clientOpenRequest={coachClientOpenRequest}
+        onClientOpenRequestConsumed={(request) => {
+          setCoachClientOpenRequest((current) => (
+            current?.ownerUserId === request.ownerUserId
+              && current.episodeId === request.episodeId
+              && current.sequence === request.sequence
+              ? null
+              : current
+          ));
+        }}
+        evaluationOpenRequest={coachEvaluationOpenRequest}
+        onEvaluationOpenRequestConsumed={(request) => {
+          setCoachEvaluationOpenRequest((current) => (
+            current?.ownerUserId === request.ownerUserId && current.sequence === request.sequence
               ? null
               : current
           ));
@@ -4489,7 +4698,12 @@ export function OrganizatechApp({
   }
 
   function toggleNotifications() {
-    if (!isNotificationPanelOpen) void persistedCalendarNotifications.reload();
+    if (!isNotificationPanelOpen) {
+      void persistedCalendarNotifications.reload();
+      void persistedTrainingCycleNotifications.reload();
+      void persistedCoachLinkNotifications.reload();
+      void persistedEvaluationNotifications.reload();
+    }
     appShell.toggleNotifications();
   }
 
@@ -4497,11 +4711,45 @@ export function OrganizatechApp({
     if (intent.notificationId.startsWith("calendar:")) {
       void persistedCalendarNotifications.markRead(intent.notificationId);
     }
+    if (intent.notificationId.startsWith("training-cycle:")) {
+      persistedTrainingCycleNotifications.markRead(intent.notificationId);
+      setTrainingCycleAlertsOpenRequest((value) => value + 1);
+    }
+    if (intent.notificationId.startsWith("coach-link:")) {
+      void persistedCoachLinkNotifications.markRead(intent.notificationId);
+    }
+    if (intent.notificationId.startsWith("evaluation:")) {
+      void persistedEvaluationNotifications.markRead(intent.notificationId);
+    }
     if (coachPortalSessionRef.current && intent.target === "calendario") {
       const ownerUserId = coachPortalSessionRef.current.userId;
       appShell.closeNotifications();
       setCoachCalendarOpenRequest((current) => ({
         ownerUserId,
+        sequence: current?.ownerUserId === ownerUserId ? current.sequence + 1 : 1,
+      }));
+      return;
+    }
+    if (coachPortalSessionRef.current && intent.target === "evaluaciones") {
+      const ownerUserId = coachPortalSessionRef.current.userId;
+      appShell.closeNotifications();
+      setCoachEvaluationOpenRequest((current) => ({
+        ownerUserId,
+        sequence: current?.ownerUserId === ownerUserId ? current.sequence + 1 : 1,
+      }));
+      return;
+    }
+    if (
+      coachPortalSessionRef.current
+      && intent.notificationId.startsWith("coach-link:")
+      && intent.target === "dashboard"
+      && intent.referenceId
+    ) {
+      const ownerUserId = coachPortalSessionRef.current.userId;
+      appShell.closeNotifications();
+      setCoachClientOpenRequest((current) => ({
+        ownerUserId,
+        episodeId: intent.referenceId!,
         sequence: current?.ownerUserId === ownerUserId ? current.sequence + 1 : 1,
       }));
       return;
@@ -4539,16 +4787,6 @@ export function OrganizatechApp({
     currentScreen: screen,
     visibleScreens: menuScreens,
   });
-  const useUserPortalShell = shouldMountAuthorizedUserPortal({
-    authorizationProof: userPortalAuthorizationProof,
-    sessionUserId: supabaseSession?.user.id,
-    authenticatedUserId: supabaseUser?.id,
-    hasCoachPortalSession: Boolean(coachPortalSession),
-    isAuthLoading,
-    isPasswordRecoveryBlocked: multiportalAuth.isPasswordRecoveryPortalBlocked(),
-    isRenderableScreen: isUserPortalRenderableScreen(screen),
-  });
-
   const dashboardScreenVariant = resolveDashboardScreenVariant(isCycleScopedPlanBlocked);
   const comparisonScreenVariant = resolveComparisonScreenVariant(isCycleScopedPlanBlocked);
   const routineBuilderVariant = resolveRoutineBuilderVariant({
@@ -4570,7 +4808,12 @@ export function OrganizatechApp({
     });
   }
 
-  const screenHeader = canGoBackFromScreen(screen)
+  const isTrainingCycleProductVisible = screen === "registro-entrenamiento" && (
+    trainingCycleProduct.status === "loading"
+    || trainingCycleProduct.status === "error"
+    || trainingCycleProduct.status === "ready"
+  );
+  const screenHeader = screen !== "evaluaciones" && canGoBackFromScreen(screen) && !isTrainingCycleProductVisible
     ? <AppScreenHeader onBack={goBack} />
     : null;
   const portalScreenContent = (
@@ -4599,22 +4842,41 @@ export function OrganizatechApp({
               navigateTo("comparacion");
             }}
             switchDay={setDashboardDayOverride}
+            evaluationsEntry={supabaseUser?.id ? (
+              <StudentEvaluationsEntry expectedUserId={supabaseUser.id} location="home" onOpen={() => navigateTo("evaluaciones")} />
+            ) : null}
           />
         )
       )}
       {screen === "training-summary" && isTrainingSummaryScreenValid(Boolean(trainingCompletionSummary)) && trainingCompletionSummary && (
         <TrainingCompletionSummaryScreen
           summary={trainingCompletionSummary}
+          advancedExecutionSync={trainingCycleActiveWorkout.syncStatus}
           onDashboard={() => {
             activeWorkoutActions.clearTrainingCompletionSummary();
             navigation.transition(createFlowScreenTransition("dashboard", "summary-dismissed"));
           }}
         />
       )}
-      {screen === "registro-entrenamiento" && routineBuilderVariant === "blocked" && (
+      {screen === "registro-entrenamiento" && isTrainingCycleProductVisible && (
+        <TrainingCycleBuilderProductiveBoundary
+          controller={trainingCycleProduct}
+          shell={{
+            isMenuOpen,
+            onMenuToggle: toggleMenu,
+            isNotificationPanelOpen,
+            onNotificationPanelToggle: toggleNotifications,
+            notificationBadgeText,
+            notificationBadgeAriaLabel,
+          }}
+          openAlertsRequest={trainingCycleAlertsOpenRequest}
+          onExit={goBack}
+        />
+      )}
+      {screen === "registro-entrenamiento" && !isTrainingCycleProductVisible && routineBuilderVariant === "blocked" && (
         <CycleScopedPlanBlocker message={cycleScopedPlanBlockerMessage} />
       )}
-      {screen === "registro-entrenamiento" && routineBuilderVariant === "editor" && (
+      {screen === "registro-entrenamiento" && !isTrainingCycleProductVisible && routineBuilderVariant === "editor" && (
         <InitialTrainingScreen
           day={setupDay}
           setDay={(day) => dispatchRoutineBuilder({ type: "select_day", day })}
@@ -4632,7 +4894,7 @@ export function OrganizatechApp({
           configuredDays={getConfiguredSetupDays(setupByDay)}
         />
       )}
-      {screen === "registro-entrenamiento" && routineBuilderVariant === "management" && (
+      {screen === "registro-entrenamiento" && !isTrainingCycleProductVisible && routineBuilderVariant === "management" && (
         <CycleManagementScreen
           trainingPlan={displayTrainingPlan}
           exercises={displayExercises}
@@ -4701,6 +4963,7 @@ export function OrganizatechApp({
           notice={routineNotice}
           isBusy={isBusy}
           retryExerciseHistory={retryExerciseHistory}
+          advancedExecution={trainingCycleActiveWorkout.integration}
         />
       )}
       {screen === "comparacion" && (
@@ -4741,6 +5004,26 @@ export function OrganizatechApp({
           onSavePersonalData={handleSaveProfilePersonalData}
           onUploadAvatar={handleUploadProfileAvatar}
           cycleContextLabel={`${trainingTopbarMeta?.cycleLabel ?? "Ciclo"} + ${trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`}`}
+          coachLinking={coachLinking}
+          onOpenCoachLinkConfirmation={() => navigateTo("coach-link-confirmation")}
+          onOpenCoachLinkSuccess={() => navigateTo("coach-link-success")}
+          evaluationsEntry={supabaseUser?.id ? (
+            <StudentEvaluationsEntry expectedUserId={supabaseUser.id} location="profile" onOpen={() => navigateTo("evaluaciones")} />
+          ) : null}
+        />
+      )}
+      {screen === "coach-link-confirmation" && (
+        <CoachLinkConfirmationScreen
+          controller={coachLinking}
+          onSuccess={() => navigateTo("coach-link-success")}
+          onCancel={goBack}
+        />
+      )}
+      {screen === "coach-link-success" && (
+        <CoachLinkSuccessScreen
+          controller={coachLinking}
+          onTrain={() => navigation.reset("entrenamiento")}
+          onProfile={() => navigation.reset("perfil")}
         />
       )}
       {screen === "calendario" && supabaseUser?.id && (
@@ -4751,6 +5034,9 @@ export function OrganizatechApp({
           onBack={goBack}
           showBackButton={false}
         />
+      )}
+      {screen === "evaluaciones" && supabaseUser?.id && (
+        <StudentEvaluations expectedUserId={supabaseUser.id} onBack={goBack} />
       )}
       {isNewCycleConfirmOpen && (
         <ConfirmNewCycleModal

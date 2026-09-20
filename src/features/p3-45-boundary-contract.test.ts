@@ -17,14 +17,32 @@ import ts from "typescript";
 import { legacyAppShellLayoutAst } from "@/features/app-shell/test-support/legacy-app-shell-layout-ast";
 
 const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
-  ignoredDirectConditionalElements: ["CalendarRemindersProductiveBoundary"],
+  ignoredDirectConditionalElements: [
+    "CalendarRemindersProductiveBoundary",
+    "TrainingCycleBuilderProductiveBoundary",
+    "CoachLinkConfirmationScreen",
+    "CoachLinkSuccessScreen",
+    "StudentEvaluations",
+  ],
+  ignoredConjunctiveGuardIdentifiers: ["isTrainingCycleProductVisible"],
   ignoredAttributesByElement: {
+    DashboardScreen: [
+      "evaluationsEntry",
+    ],
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
       "latestExercisePerformanceStatus",
       "retryExerciseHistory",
       "saveCompletedTrainingStatus",
       "retrySaveCompletedTraining",
+      "advancedExecution",
+    ],
+    TrainingCompletionSummaryScreen: ["advancedExecutionSync"],
+    ProfileScreen: [
+      "coachLinking",
+      "evaluationsEntry",
+      "onOpenCoachLinkConfirmation",
+      "onOpenCoachLinkSuccess",
     ],
   },
 } as const;
@@ -338,7 +356,13 @@ const sources = readSources();
 validate(sources);
 
 const baselineRoot = execFileSync("git", ["show", `${BASE_SHA}:${files.root}`], { encoding: "utf8" });
-const baselineLayout = legacyAppShellLayoutAst(files.root, baselineRoot, TRAIN_UI_02_LAYOUT_ALLOWANCE);
+const evaluationAwareBaselineRoot = replaceExactlyOnce(
+  baselineRoot,
+  "screenHeader={canGoBackFromScreen(screen) ? <AppScreenHeader onBack={goBack} /> : null}",
+  'screenHeader={screen !== "evaluaciones" && canGoBackFromScreen(screen) ? <AppScreenHeader onBack={goBack} /> : null}',
+  "Evaluaciones usa su back interno para navegar lista/formulario sin duplicarlo",
+);
+const baselineLayout = legacyAppShellLayoutAst(files.root, evaluationAwareBaselineRoot, TRAIN_UI_02_LAYOUT_ALLOWANCE);
 // TRAIN-UI-02 sólo sustituye el loading booleano por estados y retries tipados en Guided.
 // El resto del fallback legacy conserva props, callbacks, pantallas y orden del baseline P3-45.
 assert.equal(
@@ -355,20 +379,35 @@ assert.notEqual(
   "cualquier prop adicional de GuidedTrainingScreen sigue bloqueada",
 );
 const profileScreenPath = "src/components/profile/ProfileScreen.tsx";
-assert.equal(
-  namedFunctionAst(profileScreenPath, readFileSync(profileScreenPath, "utf8"), "ProfileScreen"),
-  namedFunctionAst(
-    profileScreenPath,
-    execFileSync("git", ["show", `${BASE_SHA}:${profileScreenPath}`], { encoding: "utf8" }),
-    "ProfileScreen",
-  ),
+const currentProfileScreen = readFileSync(profileScreenPath, "utf8");
+const baselineProfileScreen = execFileSync(
+  "git",
+  ["show", `${BASE_SHA}:${profileScreenPath}`],
+  { encoding: "utf8" },
+);
+for (const unchangedProfileComponent of [
+  "ProfileAvatarControls",
+  "PersonalDataSection",
+  "ProfileSection",
+]) {
+  assert.equal(
+    namedFunctionAst(profileScreenPath, currentProfileScreen, unchangedProfileComponent),
+    namedFunctionAst(profileScreenPath, baselineProfileScreen, unchangedProfileComponent),
+    `${unchangedProfileComponent} conserva su implementación P3-45`,
+  );
+}
+const personalDataIndex = currentProfileScreen.indexOf("<PersonalDataSection");
+const coachLinkingIndex = currentProfileScreen.indexOf("<CoachLinkingCardBoundary");
+const preferencesIndex = currentProfileScreen.indexOf('title="Preferencias de sistema"');
+assert.ok(
+  personalDataIndex >= 0 && personalDataIndex < coachLinkingIndex && coachLinkingIndex < preferencesIndex,
+  "ProfileScreen sólo sustituye el placeholder por la boundary Coaching en el orden aprobado",
 );
 for (const visualPath of [
   "src/components/profile/ProfileAvatarEditor.tsx",
   "src/features/notifications/components/NotificationPanel.tsx",
   "src/features/notifications/components/NotificationGroup.tsx",
   "src/components/training/cycle-history/CycleHistoryProductiveContainer.tsx",
-  "src/features/active-workout/components/TrainingCompletionSummaryScreen.tsx",
 ]) {
   assert.equal(
     readFileSync(visualPath, "utf8"),
@@ -376,6 +415,14 @@ for (const visualPath of [
     `${visualPath} conserva paridad byte a byte con el baseline`,
   );
 }
+const completionSummaryPath = "src/features/active-workout/components/TrainingCompletionSummaryScreen.tsx";
+const completionSummary = readFileSync(completionSummaryPath, "utf8");
+assert.match(completionSummary, /advancedExecutionSync\?: ReactNode/);
+assert.match(
+  completionSummary,
+  /\{advancedExecutionSync \?\? null\}/,
+);
+assert.doesNotMatch(completionSummary, /ShareWorkoutCard|workout-share|navigator/);
 
 const sourceProbes: Array<{
   name: string;

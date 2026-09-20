@@ -1,0 +1,18 @@
+.figure { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 14px 0 11px; }
+.amount { min-width: 0; font-size: 26px; font-weight: 700; line-height: 1.1; letter-spacing: -.7px; }
+.unit { color: rgba(255, 255, 255, .55); font-size: 11.5px; font-weight: 600; }
+.stack { display: flex; height: 8px; gap: 2px; overflow: hidden; border-radius: 5px; }
+.segment { display: block; flex-basis: 0; border-radius: 2px; }
+.segment:first-child { border-radius: 5px 2px 2px 5px; }
+.segment:last-child { border-radius: 2px 5px 5px 2px; }
+.segment[data-state="renewed"] { background: #4ade80; }
+.segment[data-state="pending"] { background: #fbbf24; }
+.segment[data-state="declined"] { background: #f87171; }
+.state[data-state="renewed"] { color: #4ade80; }
+.state[data-state="pending"] { color: #fbbf24; }
+.state[data-state="declined"] { color: #f87171; }
+.legend { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; margin: 9px 0 0; padding: 0; list-style: none; }
+.legend li { display: flex; align-items: center; gap: 6px; }
+.legend li > span:last-child { color: rgba(255, 255, 255, .55); font-size: 10.5px; }
+.list { margin: 0; padding: 0; list-style: none; }
+.footer { margin: 0; padding: 13px 15px; border-top: 1px solid rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .02); color: rgba(255, 255, 255, .55); font-size: 10.5px; line-height: 1.5; }

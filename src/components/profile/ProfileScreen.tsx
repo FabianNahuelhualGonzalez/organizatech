@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 
 import {
@@ -20,6 +20,8 @@ import { TextInput } from "@/ui/forms/text-input";
 import { StatusMessage } from "@/ui/feedback/status-message";
 import type { ProfilePersonalData } from "@/lib/profile/profile-types";
 import type { ProfileViewModel } from "@/lib/profile/profile-view-model";
+import { CoachLinkingCardBoundary } from "@/features/coach-linking/components/coach-linking-card";
+import type { CoachLinkingController } from "@/features/coach-linking/hooks/use-coach-linking-controller";
 import { PROFILE_AVATAR_EDITOR_ID, ProfileAvatarEditor } from "./ProfileAvatarEditor";
 import { UserAvatar } from "./UserAvatar";
 
@@ -45,6 +47,10 @@ export function ProfileScreen({
   onSavePersonalData,
   onUploadAvatar,
   cycleContextLabel,
+  coachLinking,
+  onOpenCoachLinkConfirmation,
+  onOpenCoachLinkSuccess,
+  evaluationsEntry,
 }: {
   profile: ProfileViewModel;
   personalData: ProfilePersonalData | null;
@@ -60,6 +66,10 @@ export function ProfileScreen({
   onSavePersonalData: (input: ProfilePersonalDataInput) => Promise<ProfilePersonalData | null>;
   onUploadAvatar: (file: File) => Promise<boolean>;
   cycleContextLabel: string;
+  coachLinking: CoachLinkingController;
+  onOpenCoachLinkConfirmation: () => void;
+  onOpenCoachLinkSuccess: () => void;
+  evaluationsEntry?: ReactNode;
 }) {
   const ageLabel = formatProfileAgeLabel(personalData?.birthDate ?? null);
 
@@ -94,6 +104,14 @@ export function ProfileScreen({
         onSave={onSavePersonalData}
       />
 
+      <CoachLinkingCardBoundary
+        controller={coachLinking}
+        onOpenConfirmation={onOpenCoachLinkConfirmation}
+        onOpenSuccess={onOpenCoachLinkSuccess}
+      />
+
+      {evaluationsEntry}
+
       <ProfileSection
         title="Preferencias de sistema"
         description="Configuración predeterminada, se está preparando para futuras opciones personales."
@@ -101,16 +119,6 @@ export function ProfileScreen({
         actionLabel="Próximamente"
         disabledAction
       />
-
-      <section className="profile-section profile-feature-section">
-        <span className="profile-coming-soon">Próximamente</span>
-        <div className="profile-section-header">
-          <div>
-            <h3>Coaching</h3>
-            <p>Próximamente podrás vincularte con un coach, compartir tu progreso y recibir seguimiento personalizado.</p>
-          </div>
-        </div>
-      </section>
     </section>
   );
 }

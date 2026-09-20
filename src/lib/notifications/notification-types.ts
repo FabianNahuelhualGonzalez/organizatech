@@ -7,7 +7,10 @@ import type { Screen } from "@/lib/navigation/app-navigation";
  * acoplamiento en tiempo de ejecución — para no duplicar definiciones que ya existen en producción.
  */
 
-export type AppNotificationTarget = Extract<Screen, "dashboard" | "perfil" | "comparacion" | "calendario">;
+export type AppNotificationTarget = Extract<
+  Screen,
+  "dashboard" | "perfil" | "comparacion" | "calendario" | "registro-entrenamiento" | "evaluaciones"
+>;
 
 export type AppNotificationSection =
   | "profile-avatar"
@@ -16,6 +19,8 @@ export type AppNotificationSection =
   | "training-carousel"
   | "weekly-progress"
   | "coach"
+  | "coach-linking"
+  | "evaluations"
   | "weekly-comparison";
 
 export type AppNotificationCategory =
@@ -31,7 +36,15 @@ export type AppNotificationTone = "info" | "success" | "warning" | "progress";
 
 export type AppNotificationPriority = "high" | "medium" | "low";
 
-export type AppNotificationKind = "feature" | "profile" | "week" | "progress" | "coach" | "calendar";
+export type AppNotificationKind =
+  | "feature"
+  | "profile"
+  | "week"
+  | "progress"
+  | "coach"
+  | "calendar"
+  | "training-cycle"
+  | "evaluation";
 
 export interface AppNotification {
   id: string;
@@ -43,6 +56,8 @@ export interface AppNotification {
   dedupeKey: string;
   target: AppNotificationTarget;
   section?: AppNotificationSection;
+  /** Opaque feature reference used only by the destination boundary. */
+  referenceId?: string;
   day?: string;
   kind: AppNotificationKind;
   createdAt: string;
@@ -95,6 +110,7 @@ export interface NotificationOpenIntent {
   dashboardDayOverride: string | null;
   comparisonDayOverride: string | null;
   section: AppNotificationSection | null;
+  referenceId: string | null;
 }
 
 /** Identificador semántico del ícono por categoría — la capa de UI decide qué componente React renderizar para cada clave. */

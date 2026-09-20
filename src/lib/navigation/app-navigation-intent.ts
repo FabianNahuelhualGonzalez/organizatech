@@ -44,7 +44,7 @@ export function resolveMenuScreens(
  * caso vía `resolveContextualBackNavigation`, ya cubierto en `app-navigation.ts`).
  */
 export function canGoBackFromScreen(screen: Screen): boolean {
-  return screen !== "dashboard" && screen !== "training-summary";
+  return screen !== "dashboard" && screen !== "training-summary" && screen !== "coach-link-success";
 }
 
 export interface DayStateReset {

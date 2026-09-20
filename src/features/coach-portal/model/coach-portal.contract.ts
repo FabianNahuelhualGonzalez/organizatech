@@ -68,7 +68,7 @@ test("perfil Coach deriva edad desde birth_date y correo desde Auth", () => {
   });
 });
 
-test("inicio, orden del menú y navegación local permanecen cerrados", () => {
+test("Panel principal queda habilitado y el resto del menú conserva su cierre", () => {
   assert.equal(COACH_HOME_WELCOME, "bienvenido Coach.");
   assert.equal(
     COACH_HOME_MESSAGE,
@@ -82,16 +82,18 @@ test("inicio, orden del menú y navegación local permanecen cerrados", () => {
     "Modificar ciclo de entrenamiento",
     "Historial ciclo de entrenamiento",
     "Calendario",
+    "Evaluaciones",
     "Mensajes",
     "Cerrar sesión",
   ]);
   assert.deepEqual(COACH_PORTAL_MENU_ITEMS.map(({ availability }) => availability), [
     "enabled",
+    "enabled",
     "disabled",
     "disabled",
     "disabled",
     "disabled",
-    "disabled",
+    "enabled",
     "enabled",
     "disabled",
     "action",
@@ -101,6 +103,10 @@ test("inicio, orden del menú y navegación local permanecen cerrados", () => {
   assert.deepEqual(menuState, { screen: "home", isMenuOpen: true });
   assert.deepEqual(reduceCoachPortalState(menuState, { type: "profile_opened" }), {
     screen: "profile",
+    isMenuOpen: false,
+  });
+  assert.deepEqual(reduceCoachPortalState(menuState, { type: "evaluations_opened" }), {
+    screen: "evaluations",
     isMenuOpen: false,
   });
   assert.deepEqual(reduceCoachPortalState(menuState, { type: "reset" }), {

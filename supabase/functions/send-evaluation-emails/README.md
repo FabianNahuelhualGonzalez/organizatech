@@ -1,0 +1,19 @@
+# Operación de correos de Evaluaciones
+
+Esta función usa el JWT del usuario y no usa `service_role`:
+
+- La app puede solicitar el drenaje inmediato de sus propios envíos con el JWT del usuario y un `Origin` igual a `ORGANIZATECH_APP_URL`.
+- Los recordatorios de vencimiento sólo se envían cuando el coach los solicita manualmente desde la app. No hay un recordatorio automático periódico.
+
+> Decisión de producto: no crear ni activar un scheduler de Evaluaciones, y en particular nunca invocar esta función cada 15 minutos. Cualquier automatización futura requiere una decisión de producto y una autorización de despliegue nuevas.
+
+## Configuración requerida por entorno
+
+Configurar primero en QA y sólo después de QA PASS y autorización explícita en PROD:
+
+1. Guardar un secreto aleatorio de al menos 32 caracteres como secreto de la Edge Function `EVALUATION_EMAIL_RPC_SECRET` y, con el mismo valor, en Vault bajo `evaluation_email_rpc_secret`.
+2. Configurar `ORGANIZATECH_APP_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY` y las credenciales del proveedor de correo.
+3. Desplegar `send-evaluation-emails` con la configuración versionada `verify_jwt = false`; el handler valida explícitamente el JWT y el origen de la app, y las RPC exigen además la capacidad privada.
+4. No crear job, cron ni invocación periódica para Evaluaciones. `EVALUATION_EMAIL_SCHEDULER_SECRET`, si existe como secreto heredado de QA, no se usa mientras no exista una autorización futura explícita.
+
+Este repositorio no crea jobs remotos ni configura secretos. Cualquier cambio de entorno requiere autorización específica para QA o PROD.

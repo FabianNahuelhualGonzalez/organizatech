@@ -1,0 +1,17 @@
+.workspace {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+}
+
+.content {
+  min-height: 0;
+}
+
+.unavailable {
+  margin: 16px auto;
+  max-width: 430px;
+  padding: 0 16px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.8rem;
+}

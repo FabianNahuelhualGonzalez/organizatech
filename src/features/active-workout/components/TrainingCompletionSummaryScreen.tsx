@@ -1,11 +1,17 @@
+import type { ReactNode } from "react";
 import type { TrainingCompletionSummary } from "@/lib/training/training-completion-summary";
 
 export interface TrainingCompletionSummaryScreenProps {
   summary: TrainingCompletionSummary;
   onDashboard: () => void;
+  advancedExecutionSync?: ReactNode;
 }
 
-export function TrainingCompletionSummaryScreen({ summary, onDashboard }: TrainingCompletionSummaryScreenProps) {
+export function TrainingCompletionSummaryScreen({
+  summary,
+  onDashboard,
+  advancedExecutionSync,
+}: TrainingCompletionSummaryScreenProps) {
   const previousDateLabel = summary.exercises.find((exercise) => exercise.comparisonStatus === "ready" && exercise.previousDateLabel)?.previousDateLabel ?? "";
   const currentDateLabel = summary.exercises[0]?.currentDateLabel ?? "";
 
@@ -67,6 +73,8 @@ export function TrainingCompletionSummaryScreen({ summary, onDashboard }: Traini
             ))}
           </div>
         </div>
+
+        {advancedExecutionSync ?? null}
 
         <button className="button training-completion-button" type="button" onClick={onDashboard}>
           Ir al panel principal

@@ -65,7 +65,7 @@ assert.deepEqual(resolveDayStateReset(), resolveDayStateReset());
 
 // CASO — navegación hacia data-section: cada sección conocida produce el selector esperado.
 const sections: AppNotificationSection[] = [
-  "profile-avatar", "personal-data", "today-training", "training-carousel", "weekly-progress", "coach", "weekly-comparison",
+  "profile-avatar", "personal-data", "today-training", "training-carousel", "weekly-progress", "coach", "coach-linking", "weekly-comparison",
 ];
 for (const section of sections) {
   assert.deepEqual(resolveNotificationScrollTarget(section), { selector: `[data-section="${section}"]` });

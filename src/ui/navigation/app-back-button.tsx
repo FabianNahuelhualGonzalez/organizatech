@@ -2,12 +2,13 @@ import styles from "@/ui/navigation/app-back-button.module.css";
 
 export interface AppBackButtonProps {
   onBack: () => void;
+  label?: string;
 }
 
-export function AppBackButton({ onBack }: AppBackButtonProps) {
+export function AppBackButton({ onBack, label }: AppBackButtonProps) {
   return (
     <button
-      className={styles.button}
+      className={`${styles.button} ${label ? styles.withLabel : ""}`}
       type="button"
       aria-label="Volver"
       onClick={onBack}
@@ -29,6 +30,7 @@ export function AppBackButton({ onBack }: AppBackButtonProps) {
         <path d="M5 12l4 4" />
         <path d="M5 12l4 -4" />
       </svg>
+      {label ? <span>{label}</span> : null}
     </button>
   );
 }

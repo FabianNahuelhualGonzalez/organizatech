@@ -1,0 +1,12 @@
+.view {
+  width: 100%;
+  max-width: 430px;
+  min-width: 0;
+  margin-inline: auto;
+  container-type: inline-size;
+  color: var(--text);
+  background: var(--background);
+  font-family: inherit;
+}
+.content { min-width: 0; padding: 20px 14px 24px; }
+.content > * { min-width: 0; }

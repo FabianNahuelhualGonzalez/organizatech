@@ -269,8 +269,8 @@ const overlayEngineConsumers: string[] = [];
   }
 })("src");
 // P3-50B1 conecto Drawer y NotificationPanel; P3-50B2 conecta ProfileAvatarEditor; AUTH-COACH-01
-// conecta el drawer Coach y UI-NAV-01 conecta el drawer Usuario nuevo. La garantía sigue siendo una
-// lista EXACTA (no un "al menos"): un séptimo consumidor inesperado debe hacer fallar este contrato.
+// conecta el drawer Coach y UI-NAV-01 conecta el drawer Usuario nuevo. CoachOverlay se integra
+// como infraestructura aislada. La lista sigue siendo EXACTA: cualquier consumidor inesperado falla.
 // Se ordena para que el resultado no dependa
 // del recorrido del directorio.
 assert.deepEqual(
@@ -281,9 +281,10 @@ assert.deepEqual(
     "src/features/coach-portal/components/coach-portal.tsx",
     "src/features/notifications/components/NotificationPanel.tsx",
     "src/features/user-portal-shell/components/user-portal-shell.tsx",
+    "src/ui/coach-overlays/coach-overlay.tsx",
     "src/ui/modals/modal-shell.tsx",
   ],
-  "los consumidores son exactamente ProfileAvatarEditor, ModalShell, los tres Drawer y NotificationPanel",
+  "los consumidores son exactamente ProfileAvatarEditor, ModalShell, los tres Drawer, NotificationPanel y CoachOverlay aislado",
 );
 
 // ConfirmDialog bloquea Escape durante busy y enfoca la accion segura.
