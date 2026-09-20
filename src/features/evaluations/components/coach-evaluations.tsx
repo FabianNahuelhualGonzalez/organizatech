@@ -34,19 +34,24 @@ import { AppBackButton } from "@/ui/navigation/app-back-button";
 import styles from "./evaluations.module.css";
 
 type CoachView = "library" | "builder" | "send" | "sent" | "review" | "detail";
+export type CoachEvaluationRestorableView = "library" | "send";
 
 export function CoachEvaluations({
   expectedUserId,
   notificationOpenRequest,
   onNotificationOpenRequestConsumed,
   onBack,
+  initialView = "library",
+  onRestorableViewChange,
 }: {
   readonly expectedUserId: string;
   readonly notificationOpenRequest: EvaluationOpenRequest | null;
   readonly onNotificationOpenRequestConsumed: (request: EvaluationOpenRequest) => void;
   readonly onBack: () => void;
+  readonly initialView?: CoachEvaluationRestorableView;
+  readonly onRestorableViewChange?: (view: CoachEvaluationRestorableView) => void;
 }) {
-  const [view, setView] = useState<CoachView>("library");
+  const [view, setView] = useState<CoachView>(initialView);
   const [templates, setTemplates] = useState<readonly EvaluationTemplate[]>([]);
   const [students, setStudents] = useState<readonly EvaluationStudent[]>([]);
   const [assignments, setAssignments] = useState<readonly CoachEvaluationAssignment[]>([]);
@@ -88,6 +93,9 @@ export function CoachEvaluations({
   }, [expectedUserId]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    onRestorableViewChange?.(view === "send" ? "send" : "library");
+  }, [onRestorableViewChange, view]);
   useEffect(() => {
     if (!toast) return;
     const timeout = window.setTimeout(() => setToast(""), 2600);
@@ -334,9 +342,9 @@ export function CoachEvaluations({
         <>
           <h2 id="coach-evaluations-title" className={styles.title}>Selecciona la plantilla que enviarás</h2>
           <div className={`${styles.card} ${styles.stack} ${styles.sendForm}`}>
-            <label className={`${styles.label} ${styles.sendControl}`}>Plantilla<select className={styles.select} value={sendTemplateId} onChange={(event) => setSendTemplateId(event.target.value)}>{templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select></label>
+            <label className={`${styles.label} ${styles.sendControl}`}>Plantilla<select className={styles.select} value={sendTemplateId} onChange={(event) => setSendTemplateId(event.target.value)}><option value="" disabled>Selecciona una plantilla</option>{templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select></label>
             <label className={`${styles.label} ${styles.sendControl}`}>Busca a quien se la quieres enviar<input className={styles.field} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Busca a tu alumno vinculado…" /></label>
-            {filteredStudents.map((student) => <button className={styles.listButton} type="button" key={student.episodeId} onClick={() => { setRecipients((current) => [...current, student]); setQuery(""); }}><strong>{student.name}</strong><span className={styles.meta}>{student.email}</span></button>)}
+            {filteredStudents.map((student) => <button className={styles.listButton} type="button" key={student.episodeId} onClick={() => { setRecipients((current) => [...current, student]); setQuery(""); }}><strong>{student.name}</strong><span>{student.email}</span></button>)}
             {query.trim() && filteredStudents.length === 0 ? <p className={styles.muted}>Sin alumnos vinculados que coincidan con «{query.trim()}»</p> : null}
             <div className={styles.selectedRecipients}>{recipients.map((student) => <div className={styles.recipientRow} key={student.episodeId}><span className={styles.avatar}>{initialsForEvaluation(student.name)}</span><div className={styles.recipientCopy}><strong>{student.name}</strong><span>{student.email}</span></div><button className={styles.iconButton} type="button" aria-label={`Quitar ${student.name}`} onClick={() => setRecipients((current) => current.filter((item) => item.episodeId !== student.episodeId))}><X size={15} /></button></div>)}</div>
             <label className={`${styles.label} ${styles.sendControl}`}>Fecha límite para responderla <span className={styles.meta}>(opcional)</span><input className={`${styles.field} ${styles.dateField}`} type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>

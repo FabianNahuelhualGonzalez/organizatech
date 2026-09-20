@@ -25,8 +25,14 @@ test("envío móvil mantiene controles equivalentes sin overflow horizontal", ()
     assert.match(css, new RegExp(`\\.${className}`));
   }
   assert.match(css, /\.sendControl \{[\s\S]*width: 100%;[\s\S]*min-width: 0;[\s\S]*max-width: 100%/);
+  assert.match(css, /\.dateField \{[\s\S]*inline-size: 100%;[\s\S]*min-inline-size: 0;[\s\S]*max-inline-size: 100%;[\s\S]*overflow: hidden/);
   assert.match(css, /@media \(max-width: 430px\)[\s\S]*min-inline-size: 0;[\s\S]*max-inline-size: 100%/);
   assert.match(css, /\.pillButton \{[\s\S]*white-space: nowrap/);
+});
+
+test("resultado de alumno separa nombre completo y correo en dos líneas", () => {
+  assert.match(coach, /styles\.listButton[\s\S]*<strong>\{student\.name\}<\/strong><span>\{student\.email\}<\/span>/);
+  assert.match(readFileSync("src/features/evaluations/components/evaluations.module.css", "utf8"), /\.listButton strong,[\s\S]*\.listButton span \{[\s\S]*display: block/);
 });
 
 test("Alumno cubre tabs, borrador, vencimiento, consentimiento exacto y tablas apiladas", () => {

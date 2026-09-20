@@ -9,6 +9,7 @@ import {
   isCompleteCoachLinkCode,
   normalizeCoachLinkCode,
   persistCoachLinkEntry,
+  resolveCoachLinkPostAuthDecision,
 } from "./coach-linking";
 
 function memoryStorage() {
@@ -79,4 +80,29 @@ test("una sesión expirada conserva confirmación y requestId para revalidación
     resumeConfirmation: true,
     requestId,
   });
+});
+
+test("destino Ver mi coach espera vínculo de la misma identidad y falla cerrado", () => {
+  assert.equal(resolveCoachLinkPostAuthDecision({
+    destinationOwnerUserId: "user-a",
+    authenticatedUserId: "user-a",
+    activeState: "loading",
+    activeStateIdentityKey: null,
+  }), "pending");
+  assert.equal(resolveCoachLinkPostAuthDecision({
+    destinationOwnerUserId: "user-a",
+    authenticatedUserId: "user-a",
+    activeState: "linked",
+    activeStateIdentityKey: "user-a",
+  }), "profile");
+  for (const input of [
+    { authenticatedUserId: "user-b", activeState: "linked" as const, activeStateIdentityKey: "user-b" },
+    { authenticatedUserId: "user-a", activeState: "linked" as const, activeStateIdentityKey: "user-b" },
+    { authenticatedUserId: "user-a", activeState: "none" as const, activeStateIdentityKey: "user-a" },
+  ]) {
+    assert.equal(resolveCoachLinkPostAuthDecision({
+      destinationOwnerUserId: "user-a",
+      ...input,
+    }), "dashboard");
+  }
 });

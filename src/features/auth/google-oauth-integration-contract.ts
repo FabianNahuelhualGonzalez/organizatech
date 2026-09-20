@@ -156,7 +156,7 @@ test("owner Auth controla Strict Mode, single-flight, URL, revisión y A→B", (
   assert.equal(resetKeepsStartFlight(reset), true);
   assert.ok(start.indexOf("startControllerRef.current.start") < start.indexOf("resetPendingRegistration()"));
   assert.ok(start.indexOf("resetPendingRegistration()") < start.indexOf("ownerControllerRef.current.begin()"));
-  assert.ok(start.indexOf("ownerControllerRef.current.begin()") < start.indexOf("await startGoogleOAuth(input)"));
+  assert.ok(start.indexOf("ownerControllerRef.current.begin()") < start.indexOf("await startGoogleOAuth({"));
 
   const clearStartMutant = boundary.replace(
     "    submitFlightRef.current.clear();",
@@ -205,7 +205,7 @@ test("boundary navega sólo después de transfer y guard vigente; mutante adelan
 });
 
 test("composition root queda sólo con wiring tipado Google", () => {
-  assert.match(entry, /const googleOAuth = useGoogleOAuthCallbackGate\(\)/);
+  assert.match(entry, /const googleOAuth = useGoogleOAuthCallbackGate\(\{[\s\S]*postAuthDestination:/);
   assert.match(entry, /googleOAuth=\{googleOAuth\}/);
   assert.match(root, /googleOAuth: GoogleOAuthBoundary/);
   assert.match(root, /googleOAuth=\{googleOAuth\}/);

@@ -55,6 +55,22 @@ export type CoachLinkActiveResult =
 
 export type CoachLinkActiveState = "loading" | "none" | "linked";
 
+export type CoachLinkPostAuthDecision = "pending" | "profile" | "dashboard";
+
+export function resolveCoachLinkPostAuthDecision(input: {
+  readonly destinationOwnerUserId: string;
+  readonly authenticatedUserId: string | null;
+  readonly activeState: CoachLinkActiveState;
+  readonly activeStateIdentityKey: string | null;
+}): CoachLinkPostAuthDecision {
+  if (input.authenticatedUserId !== input.destinationOwnerUserId) return "dashboard";
+  if (input.activeState === "loading") return "pending";
+  return input.activeState === "linked"
+    && input.activeStateIdentityKey === input.destinationOwnerUserId
+    ? "profile"
+    : "dashboard";
+}
+
 export const COACH_LINK_MESSAGES: Readonly<Record<Exclude<CoachLinkLookupStatus, "idle">, string>> = {
   incompleto: "Escribe los 9 caracteres del código.",
   validando: "Validando código…",

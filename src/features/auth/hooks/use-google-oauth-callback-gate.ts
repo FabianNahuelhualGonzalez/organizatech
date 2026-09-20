@@ -26,6 +26,10 @@ import {
   type GoogleOAuthIntent,
 } from "@/features/auth/model/google-oauth-intent";
 import type { AuthAccountType, AuthMode } from "@/features/auth/model/auth-route";
+import {
+  persistPostAuthNavigationIntent,
+  type PostAuthNavigationDestination,
+} from "@/features/auth/model/post-auth-navigation-intent";
 import { MULTIPORTAL_AUTH_ERROR_MESSAGE } from "@/features/auth/model/multiportal-auth-controller";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -65,7 +69,9 @@ const READY_STATE: GoogleOAuthBoundaryState = {
   statusTone: "info",
 };
 
-export function useGoogleOAuthCallbackGate(): GoogleOAuthBoundary {
+export function useGoogleOAuthCallbackGate(options: {
+  readonly postAuthDestination?: PostAuthNavigationDestination | null;
+} = {}): GoogleOAuthBoundary {
   const [state, setState] = useState<GoogleOAuthBoundaryState>(() => {
     if (typeof window === "undefined") return { ...READY_STATE, state: "checking" };
     return parseGoogleOAuthCallback(window.location)
@@ -148,7 +154,16 @@ export function useGoogleOAuthCallbackGate(): GoogleOAuthBoundary {
           await transferGoogleOAuthAndNavigate({
             transfer: () => operation.transferToPrincipal(principal, callbackGuard),
             guard: callbackGuard,
-            navigate: () => window.location.replace(cleanLoginUrl(operation.intent.portal)),
+            navigate: () => {
+              if (operation.intent.postAuthDestination) {
+                persistPostAuthNavigationIntent(
+                  window.sessionStorage,
+                  operation.userId,
+                  operation.intent.postAuthDestination,
+                );
+              }
+              window.location.replace(cleanLoginUrl(operation.intent.portal));
+            },
           });
           return;
         }
@@ -200,7 +215,12 @@ export function useGoogleOAuthCallbackGate(): GoogleOAuthBoundary {
       const owner = ownerControllerRef.current.begin();
       setState({ ...READY_STATE, isBusy: true });
       try {
-        await startGoogleOAuth(input);
+        await startGoogleOAuth({
+          ...input,
+          postAuthDestination: input.portal === "usuario"
+            ? options.postAuthDestination ?? null
+            : null,
+        });
       } catch (error) {
         if (!owner.isCurrent()) return;
         setState({

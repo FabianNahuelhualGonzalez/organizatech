@@ -420,7 +420,7 @@ function auditReadOnlyCoachProfile(sources: Sources) {
   );
 
   assertContract(
-    !/fetch\(|\.insert\(|\.update\(|\.upsert\(|\.rpc\(|\.from\(|supabase|repository|onSave|onUpload/.test(
+    !/fetch\(|\.insert\(|\.update\(|\.upsert\(|\.rpc\(|\.from\(|\bsupabase\s*\.|repository|onSave|onUpload/.test(
       coachFeatureSource,
     ),
     FAILURE.coachWrite,

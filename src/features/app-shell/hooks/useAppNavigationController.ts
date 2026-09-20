@@ -25,12 +25,11 @@ import {
   type Screen,
 } from "@/lib/navigation/app-navigation";
 import type { ScreenTransition } from "@/lib/navigation/app-navigation-transition";
-import { getBrowserStorageScope } from "@/lib/storage/browser-storage";
 import {
-  ACTIVE_FLOW_VERSION,
-  loadActiveFlow,
-  saveActiveFlow,
-} from "@/lib/storage/app-flow-storage";
+  getNavigationRestorationScope,
+  loadNavigationRestoration,
+  saveNavigationRestoration,
+} from "@/lib/navigation/navigation-restoration";
 
 export function useAppNavigationController(
   initialScreen: Screen,
@@ -110,11 +109,13 @@ export function useAppNavigationController(
     userId: string | undefined,
     ports: AppNavigationRestorePorts,
   ) => {
-    const recoveryScope = getBrowserStorageScope(mode, userId);
-    const activeFlow = loadActiveFlow(mode, userId);
+    const recoveryScope = getNavigationRestorationScope(mode, userId);
+    const target = recoveryScope
+      ? loadNavigationRestoration(recoveryScope, "usuario")
+      : null;
     ports.beforeRestoreAttempt(recoveryScope);
-    if (!activeFlow) return false;
-    const restoration = resolveActiveFlowRestoration(activeFlow.flow);
+    if (!target || target.portal !== "usuario") return false;
+    const restoration = resolveActiveFlowRestoration(target.destination);
 
     if (restoration.kind === "routine-draft") {
       const restored = ports.restoreRoutineDraft(mode, userId);
@@ -148,19 +149,15 @@ export function useAppNavigationController(
       readiness: persistence.readiness,
     });
     if (!activeFlow) return;
-    const userKey = getBrowserStorageScope(persistence.dataMode, persistence.userId);
+    const userKey = getNavigationRestorationScope(persistence.dataMode, persistence.userId);
     if (!userKey || persistence.activeStorageScope !== userKey) return;
-    const dataMode = persistence.dataMode;
     const flowToPersist = activeFlow;
     const userKeyToPersist = userKey;
 
     function persistFlow() {
-      saveActiveFlow({
-        version: ACTIVE_FLOW_VERSION,
-        updatedAt: Date.now(),
-        dataMode,
-        userKey: userKeyToPersist,
-        flow: flowToPersist,
+      saveNavigationRestoration(userKeyToPersist, {
+        portal: "usuario",
+        destination: flowToPersist,
       });
     }
 

@@ -32,8 +32,8 @@ assert.equal((controllerSource.match(/\bsetState\(/g) ?? []).length, 1, "un úni
 assert.match(controllerSource, /resolveContextualNavigation/);
 assert.match(controllerSource, /resolveContextualBackNavigation/);
 assert.match(controllerSource, /resolveActiveFlowRestoration/);
-assert.match(controllerSource, /loadActiveFlow/);
-assert.match(controllerSource, /saveActiveFlow/);
+assert.match(controllerSource, /loadNavigationRestoration/);
+assert.match(controllerSource, /saveNavigationRestoration/);
 assert.doesNotMatch(controllerSource, /active-workout|routine-builder|NotificationPanel|components\//);
 
 assert.match(controllerModelSource, /historyPolicy === "reset"/);

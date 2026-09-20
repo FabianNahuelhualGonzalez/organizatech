@@ -1,4 +1,5 @@
 import type { AuthAccountType, AuthMode } from "./auth-route";
+import type { PostAuthNavigationDestination } from "./post-auth-navigation-intent";
 
 export const GOOGLE_OAUTH_FLOW = "google-oauth" as const;
 export const GOOGLE_OAUTH_INTENT_TTL_MS = 10 * 60 * 1000;
@@ -9,6 +10,7 @@ export interface GoogleOAuthIntent {
   readonly mode: AuthMode;
   readonly portal: AuthAccountType;
   readonly createdAt: number;
+  readonly postAuthDestination: PostAuthNavigationDestination | null;
 }
 
 export interface OAuthIntentStorage {
@@ -20,6 +22,7 @@ export interface OAuthIntentStorage {
 export function createGoogleOAuthIntent(input: {
   mode: AuthMode;
   portal: AuthAccountType;
+  postAuthDestination?: PostAuthNavigationDestination | null;
   now?: number;
   randomBytes?: (length: number) => Uint8Array;
 }): GoogleOAuthIntent {
@@ -30,6 +33,7 @@ export function createGoogleOAuthIntent(input: {
     mode: input.mode,
     portal: input.portal,
     createdAt: input.now ?? Date.now(),
+    postAuthDestination: input.postAuthDestination ?? null,
   };
 }
 
@@ -53,12 +57,25 @@ export function consumeGoogleOAuthIntent(
       value.id !== intentId
       || (value.mode !== "login" && value.mode !== "registro")
       || (value.portal !== "usuario" && value.portal !== "coach")
+      || (
+        value.postAuthDestination !== undefined
+        && value.postAuthDestination !== null
+        && value.postAuthDestination !== "user-coach-profile"
+      )
       || typeof value.createdAt !== "number"
       || !Number.isSafeInteger(value.createdAt)
       || value.createdAt > now
       || now - value.createdAt > GOOGLE_OAUTH_INTENT_TTL_MS
     ) return null;
-    return value as GoogleOAuthIntent;
+    return {
+      id: value.id,
+      mode: value.mode,
+      portal: value.portal,
+      createdAt: value.createdAt,
+      postAuthDestination: value.postAuthDestination === "user-coach-profile"
+        ? value.postAuthDestination
+        : null,
+    } as GoogleOAuthIntent;
   } catch {
     return null;
   }

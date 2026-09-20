@@ -129,9 +129,10 @@ import {
 } from "@/features/coach-linking/components/coach-linking-screens";
 import { useCoachLinkingController } from "@/features/coach-linking/hooks/use-coach-linking-controller";
 import { useCoachLinkNotifications } from "@/features/coach-linking/hooks/use-coach-link-notifications";
-import type {
-  CoachLinkNotificationDestination,
-  CoachLinkStoredEntry,
+import {
+  resolveCoachLinkPostAuthDecision,
+  type CoachLinkNotificationDestination,
+  type CoachLinkStoredEntry,
 } from "@/features/coach-linking/model/coach-linking";
 import { UserPortalShell } from "@/features/user-portal-shell/components/user-portal-shell";
 import {
@@ -246,6 +247,8 @@ import {
   resolvePasswordRecoveryRouteTransition,
   resolveWorkoutCompletionTransition,
 } from "@/lib/navigation/app-navigation-transition";
+import { clearNavigationRestoration } from "@/lib/navigation/navigation-restoration";
+import { consumePostAuthNavigationIntent } from "@/features/auth/model/post-auth-navigation-intent";
 import {
   isTrainingSummaryScreenValid,
   resolveActiveWorkoutVariant,
@@ -275,6 +278,7 @@ import {
   clearBrowserStorageScope as clearStoredBrowserStorageScope,
   clearPasswordRecoveryStorage,
   confirmPasswordRecoveryFlow,
+  getBrowserSessionStorage,
   getBrowserStorageScope,
   hasStoredPasswordRecoveryFlow,
   loadPasswordRecoveryFlow,
@@ -283,7 +287,6 @@ import {
   type BrowserStorageScope,
 } from "@/lib/storage/browser-storage";
 import {
-  clearActiveFlow,
   clearRoutineDraft,
 } from "@/lib/storage/app-flow-storage";
 import {
@@ -528,6 +531,7 @@ export function OrganizatechApp({
     useState<EvaluationOpenRequest | null>(null);
   const [studentEvaluationOpenRequest, setStudentEvaluationOpenRequest] =
     useState<EvaluationOpenRequest | null>(null);
+  const [pendingCoachProfileUserId, setPendingCoachProfileUserId] = useState<string | null>(null);
   const coachPortalSessionRef = useRef<CoachPortalSession | null>(null);
   const [userPortalAuthorizationProof, setUserPortalAuthorizationProof] =
     useState<UserPortalAuthorizationProof | null>(null);
@@ -760,6 +764,46 @@ export function OrganizatechApp({
     activeCoachLinkState: coachLinking.snapshot.activeState,
     activeCoachLinkIdentityKey: coachLinking.snapshot.activeStateIdentityKey,
   });
+  useEffect(() => {
+    if (!pendingCoachProfileUserId) return;
+    const decision = resolveCoachLinkPostAuthDecision({
+      destinationOwnerUserId: pendingCoachProfileUserId,
+      authenticatedUserId: supabaseUser?.id ?? null,
+      activeState: coachLinking.snapshot.activeState,
+      activeStateIdentityKey: coachLinking.snapshot.activeStateIdentityKey,
+    });
+    if (decision === "pending") return;
+    setPendingCoachProfileUserId(null);
+    if (decision === "profile") {
+      navigation.transition(createAuthNavigationReset("perfil", "session-established"));
+      scrollToNotificationSection("coach-linking");
+      return;
+    }
+    clearNavigationRestoration(activeBrowserStorageScopeRef.current, "usuario");
+    navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
+    // El controller y el helper de scroll son adaptadores estables del composition root.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    coachLinking.snapshot.activeState,
+    coachLinking.snapshot.activeStateIdentityKey,
+    pendingCoachProfileUserId,
+    supabaseUser?.id,
+  ]);
+
+  useEffect(() => {
+    if (screen !== "evaluaciones" || !supabaseUser?.id) return;
+    if (coachLinking.snapshot.activeState === "loading") return;
+    if (hasStudentEvaluationsAccess) return;
+    clearNavigationRestoration(activeBrowserStorageScopeRef.current, "usuario");
+    navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
+    // El controller es estable; este efecto sólo valida el destino restaurado al resolverse vínculo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    coachLinking.snapshot.activeState,
+    hasStudentEvaluationsAccess,
+    screen,
+    supabaseUser?.id,
+  ]);
   const legacyCycleHistoryBoundary = useLegacyCycleHistoryController({
     identity: trainingDataIdentityPort,
     scope: activeFeatureStorageScope,
@@ -1993,13 +2037,21 @@ export function OrganizatechApp({
           setIsAuthLoading(false);
           clearCompletedAuthForm();
           const coachLinkDestination = initialCoachLinkNotificationDestinationRef.current;
+          let shouldOpenCoachProfile = false;
           if (coachLinkDestination?.kind === "student-coaching") {
             initialCoachLinkNotificationDestinationRef.current = null;
-            navigation.transition(createAuthNavigationReset("perfil", "session-established"));
-            scrollToNotificationSection("coach-linking");
-            return;
+            shouldOpenCoachProfile = true;
           }
-          if (
+          const postAuthStorage = getBrowserSessionStorage();
+          const storedDestination = postAuthStorage
+            ? consumePostAuthNavigationIntent(postAuthStorage, authState.user!.id)
+            : null;
+          if (storedDestination === "user-coach-profile") {
+            shouldOpenCoachProfile = true;
+          }
+          if (shouldOpenCoachProfile) {
+            setPendingCoachProfileUserId(authState.user!.id);
+          } else if (
             completedIntent === "restore-active-flow" &&
             restoreActiveFlowForSession(authState.dataMode, authState.user?.id)
           ) return;
@@ -2021,6 +2073,11 @@ export function OrganizatechApp({
     supabaseAuthIdentityScopeRef.current = recordSupabaseAuthIdentity(effectiveSession);
     const effectiveDataMode: DataMode = effectiveSession ? authState.dataMode : "demo";
     const nextStorageScope = getBrowserStorageScope(effectiveDataMode, authenticatedUser?.id);
+    const previousStorageScope = activeBrowserStorageScopeRef.current;
+    if (previousStorageScope && previousStorageScope !== nextStorageScope) {
+      clearNavigationRestoration(previousStorageScope);
+      setPendingCoachProfileUserId(null);
+    }
     const nextIdentity = {
       userId: authenticatedUser?.id ?? null,
       scope: nextStorageScope,
@@ -2088,6 +2145,8 @@ export function OrganizatechApp({
       && storageScope !== null;
     setCoachEvaluationOpenRequest(null);
     setStudentEvaluationOpenRequest(null);
+    setPendingCoachProfileUserId(null);
+    clearNavigationRestoration(storageScope);
     if (
       activeBrowserStorageScopeRef.current === null &&
       sessionDataEpochRef.current.userId === null &&
@@ -3541,7 +3600,10 @@ export function OrganizatechApp({
           if (completionResult.kind === "error") throw completionResult.error;
         }
 
-        clearActiveFlow(operation.dataMode, operation.userId ?? undefined);
+        clearNavigationRestoration(
+          getBrowserStorageScope(operation.dataMode, operation.userId ?? undefined),
+          "usuario",
+        );
         clearRoutineDraft(operation.dataMode, operation.userId ?? undefined);
         clearWorkoutDraft(operation.dataMode, operation.userId ?? undefined);
         discardActiveWorkoutState();

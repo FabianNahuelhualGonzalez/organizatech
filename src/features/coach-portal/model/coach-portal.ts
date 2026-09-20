@@ -55,8 +55,10 @@ export interface CoachPortalProfileViewModel {
   readonly professionalTitle: string;
 }
 
-export function createInitialCoachPortalState(): CoachPortalState {
-  return { screen: "home", isMenuOpen: false };
+export function createInitialCoachPortalState(
+  screen: CoachPortalScreen = "home",
+): CoachPortalState {
+  return { screen, isMenuOpen: false };
 }
 
 export function reduceCoachPortalState(

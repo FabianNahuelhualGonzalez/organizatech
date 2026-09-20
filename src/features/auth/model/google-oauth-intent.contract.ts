@@ -52,3 +52,17 @@ test("callback es same-origin exacto y parser exige flow, code e intent", () => 
   assert.equal(parseGoogleOAuthCallback({ pathname: "/", search: "" }), null);
   assert.throws(() => buildGoogleOAuthCallbackUrl("javascript:alert(1)", id));
 });
+
+test("destino post-auth tipado sobrevive al intent sin incluir PII", () => {
+  const storage = memoryStorage();
+  const intent = createGoogleOAuthIntent({
+    mode: "login",
+    portal: "usuario",
+    postAuthDestination: "user-coach-profile",
+    now: 100,
+    randomBytes: () => new Uint8Array(16).fill(11),
+  });
+  persistGoogleOAuthIntent(storage, intent);
+  assert.equal(consumeGoogleOAuthIntent(storage, intent.id, 101)?.postAuthDestination, "user-coach-profile");
+  assert.doesNotMatch(JSON.stringify(intent), /@|email|token|coachCode/i);
+});

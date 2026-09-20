@@ -28,9 +28,19 @@ import {
   type CoachPortalSession,
 } from "@/features/coach-portal/model/coach-portal";
 import { CalendarRemindersProductiveBoundary } from "@/features/calendar-reminders";
-import { CoachEvaluations } from "@/features/evaluations/components/coach-evaluations";
+import {
+  CoachEvaluations,
+  type CoachEvaluationRestorableView,
+} from "@/features/evaluations/components/coach-evaluations";
 import type { EvaluationOpenRequest } from "@/features/evaluations/model/evaluation-navigation";
 import { AppBackButton } from "@/ui/navigation/app-back-button";
+import {
+  clearNavigationRestoration,
+  loadNavigationRestoration,
+  saveNavigationRestoration,
+  type CoachNavigationDestination,
+} from "@/lib/navigation/navigation-restoration";
+import { getBrowserStorageScope } from "@/lib/storage/browser-storage";
 import {
   OVERLAY_INITIAL_FOCUS_ATTRIBUTE,
   useOverlayFocusManagement,
@@ -104,6 +114,7 @@ export function CoachPortalBoundary({
   onEvaluationOpenRequestConsumed,
   onLogout,
 }: CoachPortalBoundaryProps) {
+  const navigationScope = getBrowserStorageScope("supabase", session.userId);
   const [state, dispatch] = useReducer(
     reduceCoachPortalState,
     undefined,
@@ -111,7 +122,26 @@ export function CoachPortalBoundary({
   );
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [evaluationRestorableView, setEvaluationRestorableView] =
+    useState<CoachEvaluationRestorableView>("library");
+  const [navigationRestorationReady, setNavigationRestorationReady] = useState(false);
   const profile = useMemo(() => createCoachPortalProfileViewModel(session), [session]);
+
+  useEffect(() => {
+    const restored = navigationScope
+      ? loadNavigationRestoration(navigationScope, "coach")
+      : null;
+    const destination = restored?.portal === "coach" ? restored.destination : "home";
+    setIsCalendarOpen(destination === "calendar");
+    setEvaluationRestorableView(destination === "evaluations-send" ? "send" : "library");
+    if (destination === "profile") dispatch({ type: "profile_opened" });
+    else if (destination === "evaluations" || destination === "evaluations-send") {
+      dispatch({ type: "evaluations_opened" });
+    } else {
+      dispatch({ type: "home_opened" });
+    }
+    setNavigationRestorationReady(true);
+  }, [navigationScope]);
 
   useEffect(() => {
     if (calendarOpenRequest?.ownerUserId === session.userId) {
@@ -133,7 +163,36 @@ export function CoachPortalBoundary({
     dispatch({ type: "evaluations_opened" });
   }, [evaluationOpenRequest, session.userId]);
 
+  useEffect(() => {
+    if (!navigationScope || !navigationRestorationReady) return;
+    const destination: CoachNavigationDestination = isCalendarOpen
+      ? "calendar"
+      : state.screen === "profile"
+        ? "profile"
+        : state.screen === "evaluations"
+          ? evaluationRestorableView === "send" ? "evaluations-send" : "evaluations"
+          : "home";
+
+    const persistDestination = () => {
+      saveNavigationRestoration(navigationScope, { portal: "coach", destination });
+    };
+    persistDestination();
+    window.addEventListener("pagehide", persistDestination);
+    document.addEventListener("visibilitychange", persistDestination);
+    return () => {
+      window.removeEventListener("pagehide", persistDestination);
+      document.removeEventListener("visibilitychange", persistDestination);
+    };
+  }, [
+    evaluationRestorableView,
+    isCalendarOpen,
+    navigationRestorationReady,
+    navigationScope,
+    state.screen,
+  ]);
+
   function handleLogout() {
+    clearNavigationRestoration(navigationScope, "coach");
     dispatch({ type: "reset" });
     void onLogout();
   }
@@ -200,6 +259,7 @@ export function CoachPortalBoundary({
         }}
         onOpenEvaluations={() => {
           setIsCalendarOpen(false);
+          setEvaluationRestorableView("library");
           dispatch({ type: "evaluations_opened" });
         }}
         onLogout={handleLogout}
@@ -222,10 +282,16 @@ export function CoachPortalBoundary({
         />
       ) : state.screen === "evaluations" ? (
         <CoachEvaluations
+          key={session.userId}
           expectedUserId={session.userId}
+          initialView={evaluationRestorableView}
+          onRestorableViewChange={setEvaluationRestorableView}
           notificationOpenRequest={evaluationOpenRequest}
           onNotificationOpenRequestConsumed={onEvaluationOpenRequestConsumed}
-          onBack={() => dispatch({ type: "home_opened" })}
+          onBack={() => {
+            setEvaluationRestorableView("library");
+            dispatch({ type: "home_opened" });
+          }}
         />
       ) : (
         <CoachPortalProfile

@@ -17,6 +17,7 @@ import {
   type OAuthIntentStorage,
 } from "../model/google-oauth-intent";
 import type { AuthAccountType, AuthMode } from "../model/auth-route";
+import type { PostAuthNavigationDestination } from "../model/post-auth-navigation-intent";
 
 const PKCE_STORAGE_PREFIX = "organizatech:google-oauth:pkce:";
 
@@ -106,6 +107,7 @@ export function createTransientGoogleOAuthClient(
 export async function startGoogleOAuth(input: {
   readonly mode: AuthMode;
   readonly portal: AuthAccountType;
+  readonly postAuthDestination?: PostAuthNavigationDestination | null;
 }) {
   const origin = window.location.origin;
   const storage = getBrowserSessionStorage();

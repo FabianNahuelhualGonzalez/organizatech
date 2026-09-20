@@ -22,6 +22,7 @@
     "test:training-resource-bounds": "tsx --test src/lib/training/training-resource-bounds.test.ts src/lib/training/training-rpc-resource-bounds-migration.test.ts",
     "test:user-registration": "tsx --test src/features/auth/user-registration-migration-contract.test.ts",
     "test:ui-nav-01": "tsx --test src/features/auth/model/user-portal-authorization-proof.test.ts src/features/user-portal-shell/model/user-portal-logout-single-flight.test.ts",
+    "test:navigation-restoration": "tsx --test src/lib/navigation/navigation-restoration.test.ts src/features/auth/model/post-auth-navigation-intent.test.ts",
     "test:coach-preferences-controller": "tsx --test src/features/coach-dashboard/hooks/coach-preferences-controller.test.ts",
     "test:coach-linking": "tsx --test src/features/coach-linking/model/coach-linking.test.ts src/features/coach-linking/coach-linking-integration-contract.test.ts src/features/coach-linking/coach-self-student-migration-contract.test.ts src/features/coach-portal/data/coach-user-profile-activation-repository.test.ts supabase/functions/_shared/coach-linking/templates.test.ts supabase/functions/send-coach-link-emails/handler.test.ts",
     "test:coach-self-student-postgres": "node supabase/tests/support/run_coach_self_student_evaluations_postgres.mjs",

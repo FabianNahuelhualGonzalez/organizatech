@@ -34,7 +34,11 @@ export function AuthEntryClient({
       searchParams.get("coachLinkEpisode"),
     )
   ));
-  const googleOAuth = useGoogleOAuthCallbackGate();
+  const googleOAuth = useGoogleOAuthCallbackGate({
+    postAuthDestination: initialCoachLinkNotificationDestination?.kind === "student-coaching"
+      ? "user-coach-profile"
+      : null,
+  });
   if (googleOAuth.state === "checking") return <AuthLoadingScreen />;
   const initialAuthRoute = resolveAuthRouteState({
     mode: googleOAuth.intent

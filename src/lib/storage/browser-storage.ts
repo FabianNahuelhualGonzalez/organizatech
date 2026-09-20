@@ -21,6 +21,7 @@ export const BROWSER_STORAGE_PREFIXES = {
   trainingPlan: "organizatech:training-plan",
   cycleHistory: "organizatech:cycle-history",
   activeFlow: "organizatech:active-flow",
+  navigationRestoration: "organizatech:navigation-restoration-v1",
   routineDraft: "organizatech:routine-draft",
   workoutDraft: "organizatech:workout-draft",
   seenNotifications: "organizatech:seen-notifications-v2",
@@ -170,6 +171,13 @@ export function removeScopedBrowserStorage(storage: BrowserStorageLike, scope: B
 
   [...sharedPrefixes, ...(scope === "demo" ? demoPrefixes : [])]
     .forEach((prefix) => removeBrowserStorageItem(storage, getScopedBrowserStorageKey(prefix, scope)));
+
+  for (const portal of ["usuario", "coach"] as const) {
+    removeBrowserStorageItem(
+      storage,
+      `${getScopedBrowserStorageKey(BROWSER_STORAGE_PREFIXES.navigationRestoration, scope)}:${portal}`,
+    );
+  }
 }
 
 export function clearBrowserStorageScope(
