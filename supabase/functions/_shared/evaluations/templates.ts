@@ -66,9 +66,11 @@ export function renderEvaluationEmail(input: EvaluationEmailInput): EvaluationEm
     body = `${student} completó «${template}». Revisa sus respuestas desde la app.`;
   } else {
     const coach = safe(input.coachName, 201);
-    const due = safe(input.dueLabel, 10);
-    subject = `Recordatorio: «${template}» vence pronto`;
-    body = `Tienes hasta el ${due} para responder «${template}» de ${coach}.`;
+    const due = input.dueLabel ? safe(input.dueLabel, 10) : null;
+    subject = `Recordatorio: «${template}» está pendiente`;
+    body = due
+      ? `Tienes hasta el ${due} para responder «${template}» de ${coach}.`
+      : `Aún tienes pendiente responder «${template}» de ${coach}.`;
   }
   const safeSubject = escapeHtml(subject);
   const safeBody = escapeHtml(body);

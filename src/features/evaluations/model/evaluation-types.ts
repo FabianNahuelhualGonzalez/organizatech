@@ -59,6 +59,8 @@ export interface CoachEvaluationAssignment {
   readonly answers: EvaluationAnswers;
   readonly canMutate: boolean;
   readonly canRemind: boolean;
+  readonly reminderCount: number;
+  readonly lastReminderAt: string | null;
 }
 
 export interface StudentEvaluationAssignment {
@@ -71,6 +73,14 @@ export interface StudentEvaluationAssignment {
   readonly completedAt: string | null;
   readonly consentConfirmed: boolean;
   readonly answers: EvaluationAnswers;
+}
+
+export interface CoachEvaluationGroupSummary {
+  readonly sent: number;
+  readonly pending: number;
+  readonly responded: number;
+  readonly reminders: number;
+  readonly remindable: number;
 }
 
 export const EVALUATION_CONSENT_COPY =
@@ -171,6 +181,24 @@ export function formatEvaluationDateInput(value: string | null): string {
   }).formatToParts(new Date(value));
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+export function coachEvaluationStatusCopy(status: EvaluationAssignmentStatus): string {
+  if (status === "completed") return "Formulario respondido — OK.";
+  if (status === "expired") return "Formulario vencido.";
+  return "Formulario pendiente de responder.";
+}
+
+export function summarizeCoachEvaluationAssignments(
+  assignments: readonly Pick<CoachEvaluationAssignment, "status" | "reminderCount" | "canRemind">[],
+): CoachEvaluationGroupSummary {
+  return assignments.reduce<CoachEvaluationGroupSummary>((summary, assignment) => ({
+    sent: summary.sent + 1,
+    pending: summary.pending + (assignment.status === "pending" || assignment.status === "draft" ? 1 : 0),
+    responded: summary.responded + (assignment.status === "completed" ? 1 : 0),
+    reminders: summary.reminders + assignment.reminderCount,
+    remindable: summary.remindable + (assignment.canRemind ? 1 : 0),
+  }), { sent: 0, pending: 0, responded: 0, reminders: 0, remindable: 0 });
 }
 
 export function initialsForEvaluation(name: string): string {

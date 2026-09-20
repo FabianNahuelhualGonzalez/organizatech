@@ -5,12 +5,15 @@ import test from "node:test";
 
 const migrationFilename = "20260919225532_coach_student_evaluations.sql";
 const migration = readFileSync(`supabase/migrations/${migrationFilename}`, "utf8");
+const reminderMigrationFilename = "20260920172644_evaluations_reminders_status_bulk.sql";
+const reminderMigration = readFileSync(`supabase/migrations/${reminderMigrationFilename}`, "utf8");
 const repository = readFileSync("src/features/evaluations/data/evaluations-repository.ts", "utf8");
 const handler = readFileSync("supabase/functions/send-evaluation-emails/handler.ts", "utf8");
 const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
 
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260919225532_coach_student_evaluations.sql": "5e6e46bdc585fbb79d6c6b06e1b5d79193fc9861fae1e75a5be7316898b43e83",
+  "20260920172644_evaluations_reminders_status_bulk.sql": "4d54ebbe7145dc25e77f790ddc4975299da21b8cfb00f8f03285647dcf77d40e",
 } as const;
 
 test("las tablas canónicas son privadas, RLS forzada y sin writes directos del cliente", () => {
@@ -63,7 +66,7 @@ test("cada write con correo espera y valida functions.invoke sin prometer un sch
     repository,
     /const invocation = await operation\.client\.functions\.invoke\("send-evaluation-emails", \{ body: \{\} \}\);[\s\S]*assertEvaluationEmailInvocationSucceeded\(invocation\);/,
   );
-  assert.equal((repository.match(/await requestEmailDelivery\(expectedUserId\);/g) ?? []).length, 3);
+  assert.equal((repository.match(/await requestEmailDelivery\(expectedUserId\);/g) ?? []).length, 4);
   assert.match(handler, /accepted: true, \.\.\.aggregate, truncated/);
   for (const counter of ["sent", "failed", "ambiguous", "completionFailed"]) {
     assert.match(handler, new RegExp(`${counter}: 0`));
@@ -74,4 +77,52 @@ test("cada write con correo espera y valida functions.invoke sin prometer un sch
 
 test("la migración canónica conserva el hash contractual post PERF-06", () => {
   assert.equal(createHash("sha256").update(migration).digest("hex"), POST_PERF_06_MIGRATION_OWNERSHIP[migrationFilename]);
+  assert.equal(
+    createHash("sha256").update(reminderMigration).digest("hex"),
+    POST_PERF_06_MIGRATION_OWNERSHIP[reminderMigrationFilename],
+  );
+});
+
+test("el recordatorio individual depende sólo de ownership, vínculo, estado y vigencia en backend", () => {
+  const definition = reminderMigration.match(
+    /create or replace function public\.remind_own_evaluation_assignment[\s\S]*?\$remind_own_evaluation_assignment\$;/,
+  )?.[0] ?? "";
+  assert.match(definition, /assignment\.coach_user_id = v_owner/);
+  assert.match(definition, /episode\.ended_at is null/);
+  assert.match(definition, /coalesce\(response\.state, 'pending'\) in \('pending', 'draft'\)/);
+  assert.match(definition, /assignment\.due_at is null or assignment\.due_at > v_now/);
+  assert.doesNotMatch(definition, /48 hours|rate_limited|recent_reminder/);
+  assert.match(definition, /operation\.actor_user_id = v_owner[\s\S]*operation\.request_id = p_request_id/);
+});
+
+test("el recordatorio masivo selecciona asignaciones elegibles sólo en servidor", () => {
+  const definition = reminderMigration.match(
+    /create function public\.remind_own_evaluation_batch[\s\S]*?\$remind_own_evaluation_batch\$;/,
+  )?.[0] ?? "";
+  assert.match(definition, /assignment\.send_batch_id = p_send_batch_id/);
+  assert.match(definition, /assignment\.coach_user_id = v_owner/);
+  assert.match(definition, /episode\.ended_at is null/);
+  assert.match(definition, /coalesce\(response\.state, 'pending'\) in \('pending', 'draft'\)/);
+  assert.match(definition, /assignment\.due_at is null or assignment\.due_at > v_now/);
+  assert.match(definition, /for update of assignment/);
+  assert.match(definition, /'bulk_reminder'/);
+  assert.doesNotMatch(definition, /p_assignment_ids|student_email|answers/);
+});
+
+test("el listado conserva la exposición vigente y agrega sólo metadata de recordatorios", () => {
+  const definition = reminderMigration.match(
+    /create or replace function public\.list_own_coach_evaluation_assignments[\s\S]*?\$list_own_coach_evaluation_assignments\$;/,
+  )?.[0] ?? "";
+  assert.match(definition, /'reminderCount', coalesce\(reminders\.reminder_count, 0\)/);
+  assert.match(definition, /'lastReminderAt', reminders\.last_reminder_at/);
+  assert.match(definition, /when response\.state = 'completed' then response\.answers[\s\S]*else '\{\}'::jsonb/);
+  assert.match(definition, /where assignment\.coach_user_id = v_owner/);
+  assert.doesNotMatch(definition, /student_email|coach_email|recipient_email/);
+});
+
+test("la migración nueva endurece ACL y no toca recursos excluidos ni scheduler", () => {
+  assert.match(reminderMigration, /revoke all on function public\.list_own_coach_evaluation_assignments\(\)[\s\S]*from public, anon, authenticated/);
+  assert.match(reminderMigration, /grant execute on function public\.list_own_coach_evaluation_assignments\(\)[\s\S]*to authenticated/);
+  assert.doesNotMatch(reminderMigration, /grant execute[\s\S]*to anon/);
+  assert.doesNotMatch(reminderMigration, /training_sessions|exercise_entries|cron\.|pg_cron|service_role|vault\./i);
 });

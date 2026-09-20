@@ -23,7 +23,8 @@ const archive = join(runtime, "postgres.jar");
 const archiveHash = "e9d3398e10c2ec926395498b03e75ad1a24eeaed82895e756a7e173b202cf6de";
 const archiveUrl = "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-darwin-arm64v8/17.5.0/embedded-postgres-binaries-darwin-arm64v8-17.5.0.jar";
 const clients = [];
-const ids = [1, 2, 3, 4].map((n) => `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
+const ids = [1, 2, 3, 4, 5, 6, 7, 8]
+  .map((n) => `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
 const emails = ids.map((_, index) => `identity-${index + 1}@example.test`);
 let started = false;
 let stage = "bootstrap";
@@ -108,6 +109,7 @@ try {
   const admin = await connect();
   await admin.query(readSql("supabase/tests/support/coach_preferences_local_bootstrap.sql"));
   await admin.query("alter table auth.users add column email text");
+  await admin.query("insert into auth.users(id) select unnest($1::uuid[])", [ids.slice(4)]);
   await admin.query("create schema extensions");
   await admin.query("create extension pgcrypto with schema extensions");
   await admin.query("create table public.profiles (id uuid primary key, display_name text, first_name text, last_name text, created_at timestamptz not null default now())");
@@ -126,7 +128,10 @@ try {
       [ids[index], "Coach", String(index + 1)],
     );
   }
-  await admin.query("insert into public.user_registrations(user_id) values($1),($2)", [ids[0], ids[3]]);
+  await admin.query(
+    "insert into public.user_registrations(user_id) select unnest($1::uuid[])",
+    [[ids[0], ...ids.slice(3)]],
+  );
   await admin.query(readSql("supabase/migrations/20260909044235_coach_invitation_persistence.sql"));
   await admin.query(`
     create function private.transactional_email_sha256(p_value text)
@@ -145,11 +150,13 @@ try {
   await admin.query(readSql("supabase/migrations/20260917000000_student_coach_link_acceptance.sql"));
   await admin.query(readSql("supabase/migrations/20260919225532_coach_student_evaluations.sql"));
   await admin.query(readSql("supabase/migrations/20260920060000_coach_self_student_and_evaluation_template_deletion.sql"));
+  await admin.query(readSql("supabase/migrations/20260920172644_evaluations_reminders_status_bulk.sql"));
 
   const selfExisting = await connect(ids[0]);
   const selfActivated = await connect(ids[1]);
   const otherCoach = await connect(ids[2]);
   const normalStudent = await connect(ids[3]);
+  const additionalStudents = await Promise.all(ids.slice(4).map((id) => connect(id)));
 
   stage = "self-link with existing Usuario";
   const firstSelfInvite = await createInvitation(selfExisting, emails[0]);
@@ -173,6 +180,10 @@ try {
   const normalInvite = await createInvitation(otherCoach, emails[3]);
   check((await accept(normalStudent, normalInvite.code))?.status === "linked", "two distinct identities still link");
   check(await value(admin, "select count(*)::int as value from private.coach_relationship_episodes where coach_user_id=$1 and student_user_id=$2 and ended_at is null", [ids[2], ids[3]]) === 1, "normal relationship persisted");
+  for (let index = 0; index < additionalStudents.length; index += 1) {
+    const invitation = await createInvitation(otherCoach, emails[index + 4]);
+    check((await accept(additionalStudents[index], invitation.code))?.status === "linked", `bulk student ${index + 2} linked`);
+  }
   const competingInvite = await createInvitation(otherCoach, emails[0]);
   check((await accept(selfExisting, competingInvite.code))?.status === "ya_tiene_coach", "second distinct Coach is rejected");
   check(await value(admin, "select count(*)::int as value from private.coach_relationship_episodes where student_user_id=$1 and ended_at is null", [ids[0]]) === 1, "one active Coach invariant retained");
@@ -222,9 +233,113 @@ try {
     "select public.delete_own_evaluation_template($1::uuid) as value",
     [foreign.template.id]), "42501", "foreign template deletion rejected");
 
+  stage = "manual and bulk evaluation reminders";
+  const { template: bulkTemplate, questionId: bulkQuestionId } = await saveTemplate(otherCoach, null, "Seguimiento grupal");
+  const bulkEpisodeIds = (await admin.query(
+    "select id,student_user_id from private.coach_relationship_episodes where coach_user_id=$1 and student_user_id=any($2::uuid[]) and ended_at is null order by student_user_id",
+    [ids[2], ids.slice(3)],
+  )).rows.map((row) => row.id);
+  check(bulkEpisodeIds.length === 5, "bulk fixture has five active relationships");
+  const sendBatchId = randomUUID();
+  const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const bulkSend = await value(otherCoach,
+    "select public.send_own_evaluation_template($1::uuid,$2::uuid[],$3::date,$4,$5::uuid) as value",
+    [bulkTemplate.id, bulkEpisodeIds, dueDate, false, sendBatchId]);
+  check(bulkSend.created === 5, "bulk reminder fixture sent to five students");
+  const assignmentRows = (await admin.query(
+    "select id,student_user_id,relationship_episode_id from private.evaluation_assignments where send_batch_id=$1 order by student_user_id",
+    [sendBatchId],
+  )).rows;
+  const assignmentFor = (studentId) => assignmentRows.find((row) => row.student_user_id === studentId);
+  const pendingAssignment = assignmentFor(ids[3]);
+  const draftAssignment = assignmentFor(ids[4]);
+  const completedAssignment = assignmentFor(ids[5]);
+  const expiredAssignment = assignmentFor(ids[6]);
+  const unlinkedAssignment = assignmentFor(ids[7]);
+  check([pendingAssignment, draftAssignment, completedAssignment, expiredAssignment, unlinkedAssignment].every(Boolean), "bulk assignments mapped by student");
+
+  await value(additionalStudents[0],
+    "select public.save_own_evaluation_draft($1::uuid,$2::jsonb,$3,$4::uuid) as value",
+    [draftAssignment.id, { [bulkQuestionId]: "Borrador" }, false, randomUUID()]);
+  await value(additionalStudents[1],
+    "select public.submit_own_evaluation($1::uuid,$2::jsonb,$3,$4::uuid) as value",
+    [completedAssignment.id, { [bulkQuestionId]: "Respondida" }, false, randomUUID()]);
+  await admin.query(
+    "update private.evaluation_assignments set due_at=clock_timestamp()-interval '1 microsecond' where id=$1",
+    [expiredAssignment.id],
+  );
+  await admin.query(
+    "update private.coach_relationship_episodes set ended_at=clock_timestamp() where id=$1",
+    [unlinkedAssignment.relationship_episode_id],
+  );
+
+  const bulkReminderRequestId = randomUUID();
+  const bulkReminder = await value(otherCoach,
+    "select public.remind_own_evaluation_batch($1::uuid,$2::uuid) as value",
+    [sendBatchId, bulkReminderRequestId]);
+  check(bulkReminder.created === 2, "bulk reminder selects only pending and draft active assignments");
+  check(await value(admin,
+    "select count(*)::int as value from private.evaluation_notifications where send_batch_id is null and event_kind='evaluation_due_reminder' and assignment_id=any($1::uuid[])",
+    [[pendingAssignment.id, draftAssignment.id]]) === 2, "bulk reminder created exactly two notifications");
+  check(await value(admin,
+    "select count(*)::int as value from private.evaluation_notifications where event_kind='evaluation_due_reminder' and assignment_id=any($1::uuid[])",
+    [[completedAssignment.id, expiredAssignment.id, unlinkedAssignment.id]]) === 0, "completed, expired and unlinked assignments are excluded");
+  const bulkRetry = await value(otherCoach,
+    "select public.remind_own_evaluation_batch($1::uuid,$2::uuid) as value",
+    [sendBatchId, bulkReminderRequestId]);
+  check(bulkRetry.created === 2, "bulk retry returns the durable result");
+  check(await value(admin,
+    "select count(*)::int as value from private.evaluation_notifications where event_kind='evaluation_due_reminder' and assignment_id=any($1::uuid[])",
+    [[pendingAssignment.id, draftAssignment.id]]) === 2, "bulk retry does not duplicate notifications");
+
+  await admin.query("update private.evaluation_assignments set due_at=null where id=$1", [pendingAssignment.id]);
+  const firstIndividualRequestId = randomUUID();
+  await value(otherCoach,
+    "select public.remind_own_evaluation_assignment($1::uuid,$2::uuid) as value",
+    [pendingAssignment.id, firstIndividualRequestId]);
+  await value(otherCoach,
+    "select public.remind_own_evaluation_assignment($1::uuid,$2::uuid) as value",
+    [pendingAssignment.id, firstIndividualRequestId]);
+  check(await value(admin,
+    "select count(*)::int as value from private.evaluation_notifications where event_kind='evaluation_due_reminder' and assignment_id=$1",
+    [pendingAssignment.id]) === 2, "individual retry reuses requestId without duplication");
+  await value(otherCoach,
+    "select public.remind_own_evaluation_assignment($1::uuid,$2::uuid) as value",
+    [pendingAssignment.id, randomUUID()]);
+  check(await value(admin,
+    "select count(*)::int as value from private.evaluation_notifications where event_kind='evaluation_due_reminder' and assignment_id=$1",
+    [pendingAssignment.id]) === 3, "new requestId creates a repeated reminder without cooldown");
+
+  for (const [assignment, label] of [
+    [completedAssignment, "completed reminder rejected"],
+    [expiredAssignment, "expired reminder rejected"],
+    [unlinkedAssignment, "unlinked reminder rejected"],
+  ]) {
+    await expectCode(value(otherCoach,
+      "select public.remind_own_evaluation_assignment($1::uuid,$2::uuid) as value",
+      [assignment.id, randomUUID()]), "42501", label);
+  }
+  await expectCode(value(selfExisting,
+    "select public.remind_own_evaluation_batch($1::uuid,$2::uuid) as value",
+    [sendBatchId, randomUUID()]), "42501", "cross-coach bulk reminder rejected");
+
+  const coachHistory = await value(otherCoach, "select public.list_own_coach_evaluation_assignments() as value");
+  const bulkHistory = coachHistory.filter((assignment) => assignment.sendBatchId === sendBatchId);
+  check(bulkHistory.length === 5, "owner sees all assignments in reminder group");
+  check(bulkHistory.find((assignment) => assignment.id === pendingAssignment.id)?.reminderCount === 3, "individual reminder metadata counted");
+  check(bulkHistory.find((assignment) => assignment.id === draftAssignment.id)?.reminderCount === 1, "bulk reminder metadata counted");
+  check(typeof bulkHistory.find((assignment) => assignment.id === pendingAssignment.id)?.lastReminderAt === "string", "last reminder date returned");
+  check(bulkHistory.find((assignment) => assignment.id === completedAssignment.id)?.status === "completed", "completed form status remains independent");
+  check(bulkHistory.find((assignment) => assignment.id === expiredAssignment.id)?.status === "expired", "expired form status remains independent");
+  check(!/email/i.test(JSON.stringify(bulkHistory)), "coach history exposes no email fields");
+  check((await value(selfExisting, "select public.list_own_coach_evaluation_assignments() as value"))
+    .every((assignment) => assignment.sendBatchId !== sendBatchId), "another coach cannot list the group or its responses");
+
   stage = "ACL and scope";
   check(await value(admin, "select has_function_privilege('authenticated','public.delete_own_evaluation_template(uuid)','EXECUTE') as value") === true, "authenticated can call narrow delete RPC");
   check(await value(admin, "select has_function_privilege('anon','public.delete_own_evaluation_template(uuid)','EXECUTE') as value") === false, "anon cannot delete templates");
+  check(await value(admin, "select has_function_privilege('authenticated','public.remind_own_evaluation_batch(uuid,uuid)','EXECUTE') as value") === true, "authenticated can call narrow bulk reminder RPC");
+  check(await value(admin, "select has_function_privilege('anon','public.remind_own_evaluation_batch(uuid,uuid)','EXECUTE') as value") === false, "anon cannot call bulk reminder RPC");
   const migration = readSql("supabase/migrations/20260920060000_coach_self_student_and_evaluation_template_deletion.sql");
   check(!/training_sessions|exercise_entries|service_role|storage\./i.test(migration), "migration stays outside excluded resources");
 

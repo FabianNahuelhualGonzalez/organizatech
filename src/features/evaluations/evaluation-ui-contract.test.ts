@@ -18,6 +18,19 @@ test("Coach cubre biblioteca, constructor, envío, snapshot y revisión aprobado
   assert.match(coach, /listOwnEvaluationStudents/);
   assert.match(coach, /La evaluación fue creada, pero el correo está pendiente de reintento/);
   assert.match(coach, /El recordatorio fue creado, pero el correo está pendiente de reintento/);
+  for (const copy of [
+    "Formulario pendiente de responder.",
+    "Formulario respondido — OK.",
+    "Formulario vencido.",
+    "Recordatorios enviados:",
+    "Formularios enviados:",
+    "Pendientes:",
+    "Respondidos:",
+    "Recordar pendientes",
+  ]) {
+    assert.ok(`${coach}\n${model}`.includes(copy), `Falta el texto aprobado: ${copy}`);
+  }
+  assert.match(coach, /Se crearon los recordatorios, pero uno o más correos están pendientes de reintento/);
 });
 
 test("envío móvil mantiene controles equivalentes sin overflow horizontal", () => {
@@ -30,6 +43,8 @@ test("envío móvil mantiene controles equivalentes sin overflow horizontal", ()
   assert.match(css, /\.dateField \{[\s\S]*inline-size: 100%;[\s\S]*min-inline-size: 0;[\s\S]*max-inline-size: 100%;[\s\S]*overflow: hidden/);
   assert.match(css, /@media \(max-width: 430px\)[\s\S]*min-inline-size: 0;[\s\S]*max-inline-size: 100%/);
   assert.match(css, /\.pillButton \{[\s\S]*white-space: nowrap/);
+  assert.match(css, /\.inlineActions \{[\s\S]*flex-wrap: wrap/);
+  assert.match(css, /\.assignmentCard \.inlineActions > button \{ width: 100%; \}/);
 });
 
 test("resultado de alumno separa nombre completo y correo en dos líneas", () => {

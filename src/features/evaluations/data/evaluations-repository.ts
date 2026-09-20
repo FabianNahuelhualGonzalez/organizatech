@@ -21,6 +21,7 @@ type EvaluationRpcName =
   | "list_own_coach_evaluation_assignments"
   | "extend_own_evaluation_assignment"
   | "remind_own_evaluation_assignment"
+  | "remind_own_evaluation_batch"
   | "list_own_student_evaluations"
   | "get_own_student_evaluation"
   | "save_own_evaluation_draft"
@@ -45,7 +46,7 @@ interface EvaluationClient {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class EvaluationRepositoryError extends Error {
-  constructor(readonly code: "unavailable" | "forbidden" | "invalid" | "expired" | "conflict" | "rate_limited" | "email_pending") {
+  constructor(readonly code: "unavailable" | "forbidden" | "invalid" | "expired" | "conflict" | "email_pending") {
     super(code);
     this.name = "EvaluationRepositoryError";
   }
@@ -80,6 +81,13 @@ function nullableIso(value: unknown): string | null {
 function bool(value: unknown): boolean {
   if (typeof value !== "boolean") throw new EvaluationRepositoryError("unavailable");
   return value;
+}
+
+function nonNegativeInteger(value: unknown, maximum: number): number {
+  if (!Number.isInteger(value) || Number(value) < 0 || Number(value) > maximum) {
+    throw new EvaluationRepositoryError("unavailable");
+  }
+  return Number(value);
 }
 
 function questions(value: unknown): readonly EvaluationQuestion[] {
@@ -187,6 +195,8 @@ function coachAssignments(value: unknown): readonly CoachEvaluationAssignment[] 
       sentAt: iso(row.sentAt), dueAt: nullableIso(row.dueAt), completedAt: nullableIso(row.completedAt),
       consentConfirmed: bool(row.consentConfirmed), answers: answers(row.answers),
       canMutate: bool(row.canMutate), canRemind: bool(row.canRemind),
+      reminderCount: nonNegativeInteger(row.reminderCount, Number.MAX_SAFE_INTEGER),
+      lastReminderAt: nullableIso(row.lastReminderAt),
     };
   });
 }
@@ -234,7 +244,6 @@ function mappedError(error: { readonly code?: string; readonly message?: string 
   if (error?.code === "22023") return new EvaluationRepositoryError("invalid");
   if (error?.code === "P0001" && message.includes("expired")) return new EvaluationRepositoryError("expired");
   if (error?.code === "55000" || error?.code === "23505") return new EvaluationRepositoryError("conflict");
-  if (error?.code === "P0001" && message.includes("rate_limited")) return new EvaluationRepositoryError("rate_limited");
   return new EvaluationRepositoryError("unavailable");
 }
 
@@ -350,6 +359,15 @@ export async function remindOwnEvaluationAssignment(expectedUserId: string, assi
     p_assignment_id: assignmentId, p_request_id: requestId,
   });
   await requestEmailDelivery(expectedUserId);
+}
+
+export async function remindOwnEvaluationBatch(expectedUserId: string, sendBatchId: string, requestId: string) {
+  const result = record(await rpc(expectedUserId, "remind_own_evaluation_batch", {
+    p_send_batch_id: sendBatchId, p_request_id: requestId,
+  }));
+  const created = nonNegativeInteger(result.created, 500);
+  if (created > 0) await requestEmailDelivery(expectedUserId);
+  return { created };
 }
 
 export async function listOwnStudentEvaluations(expectedUserId: string) {

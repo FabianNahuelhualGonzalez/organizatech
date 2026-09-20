@@ -28,6 +28,13 @@ test("renderiza los cuatro correos aprobados sin contenido de respuestas", () =>
     eventKind: "evaluation_due_reminder", templateName: "Salud inicial", coachName: "Ada Lovelace",
     dueLabel: "22/09/2026", actionUrl: "https://app.example.com/login?tipo=usuario",
   });
-  assert.equal(reminder.subject, "Recordatorio: «Salud inicial» vence pronto");
+  assert.equal(reminder.subject, "Recordatorio: «Salud inicial» está pendiente");
+  assert.match(reminder.textContent, /Tienes hasta el 22\/09\/2026/);
+
+  const reminderWithoutDueDate = renderEvaluationEmail({
+    eventKind: "evaluation_due_reminder", templateName: "Salud inicial", coachName: "Ada Lovelace",
+    dueLabel: null, actionUrl: "https://app.example.com/login?tipo=usuario",
+  });
+  assert.match(reminderWithoutDueDate.textContent, /Aún tienes pendiente responder/);
   assert.doesNotMatch([received, sent, completed, reminder].map((item) => item.textContent).join("\n"), /respuesta clínica|lesión real/i);
 });

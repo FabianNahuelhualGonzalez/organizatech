@@ -67,8 +67,28 @@ test("el reintento conserva request_id hasta confirmar el correo", () => {
 
   assert.match(repository, /send_own_evaluation_template[\s\S]*p_request_id: input\.requestId/);
   assert.match(repository, /remind_own_evaluation_assignment[\s\S]*p_request_id: requestId/);
+  assert.match(repository, /remind_own_evaluation_batch[\s\S]*p_send_batch_id: sendBatchId, p_request_id: requestId/);
   assert.match(repository, /submit_own_evaluation[\s\S]*p_request_id: input\.requestId/);
   assert.match(coach, /sendOperationRef\.current\?\.fingerprint !== fingerprint[\s\S]*requestId: sendOperationRef\.current\.requestId/);
   assert.match(coach, /reminderOperationIdsRef\.current\.get\(assignment\.id\)[\s\S]*remindOwnEvaluationAssignment\(expectedUserId, assignment\.id, requestId\)/);
+  assert.match(coach, /bulkReminderOperationIdsRef\.current\.get\(sendBatchId\)[\s\S]*remindOwnEvaluationBatch\(expectedUserId, sendBatchId, requestId\)/);
   assert.match(student, /submitOperationRef\.current\?\.fingerprint !== fingerprint[\s\S]*requestId: submitOperationRef\.current\.requestId/);
+});
+
+test("la operación masiva no acepta IDs de asignaciones desde el cliente", () => {
+  const repository = readFileSync("src/features/evaluations/data/evaluations-repository.ts", "utf8");
+  const bulkOperation = repository.match(
+    /export async function remindOwnEvaluationBatch[\s\S]*?\n\}/,
+  )?.[0] ?? "";
+  assert.match(bulkOperation, /p_send_batch_id: sendBatchId/);
+  assert.match(bulkOperation, /p_request_id: requestId/);
+  assert.doesNotMatch(bulkOperation, /assignmentIds|studentIds|emails|answers/);
+  assert.match(bulkOperation, /if \(created > 0\) await requestEmailDelivery\(expectedUserId\)/);
+});
+
+test("un correo pendiente refresca metadata sin descartar el requestId de reintento", () => {
+  const coach = readFileSync("src/features/evaluations/components/coach-evaluations.tsx", "utf8");
+  assert.match(coach, /caught\.code === "email_pending"\) await load\(\)/);
+  assert.doesNotMatch(coach, /email_pending[\s\S]{0,240}reminderOperationIdsRef\.current\.delete/);
+  assert.doesNotMatch(coach, /email_pending[\s\S]{0,240}bulkReminderOperationIdsRef\.current\.delete/);
 });

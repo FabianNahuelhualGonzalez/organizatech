@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  coachEvaluationStatusCopy,
   formatEvaluationDate,
   formatEvaluationDateInput,
   questionsForSave,
+  summarizeCoachEvaluationAssignments,
   validateEvaluationForSubmit,
   type EvaluationSnapshot,
 } from "./evaluation-types";
@@ -42,4 +44,20 @@ test("enviar valida obligatorias y consentimiento, guardar borrador no usa esta 
 test("la fecha para editar conserva el día civil de Santiago", () => {
   assert.equal(formatEvaluationDate("2026-09-23T02:59:59.999Z"), "22/09/2026");
   assert.equal(formatEvaluationDateInput("2026-09-23T02:59:59.999Z"), "2026-09-22");
+});
+
+test("el estado del formulario no se reemplaza por la metadata de recordatorios", () => {
+  assert.equal(coachEvaluationStatusCopy("pending"), "Formulario pendiente de responder.");
+  assert.equal(coachEvaluationStatusCopy("draft"), "Formulario pendiente de responder.");
+  assert.equal(coachEvaluationStatusCopy("completed"), "Formulario respondido — OK.");
+  assert.equal(coachEvaluationStatusCopy("expired"), "Formulario vencido.");
+});
+
+test("el resumen del envío cuenta formularios y recordatorios por separado", () => {
+  assert.deepEqual(summarizeCoachEvaluationAssignments([
+    { status: "pending", reminderCount: 2, canRemind: true },
+    { status: "draft", reminderCount: 1, canRemind: true },
+    { status: "completed", reminderCount: 3, canRemind: false },
+    { status: "expired", reminderCount: 0, canRemind: false },
+  ]), { sent: 4, pending: 2, responded: 1, reminders: 6, remindable: 2 });
 });

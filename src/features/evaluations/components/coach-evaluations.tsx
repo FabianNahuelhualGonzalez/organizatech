@@ -10,18 +10,21 @@ import {
   listOwnCoachEvaluationAssignments,
   listOwnEvaluationStudents,
   listOwnEvaluationTemplates,
+  remindOwnEvaluationBatch,
   remindOwnEvaluationAssignment,
   saveOwnEvaluationTemplate,
   sendOwnEvaluationTemplate,
 } from "@/features/evaluations/data/evaluations-repository";
 import {
   EVALUATION_TABLE_PRESETS,
+  coachEvaluationStatusCopy,
   createEvaluationId,
   createEvaluationQuestion,
   formatEvaluationDate,
   formatEvaluationDateInput,
   initialsForEvaluation,
   questionsForSave,
+  summarizeCoachEvaluationAssignments,
   type CoachEvaluationAssignment,
   type EvaluationQuestion,
   type EvaluationStudent,
@@ -74,6 +77,7 @@ export function CoachEvaluations({
   const [extendDate, setExtendDate] = useState("");
   const sendOperationRef = useRef<{ readonly fingerprint: string; readonly requestId: string } | null>(null);
   const reminderOperationIdsRef = useRef(new Map<string, string>());
+  const bulkReminderOperationIdsRef = useRef(new Map<string, string>());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -260,15 +264,36 @@ export function CoachEvaluations({
     try {
       await remindOwnEvaluationAssignment(expectedUserId, assignment.id, requestId);
       reminderOperationIdsRef.current.delete(assignment.id);
+      await load();
       setToast(`Recordatorio enviado a ${assignment.studentName}`);
     } catch (caught) {
+      if (caught instanceof EvaluationRepositoryError && caught.code === "email_pending") await load();
       setToast(caught instanceof EvaluationRepositoryError
-        ? caught.code === "rate_limited"
-          ? "Ya enviaste un recordatorio durante las últimas 48 horas"
-          : caught.code === "email_pending"
+        ? caught.code === "email_pending"
             ? "El recordatorio fue creado, pero el correo está pendiente de reintento"
             : "No pudimos confirmar el envío del correo del recordatorio"
         : "No pudimos confirmar el envío del correo del recordatorio");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remindBatch(sendBatchId: string) {
+    const requestId = bulkReminderOperationIdsRef.current.get(sendBatchId) ?? createEvaluationId();
+    bulkReminderOperationIdsRef.current.set(sendBatchId, requestId);
+    setBusy(true);
+    try {
+      const result = await remindOwnEvaluationBatch(expectedUserId, sendBatchId, requestId);
+      bulkReminderOperationIdsRef.current.delete(sendBatchId);
+      await load();
+      setToast(result.created === 0
+        ? "No hay formularios pendientes elegibles en este envío"
+        : `${result.created} recordatorio${result.created === 1 ? "" : "s"} enviado${result.created === 1 ? "" : "s"}`);
+    } catch (caught) {
+      if (caught instanceof EvaluationRepositoryError && caught.code === "email_pending") await load();
+      setToast(caught instanceof EvaluationRepositoryError && caught.code === "email_pending"
+        ? "Se crearon los recordatorios, pero uno o más correos están pendientes de reintento"
+        : "No pudimos confirmar el envío de los recordatorios");
     } finally {
       setBusy(false);
     }
@@ -390,7 +415,7 @@ export function CoachEvaluations({
       {!loading && !error && view === "review" ? (
         <>
           <header className={styles.stack}><h2 id="coach-evaluations-title" className={styles.title}>Evaluaciones enviadas</h2><p className={styles.subtitle}>Revisa estados y respuestas, extiende plazos o envía un recordatorio.</p></header>
-          {assignments.length === 0 ? <div className={styles.empty}>Aún no has enviado ninguna plantilla</div> : <CoachAssignmentGroups assignments={assignments} busy={busy} onView={(id) => { setDetailId(id); setView("detail"); }} onExtend={(assignment) => { setExtendTarget(assignment); setExtendDate(formatEvaluationDateInput(assignment.dueAt)); }} onRemind={(assignment) => void remind(assignment)} />}
+          {assignments.length === 0 ? <div className={styles.empty}>Aún no has enviado ninguna plantilla</div> : <CoachAssignmentGroups assignments={assignments} busy={busy} onView={(id) => { setDetailId(id); setView("detail"); }} onExtend={(assignment) => { setExtendTarget(assignment); setExtendDate(formatEvaluationDateInput(assignment.dueAt)); }} onRemind={(assignment) => void remind(assignment)} onRemindBatch={(sendBatchId) => void remindBatch(sendBatchId)} />}
         </>
       ) : null}
 
@@ -403,16 +428,79 @@ export function CoachEvaluations({
   );
 }
 
-function CoachAssignmentGroups({ assignments, busy, onView, onExtend, onRemind }: {
+function CoachAssignmentGroups({ assignments, busy, onView, onExtend, onRemind, onRemindBatch }: {
   readonly assignments: readonly CoachEvaluationAssignment[];
   readonly busy: boolean;
   readonly onView: (id: string) => void;
   readonly onExtend: (assignment: CoachEvaluationAssignment) => void;
   readonly onRemind: (assignment: CoachEvaluationAssignment) => void;
+  readonly onRemindBatch: (sendBatchId: string) => void;
 }) {
   const groups = new Map<string, CoachEvaluationAssignment[]>();
   for (const assignment of assignments) groups.set(assignment.sendBatchId, [...(groups.get(assignment.sendBatchId) ?? []), assignment]);
-  return <div className={styles.stack}>{[...groups.values()].map((group) => <section className={`${styles.card} ${styles.stack}`} key={group[0]!.sendBatchId}><div><strong>{group[0]!.snapshot.name}</strong><p className={styles.meta}>Enviada: {formatEvaluationDate(group[0]!.sentAt)} · {group.length} alumno{group.length === 1 ? "" : "s"}</p></div>{group.map((assignment) => <article className={`${styles.assignmentCard} ${styles.stack}`} key={assignment.id}><div className={styles.studentHeading}><strong>{assignment.studentName}</strong><StatusBadge status={assignment.status} /></div><p className={styles.meta}>{assignment.status === "completed" ? `Respondida: ${formatEvaluationDate(assignment.completedAt)}` : assignment.dueAt ? `Vence: ${formatEvaluationDate(assignment.dueAt)}` : "Sin fecha límite"}</p><div className={styles.inlineActions}>{assignment.status === "completed" ? <button className={styles.button} type="button" onClick={() => onView(assignment.id)}>Ver respuesta</button> : null}{assignment.status !== "completed" && assignment.canMutate ? <button className={styles.buttonSecondary} type="button" disabled={busy} onClick={() => onExtend(assignment)}>Extender fecha</button> : null}{assignment.canRemind ? <button className={styles.buttonSecondary} type="button" disabled={busy} onClick={() => onRemind(assignment)}>Recordar</button> : null}</div></article>)}</section>)}</div>;
+  return (
+    <div className={styles.stack}>
+      {[...groups.values()].map((group) => {
+        const first = group[0]!;
+        const summary = summarizeCoachEvaluationAssignments(group);
+        return (
+          <section className={`${styles.card} ${styles.stack}`} key={first.sendBatchId}>
+            <div className={styles.stack}>
+              <strong className={styles.groupTitle}>{first.snapshot.name}</strong>
+              <p className={styles.meta}>Enviada: {formatEvaluationDate(first.sentAt)}</p>
+              <p className={styles.groupSummary}>
+                Formularios enviados: {summary.sent} · Pendientes: {summary.pending} · Respondidos: {summary.responded} · Recordatorios enviados: {summary.reminders}
+              </p>
+              <button
+                className={styles.buttonSecondary}
+                type="button"
+                disabled={busy || summary.remindable === 0}
+                onClick={() => onRemindBatch(first.sendBatchId)}
+              >
+                Recordar pendientes
+              </button>
+            </div>
+            {group.map((assignment) => (
+              <article className={`${styles.assignmentCard} ${styles.stack}`} key={assignment.id}>
+                <div className={styles.studentHeading}>
+                  <strong>{assignment.studentName}</strong>
+                  <StatusBadge status={assignment.status} />
+                </div>
+                <p className={styles.assignmentStatus}>{coachEvaluationStatusCopy(assignment.status)}</p>
+                <p className={styles.meta}>
+                  {assignment.status === "completed"
+                    ? `Respondida: ${formatEvaluationDate(assignment.completedAt)}`
+                    : assignment.dueAt
+                      ? `Vence: ${formatEvaluationDate(assignment.dueAt)}`
+                      : "Sin fecha límite"}
+                </p>
+                {assignment.reminderCount > 0 ? (
+                  <p className={styles.reminderMeta}>
+                    Recordatorios enviados: {assignment.reminderCount} · Último: {formatEvaluationDate(assignment.lastReminderAt)}
+                  </p>
+                ) : null}
+                <div className={styles.inlineActions}>
+                  {assignment.status === "completed" ? <button className={styles.button} type="button" onClick={() => onView(assignment.id)}>Ver respuesta</button> : null}
+                  {assignment.status !== "completed" && assignment.canMutate ? <button className={styles.buttonSecondary} type="button" disabled={busy} onClick={() => onExtend(assignment)}>Extender fecha</button> : null}
+                  {assignment.status !== "completed" && assignment.canMutate ? (
+                    <button
+                      className={styles.buttonSecondary}
+                      type="button"
+                      disabled={busy || !assignment.canRemind}
+                      title={assignment.status === "expired" ? "Extiende la fecha para poder enviar un recordatorio" : undefined}
+                      onClick={() => onRemind(assignment)}
+                    >
+                      Recordar
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </section>
+        );
+      })}
+    </div>
+  );
 }
 
 function CoachEvaluationDetail({ assignment, onCloseDetail }: { readonly assignment: CoachEvaluationAssignment; readonly onCloseDetail: () => void }) {
