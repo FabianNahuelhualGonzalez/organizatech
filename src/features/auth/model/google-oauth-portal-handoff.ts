@@ -41,6 +41,19 @@ export async function prepareGoogleOAuthPortalHandoff(
       }
       storage.setItem(GOOGLE_OAUTH_HANDOFF_KEY, JSON.stringify({ ...record, phase: "ready" }));
     },
+    reject() {
+      // Do not replace a newer OAuth attempt when this transfer became stale.
+      const transferringRecord = JSON.stringify(record);
+      const readyRecord = JSON.stringify({ ...record, phase: "ready" });
+      try {
+        const current = storage.getItem(GOOGLE_OAUTH_HANDOFF_KEY);
+        if (current === transferringRecord || current === readyRecord) {
+          blockGoogleOAuthPortal(storage);
+        }
+      } catch {
+        // Storage failures remain fail-closed through the callback error path.
+      }
+    },
   };
 }
 

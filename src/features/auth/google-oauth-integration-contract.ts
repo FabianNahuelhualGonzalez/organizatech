@@ -245,5 +245,6 @@ test("bootstrap y eventos respetan la barrera OAuth antes de continuar sesión",
   assert.match(multiportal, /owner: \{ \.\.\.owner, isCurrent: \(\) => isPortalResolutionCurrent\(owner\) \}/);
   const transfer = gateway.slice(gateway.indexOf("async transferToPrincipal"));
   assert.ok(transfer.indexOf("prepareGoogleOAuthPortalHandoff") < transfer.indexOf("principal.auth.setSession"));
-  assert.ok(transfer.indexOf("handoff.ready()") > transfer.indexOf("await activation"));
+  assert.ok(transfer.indexOf("handoff.ready()") < transfer.indexOf("principal.auth.setSession"));
+  assert.match(transfer, /handoff\.reject\(\);[\s\S]*throw error;/);
 });

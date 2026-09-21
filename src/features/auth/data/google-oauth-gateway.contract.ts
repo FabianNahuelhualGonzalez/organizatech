@@ -564,23 +564,26 @@ function renderPortalBoundary(storage: OAuthIntentStorage, location: URL) {
 }
 
 for (const portal of ["coach", "usuario"] as const) {
-  for (const order of ["session-before-navigation", "navigation-before-session"] as const) {
-    test(`dual role + Login ${portal}: primer intento, ${order}`, async () => {
+  for (const order of ["events-before-bootstrap", "bootstrap-before-events"] as const) {
+    test(`integración OAuth dual role + Login ${portal}: primer intento, ${order}`, async () => {
       const { operation, guard, storage } = await pendingOperation({ portal, mode: "login" });
       const mounted: ReturnType<typeof renderPortalBoundary>[] = [];
       const backendReads: string[] = [];
       const publications: string[] = [];
-      let location = new URL("https://example.test/login"); // Root captured the default Usuario route.
-      let root = renderPortalBoundary(storage, location);
-      mounted.push(root);
-      root.boundary.completeInitialResolution();
+      const decisions: string[] = [];
+      let location = new URL("https://example.test/login"); // Root captured the immutable default Usuario route.
+      const preNavigationRoot = renderPortalBoundary(storage, location);
+      mounted.push(preNavigationRoot);
+      preNavigationRoot.boundary.completeInitialResolution();
       const principal = fakeClient({
         userId: null,
         onSetSession: () => {
-          // Supabase can synchronously publish SIGNED_IN before setSession resolves.
-          assert.equal(root.boundary.resolveInitialSessionDecision(USER_A), "defer");
-          if (order === "session-before-navigation") {
-            assert.equal(root.boundary.resolveSessionEventDecision("SIGNED_IN", USER_A), "defer");
+          // Supabase may publish either establishing event synchronously from setSession.
+          if (order === "events-before-bootstrap") {
+            decisions.push(preNavigationRoot.boundary.resolveSessionEventDecision("SIGNED_IN", USER_A));
+            queueMicrotask(() => {
+              decisions.push(preNavigationRoot.boundary.resolveSessionEventDecision("INITIAL_SESSION", USER_A));
+            });
           }
         },
       });
@@ -590,17 +593,39 @@ for (const portal of ["coach", "usuario"] as const) {
           transfer: () => operation.transferToPrincipal(principal.client, guard),
           navigate() {
             location = new URL(`https://example.test/login?mode=login&tipo=${portal}`);
-            root = renderPortalBoundary(storage, location);
-            mounted.push(root);
           },
         });
-        // Both clean-page bootstrap and late events must select the same portal.
-        const initialDecision = root.boundary.resolveInitialSessionDecision(USER_A);
-        root.boundary.completeInitialResolution();
-        const eventDecision = root.boundary.resolveSessionEventDecision("SIGNED_IN", USER_A);
+        await Promise.resolve();
+        // The pre-navigation root keeps its immutable Usuario route, but the ready handoff
+        // already bound every principal event to the selected portal before navigation.
         const expected = portal === "coach" ? "authorize_coach" : "authorize_user";
-        assert.equal(initialDecision, expected);
-        assert.equal(eventDecision, expected);
+        assert.deepEqual(decisions, order === "events-before-bootstrap" ? [expected, expected] : []);
+        assert.equal(
+          preNavigationRoot.boundary.resolveSessionEventDecision("TOKEN_REFRESHED", USER_A),
+          expected,
+          "initialRoute Usuario no puede vencer una intención OAuth Coach válida",
+        );
+
+        const root = renderPortalBoundary(storage, location);
+        mounted.push(root);
+        if (order === "bootstrap-before-events") {
+          decisions.push(root.boundary.resolveInitialSessionDecision(USER_A));
+          root.boundary.completeInitialResolution();
+          decisions.push(root.boundary.resolveSessionEventDecision("SIGNED_IN", USER_A));
+          await new Promise<void>((resolve) => queueMicrotask(() => {
+            decisions.push(root.boundary.resolveSessionEventDecision("INITIAL_SESSION", USER_A));
+            resolve();
+          }));
+        } else {
+          decisions.push(root.boundary.resolveInitialSessionDecision(USER_A));
+          root.boundary.completeInitialResolution();
+        }
+        assert.deepEqual(decisions, order === "events-before-bootstrap"
+          ? [expected, expected, expected]
+          : [expected, expected, expected],
+        "SIGNED_IN, INITIAL_SESSION, bootstrap y microtasks resuelven el mismo portal",
+        );
+
         const handoff = createGoogleOAuthPortalHandoffGuard({ storage, location: () => location });
         assert.equal(await handoff.validate(USER_A, portal), true);
         const owner = root.boundary.beginPortalResolution(USER_A);
@@ -630,6 +655,60 @@ for (const portal of ["coach", "usuario"] as const) {
     });
   }
 }
+
+test("integración OAuth falla cerrada ante sesión previa, intención inválida o vencida y sesión cruzada", async () => {
+  const previousSession = await pendingOperation({ portal: "coach", mode: "login" });
+  const principalB = fakeClient({ userId: USER_B });
+  await assert.rejects(
+    previousSession.operation.transferToPrincipal(principalB.client, previousSession.guard),
+    GoogleOAuthStaleOperationError,
+  );
+  assert.equal(principalB.setSessionCalls.length, 0, "nunca reemplaza la sesión previa B");
+
+  const invalidStorage = memoryStorage();
+  await assert.rejects(
+    completeGoogleOAuth({
+      code: "oauth-code",
+      intentId: "0d".repeat(16),
+      storage: invalidStorage,
+      guard: mutableGuard(),
+      transientClient: fakeClient().client,
+    }),
+    /intent is invalid or expired/,
+  );
+
+  const expiredStorage = memoryStorage();
+  const expiredIntent = createGoogleOAuthIntent({
+    mode: "login",
+    portal: "coach",
+    now: Date.now() - (10 * 60 * 1000) - 1,
+    randomBytes: () => new Uint8Array(16).fill(13),
+  });
+  persistGoogleOAuthIntent(expiredStorage, expiredIntent);
+  await assert.rejects(
+    completeGoogleOAuth({
+      code: "oauth-code",
+      intentId: expiredIntent.id,
+      storage: expiredStorage,
+      guard: mutableGuard(),
+      transientClient: fakeClient().client,
+    }),
+    /intent is invalid or expired/,
+  );
+
+  const crossedSession = await pendingOperation({ portal: "coach", mode: "login" });
+  const crossedPrincipal = fakeClient({
+    userId: null,
+    activatedUserId: USER_B,
+    activatedSessionUserId: USER_A,
+  });
+  await assert.rejects(
+    crossedSession.operation.transferToPrincipal(crossedPrincipal.client, crossedSession.guard),
+    /session transfer failed/,
+  );
+  assert.equal(crossedPrincipal.setSessionCalls.length, 1);
+  assert.match(crossedSession.storage.getItem(GOOGLE_OAUTH_HANDOFF_KEY) ?? "", /"phase":"blocked"/);
+});
 
 test("handoff OAuth no concede Coach cuando backend no tiene membresía", async () => {
   const { operation, guard, storage } = await pendingOperation({ portal: "coach", mode: "login" });
