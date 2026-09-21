@@ -7,6 +7,8 @@ import { OrganizatechApp } from "@/components/organizatech-app";
 import { AuthLoadingScreen } from "@/features/auth/components/auth-screen";
 import { useGoogleOAuthCallbackGate } from "@/features/auth/hooks/use-google-oauth-callback-gate";
 import { resolveAuthRouteState } from "@/features/auth/model/auth-route";
+import { resolveGoogleOAuthPortalHandoffRoute } from "@/features/auth/model/google-oauth-portal-handoff";
+import { getBrowserSessionStorage } from "@/lib/storage/browser-storage";
 import {
   captureCoachLinkEntry,
   captureCoachLinkNotificationDestination,
@@ -40,7 +42,7 @@ export function AuthEntryClient({
       : null,
   });
   if (googleOAuth.state === "checking") return <AuthLoadingScreen />;
-  const initialAuthRoute = resolveAuthRouteState({
+  const routeFromLocation = resolveAuthRouteState({
     mode: googleOAuth.intent
       ? googleOAuth.intent.mode
       : searchParams.get("mode") ?? undefined,
@@ -48,6 +50,18 @@ export function AuthEntryClient({
       ? googleOAuth.intent.portal
       : searchParams.get("tipo") ?? undefined,
   });
+  // The clean document can receive INITIAL_SESSION before Next finishes
+  // hydrating search params. A ready handoff wins over that default route, but
+  // is only a request: useMultiportalAuthBoundary still authorizes it remotely.
+  const handoffPortal = typeof window === "undefined"
+    ? null
+    : resolveGoogleOAuthPortalHandoffRoute({
+      storage: getBrowserSessionStorage(),
+      location: () => window.location,
+    });
+  const initialAuthRoute = handoffPortal
+    ? { mode: "login" as const, accountType: handoffPortal }
+    : routeFromLocation;
 
   return (
     <OrganizatechApp

@@ -239,6 +239,8 @@ test("bootstrap y eventos respetan la barrera OAuth antes de continuar sesión",
   assert.ok(decision >= 0 && block > decision && fallback > block);
   assert.match(bootstrap.slice(block, fallback), /return;/);
   assert.match(root, /isGoogleOAuthBlocked: googleOAuth\.isPortalResolutionBlocked/);
+  assert.match(entry, /resolveGoogleOAuthPortalHandoffRoute/);
+  assert.match(entry, /const initialAuthRoute = handoffPortal[\s\S]*?accountType: handoffPortal/);
   assert.match(root, /if \(portalEventDecision === "reject_oauth"\) \{[\s\S]*?return;/);
   assert.equal((multiportal.match(/oauthHandoffRef\.current!\.decision\(\)/g) ?? []).length, 2);
   assert.match(multiportal, /await oauthHandoffRef\.current!\.validate\(expectedUserId, requestedPortal\)/);

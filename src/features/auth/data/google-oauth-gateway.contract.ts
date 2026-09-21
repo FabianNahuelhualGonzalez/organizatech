@@ -4,7 +4,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { useMultiportalAuthBoundary } from "../hooks/use-multiportal-auth-boundary";
 import { resolveAuthRouteState } from "../model/auth-route";
-import { createGoogleOAuthPortalHandoffGuard, GOOGLE_OAUTH_HANDOFF_KEY } from "../model/google-oauth-portal-handoff";
+import {
+  createGoogleOAuthPortalHandoffGuard,
+  GOOGLE_OAUTH_HANDOFF_KEY,
+  resolveGoogleOAuthPortalHandoffRoute,
+} from "../model/google-oauth-portal-handoff";
 import { createMultiportalAuthController, type MultiportalAuthGateway } from "../model/multiportal-auth-controller";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -606,7 +610,17 @@ for (const portal of ["coach", "usuario"] as const) {
           "initialRoute Usuario no puede vencer una intención OAuth Coach válida",
         );
 
-        const root = renderPortalBoundary(storage, location);
+        const rehydratedPortal = resolveGoogleOAuthPortalHandoffRoute({
+          storage,
+          location: () => location,
+        });
+        assert.equal(rehydratedPortal, portal);
+        // This is the actual clean-document route snapshot. It deliberately
+        // starts from no query parameters to prove an immutable Usuario default
+        // cannot win before the backend portal authorization runs.
+        const rootLocation = new URL("https://example.test/login");
+        if (rehydratedPortal) rootLocation.searchParams.set("tipo", rehydratedPortal);
+        const root = renderPortalBoundary(storage, rootLocation);
         mounted.push(root);
         if (order === "bootstrap-before-events") {
           decisions.push(root.boundary.resolveInitialSessionDecision(USER_A));

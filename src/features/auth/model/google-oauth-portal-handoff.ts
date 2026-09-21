@@ -146,6 +146,21 @@ export function createGoogleOAuthPortalHandoffGuard(input: {
   };
 }
 
+/**
+ * Rehydrates the selected portal for the clean document that follows a Google
+ * callback. This is navigation evidence only: callers must still resolve the
+ * returned portal through the backend before publishing either portal.
+ */
+export function resolveGoogleOAuthPortalHandoffRoute(input: {
+  storage: OAuthIntentStorage | null;
+  location: () => { pathname: string; search: string };
+}) {
+  const decision = createGoogleOAuthPortalHandoffGuard(input).decision();
+  if (decision === "authorize_coach") return "coach" as const;
+  if (decision === "authorize_user") return "usuario" as const;
+  return null;
+}
+
 async function subjectDigest(intentId: string, userId: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${intentId}:${userId}`));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
