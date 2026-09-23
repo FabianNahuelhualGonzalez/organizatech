@@ -8,7 +8,6 @@ import { AuthLoadingScreen } from "@/features/auth/components/auth-screen";
 import { useGoogleOAuthCallbackGate } from "@/features/auth/hooks/use-google-oauth-callback-gate";
 import { resolveAuthRouteState } from "@/features/auth/model/auth-route";
 import { resolveGoogleOAuthPortalHandoffRoute } from "@/features/auth/model/google-oauth-portal-handoff";
-import { configureGoogleOAuthQaTrace } from "@/features/auth/model/google-oauth-qa-trace";
 import { getBrowserSessionStorage } from "@/lib/storage/browser-storage";
 import {
   captureCoachLinkEntry,
@@ -16,19 +15,16 @@ import {
 } from "@/features/coach-linking/model/coach-linking";
 
 interface AuthEntryClientProps {
-  googleOAuthQaTraceEnabled: boolean;
   trainingCyclesRepositoryEnabled: boolean;
   trainingCyclesSnapshotSource: "ui-main-production" | "ui-main-qa";
   trainingWorkoutReadinessV2Enabled: boolean;
 }
 
 export function AuthEntryClient({
-  googleOAuthQaTraceEnabled,
   trainingCyclesRepositoryEnabled,
   trainingCyclesSnapshotSource,
   trainingWorkoutReadinessV2Enabled,
 }: AuthEntryClientProps) {
-  configureGoogleOAuthQaTrace(googleOAuthQaTraceEnabled);
   const searchParams = useSearchParams();
   const [initialCoachLinkEntry] = useState(() => captureCoachLinkEntry(
     searchParams.get("coachCode"),
@@ -69,7 +65,6 @@ export function AuthEntryClient({
 
   return (
     <OrganizatechApp
-      googleOAuthQaTraceEnabled={googleOAuthQaTraceEnabled}
       googleOAuth={googleOAuth}
       initialAuthRoute={initialAuthRoute}
       initialCoachLinkEntry={initialCoachLinkEntry}

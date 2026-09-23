@@ -34,7 +34,6 @@ import {
 } from "@/features/auth/model/post-auth-navigation-intent";
 import { MULTIPORTAL_AUTH_ERROR_MESSAGE } from "@/features/auth/model/multiportal-auth-controller";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { traceGoogleOAuthQaEvent } from "@/features/auth/model/google-oauth-qa-trace";
 
 type GoogleOAuthBoundaryState = {
   readonly state: "checking" | "ready";
@@ -103,8 +102,6 @@ export function useGoogleOAuthCallbackGate(options: {
     const ownerController = ownerControllerRef.current;
     ownerController.mount();
     const callback = parseGoogleOAuthCallback(window.location);
-    if (callback) traceGoogleOAuthQaEvent({ kind: "callback", state: "detected" });
-    if (callback?.invalid) traceGoogleOAuthQaEvent({ kind: "intent", state: "absent" });
     const principal = getSupabaseBrowserClient();
     const subscription = principal?.auth.onAuthStateChange((_event, session) => {
       ownerController.acceptPrincipalIdentity(session?.user.id ?? null);
@@ -172,10 +169,6 @@ export function useGoogleOAuthCallbackGate(options: {
                   operation.intent.postAuthDestination,
                 );
               }
-              traceGoogleOAuthQaEvent({
-                kind: "clean_route",
-                route: operation.intent.portal === "coach" ? "login_coach" : "login_usuario",
-              });
               window.location.replace(cleanLoginUrl(operation.intent.portal));
             },
           });
@@ -185,10 +178,6 @@ export function useGoogleOAuthCallbackGate(options: {
         window.sessionStorage.removeItem(GOOGLE_OAUTH_HANDOFF_KEY);
         portalResolutionBlockedRef.current = false;
         const cleanRegistrationLocation = cleanRegistrationUrl(operation.intent.portal);
-        traceGoogleOAuthQaEvent({
-          kind: "clean_route",
-          route: operation.intent.portal === "coach" ? "registro_coach" : "registro_usuario",
-        });
         window.history.replaceState(null, "", cleanRegistrationLocation);
         if (!owner.isCurrent()) return;
         expectedLocationRef.current = currentLocationKey();
@@ -294,13 +283,7 @@ export function useGoogleOAuthCallbackGate(options: {
         const navigated = await transferGoogleOAuthAndNavigate({
           transfer: () => operation.transferToPrincipal(principal, combinedGuard),
           guard: combinedGuard,
-          navigate: () => {
-            traceGoogleOAuthQaEvent({
-              kind: "clean_route",
-              route: operation.intent.portal === "coach" ? "login_coach" : "login_usuario",
-            });
-            window.location.replace(cleanLoginUrl(operation.intent.portal));
-          },
+          navigate: () => window.location.replace(cleanLoginUrl(operation.intent.portal)),
         });
         if (!navigated) return { state: "stale" } as const;
         return { state: "submitted" } as const;

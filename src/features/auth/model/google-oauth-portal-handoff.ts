@@ -1,6 +1,5 @@
 import type { AuthAccountType } from "./auth-route";
 import { GOOGLE_OAUTH_INTENT_TTL_MS, parseGoogleOAuthCallback, type GoogleOAuthIntent, type OAuthIntentStorage } from "./google-oauth-intent";
-import { traceGoogleOAuthQaEvent } from "./google-oauth-qa-trace";
 
 export const GOOGLE_OAUTH_HANDOFF_KEY = "organizatech:google-oauth:portal-handoff:v1";
 
@@ -15,7 +14,6 @@ type Handoff = {
 
 // Navigation evidence only. Portal membership is always checked by the backend.
 export function blockGoogleOAuthPortal(storage: OAuthIntentStorage) {
-  traceGoogleOAuthQaEvent({ kind: "handoff", phase: "blocked" });
   storage.setItem(GOOGLE_OAUTH_HANDOFF_KEY, JSON.stringify({ version: 1, phase: "blocked" }));
 }
 
@@ -35,7 +33,6 @@ export async function prepareGoogleOAuthPortalHandoff(
   };
   assertCurrent();
   storage.setItem(GOOGLE_OAUTH_HANDOFF_KEY, JSON.stringify(record));
-  traceGoogleOAuthQaEvent({ kind: "handoff", phase: "transferring" });
   return {
     ready() {
       assertCurrent();
@@ -43,10 +40,8 @@ export async function prepareGoogleOAuthPortalHandoff(
         throw new Error("OAuth handoff was replaced.");
       }
       storage.setItem(GOOGLE_OAUTH_HANDOFF_KEY, JSON.stringify({ ...record, phase: "ready" }));
-      traceGoogleOAuthQaEvent({ kind: "handoff", phase: "ready" });
     },
     reject() {
-      traceGoogleOAuthQaEvent({ kind: "handoff", phase: "rejected" });
       // Do not replace a newer OAuth attempt when this transfer became stale.
       const transferringRecord = JSON.stringify(record);
       const readyRecord = JSON.stringify({ ...record, phase: "ready" });

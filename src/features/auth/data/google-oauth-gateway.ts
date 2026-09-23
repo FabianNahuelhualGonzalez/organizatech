@@ -20,7 +20,6 @@ import type { AuthAccountType, AuthMode } from "../model/auth-route";
 import type { PostAuthNavigationDestination } from "../model/post-auth-navigation-intent";
 
 import { blockGoogleOAuthPortal, prepareGoogleOAuthPortalHandoff } from "../model/google-oauth-portal-handoff";
-import { traceGoogleOAuthQaEvent } from "../model/google-oauth-qa-trace";
 
 const PKCE_STORAGE_PREFIX = "organizatech:google-oauth:pkce:";
 
@@ -111,16 +110,14 @@ export async function startGoogleOAuth(input: {
   readonly mode: AuthMode;
   readonly portal: AuthAccountType;
   readonly postAuthDestination?: PostAuthNavigationDestination | null;
-}, dependencies: { readonly transientClient?: Pick<SupabaseClient, "auth"> } = {}) {
+}) {
   const origin = window.location.origin;
   const storage = getBrowserSessionStorage();
   if (!storage) throw new Error("OAuth storage is unavailable.");
   const intent = createGoogleOAuthIntent(input);
-  traceGoogleOAuthQaEvent({ kind: "portal_requested", portal: input.portal });
   blockGoogleOAuthPortal(storage);
   persistGoogleOAuthIntent(storage, intent);
-  traceGoogleOAuthQaEvent({ kind: "intent", state: "found" });
-  const client = dependencies.transientClient ?? createTransientGoogleOAuthClient(intent.id, storage);
+  const client = createTransientGoogleOAuthClient(intent.id, storage);
   const { error } = await client.auth.signInWithOAuth({
     provider: "google",
     options: {
@@ -142,11 +139,7 @@ export async function completeGoogleOAuth(input: {
   assertCurrent(input.guard);
   blockGoogleOAuthPortal(input.storage);
   const intent = consumeGoogleOAuthIntent(input.storage, input.intentId);
-  if (!intent) {
-    traceGoogleOAuthQaEvent({ kind: "intent", state: "absent" });
-    throw new Error("OAuth intent is invalid or expired.");
-  }
-  traceGoogleOAuthQaEvent({ kind: "intent", state: "found" });
+  if (!intent) throw new Error("OAuth intent is invalid or expired.");
   const transient = input.transientClient
     ?? createTransientGoogleOAuthClient(intent.id, input.storage);
   assertCurrent(input.guard);
@@ -248,17 +241,11 @@ function createPendingOperation(input: {
           handoff.ready();
           if (principalUserId === userId) return;
 
-          traceGoogleOAuthQaEvent({ kind: "set_session", phase: "start" });
           const activation = principal.auth.setSession({
             access_token: session.access_token,
             refresh_token: session.refresh_token,
           });
-          let activated: Awaited<typeof activation>;
-          try {
-            activated = await activation;
-          } finally {
-            traceGoogleOAuthQaEvent({ kind: "set_session", phase: "end" });
-          }
+          const activated = await activation;
           assertCurrent(guard);
           if (
             activated.error
