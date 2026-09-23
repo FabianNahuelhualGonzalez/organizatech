@@ -112,6 +112,7 @@ import {
   canAccessStudentEvaluations,
   createEvaluationOpenRequest,
   resolveStudentEvaluationNotificationTarget,
+  resolveStudentEvaluationScreenTarget,
   type EvaluationOpenRequest,
 } from "@/features/evaluations/model/evaluation-navigation";
 import { NotificationPanel } from "@/features/notifications/components/NotificationPanel";
@@ -764,6 +765,7 @@ export function OrganizatechApp({
     expectedUserId: supabaseUser?.id ?? null,
     activeCoachLinkState: coachLinking.snapshot.activeState,
     activeCoachLinkIdentityKey: coachLinking.snapshot.activeStateIdentityKey,
+    isCoachPortal: Boolean(coachPortalSession),
   });
   useEffect(() => {
     if (!pendingCoachProfileUserId) return;
@@ -795,6 +797,7 @@ export function OrganizatechApp({
     if (screen !== "evaluaciones" || !supabaseUser?.id) return;
     if (coachLinking.snapshot.activeState === "loading") return;
     if (hasStudentEvaluationsAccess) return;
+    setStudentEvaluationOpenRequest(null);
     clearNavigationRestoration(activeBrowserStorageScopeRef.current, "usuario");
     navigation.transition(createAuthNavigationReset("dashboard", "session-established"));
     // El controller es estable; este efecto sólo valida el destino restaurado al resolverse vínculo.
@@ -3035,6 +3038,14 @@ export function OrganizatechApp({
   }
 
   function navigateTo(nextScreen: Screen) {
+    const evaluationTarget = resolveStudentEvaluationScreenTarget(nextScreen, hasStudentEvaluationsAccess);
+    if (evaluationTarget !== nextScreen) {
+      setStudentEvaluationOpenRequest(null);
+      clearNavigationRestoration(activeBrowserStorageScopeRef.current, "usuario");
+      navigation.reset(evaluationTarget);
+      appShell.closeMenu();
+      return;
+    }
     navigation.navigate(nextScreen, {
       hasRoutinePlan,
       prepareRoutineEditor: () => prepareRoutineBuilderStateFromExercises(exercises, activeRoutineDay),

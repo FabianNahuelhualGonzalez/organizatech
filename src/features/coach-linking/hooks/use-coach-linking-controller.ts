@@ -96,6 +96,7 @@ export function useCoachLinkingController(input: {
   const generation = useRef(0);
   const lookupFlight = useRef<AbortController | null>(null);
   const acceptFlight = useRef<AbortController | null>(null);
+  const refreshFlight = useRef<AbortController | null>(null);
   const resumeHandled = useRef(false);
   const identityKeyRef = useRef(input.identityKey);
   const pendingEntryCode = useRef(initialCode);
@@ -126,6 +127,7 @@ export function useCoachLinkingController(input: {
       && previousIdentityKey !== input.identityKey;
     lookupFlight.current?.abort();
     acceptFlight.current?.abort();
+    refreshFlight.current?.abort();
     resumeHandled.current = false;
     if (switchedDirectly) {
       resumeConfirmation.current = null;
@@ -252,8 +254,59 @@ export function useCoachLinkingController(input: {
         resumeRef.current();
       }
     });
-    return () => abort.abort();
+    return () => {
+      abort.abort();
+      refreshFlight.current?.abort();
+    };
   }, [expireSession, initialCode, input.enabled, input.identityKey, repository]);
+
+  const refreshActive = useCallback(() => {
+    if (!input.enabled || !input.identityKey || snapshotRef.current.activeState !== "linked"
+      || snapshotRef.current.activeStateIdentityKey !== input.identityKey) return;
+    const identityKey = input.identityKey;
+    const currentGeneration = generation.current;
+    const flight = new AbortController();
+    refreshFlight.current?.abort();
+    refreshFlight.current = flight;
+    setSnapshot((state) => ({ ...state, activeState: "loading" }));
+    void repository.readActive(identityKey, flight.signal).then((result) => {
+      if (refreshFlight.current !== flight || flight.signal.aborted
+        || generation.current !== currentGeneration) return;
+      refreshFlight.current = null;
+      setSnapshot((state) => ({
+        ...state,
+        activeState: result.status,
+        activeStateIdentityKey: identityKey,
+        coachName: result.status === "linked" ? result.coachName : null,
+      }));
+    }).catch((error) => {
+      if (refreshFlight.current !== flight || flight.signal.aborted
+        || generation.current !== currentGeneration) return;
+      refreshFlight.current = null;
+      if (error instanceof CoachLinkingRepositoryError && error.code === "session_expired") {
+        expireSession();
+        return;
+      }
+      setSnapshot((state) => ({
+        ...state,
+        activeState: "none",
+        activeStateIdentityKey: identityKey,
+        coachName: null,
+      }));
+    });
+  }, [expireSession, input.enabled, input.identityKey, repository]);
+
+  useEffect(() => {
+    const onResume = () => {
+      if (document.visibilityState === "visible") refreshActive();
+    };
+    window.addEventListener("focus", onResume);
+    document.addEventListener("visibilitychange", onResume);
+    return () => {
+      window.removeEventListener("focus", onResume);
+      document.removeEventListener("visibilitychange", onResume);
+    };
+  }, [refreshActive]);
 
   const openForm = useCallback(() => {
     setSnapshot((state) => state.activeState === "linked" ? state : {

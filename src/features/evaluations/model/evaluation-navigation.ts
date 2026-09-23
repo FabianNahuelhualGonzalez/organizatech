@@ -1,4 +1,5 @@
 import type { CoachLinkActiveState } from "@/features/coach-linking/model/coach-linking";
+import type { Screen } from "@/lib/navigation/app-navigation";
 
 export interface EvaluationOpenRequest {
   readonly ownerUserId: string;
@@ -10,10 +11,19 @@ export function canAccessStudentEvaluations(input: {
   readonly expectedUserId: string | null;
   readonly activeCoachLinkState: CoachLinkActiveState;
   readonly activeCoachLinkIdentityKey: string | null;
+  readonly isCoachPortal: boolean;
 }): boolean {
   return input.expectedUserId !== null
+    && !input.isCoachPortal
     && input.activeCoachLinkState === "linked"
     && input.activeCoachLinkIdentityKey === input.expectedUserId;
+}
+
+export function resolveStudentEvaluationScreenTarget(
+  requestedScreen: Screen,
+  hasAccess: boolean,
+): Screen {
+  return requestedScreen === "evaluaciones" && !hasAccess ? "dashboard" : requestedScreen;
 }
 
 export function resolveStudentEvaluationNotificationTarget(
