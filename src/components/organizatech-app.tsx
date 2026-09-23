@@ -81,6 +81,12 @@ import {
   type AuthRouteState,
 } from "@/features/auth/model/auth-route";
 import {
+  clearGoogleOAuthQaTrace,
+  clearGoogleOAuthQaTraceOnSignedOut,
+  routeKind,
+  traceGoogleOAuthQaEvent,
+} from "@/features/auth/model/google-oauth-qa-trace";
+import {
   MULTIPORTAL_AUTH_ERROR_MESSAGE,
   SIGNUP_CONFIRMATION_INVALID_MESSAGE,
   type AuthorizedPortalAccess,
@@ -470,6 +476,7 @@ const objectiveDescriptions: Record<string, string> = {
 };
 
 interface OrganizatechAppProps {
+  googleOAuthQaTraceEnabled?: boolean;
   trainingCyclesRepositoryEnabled?: boolean;
   trainingCyclesSnapshotSource?: "ui-main-production" | "ui-main-qa";
   trainingWorkoutReadinessV2Enabled?: boolean;
@@ -480,6 +487,7 @@ interface OrganizatechAppProps {
 }
 
 export function OrganizatechApp({
+  googleOAuthQaTraceEnabled = false,
   trainingCyclesRepositoryEnabled = false,
   trainingCyclesSnapshotSource = "ui-main-qa",
   trainingWorkoutReadinessV2Enabled = false,
@@ -499,6 +507,14 @@ export function OrganizatechApp({
   initialPasswordRecoveryRouteStateRef.current = initialPasswordRecoveryRouteState;
   const initialAuthState = resolveInitialAuthState(initialPasswordRecoveryRouteState, initialAuthRoute.mode);
   const authRouteController = useAuthRouteController(initialAuthRoute);
+  useEffect(() => {
+    if (!googleOAuthQaTraceEnabled) return;
+    traceGoogleOAuthQaEvent({
+      kind: "routes",
+      initial: routeKind(initialAuthRoute),
+      current: routeKind(authRouteController.route),
+    });
+  }, [authRouteController.route, googleOAuthQaTraceEnabled, initialAuthRoute]);
   const multiportalAuth = useMultiportalAuthBoundary({
     initialRoute: initialAuthRoute,
     currentRoute: authRouteController.route,
@@ -1144,6 +1160,7 @@ export function OrganizatechApp({
     const supabase = getSupabaseBrowserClient();
 
     async function bootstrapSession() {
+      traceGoogleOAuthQaEvent({ kind: "bootstrap" });
       let requestToken = captureSessionDataRequestToken();
       const recoveryState = initialPasswordRecoveryRouteState;
       const signupConfirmationRouteState = initialSignupConfirmation.routeState;
@@ -1244,6 +1261,7 @@ export function OrganizatechApp({
           }
           if (portalDecision === "authorize_user" || portalDecision === "authorize_coach") {
             const requestedPortal = portalDecision === "authorize_coach" ? "coach" : "usuario";
+            traceGoogleOAuthQaEvent({ kind: "backend_portal", portal: requestedPortal });
             const resolutionOwner = multiportalAuth.beginPortalResolution(authState.session.user.id);
             try {
               await authorizeAndContinuePortalSession(
@@ -1304,6 +1322,9 @@ export function OrganizatechApp({
 
     const authSubscription = supabase?.auth.onAuthStateChange((event, session) => {
       if (!isMounted) return;
+      if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
+        traceGoogleOAuthQaEvent({ kind: "auth_event", event });
+      }
 
       const nextState: SupabaseSessionState = {
         isConfigured: true,
@@ -1312,6 +1333,8 @@ export function OrganizatechApp({
         user: session?.user ?? null,
       };
       const previousStorageScope = activeBrowserStorageScopeRef.current;
+
+      clearGoogleOAuthQaTraceOnSignedOut(event);
 
       const portalEventDecision = multiportalAuth.resolveSessionEventDecision(
         event,
@@ -1409,6 +1432,10 @@ export function OrganizatechApp({
           return;
         }
 
+        traceGoogleOAuthQaEvent({
+          kind: "backend_portal",
+          portal: portalEventDecision === "authorize_coach" ? "coach" : "usuario",
+        });
         const requestedPortal = portalEventDecision === "authorize_coach" ? "coach" : "usuario";
         const userPortalSessionRevalidation = resolveUserPortalSessionRevalidation({
           event,
@@ -1932,6 +1959,12 @@ export function OrganizatechApp({
       || access.state === "coach_registration_required"
       || access.state === "error"
     ) {
+      if (requestedPortal === "coach") {
+        traceGoogleOAuthQaEvent({
+          kind: "coach_result",
+          result: access.state === "error" ? "error" : "rejected",
+        });
+      }
       const preserveAuthorizedUserPortal = shouldPreserveUserPortalAfterRetryableRevalidation({
         access,
         sessionRevalidation,
@@ -1946,6 +1979,12 @@ export function OrganizatechApp({
       setIsAuthLoading(false);
       if (rejectionMessage) setAuthStatus(rejectionMessage, "error");
       return null;
+    }
+    if (requestedPortal === "coach") {
+      traceGoogleOAuthQaEvent({
+        kind: "coach_result",
+        result: access.state === "coach_authorized" ? "authorized" : "error",
+      });
     }
     applySessionState(authState);
     await continueAuthorizedPortalAccess(
@@ -3517,6 +3556,7 @@ export function OrganizatechApp({
 
   async function handleLogout() {
     if (logoutInFlightRef.current) return;
+    clearGoogleOAuthQaTrace();
     logoutInFlightRef.current = true;
     replaceUserPortalAuthorizationProof(null);
     multiportalAuth.invalidatePortalOperations();

@@ -26,6 +26,7 @@ export default function Home() {
   return (
     <Suspense fallback={<main className="app-shell"><AuthLoadingScreen /></main>}>
       <AuthEntryClient
+        googleOAuthQaTraceEnabled={qaTrainingCyclesRepositoryEnabled}
         trainingCyclesRepositoryEnabled={trainingCyclesRepositoryEnabled}
         trainingCyclesSnapshotSource={trainingCyclesSnapshotSource}
         trainingWorkoutReadinessV2Enabled={trainingWorkoutReadinessV2Enabled}

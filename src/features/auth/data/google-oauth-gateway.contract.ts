@@ -17,6 +17,7 @@ import {
   completeGoogleOAuth,
   createTransientGoogleOAuthClient,
   GoogleOAuthStaleOperationError,
+  startGoogleOAuth,
   type GoogleOAuthOperationGuard,
 } from "./google-oauth-gateway";
 import {
@@ -25,6 +26,13 @@ import {
   type OAuthIntentStorage,
 } from "../model/google-oauth-intent";
 import { transferGoogleOAuthAndNavigate } from "../model/google-oauth-operation-owner";
+import {
+  clearGoogleOAuthQaTrace,
+  clearGoogleOAuthQaTraceOnSignedOut,
+  configureGoogleOAuthQaTrace,
+  traceGoogleOAuthQaEvent,
+  type GoogleOAuthQaTraceApi,
+} from "../model/google-oauth-qa-trace";
 
 const USER_A = "00000000-0000-4000-8000-00000000000a";
 const USER_B = "00000000-0000-4000-8000-00000000000b";
@@ -768,4 +776,112 @@ test("URL limpia con root aún capturado en Usuario respeta la intención Coach"
     mount.boundary.completeInitialResolution();
     assert.equal(mount.boundary.resolveSessionEventDecision("SIGNED_IN", USER_A), "authorize_coach");
   } finally { mount.restore(); }
+});
+
+test("traza OAuth QA conserva inicio Coach y callback entre dos documentos del mismo tab", async () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const originalSetTimeout = Object.getOwnPropertyDescriptor(globalThis, "setTimeout");
+  const originalClearTimeout = Object.getOwnPropertyDescriptor(globalThis, "clearTimeout");
+  const originalDateNow = Object.getOwnPropertyDescriptor(Date, "now");
+  const values = new Map<string, string>();
+  const sessionStorage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+    clear: () => { values.clear(); },
+    key: (index: number) => [...values.keys()][index] ?? null,
+    get length() { return values.size; },
+  } as Storage;
+  const browser = () => ({
+    sessionStorage,
+    location: { origin: "https://qa.example.test" },
+  }) as Window;
+  let expire: (() => void) | null = null;
+  let nowMs = 10_000;
+  const traceApi = () => Object.getOwnPropertyDescriptor(
+    globalThis.window,
+    "__organizatechQaOAuthTrace",
+  )?.value as GoogleOAuthQaTraceApi | undefined;
+  try {
+    Object.defineProperty(globalThis, "setTimeout", {
+      configurable: true,
+      enumerable: originalSetTimeout?.enumerable,
+      writable: originalSetTimeout?.writable,
+      value: (callback: () => void) => {
+        expire = callback;
+        return 1;
+      },
+    });
+    Object.defineProperty(globalThis, "clearTimeout", {
+      configurable: true,
+      enumerable: originalClearTimeout?.enumerable,
+      writable: originalClearTimeout?.writable,
+      value: () => { expire = null; },
+    });
+    Object.defineProperty(Date, "now", { configurable: true, value: () => nowMs });
+
+    // Documento 1: click "Ingresar como Coach" antes de salir a Google.
+    Object.defineProperty(globalThis, "window", { configurable: true, value: browser() });
+    configureGoogleOAuthQaTrace(false);
+    configureGoogleOAuthQaTrace(true);
+    await startGoogleOAuth(
+      { mode: "login", portal: "coach" },
+      { transientClient: {
+        auth: { signInWithOAuth: async () => ({ error: null }) },
+      } as unknown as Pick<SupabaseClient, "auth"> },
+    );
+    assert.deepEqual(traceApi()?.read().map(({ kind }) => kind), ["portal_requested", "handoff", "intent"]);
+    const stored = JSON.parse(values.get("organizatech.qa.oauth-trace.v1") ?? "null") as Record<string, unknown>;
+    assert.deepEqual(Object.keys(stored).sort(), ["attemptId", "events", "expiresAtMs", "nextOrder", "version"]);
+    assert.match(stored.attemptId as string, /^[0-9a-f-]{36}$/i);
+    assert.equal(stored.version, 1);
+
+    // Documento 2: retorno de Google en el mismo tab y el mismo sessionStorage.
+    Object.defineProperty(globalThis, "window", { configurable: true, value: browser() });
+    nowMs += 100;
+    configureGoogleOAuthQaTrace(true);
+    const restored = traceApi()?.read() ?? [];
+    assert.equal(restored.length, 3);
+    assert.equal(restored[0]?.kind, "portal_requested");
+    assert.equal(restored[0]?.portal, "coach");
+    assert.deepEqual(Object.keys(restored[0] ?? {}).sort(), ["elapsedMs", "kind", "order", "portal"]);
+    assert.ok(Object.isFrozen(restored));
+    assert.ok(Object.isFrozen(restored[0]));
+    assert.deepEqual(restored.map(({ order }) => order), [1, 2, 3]);
+
+    const scheduledBeforeRerender = expire;
+    configureGoogleOAuthQaTrace(true);
+    assert.equal(expire, scheduledBeforeRerender, "un rerender del mismo documento no reinicia la expiración");
+
+    traceGoogleOAuthQaEvent({ kind: "callback", state: "detected" });
+    assert.deepEqual(traceApi()?.read().map(({ kind }) => kind), ["portal_requested", "handoff", "intent", "callback"]);
+    clearGoogleOAuthQaTraceOnSignedOut("SIGNED_OUT");
+    assert.deepEqual(traceApi()?.read(), [], "SIGNED_OUT borra la memoria y la traza del tab");
+
+    traceGoogleOAuthQaEvent({ kind: "portal_requested", portal: "coach" });
+    for (let index = 0; index < 34; index += 1) {
+      traceGoogleOAuthQaEvent({ kind: "intent", state: "found" });
+    }
+    assert.deepEqual(traceApi()?.read().map(({ order }) => order), Array.from({ length: 32 }, (_, index) => index + 4));
+    nowMs += 10 * 60 * 1000;
+    Object.defineProperty(globalThis, "window", { configurable: true, value: browser() });
+    configureGoogleOAuthQaTrace(true);
+    assert.deepEqual(traceApi()?.read(), [], "la expiración corta también se aplica al volver en otro documento");
+
+    traceGoogleOAuthQaEvent({ kind: "portal_requested", portal: "coach" });
+    clearGoogleOAuthQaTrace();
+    assert.deepEqual(traceApi()?.read(), [], "clear manual elimina la traza del tab");
+    configureGoogleOAuthQaTrace(false);
+    assert.equal(traceApi(), undefined, "al desactivar QA la API también desaparece");
+  } finally {
+    clearGoogleOAuthQaTrace();
+    if (originalSetTimeout) Object.defineProperty(globalThis, "setTimeout", originalSetTimeout);
+    else Reflect.deleteProperty(globalThis, "setTimeout");
+    if (originalClearTimeout) Object.defineProperty(globalThis, "clearTimeout", originalClearTimeout);
+    else Reflect.deleteProperty(globalThis, "clearTimeout");
+    if (originalDateNow) Object.defineProperty(Date, "now", originalDateNow);
+    else Reflect.deleteProperty(Date, "now");
+    if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
 });
