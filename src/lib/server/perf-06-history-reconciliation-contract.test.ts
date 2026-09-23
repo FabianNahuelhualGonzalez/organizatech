@@ -235,7 +235,9 @@ function sourceTestFiles(root: string): string[] {
     for (const entry of readdirSync(directory)) {
       const path = join(directory, entry);
       if (statSync(path).isDirectory()) walk(path);
-      else if (/\.test\.tsx?$/.test(entry)) files.push(relative(root, path));
+      else if (/\.test\.tsx?$/.test(entry) || /-migration\.contract\.tsx?$/.test(entry)) {
+        files.push(relative(root, path));
+      }
     }
   };
   walk(sourceRoot);

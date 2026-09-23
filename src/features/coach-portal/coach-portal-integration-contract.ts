@@ -90,6 +90,8 @@ const COACH_SELF_STUDENT_AND_EVALUATION_TEMPLATE_DELETION_MIGRATION_PATH =
   "supabase/migrations/20260920060000_coach_self_student_and_evaluation_template_deletion.sql";
 const EVALUATIONS_REMINDERS_STATUS_BULK_MIGRATION_PATH =
   "supabase/migrations/20260920172644_evaluations_reminders_status_bulk.sql";
+const PROGRESS_RECORDS_PHASE1_MIGRATION_PATH =
+  "supabase/migrations/20260923184225_progress_records_private_storage_reports_phase1.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -613,6 +615,7 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== COACH_STUDENT_EVALUATIONS_MIGRATION_PATH
         && path !== COACH_SELF_STUDENT_AND_EVALUATION_TEMPLATE_DELETION_MIGRATION_PATH
         && path !== EVALUATIONS_REMINDERS_STATUS_BULK_MIGRATION_PATH
+        && path !== PROGRESS_RECORDS_PHASE1_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
