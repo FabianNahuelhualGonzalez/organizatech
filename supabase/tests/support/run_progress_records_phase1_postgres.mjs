@@ -1,7 +1,7 @@
 // Standalone synthetic PostgreSQL test. No .env, TCP, QA/PROD or app server.
 // Uses a pinned PostgreSQL 17.5 artifact and removes its temporary cluster.
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -54,6 +54,9 @@ const paths = {
   endedPhoto: `${ids.endedPhoto}/${randomUUID()}.webp`,
   document: `${ids.document}/${randomUUID()}.pdf`,
 };
+const photoAttestationKey = "local-test-only-progress-photo-attestation-key";
+const uploadedPhotoId = randomUUID();
+const uploadedCloudinaryId = "opaqueCloudinaryAssetId123";
 
 const readSql = (path) => readFileSync(join(root, path), "utf8");
 const run = (command, args, options = {}) => execFileSync(command, args, { env: childEnv, ...options });
@@ -113,6 +116,8 @@ try {
     create schema storage;
     create schema private;
     create schema extensions;
+    create schema vault;
+    create table vault.decrypted_secrets (name text primary key, decrypted_secret text not null);
     create extension pgcrypto with schema extensions;
     create function auth.uid() returns uuid language sql stable as $$
       select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
@@ -226,6 +231,8 @@ try {
 
   stage = "apply migration";
   await admin.query(readSql("supabase/migrations/20260923184225_progress_records_private_storage_reports_phase1.sql"));
+  await admin.query(readSql("supabase/migrations/20260924130000_progress_cloudinary_photo_ingest.sql"));
+  await admin.query("insert into vault.decrypted_secrets(name,decrypted_secret) values('progress_photo_attestation_key',$1)", [photoAttestationKey]);
   await admin.query(`
     create function public.get_own_student_evaluation(p_assignment_id uuid)
     returns jsonb language plpgsql security definer set search_path = '' as $$
@@ -294,6 +301,33 @@ try {
     "42501",
     "Coach-only identity cannot enter student surface",
   );
+
+  stage = "Cloudinary photo ingest attestation and ownership";
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const attestation = (studentId = ids.student) => createHmac("sha256", photoAttestationKey)
+    .update([studentId, uploadedPhotoId, uploadedCloudinaryId, "image/jpeg", "jpg", 1024, 100, 200, issuedAt].join("|"))
+    .digest("hex");
+  const registerSql = `select public.register_own_cloudinary_progress_photo(
+    $1::uuid,$2::text,'image/jpeg','jpg',1024,100,200,'frente',$3::bigint,$4::text
+  ) as value`;
+  await expectCode(value(unlinked, registerSql,
+    [uploadedPhotoId, uploadedCloudinaryId, issuedAt, attestation(ids.unlinked)]), "42501",
+  "unlinked Student cannot register photo");
+  await expectCode(value(student, registerSql,
+    [uploadedPhotoId, uploadedCloudinaryId, issuedAt, "0".repeat(64)]), "42501",
+  "browser cannot forge sanitized photo");
+  check(await value(student, registerSql,
+    [uploadedPhotoId, uploadedCloudinaryId, issuedAt, attestation()]) === uploadedPhotoId,
+  "active Student registers signed sanitized photo");
+  check((await value(student,
+    "select public.get_own_cloudinary_progress_photo($1::uuid,null) as value", [uploadedPhotoId]))
+    .cloudinaryAssetId === uploadedCloudinaryId, "owner reads own photo");
+  await expectCode(value(unlinked,
+    "select public.get_own_cloudinary_progress_photo($1::uuid,null) as value", [uploadedPhotoId]),
+  "42501", "another Student cannot read photo ID");
+  await expectCode(value(coach,
+    "select public.get_own_cloudinary_progress_photo($1::uuid,null) as value", [uploadedPhotoId]),
+  "42501", "Coach cannot read unshared photo");
 
   stage = "MIME size and opaque path constraints";
   const now = new Date().toISOString();
@@ -374,6 +408,16 @@ try {
     "select public.create_own_progress_report('photos',$1::uuid[],$2,$3::uuid) as value",
     [[ids.photo], "Revisión", requestId]);
   check(report.items.length === 1 && report.items[0].assetId === ids.photo, "student shares exact selected photo");
+  const cloudinaryReport = await value(student,
+    "select public.create_own_progress_report('photos',$1::uuid[],null,$2::uuid) as value",
+    [[uploadedPhotoId], randomUUID()]);
+  check((await value(coach,
+    "select public.get_own_cloudinary_progress_photo($1::uuid,$2::uuid) as value",
+    [uploadedPhotoId, cloudinaryReport.id])).cloudinaryAssetId === uploadedCloudinaryId,
+  "Coach reads only a selected reported photo");
+  await expectCode(value(otherCoach,
+    "select public.get_own_cloudinary_progress_photo($1::uuid,$2::uuid) as value",
+    [uploadedPhotoId, cloudinaryReport.id]), "42501", "other Coach denied by BOLA");
   const idempotentReport = await value(student,
     "select public.create_own_progress_report('photos',$1::uuid[],$2,$3::uuid) as value",
     [[ids.photo], "Revisión", requestId]);
@@ -452,6 +496,12 @@ try {
     "active Coach lists current evaluations");
 
   await admin.query("update private.coach_relationship_episodes set ended_at=clock_timestamp() where id=$1", [ids.activeEpisode]);
+  await expectCode(value(coach,
+    "select public.get_own_cloudinary_progress_photo($1::uuid,$2::uuid) as value",
+    [uploadedPhotoId, cloudinaryReport.id]), "42501", "Coach photo revoked after unlink");
+  check((await value(student,
+    "select public.get_own_cloudinary_progress_photo($1::uuid,null) as value", [uploadedPhotoId]))
+    .cloudinaryAssetId === uploadedCloudinaryId, "Student retains own photo after unlink");
   check((await value(student, "select public.get_own_student_progress_report($1::uuid) as value", [report.id])).id === report.id,
     "persisted student session retains its own historical report");
   check((await value(student, "select public.get_own_student_progress_report($1::uuid) as value", [documentReport.id])).id === documentReport.id,
@@ -509,6 +559,9 @@ try {
     "Coach completed answers disappear after unlink");
 
   stage = "QA rollback";
+  await admin.query("drop function public.get_own_cloudinary_progress_photo(uuid,uuid)");
+  await admin.query("drop function public.register_own_cloudinary_progress_photo(uuid,text,text,text,bigint,integer,integer,text,bigint,text)");
+  await admin.query("drop table private.progress_cloudinary_photos");
   await admin.query("delete from storage.objects where bucket_id in ('progress-check-photos','progress-medical-documents')");
   await admin.query(readSql("supabase/diagnostics/qa/20260923_progress_records_phase1_qa_rollback.sql"));
   check(await value(admin, "select to_regclass('private.progress_assets') is null as value") === true,

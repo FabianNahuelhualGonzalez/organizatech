@@ -92,6 +92,8 @@ const EVALUATIONS_REMINDERS_STATUS_BULK_MIGRATION_PATH =
   "supabase/migrations/20260920172644_evaluations_reminders_status_bulk.sql";
 const PROGRESS_RECORDS_PHASE1_MIGRATION_PATH =
   "supabase/migrations/20260923184225_progress_records_private_storage_reports_phase1.sql";
+const PROGRESS_RECORDS_CLOUDINARY_PHOTO_MIGRATION_PATH =
+  "supabase/migrations/20260924130000_progress_cloudinary_photo_ingest.sql";
 
 const FAILURE = {
   coachContinuesUser: "[AUTH-COACH-01.PORTAL.M01.coach-continues-user]",
@@ -536,7 +538,10 @@ function auditNoPrematureEmail(sources: Sources) {
   );
 }
 
-function auditProhibitedArtifacts(sources: Sources) {
+function auditProhibitedArtifacts(
+  sources: Sources,
+  changedEntriesOverride?: ReadonlyArray<{ status: string; path: string }>,
+) {
   const packageJson = JSON.parse(sources.packageJson) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
@@ -546,7 +551,7 @@ function auditProhibitedArtifacts(sources: Sources) {
     ...(packageJson.devDependencies ?? {}),
   });
   const status = spawnSync("git", ["status", "--porcelain=v1"], { encoding: "utf8" });
-  const changedEntries = (status.stdout ?? "")
+  const changedEntries = changedEntriesOverride ?? (status.stdout ?? "")
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => ({
@@ -616,6 +621,7 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== COACH_SELF_STUDENT_AND_EVALUATION_TEMPLATE_DELETION_MIGRATION_PATH
         && path !== EVALUATIONS_REMINDERS_STATUS_BULK_MIGRATION_PATH
         && path !== PROGRESS_RECORDS_PHASE1_MIGRATION_PATH
+        && path !== PROGRESS_RECORDS_CLOUDINARY_PHOTO_MIGRATION_PATH
         && !(
           contactMigrationRenameInProgress
           && path === AUTH_SEPARATE_LEGACY_CONTACT_MIGRATION_PATH
@@ -1035,6 +1041,24 @@ test("contrato Coach Portal tolera comentarios, formato y renombres válidos", (
     assert.notEqual(sha256(transformed), sha256(original), `${control.name}: SHA efectivo`);
     assertValidSource(transformed, SOURCE_PATHS[control.source]);
     auditIntegration({ ...sources, [control.source]: transformed });
+  }
+});
+
+test("allowlist admite sólo la migración Cloudinary declarada de progress-records", () => {
+  const sources = readSources();
+  assert.doesNotThrow(() => auditProhibitedArtifacts(sources, [
+    { status: "??", path: PROGRESS_RECORDS_CLOUDINARY_PHOTO_MIGRATION_PATH },
+  ]));
+  for (const path of [
+    "supabase/migrations/20260924130001_progress_records_undeclared.sql",
+    "supabase/migrations/20260924130002_unrelated.sql",
+  ]) {
+    assert.throws(
+      () => auditProhibitedArtifacts(sources, [{ status: "??", path }]),
+      (error: unknown) => error instanceof assert.AssertionError
+        && error.message.split(/\r?\n/, 1)[0] === FAILURE.prohibitedArtifact,
+      `${path} sigue prohibida`,
+    );
   }
 });
 
