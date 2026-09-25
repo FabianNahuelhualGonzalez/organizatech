@@ -20,6 +20,7 @@ const evaluationsMigration = readFileSync(
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260923184225_progress_records_private_storage_reports_phase1.sql": "ee72147210ab601e335d519af0092d92513297e0b22fd5bf05c94ce26650060a",
   "20260924140000_progress_photo_staging_preparation.sql": "cfb33305ae35d3891d77071907fbe2b019f02d712feefbca3df35b201e6fb142",
+  "20260925004129_progress_photo_stage_volatility.sql": "2ea74c298b3d6d21f7b10f49fbc67029819720517ea3ee4c7ae705e477a673cc",
 } as const;
 
 test("crea buckets privados con límites y MIME exactos", () => {

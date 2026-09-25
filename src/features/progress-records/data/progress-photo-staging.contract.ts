@@ -5,9 +5,18 @@ import test from "node:test";
 const sql = readFileSync(
   "supabase/migrations/20260924140000_progress_photo_staging_preparation.sql", "utf8",
 );
+const volatilitySql = readFileSync(
+  "supabase/migrations/20260925004129_progress_photo_stage_volatility.sql", "utf8",
+);
 const worker = readFileSync(
   "src/features/progress-records/server/supabase-progress-photo-publisher.ts", "utf8",
 );
+
+test("follow-up migration changes only staging function volatility", () => {
+  assert.match(sql, /create function private\.can_stage_own_progress_photo\(p_bucket_id text, p_object_name text\)\s+returns boolean language plpgsql stable security definer set search_path = ''/);
+  assert.equal(volatilitySql.trim(),
+    "alter function private.can_stage_own_progress_photo(text, text) volatile;");
+});
 
 test("staging is private, bounded and only the server chooses opaque paths", () => {
   assert.match(sql, /'progress-check-staging', 'progress-check-staging', false, 20971520/);

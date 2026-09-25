@@ -241,6 +241,27 @@ try {
   stage = "apply migration";
   await admin.query(readSql("supabase/migrations/20260923184225_progress_records_private_storage_reports_phase1.sql"));
   await admin.query(readSql("supabase/migrations/20260924140000_progress_photo_staging_preparation.sql"));
+  const stageFunctionBefore = await value(admin, `select to_jsonb(procedure) as value
+    from pg_proc procedure
+    where procedure.oid = 'private.can_stage_own_progress_photo(text,text)'::regprocedure`);
+  check(stageFunctionBefore.provolatile === "s", "applied staging migration declares stable function");
+  await admin.query(readSql("supabase/migrations/20260925004129_progress_photo_stage_volatility.sql"));
+  const stageFunctionAfter = await value(admin, `select to_jsonb(procedure) as value
+    from pg_proc procedure
+    where procedure.oid = 'private.can_stage_own_progress_photo(text,text)'::regprocedure`);
+  check(stageFunctionAfter.provolatile === "v", "follow-up migration makes staging function volatile");
+  check(stageFunctionAfter.prosecdef === true,
+    "security definer is preserved");
+  check(stageFunctionBefore.proconfig?.some((setting) => setting.startsWith("search_path="))
+    && isDeepStrictEqual(stageFunctionAfter.proconfig, stageFunctionBefore.proconfig),
+  "function search_path is preserved");
+  check(isDeepStrictEqual(stageFunctionAfter.proacl, stageFunctionBefore.proacl),
+    "function grants are preserved");
+  const { provolatile: beforeVolatility, ...beforeAttributes } = stageFunctionBefore;
+  const { provolatile: afterVolatility, ...afterAttributes } = stageFunctionAfter;
+  check(beforeVolatility === "s" && afterVolatility === "v"
+    && isDeepStrictEqual(afterAttributes, beforeAttributes),
+  "volatility is the only pg_proc attribute changed");
   await admin.query(`insert into private.progress_photo_principals(auth_user_id,state)
     values($1,'active')`, [ids.publisher]);
   await expectCode(admin.query(`insert into private.progress_photo_principals(auth_user_id,state)

@@ -94,6 +94,8 @@ const PROGRESS_RECORDS_PHASE1_MIGRATION_PATH =
   "supabase/migrations/20260923184225_progress_records_private_storage_reports_phase1.sql";
 const PROGRESS_PHOTO_STAGING_MIGRATION_PATH =
   "supabase/migrations/20260924140000_progress_photo_staging_preparation.sql";
+const PROGRESS_PHOTO_STAGE_VOLATILITY_MIGRATION_PATH =
+  "supabase/migrations/20260925004129_progress_photo_stage_volatility.sql";
 const REMOVED_CLOUDINARY_PHOTO_MIGRATION_PATH =
   "supabase/migrations/20260924130000_progress_cloudinary_photo_ingest.sql";
 
@@ -621,6 +623,7 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== EVALUATIONS_REMINDERS_STATUS_BULK_MIGRATION_PATH
         && path !== PROGRESS_RECORDS_PHASE1_MIGRATION_PATH
         && path !== PROGRESS_PHOTO_STAGING_MIGRATION_PATH
+        && path !== PROGRESS_PHOTO_STAGE_VOLATILITY_MIGRATION_PATH
         && !(path === REMOVED_CLOUDINARY_PHOTO_MIGRATION_PATH && entryStatus === " D")
         && !(
           contactMigrationRenameInProgress
