@@ -19,7 +19,7 @@ const evaluationsMigration = readFileSync(
 // feature-local *-migration.contract.ts files without registering them globally.
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260923184225_progress_records_private_storage_reports_phase1.sql": "ee72147210ab601e335d519af0092d92513297e0b22fd5bf05c94ce26650060a",
-  "20260924130000_progress_cloudinary_photo_ingest.sql": "33942cd55e18458980fbca0af0341f59c1da54c671fa11cc27c8c734787a3da6",
+  "20260924140000_progress_photo_staging_preparation.sql": "cfb33305ae35d3891d77071907fbe2b019f02d712feefbca3df35b201e6fb142",
 } as const;
 
 test("crea buckets privados con límites y MIME exactos", () => {
