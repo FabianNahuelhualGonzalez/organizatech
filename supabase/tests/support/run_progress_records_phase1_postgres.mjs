@@ -262,6 +262,28 @@ try {
   check(beforeVolatility === "s" && afterVolatility === "v"
     && isDeepStrictEqual(afterAttributes, beforeAttributes),
   "volatility is the only pg_proc attribute changed");
+  const selectFunctionBefore = await value(admin, `select to_jsonb(procedure) as value
+    from pg_proc procedure
+    where procedure.oid = 'private.can_select_progress_photo_object(text,text)'::regprocedure`);
+  check(selectFunctionBefore.provolatile === "s", "applied select function is stable");
+  await admin.query(readSql("supabase/migrations/20260925012214_progress_photo_select_volatility.sql"));
+  const selectFunctionAfter = await value(admin, `select to_jsonb(procedure) as value
+    from pg_proc procedure
+    where procedure.oid = 'private.can_select_progress_photo_object(text,text)'::regprocedure`);
+  check(selectFunctionAfter.provolatile === "v", "follow-up select function is volatile");
+  check(selectFunctionAfter.prosecdef === true, "select function remains security definer");
+  check(selectFunctionBefore.proconfig?.some((setting) => setting.startsWith("search_path="))
+    && isDeepStrictEqual(selectFunctionAfter.proconfig, selectFunctionBefore.proconfig),
+  "select function search_path is preserved");
+  check(selectFunctionAfter.proowner === selectFunctionBefore.proowner,
+    "select function owner is preserved");
+  check(isDeepStrictEqual(selectFunctionAfter.proacl, selectFunctionBefore.proacl),
+    "select function grants are preserved");
+  const { provolatile: selectBeforeVolatility, ...selectBeforeAttributes } = selectFunctionBefore;
+  const { provolatile: selectAfterVolatility, ...selectAfterAttributes } = selectFunctionAfter;
+  check(selectBeforeVolatility === "s" && selectAfterVolatility === "v"
+    && isDeepStrictEqual(selectAfterAttributes, selectBeforeAttributes),
+  "select function volatility is the only pg_proc attribute changed");
   await admin.query(`insert into private.progress_photo_principals(auth_user_id,state)
     values($1,'active')`, [ids.publisher]);
   await expectCode(admin.query(`insert into private.progress_photo_principals(auth_user_id,state)
