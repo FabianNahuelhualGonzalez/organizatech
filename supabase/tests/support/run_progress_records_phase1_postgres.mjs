@@ -284,6 +284,12 @@ try {
   check(selectBeforeVolatility === "s" && selectAfterVolatility === "v"
     && isDeepStrictEqual(selectAfterAttributes, selectBeforeAttributes),
   "select function volatility is the only pg_proc attribute changed");
+  await admin.query(readSql("supabase/migrations/20260930163231_progress_photo_student_gateway.sql"));
+  check(await value(admin, `select count(*)::int as value from pg_constraint
+    where conrelid = 'private.progress_check_photos'::regclass
+      and conname in ('progress_check_photos_photo_asset_id_key',
+        'progress_check_photos_check_id_pose_key')`) === 2,
+  "gateway preserves one-check-per-asset and one-pose-per-check constraints");
   await admin.query(`insert into private.progress_photo_principals(auth_user_id,state)
     values($1,'active')`, [ids.publisher]);
   await expectCode(admin.query(`insert into private.progress_photo_principals(auth_user_id,state)
@@ -435,6 +441,21 @@ try {
     "server fixes private staging bucket and MIME");
   check(/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.jpg$/.test(staged.objectName),
     "server generates opaque staging path");
+  check((await value(student, "select public.list_own_progress_photo_uploads() as value"))
+    .some((upload) => upload.uploadId === staged.uploadId && upload.status === "reservada"),
+  "owner sees current reservation state");
+  check((await value(unlinked, "select public.list_own_progress_photo_uploads() as value")).length === 0,
+    "another Student cannot list owner's reservations");
+  await expectCode(value(coach, "select public.list_own_progress_photo_uploads() as value"),
+    "42501", "Coach cannot list student reservations");
+  await expectCode(value(anonymous, "select public.list_own_progress_photo_uploads() as value"),
+    "42501", "anonymous cannot list reservations");
+  check(await value(admin, `select has_table_privilege('authenticated',
+    'private.progress_photo_uploads', 'SELECT') as value`) === false,
+  "client has no direct private upload table grant");
+  check(await value(admin, `select has_table_privilege('authenticated',
+    'private.progress_photo_uploads', 'UPDATE') as value`) === false,
+  "client cannot alter server-recorded upload pose");
   await expectCode(unlinked.query(
     "insert into storage.objects(bucket_id,name) values($1,$2)",
     [staged.bucketId, staged.objectName]), "42501", "other Student cannot write staging");
@@ -467,6 +488,9 @@ try {
   check(await value(student,
     "select public.finalize_own_progress_photo_upload($1::uuid) as value", [staged.uploadId])
     === staged.uploadId, "Student queues only own reservation");
+  check((await value(student, "select public.list_own_progress_photo_uploads() as value"))
+    .some((upload) => upload.uploadId === staged.uploadId && upload.status === "en_cola"),
+  "owner sees queued state");
   await expectCode(value(student,
     "select public.finalize_own_progress_photo_upload($1::uuid) as value", [staged.uploadId]),
     "42501", "queue replay is denied");
@@ -476,6 +500,9 @@ try {
     "select public.claim_progress_photo_for_verification() as value");
   check(claimed.uploadId === staged.uploadId && claimed.stagingPath === staged.objectName,
     "publisher claims only queued reservation");
+  check((await value(student, "select public.list_own_progress_photo_uploads() as value"))
+    .some((upload) => upload.uploadId === staged.uploadId && upload.status === "procesando"),
+  "owner sees processing state");
   check(await value(publisher,
     "select public.claim_progress_photo_for_verification() as value") === null,
     "publisher claim cannot replay processing reservation");
@@ -499,6 +526,12 @@ try {
   const publishedAssetId = await value(publisher,
     "select public.publish_verified_progress_photo($1::uuid,1024,100,200) as value",
     [staged.uploadId]);
+  const publishedUploads = await value(student, "select public.list_own_progress_photo_uploads() as value");
+  check(publishedUploads.some((upload) => upload.uploadId === staged.uploadId
+    && upload.status === "publicada" && upload.assetId === publishedAssetId),
+  "owner sees published status and only its own asset ID");
+  check(await value(admin, "select count(*)::int as value from private.progress_check_photos where photo_asset_id=$1",
+    [publishedAssetId]) === 0, "publisher leaves sanitized photo unassigned to any check");
   check(await value(student, "select count(*)::int as value from storage.objects where bucket_id='progress-check-photos' and name=$1",
     [claimed.finalPath]) === 1, "Student reads published private final photo");
   check(await value(coach, "select count(*)::int as value from storage.objects where bucket_id='progress-check-photos' and name=$1",
@@ -513,6 +546,27 @@ try {
     [claimed.finalPath])).rowCount === 0, "publisher cannot delete historical final asset");
   check((await student.query("delete from storage.objects where bucket_id='progress-check-photos' and name=$1",
     [claimed.finalPath])).rowCount === 0, "broad policy cannot delete historical final asset");
+  async function publishAdditionalPhoto(pose) {
+    const reservation = await value(student,
+      "select public.begin_own_progress_photo_upload($1,'jpeg') as value", [pose]);
+    await student.query("insert into storage.objects(bucket_id,name) values($1,$2)",
+      [reservation.bucketId, reservation.objectName]);
+    await value(student, "select public.finalize_own_progress_photo_upload($1::uuid) as value",
+      [reservation.uploadId]);
+    const candidate = await value(publisher, "select public.claim_progress_photo_for_verification() as value");
+    check(candidate.uploadId === reservation.uploadId, `publisher claims ${pose} reservation`);
+    await publisher.query("insert into storage.objects(bucket_id,name) values('progress-check-photos',$1)",
+      [candidate.finalPath]);
+    await publisher.query("delete from storage.objects where bucket_id=$1 and name=$2",
+      [reservation.bucketId, reservation.objectName]);
+    const assetId = await value(publisher,
+      "select public.publish_verified_progress_photo($1::uuid,1024,100,200) as value",
+      [reservation.uploadId]);
+    return { assetId, path: candidate.finalPath };
+  }
+  const samePosePhoto = await publishAdditionalPhoto("frente");
+  const profilePhoto = await publishAdditionalPhoto("perfil");
+  const backPhoto = await publishAdditionalPhoto("espalda");
   const pendingStage = await value(student,
     "select public.begin_own_progress_photo_upload('perfil','jpeg') as value");
   await student.query("insert into storage.objects(bucket_id,name) values($1,$2)",
@@ -543,6 +597,9 @@ try {
   check(await value(admin,
     "select state as value from private.progress_photo_uploads where id=$1", [expiredStage.uploadId])
     === "cleaned", "expired staging cleanup completes without final deletion");
+  check((await value(student, "select public.list_own_progress_photo_uploads() as value"))
+    .some((upload) => upload.uploadId === expiredStage.uploadId && upload.status === "fallida"),
+  "expired and cleaned reservation is displayed as failed");
   await value(student, "select public.begin_own_progress_photo_upload('frente','jpeg') as value");
   await value(student, "select public.begin_own_progress_photo_upload('espalda','webp') as value");
   await expectCode(value(student,
@@ -667,6 +724,90 @@ try {
     "recipient Coach reads selected PDF while linked");
   check((await value(coach, "select public.get_own_coach_progress_report($1::uuid) as value", [report.id])).id === report.id,
     "Coach direct report access is allowed while linked");
+  stage = "student photo gateway ownership and check creation";
+  const ownerPhotos = await value(student, "select public.list_own_progress_photos() as value");
+  check(ownerPhotos.some((photo) => photo.assetId === publishedAssetId)
+    && ownerPhotos.some((photo) => photo.assetId === ids.photo)
+    && ownerPhotos.every((photo) => photo.assetId !== ids.pendingPhoto && photo.assetId !== ids.endedPhoto),
+  "Student lists only own available sanitized photos");
+  check(ownerPhotos.some((photo) => photo.assetId === publishedAssetId
+    && photo.pose === "frente" && photo.checkId === null),
+  "unassigned published photo exposes SQL-derived pose and no check ID");
+  check(ownerPhotos.some((photo) => photo.assetId === ids.photo && photo.checkId === ids.check),
+    "historical photo remains associated with its original check");
+  check((await value(student, "select public.get_own_progress_photo($1::uuid) as value", [ids.photo])).objectName === paths.photo,
+    "owner obtains final Storage path through an authorized detail RPC");
+  await expectCode(value(unlinked, "select public.get_own_progress_photo($1::uuid) as value", [ids.photo]),
+    "42501", "another Student cannot read direct photo detail");
+  await expectCode(value(coach, "select public.get_own_progress_photo($1::uuid) as value", [ids.photo]),
+    "42501", "Coach cannot read unshared photo detail");
+  await expectCode(value(coach, "select public.list_own_progress_photos() as value"),
+    "42501", "Coach receives no new list surface");
+  const checkedOn = await value(admin,
+    "select (clock_timestamp() at time zone 'America/Santiago')::date::text as value");
+  await expectCode(value(unlinked,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value", [checkedOn, [ids.photo]]),
+    "42501", "unlinked Student cannot create a check");
+  await expectCode(value(coach,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value", [checkedOn, [ids.photo]]),
+    "42501", "Coach cannot create a student check");
+  await expectCode(value(student,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value", [checkedOn, [ids.endedPhoto]]),
+    "42501", "other Student asset ID is denied");
+  await expectCode(value(student,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value", [checkedOn, [ids.pendingPhoto]]),
+    "42501", "unpublished asset is denied");
+  await expectCode(value(student,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value", [checkedOn, [ids.photo]]),
+    "42501", "historical asset already in a check cannot be reused");
+  await expectCode(value(student,
+    "select public.create_own_progress_check('2026-02-30',$1::uuid[]) as value", [[ids.photo]]),
+    "22023", "invalid calendar date is denied");
+  await expectCode(value(student,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value", [checkedOn, [publishedAssetId, publishedAssetId]]),
+    "22023", "duplicate photo is denied");
+  await expectCode(value(student,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value",
+    [checkedOn, [publishedAssetId, samePosePhoto.assetId, profilePhoto.assetId, backPhoto.assetId]]),
+    "22023", "more than three photos is denied before asset lookup");
+  await expectCode(value(student,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value",
+    [checkedOn, [publishedAssetId, samePosePhoto.assetId]]),
+    "22023", "two distinct photos with the same pose cannot form a check");
+  const customCheck = await value(student,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value",
+    [checkedOn, [publishedAssetId, profilePhoto.assetId, backPhoto.assetId]]);
+  check(customCheck.checkedOn === checkedOn && customCheck.id,
+    "Student creates check with three own published photos and SQL-derived ownership");
+  const ownChecks = await value(student, "select public.list_own_progress_checks() as value");
+  check(ownChecks.some((entry) => entry.id === customCheck.id && entry.photos.length === 3
+    && entry.photos[0].objectName === claimed.finalPath
+    && entry.photos.map((photo) => photo.pose).join(",") === "frente,perfil,espalda"),
+  "one check contains the three photos with distinct server-derived poses");
+  check(ownChecks.filter((entry) => entry.photos.some((photo) =>
+    [publishedAssetId, profilePhoto.assetId, backPhoto.assetId].includes(photo.assetId))).length === 1,
+  "new three-photo check is the only visible check for its assets");
+  check(await value(admin, `select count(*)::int as value from private.progress_check_photos
+    where photo_asset_id = any($1::uuid[])`,
+  [[publishedAssetId, profilePhoto.assetId, backPhoto.assetId]]) === 3,
+  "three selected assets each have exactly one check association");
+  await expectCode(value(student,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value", [checkedOn, [publishedAssetId]]),
+    "42501", "photo already assigned to new check cannot be reused");
+  const singlePhotoCheck = await value(student,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value", [checkedOn, [samePosePhoto.assetId]]);
+  check(singlePhotoCheck.id !== customCheck.id, "another unassigned photo creates one separate check");
+  check((await value(endedStudent, "select public.list_own_progress_checks() as value"))
+    .some((entry) => entry.id === ids.endedCheck),
+  "unlinked Student retains own historical check");
+  await expectCode(value(coach, "select public.list_own_progress_checks() as value"),
+    "42501", "Coach cannot list check history");
+  const laterReport = await value(student,
+    "select public.create_own_progress_report('photos',$1::uuid[],null,$2::uuid) as value",
+    [[publishedAssetId, samePosePhoto.assetId], randomUUID()]);
+  check(laterReport.items.length === 2 && laterReport.items[0].checkId === customCheck.id
+    && laterReport.items[1].checkId === singlePhotoCheck.id,
+  "report selects photos from two distinct checks without reusing check assets");
   await expectCode(
     value(unlinked, "select public.get_own_student_progress_report($1::uuid) as value", [report.id]),
     "42501",
@@ -718,6 +859,12 @@ try {
   await expectCode(value(student,
     "select public.finalize_own_progress_photo_upload($1::uuid) as value", [pendingStage.uploadId]),
     "42501", "unlinked Student cannot finalize staging");
+  await expectCode(value(student,
+    "select public.create_own_progress_check($1,$2::uuid[]) as value", [checkedOn, [publishedAssetId]]),
+    "42501", "revoked relationship blocks new checks");
+  check((await value(student, "select public.list_own_progress_checks() as value"))
+    .some((entry) => entry.id === customCheck.id),
+  "historical checks remain readable after relationship revocation");
   check((await value(student, "select public.get_own_student_progress_report($1::uuid) as value", [report.id])).id === report.id,
     "persisted student session retains its own historical report");
   check((await value(student, "select public.get_own_student_progress_report($1::uuid) as value", [documentReport.id])).id === documentReport.id,
@@ -820,6 +967,14 @@ try {
   "previously issued publisher token stays denied after replacement");
 
   stage = "staging cleanup in disposable local cluster";
+  for (const signature of [
+    "public.list_own_progress_photo_uploads(integer,integer)",
+    "public.list_own_progress_photos(integer,integer)",
+    "public.get_own_progress_photo(uuid)",
+    "public.list_own_progress_checks(integer,integer)",
+    "public.create_own_progress_check(text,uuid[])",
+  ]) await admin.query(`drop function ${signature}`);
+  await admin.query("drop function private.require_own_progress_photo_reader()");
   await admin.query("delete from storage.objects where bucket_id='progress-check-staging'");
   await admin.query("drop policy \"progress photo staging insert\" on storage.objects");
   await admin.query("drop policy \"progress photo staging owner read\" on storage.objects");

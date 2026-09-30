@@ -98,6 +98,8 @@ const PROGRESS_PHOTO_STAGE_VOLATILITY_MIGRATION_PATH =
   "supabase/migrations/20260925004129_progress_photo_stage_volatility.sql";
 const PROGRESS_PHOTO_SELECT_VOLATILITY_MIGRATION_PATH =
   "supabase/migrations/20260925012214_progress_photo_select_volatility.sql";
+const PROGRESS_PHOTO_STUDENT_GATEWAY_MIGRATION_PATH =
+  "supabase/migrations/20260930163231_progress_photo_student_gateway.sql";
 const REMOVED_CLOUDINARY_PHOTO_MIGRATION_PATH =
   "supabase/migrations/20260924130000_progress_cloudinary_photo_ingest.sql";
 
@@ -544,7 +546,10 @@ function auditNoPrematureEmail(sources: Sources) {
   );
 }
 
-function auditProhibitedArtifacts(sources: Sources) {
+function auditProhibitedArtifacts(
+  sources: Sources,
+  changedEntriesOverride?: readonly { readonly status: string; readonly path: string }[],
+) {
   const packageJson = JSON.parse(sources.packageJson) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
@@ -554,7 +559,7 @@ function auditProhibitedArtifacts(sources: Sources) {
     ...(packageJson.devDependencies ?? {}),
   });
   const status = spawnSync("git", ["status", "--porcelain=v1"], { encoding: "utf8" });
-  const changedEntries = (status.stdout ?? "")
+  const changedEntries = changedEntriesOverride ?? (status.stdout ?? "")
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => ({
@@ -627,6 +632,7 @@ function auditProhibitedArtifacts(sources: Sources) {
         && path !== PROGRESS_PHOTO_STAGING_MIGRATION_PATH
         && path !== PROGRESS_PHOTO_STAGE_VOLATILITY_MIGRATION_PATH
         && path !== PROGRESS_PHOTO_SELECT_VOLATILITY_MIGRATION_PATH
+        && path !== PROGRESS_PHOTO_STUDENT_GATEWAY_MIGRATION_PATH
         && !(path === REMOVED_CLOUDINARY_PHOTO_MIGRATION_PATH && entryStatus === " D")
         && !(
           contactMigrationRenameInProgress
@@ -1048,6 +1054,22 @@ test("contrato Coach Portal tolera comentarios, formato y renombres válidos", (
     assertValidSource(transformed, SOURCE_PATHS[control.source]);
     auditIntegration({ ...sources, [control.source]: transformed });
   }
+});
+
+test("allowlist permite sólo la migración gateway declarada y rechaza una vecina", () => {
+  const sources = readSources();
+  assert.equal(existsSync(PROGRESS_PHOTO_STUDENT_GATEWAY_MIGRATION_PATH), true);
+  auditProhibitedArtifacts(sources, [{
+    status: "??", path: PROGRESS_PHOTO_STUDENT_GATEWAY_MIGRATION_PATH,
+  }]);
+  assert.throws(
+    () => auditProhibitedArtifacts(sources, [{
+      status: "??",
+      path: "supabase/migrations/20260930163232_progress_photo_student_gateway.sql",
+    }]),
+    (error: unknown) => error instanceof assert.AssertionError
+      && error.message.split(/\r?\n/, 1)[0] === FAILURE.prohibitedArtifact,
+  );
 });
 
 function assertMutationContract(
