@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Pencil, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   EvaluationRepositoryError,
@@ -35,11 +35,13 @@ export function StudentEvaluations({
   notificationOpenRequest,
   onNotificationOpenRequestConsumed,
   onBack,
+  progressPhotos,
 }: {
   readonly expectedUserId: string;
   readonly notificationOpenRequest: EvaluationOpenRequest | null;
   readonly onNotificationOpenRequestConsumed: (request: EvaluationOpenRequest) => void;
   readonly onBack: () => void;
+  readonly progressPhotos?: ReactNode;
 }) {
   const [assignments, setAssignments] = useState<readonly StudentEvaluationAssignment[]>([]);
   const [view, setView] = useState<StudentView>("list");
@@ -203,6 +205,7 @@ export function StudentEvaluations({
   return (
     <section className={styles.screen} aria-labelledby="student-evaluations-title">
       <div><AppBackButton onBack={returnToPreviousEvaluationView} /></div>
+      {view === "list" ? progressPhotos : null}
       {loading ? <div className={styles.loading} role="status">Cargando tus evaluaciones…</div> : null}
       {!loading && loadError ? <div className={styles.error} role="alert"><div><p>{loadError}</p><button className={styles.button} type="button" onClick={() => void load()}>Reintentar</button></div></div> : null}
       {!loading && !loadError && view === "list" ? (

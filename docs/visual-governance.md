@@ -140,3 +140,17 @@ Max continúan pendientes. El diseño y el copy ya fueron aprobados por el dueñ
 commit técnico realizado por el dueño puede utilizarse para generar Preview, pero
 Preview, merge y producción permanecen bloqueados hasta que el dueño registre
 `PASS` de QA visual/manual.
+
+## Registro trazable PROGRESS-PHOTOS-4B
+
+- Clasificación principal: `Cambio visual aprobado`.
+- Pantalla: Evaluaciones del Alumno, únicamente con vínculo Coach–Alumno activo.
+- Ubicación: sección Fotos de progreso dentro de Evaluaciones.
+- Alcance aprobado: selección de 1 a 3 fotos, carga privada, estados reales de procesamiento, historial propio de fotos/checks y creación de checks sólo con fotos publicadas.
+- Fuera de alcance: documentos PDF, reportes Coach, notificaciones, email y cambios en producción.
+- Aprobador: Dueño de producto.
+- Fecha: 2026-09-30.
+- Referencia: autorización explícita del dueño en esta conversación para implementar la UI Fase 4B.
+- Canvas: `#07101A`.
+- Mobile-first: Sí.
+- QA pendiente: iPhone 15 Pro Max en entorno QA tras integración.

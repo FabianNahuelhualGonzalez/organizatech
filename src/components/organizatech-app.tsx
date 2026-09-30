@@ -107,6 +107,7 @@ import {
 import { DashboardScreen } from "@/features/dashboard/components/dashboard-screen";
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
 import { StudentEvaluations } from "@/features/evaluations/components/student-evaluations";
+import { StudentProgressPhotos } from "@/features/progress-records/components/student-progress-photos";
 import { useEvaluationNotifications } from "@/features/evaluations/hooks/use-evaluation-notifications";
 import {
   canAccessStudentEvaluations,
@@ -5156,6 +5157,7 @@ export function OrganizatechApp({
       {screen === "evaluaciones" && supabaseUser?.id && hasStudentEvaluationsAccess && (
         <StudentEvaluations
           expectedUserId={supabaseUser.id}
+          progressPhotos={<StudentProgressPhotos key={supabaseUser.id} />}
           notificationOpenRequest={studentEvaluationOpenRequest}
           onNotificationOpenRequestConsumed={(request) => {
             setStudentEvaluationOpenRequest((current) => (
