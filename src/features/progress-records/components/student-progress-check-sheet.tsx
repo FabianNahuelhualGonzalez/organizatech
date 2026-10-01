@@ -108,6 +108,7 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
   }
 
   const preparing = POSES.some((pose) => slots[pose]?.status === "preparando");
+  const preparationFailed = POSES.some((pose) => slots[pose]?.status === "error");
   const ready = POSES.flatMap((pose) => slots[pose]?.prepared ? [{ pose, prepared: slots[pose].prepared }] : []);
   return <div className={styles.sheetOverlay}>
     <button className={styles.sheetScrim} type="button" aria-label="Cerrar nuevo check" disabled={saving} onClick={requestClose} />
@@ -140,6 +141,7 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
       </div>
       <div className={styles.sheetFooter}>
         {status ? <p className={styles.sheetStatus} role="status">{status}</p> : null}
+        {preparationFailed ? <p className={styles.sheetError} role="alert">No pudimos abrir esta imagen. Prueba con una foto JPG o PNG.</p> : null}
         {error ? <p className={styles.sheetError} role="alert">{error}</p> : null}
         <button className={styles.sheetSave} type="button" disabled={ready.length === 0 || preparing || saving} onClick={() => onSave(ready)}>{saving ? "Guardando check…" : "Guardar check"}</button>
       </div>

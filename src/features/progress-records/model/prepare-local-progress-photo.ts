@@ -38,12 +38,92 @@ function encode(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
   });
 }
 
+type DecodedImage = {
+  readonly source: CanvasImageSource;
+  readonly width: number;
+  readonly height: number;
+  readonly release: () => void;
+};
+
+function validDimensions(width: number, height: number): boolean {
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0;
+}
+
+function decodeWithImage(file: File): Promise<DecodedImage> {
+  return new Promise((resolve, reject) => {
+    let image: HTMLImageElement;
+    let url: string;
+    try {
+      image = new Image();
+      url = URL.createObjectURL(file);
+    } catch {
+      reject(new Error("progress_photo_decode_failed"));
+      return;
+    }
+
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      image.onload = null;
+      image.onerror = null;
+      image.onabort = null;
+      try {
+        image.src = "";
+      } catch {
+        // Revocation still has to run if clearing the image source fails.
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    };
+    const fail = () => {
+      release();
+      reject(new Error("progress_photo_decode_failed"));
+    };
+    image.onload = () => {
+      const width = image.naturalWidth;
+      const height = image.naturalHeight;
+      if (!validDimensions(width, height)) {
+        fail();
+        return;
+      }
+      image.onload = null;
+      image.onerror = null;
+      image.onabort = null;
+      resolve({ source: image, width, height, release });
+    };
+    image.onerror = fail;
+    image.onabort = fail;
+    try {
+      image.src = url;
+    } catch {
+      fail();
+    }
+  });
+}
+
+async function decode(file: File): Promise<DecodedImage> {
+  if (typeof createImageBitmap === "function") {
+    let bitmap: ImageBitmap | undefined;
+    try {
+      bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+      if (validDimensions(bitmap.width, bitmap.height)) {
+        const decodedBitmap = bitmap;
+        return { source: decodedBitmap, width: decodedBitmap.width, height: decodedBitmap.height, release: () => decodedBitmap.close() };
+      }
+    } catch {
+      // Safari can expose createImageBitmap while failing to decode a selected file.
+    }
+    bitmap?.close();
+  }
+  return decodeWithImage(file);
+}
+
 // This prepares a local candidate. Server authorization must never treat the
 // returned MIME, dimensions, size, or metadata check as proof of sanitization.
 export async function prepareLocalProgressPhoto(file: File): Promise<PreparedProgressPhoto> {
-  const image = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const image = await decode(file);
   try {
-    if (image.width < 1 || image.height < 1) throw new Error("progress_photo_decode_failed");
     let scale = Math.min(1, 4096 / Math.max(image.width, image.height));
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const width = Math.max(1, Math.round(image.width * scale));
@@ -55,7 +135,7 @@ export async function prepareLocalProgressPhoto(file: File): Promise<PreparedPro
       if (!context) throw new Error("progress_photo_encode_failed");
       context.fillStyle = "#ffffff";
       context.fillRect(0, 0, width, height);
-      context.drawImage(image, 0, 0, width, height);
+      context.drawImage(image.source, 0, 0, width, height);
       for (const quality of [0.94, 0.88, 0.82]) {
         const blob = await encode(canvas, quality);
         if (blob.size > PROGRESS_PHOTO_MAX_BYTES) continue;
@@ -68,6 +148,6 @@ export async function prepareLocalProgressPhoto(file: File): Promise<PreparedPro
     }
     throw new Error("progress_photo_encode_failed");
   } finally {
-    image.close();
+    image.release();
   }
 }
