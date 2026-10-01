@@ -9,8 +9,8 @@ import {
   type StudentPhotoUpload,
   type StudentPublishedPhoto,
 } from "../data/student-progress-photo-gateway";
-import { prepareLocalProgressPhoto } from "../model/prepare-local-progress-photo";
 import type { ProgressPhotoPose } from "../model/progress-records-contract";
+import { StudentProgressCheckSheet, type ProgressCheckSheetPhoto } from "./student-progress-check-sheet";
 
 import styles from "./student-progress-photos.module.css";
 
@@ -31,7 +31,7 @@ const STATUS: Readonly<Record<StudentPhotoUpload["status"], string>> = {
   publicada: "Publicada",
   fallida: "Error",
 };
-type Draft = { readonly id: number; readonly file: File; readonly pose: ProgressPhotoPose; readonly status: "seleccionada" | "preparación" | "subida" | "error" };
+type QueuedPhoto = { readonly pose: ProgressPhotoPose; readonly uploadId: string };
 
 function todayInChile(): string {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -52,6 +52,8 @@ function message(error: unknown): string {
 export function StudentProgressPhotos() {
   const surfaceRef = useRef<HTMLElement>(null);
   const viewerCloseRef = useRef<HTMLButtonElement>(null);
+  const newCheckButtonRef = useRef<HTMLButtonElement>(null);
+  const queuedPhotosRef = useRef<Partial<Record<ProgressPhotoPose, QueuedPhoto>>>({});
   const [guideOpen, setGuideOpen] = useState(false);
   const guideInitializedRef = useRef(false);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -66,8 +68,8 @@ export function StudentProgressPhotos() {
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useState("");
-  const [drafts, setDrafts] = useState<readonly Draft[]>([]);
-  const [selected, setSelected] = useState<readonly string[]>([]);
+  const [sheetError, setSheetError] = useState("");
+  const [sheetStatus, setSheetStatus] = useState("");
   const [checkedOn, setCheckedOn] = useState(todayInChile);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -95,7 +97,6 @@ export function StudentProgressPhotos() {
       }
       setPhotosMore(photoPages.at(-1)?.length === PAGE_SIZE);
       setChecksMore(checkPages.at(-1)?.length === PAGE_SIZE);
-      setSelected((current) => current.filter((id) => nextPhotos.some((photo) => photo.assetId === id && photo.checkId === null)));
     } catch (error) { setLoadError(message(error)); }
     finally { if (showLoading) setLoading(false); }
   }, []);
@@ -103,47 +104,82 @@ export function StudentProgressPhotos() {
   useEffect(() => { void load(true); }, [load]);
   useEffect(() => { if (viewer) viewerCloseRef.current?.focus(); }, [viewer]);
   useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 2800);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+  useEffect(() => {
     if (!uploads.some((upload) => upload.status === "reservada" || upload.status === "en_cola" || upload.status === "procesando")) return;
     const timer = window.setTimeout(() => { void load(); }, 10000);
     return () => window.clearTimeout(timer);
   }, [uploads, load]);
   useEffect(() => () => { if (viewer) URL.revokeObjectURL(viewer.url); }, [viewer]);
+  useEffect(() => {
+    if (!composerOpen) return;
+    const scroll = surfaceRef.current?.closest<HTMLElement>("#student-evaluations-content");
+    const previousScrollOverflow = scroll?.style.overflowY ?? "";
+    const previousBodyOverflow = document.body.style.overflow;
+    if (scroll) scroll.style.overflowY = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      if (scroll) scroll.style.overflowY = previousScrollOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [composerOpen]);
 
-  function setDraftStatus(id: number, status: Draft["status"]) {
-    setDrafts((current) => current.map((draft) => draft.id === id ? { ...draft, status } : draft));
+  function closeCheckSheet() {
+    setComposerOpen(false);
+    setSheetError("");
+    setSheetStatus("");
+    queuedPhotosRef.current = {};
+    window.requestAnimationFrame(() => newCheckButtonRef.current?.focus());
   }
 
-  function chooseFiles(files: FileList | null) {
-    setActionError("");
-    if (!files?.length) return;
-    if (files.length > 3) { setActionError("Selecciona entre 1 y 3 fotos."); return; }
-    setDrafts(Array.from(files, (file, index) => ({ id: index, file, pose: POSES[index], status: "seleccionada" as const })));
-  }
-
-  async function upload() {
-    if (busyRef.current || drafts.length < 1 || drafts.length > 3) return;
+  async function saveNewCheck(sheetPhotos: readonly ProgressCheckSheetPhoto[]) {
+    if (busyRef.current || sheetPhotos.length < 1 || sheetPhotos.length > 3) return;
     busyRef.current = true;
     setBusy(true);
-    setActionError("");
+    setSheetError("");
     try {
       const gateway = getStudentProgressPhotoGateway();
-      for (const draft of drafts) {
-        if (draft.status !== "seleccionada" && draft.status !== "error") continue;
-        try {
-          setDraftStatus(draft.id, "preparación");
-          const prepared = await prepareLocalProgressPhoto(draft.file);
-          const reservation = await gateway.reserve(draft.pose, "jpeg");
-          setDraftStatus(draft.id, "subida");
-          await gateway.stage(reservation.uploadId, prepared.blob);
-          await gateway.enqueue(reservation.uploadId);
-          setDrafts((current) => current.filter((item) => item.id !== draft.id));
-        } catch (error) {
-          setDraftStatus(draft.id, "error");
-          setActionError(error instanceof StudentProgressPhotoGatewayError ? message(error) : "No pudimos preparar esta imagen. Prueba con una foto que tu navegador pueda abrir.");
-        }
+      for (const [index, photo] of sheetPhotos.entries()) {
+        if (queuedPhotosRef.current[photo.pose]) continue;
+        setSheetStatus(`Subiendo foto ${index + 1} de ${sheetPhotos.length}…`);
+        const reservation = await gateway.reserve(photo.pose, "jpeg");
+        await gateway.stage(reservation.uploadId, photo.prepared.blob);
+        await gateway.enqueue(reservation.uploadId);
+        queuedPhotosRef.current[photo.pose] = { pose: photo.pose, uploadId: reservation.uploadId };
       }
       await load();
-    } catch (error) { setActionError(message(error)); }
+      const uploadIds = sheetPhotos.map((photo) => queuedPhotosRef.current[photo.pose]?.uploadId);
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const recent = await gateway.listUploads(100);
+        const matching = uploadIds.map((uploadId) => recent.find((upload) => upload.uploadId === uploadId));
+        if (matching.some((upload) => upload?.status === "fallida")) {
+          for (const photo of sheetPhotos) {
+            const queued = queuedPhotosRef.current[photo.pose];
+            if (matching.some((upload) => upload?.uploadId === queued?.uploadId && upload?.status === "fallida")) delete queuedPhotosRef.current[photo.pose];
+          }
+          throw new Error("Una foto no pudo publicarse. Reintenta el guardado.");
+        }
+        const publishedAssetIds = matching.map((upload) => upload?.status === "publicada" ? upload.assetId : null);
+        if (publishedAssetIds.every((assetId): assetId is string => typeof assetId === "string")) {
+          setSheetStatus("Creando check…");
+          await gateway.createCheck(checkedOn, publishedAssetIds);
+          setNotice("Check guardado");
+          setGuideOpen(false);
+          closeCheckSheet();
+          await load();
+          return;
+        }
+        setSheetStatus(matching.some((upload) => upload?.status === "procesando") ? "Procesando fotos…" : "Fotos en cola…");
+        await new Promise((resolve) => window.setTimeout(resolve, 3000));
+      }
+      throw new Error("Las fotos siguen procesándose. Reintenta el guardado en esta hoja.");
+    } catch (error) {
+      setSheetStatus("");
+      setSheetError(error instanceof StudentProgressPhotoGatewayError ? message(error) : error instanceof Error ? error.message : message(error));
+    }
     finally { busyRef.current = false; setBusy(false); }
   }
 
@@ -167,38 +203,6 @@ export function StudentProgressPhotos() {
       }
     } catch (error) { setActionError(message(error)); }
     finally { busyRef.current = false; setBusy(false); }
-  }
-
-  async function createCheck() {
-    if (busyRef.current || !checkedOn || checkedOn > todayInChile() || selected.length < 1 || selected.length > 3) return;
-    const chosen = selected.map((id) => photos.find((photo) => photo.assetId === id));
-    if (chosen.some((photo) => !photo || photo.checkId !== null || !photo.pose) || new Set(chosen.map((photo) => photo?.pose)).size !== chosen.length) return;
-    busyRef.current = true;
-    setBusy(true);
-    setActionError("");
-    try {
-      await getStudentProgressPhotoGateway().createCheck(checkedOn, [...selected]);
-      setSelected([]);
-      setNotice("Check creado.");
-      setComposerOpen(false);
-      setGuideOpen(false);
-      await load();
-    } catch (error) { setActionError(message(error)); }
-    finally { busyRef.current = false; setBusy(false); }
-  }
-
-  function togglePhoto(photo: StudentPublishedPhoto) {
-    if (!photo.pose || photo.checkId !== null) return;
-    setActionError("");
-    if (selected.includes(photo.assetId)) {
-      setSelected(selected.filter((id) => id !== photo.assetId));
-      return;
-    }
-    if (selected.length >= 3 || selected.some((id) => photos.find((item) => item.assetId === id)?.pose === photo.pose)) {
-      setActionError("Elige hasta 3 fotos con poses distintas.");
-      return;
-    }
-    setSelected([...selected, photo.assetId]);
   }
 
   async function openPhoto(assetId: string) {
@@ -236,9 +240,8 @@ export function StudentProgressPhotos() {
     window.requestAnimationFrame(() => surfaceRef.current?.focus());
   }
 
-  const available = photos.filter((photo) => photo.checkId === null && photo.pose !== null);
   const noContent = checks.length === 0 && uploads.length === 0 && photos.length === 0;
-  const newCheckButton = <button className={styles.newCheckButton} type="button" aria-expanded={composerOpen} onClick={() => setComposerOpen((current) => !current)}>+ Nuevo check</button>;
+  const newCheckButton = <button ref={newCheckButtonRef} className={styles.newCheckButton} type="button" aria-expanded={composerOpen} onClick={() => { setCheckedOn(todayInChile()); setSheetError(""); setSheetStatus(""); setComposerOpen(true); }}>+ Nuevo check</button>;
   const privacyNote = <p className={styles.privacy}><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg><span>Tus fotos son privadas. Solo tú puedes verlas aquí.</span></p>;
   return (
     <section ref={surfaceRef} tabIndex={-1} className={styles.surface} aria-label="Fotos de progreso">
@@ -260,27 +263,24 @@ export function StudentProgressPhotos() {
           {newCheckButton}
           <div className={styles.emptyPrivacy}>{privacyNote}</div>
         </div> : <>{newCheckButton}{privacyNote}</>}
-        {composerOpen ? <div className={styles.card}>
-          <h4>Nueva carga</h4>
-          <p>Selecciona de 1 a 3 fotos. Las prepararemos antes de subirlas.</p>
-          <label className={styles.fileLabel}>Elegir fotos<input type="file" accept="image/*" multiple disabled={busy} onChange={(event) => { chooseFiles(event.target.files); event.target.value = ""; }} /></label>
-          {drafts.map((draft) => <div className={styles.draft} key={draft.id}><span className={styles.fileName}>{draft.file.name}</span><label>Pose<select value={draft.pose} disabled={busy} onChange={(event) => setDrafts((current) => current.map((item) => item.id === draft.id ? { ...item, pose: event.target.value as ProgressPhotoPose } : item))}>{POSES.map((pose) => <option value={pose} key={pose}>{pose}</option>)}</select></label><span role="status">{draft.status === "seleccionada" ? "Lista" : draft.status === "preparación" ? "Preparación" : draft.status === "subida" ? "Subida" : "Error"}</span></div>)}
-          {drafts.length > 0 ? <button className={styles.primary} type="button" disabled={busy} onClick={() => void upload()}>{drafts.some((draft) => draft.status === "error") ? "Reintentar carga" : "Subir fotos"}</button> : null}
-        </div> : null}
         {actionError ? <p className={styles.error} role="alert">{actionError}</p> : null}
-        {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
-        {checks.length > 0 ? <section className={styles.historySection} aria-label="Checks">
-          <h4>Checks</h4>
+        {checks.length > 0 ? <section className={styles.historySection} aria-label="Mis checks">
+          <h4>Mis checks</h4>
           <div className={styles.group}>{checks.map((check) => <article className={styles.check} key={check.id}>
             <div className={styles.checkHeading}><div><strong>Check · {check.checkedOn.split("-").reverse().join("/")}</strong><span>{check.photos.length} {check.photos.length === 1 ? "foto" : "fotos"}</span></div><span className={styles.privateBadge}>Solo tú</span></div>
-            <div className={styles.checkGrid}>{check.photos.map((photo) => <PrivateCheckPhoto key={photo.assetId} assetId={photo.assetId} pose={photo.pose} onOpen={() => void openPhoto(photo.assetId)} />)}</div>
+            <div className={styles.checkGrid}>{POSES.map((pose) => {
+              const photo = check.photos.find((item) => item.pose === pose);
+              return photo
+                ? <PrivateCheckPhoto key={pose} assetId={photo.assetId} pose={pose} onOpen={() => void openPhoto(photo.assetId)} />
+                : <div className={styles.missingTile} key={pose}><span>Falta</span><span className={styles.poseLabel}>{pose}</span></div>;
+            })}</div>
           </article>)}
           {checksMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("checks")}>Ver más checks</button> : null}</div>
         </section> : null}
         {uploads.length > 0 ? <section className={styles.historySection} aria-label="Cargas recientes"><h4>Cargas recientes</h4><div className={styles.group}>{uploads.map((item) => <div className={styles.row} key={item.uploadId}><span>{dateLabel(item.createdAt)} · {item.pose}</span><strong>{STATUS[item.status]}</strong></div>)}</div></section> : null}
-        {photos.length > 0 ? <section className={styles.historySection} aria-label="Mis fotos"><h4>Mis fotos</h4><div className={styles.group}>{photos.map((photo) => <div className={styles.row} key={photo.assetId}><div><strong>{photo.pose ?? "Foto"}</strong><span>{dateLabel(photo.availableAt)}</span></div><div className={styles.actions}><button className={styles.secondary} type="button" disabled={busy} onClick={() => void openPhoto(photo.assetId)}>Abrir</button>{photo.checkId === null && photo.pose ? <label className={styles.select}><input type="checkbox" checked={selected.includes(photo.assetId)} disabled={busy} onChange={() => togglePhoto(photo)} />Check</label> : null}</div></div>)}{photosMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("photos")}>Ver más fotos</button> : null}</div></section> : null}
-        {composerOpen && available.length > 0 ? <div className={styles.card}><h4>Crear check</h4><p>Elige de 1 a 3 fotos publicadas con poses distintas.</p><label className={styles.dateLabel}>Fecha<input type="date" value={checkedOn} max={todayInChile()} onChange={(event) => setCheckedOn(event.target.value)} /></label><button className={styles.primary} type="button" disabled={busy || selected.length === 0 || !checkedOn || checkedOn > todayInChile()} onClick={() => void createCheck()}>Crear check ({selected.length})</button></div> : null}
+        {photos.length > 0 ? <section className={styles.historySection} aria-label="Mis fotos"><h4>Mis fotos</h4><div className={styles.group}>{photos.map((photo) => <div className={styles.row} key={photo.assetId}><div><strong>{photo.pose ?? "Foto"}</strong><span>{dateLabel(photo.availableAt)}</span></div><div className={styles.actions}><button className={styles.secondary} type="button" disabled={busy} onClick={() => void openPhoto(photo.assetId)}>Abrir</button></div></div>)}{photosMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("photos")}>Ver más fotos</button> : null}</div></section> : null}
       </> : null}
+      {notice ? <p className={styles.toast} role="status">{notice}</p> : null}
       {viewer ? <div className={styles.viewer} role="dialog" aria-modal="true" aria-label="Foto de progreso" onKeyDown={handleViewerKeyDown}>
         <div className={styles.viewerPanel}>
           <button ref={viewerCloseRef} className={styles.secondary} type="button" onClick={closeViewer}>Cerrar foto</button>
@@ -291,6 +291,7 @@ export function StudentProgressPhotos() {
           )}
         </div>
       </div> : null}
+      {composerOpen ? <StudentProgressCheckSheet checkedOn={checkedOn} saving={busy} status={sheetStatus} error={sheetError} onClose={closeCheckSheet} onSlotChange={(pose) => { delete queuedPhotosRef.current[pose]; }} onSave={(sheetPhotos) => { void saveNewCheck(sheetPhotos); }} /> : null}
     </section>
   );
 }

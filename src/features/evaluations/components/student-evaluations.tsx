@@ -210,6 +210,7 @@ export function StudentEvaluations({
   return (
     <section className={`${styles.screen} ${styles.studentScreen}`} aria-labelledby="student-evaluations-title">
       <div className={styles.studentBack}><AppBackButton onBack={returnToPreviousEvaluationView} /></div>
+      <div id="student-evaluations-content" className={styles.studentScroll} role={view === "list" ? "tabpanel" : undefined}>
       {view === "list" ? (
         <>
           <header className={styles.studentIntro}>
@@ -229,17 +230,18 @@ export function StudentEvaluations({
               ))}
             </div>
           </div>
-          {section === "formularios" ? <div className={styles.studentTabs} role="tablist" aria-label="Estados de evaluaciones">
+          {section === "formularios" && !loading && !loadError && assignments.length > 0 ? <div className={styles.studentTabs} role="tablist" aria-label="Estados de evaluaciones">
             {(["pending", "expired", "completed"] as StudentTab[]).map((item) => <button className={styles.studentTab} data-active={tab === item} type="button" role="tab" aria-selected={tab === item} key={item} onClick={() => setTab(item)}>{item === "pending" ? "Pendientes" : item === "expired" ? "Vencidas" : "Completadas"} ({counts[item]})</button>)}
           </div> : null}
         </>
       ) : null}
 
-      <div id="student-evaluations-content" className={styles.studentScroll} role={view === "list" ? "tabpanel" : undefined}>
+      <div className={styles.studentContent}>
         {view === "list" && section === "formularios" ? (
           loading ? <div className={styles.loading} role="status">Cargando tus evaluaciones…</div>
             : loadError ? <div className={styles.error} role="alert"><div><p>{loadError}</p><button className={styles.button} type="button" onClick={() => void load()}>Reintentar</button></div></div>
-              : filtered.length === 0 ? <div className={styles.studentEmpty}>{tab === "pending" ? "No tienes evaluaciones pendientes" : tab === "expired" ? "No tienes evaluaciones vencidas" : "Aún no has completado evaluaciones"}</div>
+              : assignments.length === 0 ? <div className={styles.studentFirstEmpty}><strong>Aún no tienes evaluaciones</strong><p>Tu coach te enviará formularios sobre tu salud, alimentación o entrenamiento. Te avisaremos cuando llegue el primero.</p></div>
+                : filtered.length === 0 ? <div className={styles.studentEmpty}>{tab === "pending" ? "No tienes evaluaciones pendientes" : tab === "expired" ? "No tienes evaluaciones vencidas" : "Aún no has completado evaluaciones"}</div>
                 : <div className={styles.stack}>{filtered.map((assignment) => <button className={styles.studentAssignmentCard} type="button" disabled={busy} key={assignment.id} onClick={() => void openAssignment(assignment.id)}><div className={styles.studentAssignmentHeading}><strong>{assignment.snapshot.name}</strong><StatusBadge status={assignment.status} /></div><p className={styles.studentAssignmentMeta}>{assignment.coachName} · {assignment.dueAt ? `Vence: ${formatEvaluationDate(assignment.dueAt)}` : "Sin fecha límite"}</p></button>)}</div>
         ) : null}
         {view === "list" && section === "documentos" ? medicalDocuments : null}
@@ -257,6 +259,7 @@ export function StudentEvaluations({
       ) : null}
 
       {view === "success" && active ? <div className={styles.success}><Check size={42} color="#4ade80" /><h2 id="student-evaluations-title" className={styles.title}>Evaluación enviada</h2><p className={styles.muted}>Enviaste «{active.snapshot.name}» a {active.coachName}. Tu coach recibirá una notificación.</p><button className={styles.button} type="button" onClick={() => { setView("list"); setActive(null); }}>Volver a mis evaluaciones</button></div> : null}
+      </div>
       </div>
       {toast ? <div className={styles.toast} role="status">{toast}</div> : null}
     </section>

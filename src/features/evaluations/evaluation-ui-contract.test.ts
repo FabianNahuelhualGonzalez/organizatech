@@ -72,7 +72,7 @@ test("Mis evaluaciones conserva el guard y compone Formularios, Documentos y Fot
   assert.match(portalShell, /contextLabel=\{contextLabel\}/);
   assert.match(portalTopbar, /\{contextLabel \? <span className=\{styles\.brandContext\}>\{contextLabel\}<\/span> : null\}/);
   assert.match(student, /Mis evaluaciones[\s\S]*\["formularios", "documentos", "fotos"\]/);
-  assert.match(student, /section === "formularios" \? <div className=\{styles\.studentTabs\}/);
+  assert.match(student, /section === "formularios" && !loading && !loadError && assignments\.length > 0 \? <div className=\{styles\.studentTabs\}/);
   assert.match(student, /section === "documentos" \? medicalDocuments/);
   assert.match(student, /section === "fotos" \? progressPhotos/);
 });
@@ -98,9 +98,30 @@ test("Mis evaluaciones mantiene márgenes, estado vacío y textos aprobados", ()
   assert.match(css, /\.studentBack \{[\s\S]*padding: 12px 14px 0/);
   assert.match(css, /\.studentIntro \{[\s\S]*padding: 12px 16px 0/);
   assert.match(css, /\.studentSegmentWrap \{[\s\S]*padding: 14px 14px 0/);
-  assert.match(css, /\.studentScroll \{[\s\S]*padding: 16px 14px 20px/);
+  assert.match(css, /\.studentScroll \{[^}]*overflow-y: auto/);
+  assert.match(css, /\.studentContent \{[^}]*padding: 16px 14px 20px/);
   assert.match(css, /\.studentEmpty \{[\s\S]*min-height: 300px/);
+  const scroll = student.indexOf('id="student-evaluations-content"');
+  const sections = student.indexOf("className={styles.studentSegmentWrap}");
+  const content = student.indexOf("className={styles.studentContent}");
+  assert.ok(scroll >= 0 && scroll < sections && sections < content, "El selector se desplaza con el contenido");
+  assert.match(student, /assignments\.length === 0 \? <div className=\{styles\.studentFirstEmpty\}>/);
+  assert.match(student, /Aún no tienes evaluaciones/);
   for (const copy of ["No tienes evaluaciones pendientes", "No tienes evaluaciones vencidas", "Aún no has completado evaluaciones"]) {
     assert.ok(student.includes(copy));
   }
+});
+
+test("Nuevo check usa hoja privada y espera fotos publicadas", () => {
+  const photos = readFileSync("src/features/progress-records/components/student-progress-photos.tsx", "utf8");
+  const sheet = readFileSync("src/features/progress-records/components/student-progress-check-sheet.tsx", "utf8");
+  const documents = readFileSync("src/features/progress-records/components/student-medical-documents.tsx", "utf8");
+  assert.doesNotMatch(photos, /Nueva carga|Selecciona de 1 a 3 fotos|Elegir fotos/);
+  assert.match(sheet, /role="dialog" aria-modal="true"/);
+  assert.match(sheet, /¿Descartar este check\?/);
+  assert.match(sheet, /"frente", "perfil", "espalda"/);
+  assert.doesNotMatch(sheet, /sin comprimir|Calidad original/);
+  assert.match(photos, /publishedAssetIds\.every[\s\S]*gateway\.createCheck\(checkedOn, publishedAssetIds\)/);
+  assert.match(photos, /setNotice\("Check guardado"\)/);
+  assert.match(documents, /Aún no tienes documentos[\s\S]*\+ Subir documento[\s\S]*Tus documentos son privados/);
 });

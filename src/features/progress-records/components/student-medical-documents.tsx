@@ -139,15 +139,20 @@ export function StudentMedicalDocuments() {
 
   return (
     <section className={styles.documents} aria-label="Mis documentos">
-      <button ref={uploadButtonRef} className={styles.uploadButton} type="button" onClick={() => { setError(""); setSheetOpen(true); }}>
+      {documents.length > 0 ? <button ref={uploadButtonRef} className={styles.uploadButton} type="button" onClick={() => { setError(""); setSheetOpen(true); }}>
         <span aria-hidden="true">↑</span> Subir documento
-      </button>
-      <p className={styles.fileHint}>PDF · máx. 25 MB por archivo</p>
+      </button> : null}
+      {documents.length > 0 ? <p className={styles.fileHint}>PDF · máx. 25 MB por archivo</p> : null}
       {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
       {error && !sheetOpen ? <p className={styles.error} role="alert">{error}</p> : null}
       {loading ? <div className={styles.state} role="status">Cargando tus documentos…</div> : null}
       {!loading && error && documents.length === 0 ? <button className={styles.retry} type="button" onClick={() => void load()}>Reintentar</button> : null}
-      {!loading && !error && documents.length === 0 ? <div className={styles.state}>Aún no tienes documentos.</div> : null}
+      {!loading && !error && documents.length === 0 ? <div className={styles.emptyState}>
+        <strong>Aún no tienes documentos</strong>
+        <p>Guarda tus exámenes médicos, informes o recetas. Solo tú los ves hasta que decidas enviarlos a tu coach.</p>
+        <button ref={uploadButtonRef} className={styles.emptyUploadButton} type="button" onClick={() => { setError(""); setSheetOpen(true); }}>+ Subir documento</button>
+        <p className={styles.emptyPrivacy}><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg><span>Tus documentos son privados.</span></p>
+      </div> : null}
       <div className={styles.list}>
         {documents.map((asset) => <article className={styles.documentCard} key={asset.assetId}>
           <span className={styles.extension}>PDF</span>
