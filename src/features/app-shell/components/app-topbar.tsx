@@ -14,6 +14,7 @@ export interface AppTopbarProps {
   isMenuOpen: boolean;
   onMenuToggle: () => void;
   trainingMeta?: AppTopbarTrainingMeta | null;
+  contextLabel?: string | null;
   fallbackText: string;
   isNotificationPanelOpen: boolean;
   notificationBadgeText?: string | null;
@@ -26,6 +27,7 @@ export function AppTopbar({
   isMenuOpen,
   onMenuToggle,
   trainingMeta,
+  contextLabel,
   fallbackText,
   isNotificationPanelOpen,
   notificationBadgeText,
@@ -37,7 +39,9 @@ export function AppTopbar({
       <AppMenuButton isOpen={isMenuOpen} onToggle={onMenuToggle} />
       <div>
         <h1>Organizatech</h1>
-        {trainingMeta ? (
+        {contextLabel ? (
+          <p className="topbar-context-label">{contextLabel}</p>
+        ) : trainingMeta ? (
           <p
             className="topbar-training-meta"
             aria-label={`${trainingMeta.cycleLabel}, ${trainingMeta.weekLabel}, ${trainingMeta.progressLabel}`}

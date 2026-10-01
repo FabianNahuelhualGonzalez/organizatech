@@ -29,6 +29,7 @@ export interface UserPortalShellProps {
   readonly isNotificationPanelOpen: boolean;
   readonly notificationBadgeText: string | null;
   readonly notificationBadgeAriaLabel: string | null;
+  readonly contextLabel?: string | null;
   readonly notificationOverlay: ReactNode;
   readonly screenHeader: ReactNode;
   readonly children: ReactNode;
@@ -50,6 +51,7 @@ export function UserPortalShell({
   isNotificationPanelOpen,
   notificationBadgeText,
   notificationBadgeAriaLabel,
+  contextLabel,
   notificationOverlay,
   screenHeader,
   children,
@@ -99,6 +101,7 @@ export function UserPortalShell({
           isNotificationPanelOpen={isNotificationPanelOpen}
           notificationBadgeText={notificationBadgeText}
           notificationBadgeAriaLabel={notificationBadgeAriaLabel}
+          contextLabel={contextLabel}
           menuButtonRef={menuButtonRef}
           onMenuToggle={isDrawerOpen ? onClose : onOpen}
           onToggleNotifications={onToggleNotifications}

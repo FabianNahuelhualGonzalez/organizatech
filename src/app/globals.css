@@ -83,6 +83,13 @@ a {
   text-align: center;
 }
 
+.topbar-context-label {
+  margin: 1px 0 0;
+  color: #3c7aff;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
 .topbar-training-meta {
   display: flex;
   min-width: 0;

@@ -26,6 +26,8 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
   ],
   ignoredConjunctiveGuardIdentifiers: ["isTrainingCycleProductVisible"],
   ignoredAttributesByElement: {
+    // La etiqueta contextual sólo afecta el AppTopbar de Evaluaciones del Alumno.
+    AppTopbar: ["contextLabel"],
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
       "latestExercisePerformanceStatus",

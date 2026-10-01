@@ -28,6 +28,7 @@ import styles from "./evaluations.module.css";
 
 type StudentTab = "pending" | "expired" | "completed";
 type StudentView = "list" | "form" | "success";
+type StudentSection = "formularios" | "documentos" | "fotos";
 type RowEditor = { readonly questionId: string; readonly rowId: string | null; readonly values: Record<string, string> };
 
 export function StudentEvaluations({
@@ -36,15 +37,18 @@ export function StudentEvaluations({
   onNotificationOpenRequestConsumed,
   onBack,
   progressPhotos,
+  medicalDocuments,
 }: {
   readonly expectedUserId: string;
   readonly notificationOpenRequest: EvaluationOpenRequest | null;
   readonly onNotificationOpenRequestConsumed: (request: EvaluationOpenRequest) => void;
   readonly onBack: () => void;
   readonly progressPhotos?: ReactNode;
+  readonly medicalDocuments?: ReactNode;
 }) {
   const [assignments, setAssignments] = useState<readonly StudentEvaluationAssignment[]>([]);
   const [view, setView] = useState<StudentView>("list");
+  const [section, setSection] = useState<StudentSection>("formularios");
   const [tab, setTab] = useState<StudentTab>("pending");
   const [active, setActive] = useState<StudentEvaluationAssignment | null>(null);
   const [answers, setAnswers] = useState<EvaluationAnswers>({});
@@ -91,6 +95,7 @@ export function StudentEvaluations({
       setConsent(assignment.consentConfirmed);
       setErrors(new Set());
       setEditor(null);
+      setSection("formularios");
       setView("form");
       setAssignments((current) => current.map((item) => item.id === id ? assignment : item));
     } catch {
@@ -203,22 +208,44 @@ export function StudentEvaluations({
   }
 
   return (
-    <section className={styles.screen} aria-labelledby="student-evaluations-title">
-      <div><AppBackButton onBack={returnToPreviousEvaluationView} /></div>
-      {view === "list" ? progressPhotos : null}
-      {loading ? <div className={styles.loading} role="status">Cargando tus evaluaciones…</div> : null}
-      {!loading && loadError ? <div className={styles.error} role="alert"><div><p>{loadError}</p><button className={styles.button} type="button" onClick={() => void load()}>Reintentar</button></div></div> : null}
-      {!loading && !loadError && view === "list" ? (
+    <section className={`${styles.screen} ${styles.studentScreen}`} aria-labelledby="student-evaluations-title">
+      <div className={styles.studentBack}><AppBackButton onBack={returnToPreviousEvaluationView} /></div>
+      {view === "list" ? (
         <>
-          <header className={styles.stack}><h2 id="student-evaluations-title" className={styles.title}>Mis evaluaciones</h2><p className={styles.subtitle}>Responde los formularios de tu coach. Puedes guardar un borrador y continuar después.</p></header>
-          <div className={styles.tabs} role="tablist" aria-label="Estados de evaluaciones">
-            {(["pending", "expired", "completed"] as StudentTab[]).map((item) => <button className={styles.tab} data-active={tab === item} type="button" role="tab" aria-selected={tab === item} key={item} onClick={() => setTab(item)}>{item === "pending" ? "Pendientes" : item === "expired" ? "Vencidas" : "Completadas"} ({counts[item]})</button>)}
+          <header className={styles.studentIntro}>
+            <h2 id="student-evaluations-title">Mis evaluaciones</h2>
+            <p>{section === "formularios"
+              ? "Tu coach te envía formularios para conocer tu estado de salud, alimentación o entrenamiento. Responde lo que necesites y guarda un borrador si no puedes terminar."
+              : section === "documentos"
+                ? "Guarda tus exámenes médicos, informes o recetas. Solo tú los ves hasta que decidas enviarlos a tu coach."
+                : "Registra tus fotos de progreso siempre en las mismas condiciones para comparar tu evolución."}</p>
+          </header>
+          <div className={styles.studentSegmentWrap}>
+            <div className={styles.studentSegments} role="tablist" aria-label="Secciones de evaluaciones">
+              {(["formularios", "documentos", "fotos"] as StudentSection[]).map((item) => (
+                <button className={styles.studentSegment} data-active={section === item} type="button" role="tab" aria-selected={section === item} aria-controls="student-evaluations-content" key={item} onClick={() => setSection(item)}>
+                  {item === "formularios" ? "Formularios" : item === "documentos" ? "Documentos" : "Fotos"}
+                </button>
+              ))}
+            </div>
           </div>
-          {filtered.length === 0 ? <div className={styles.empty}>{tab === "pending" ? "No tienes evaluaciones pendientes" : tab === "expired" ? "No tienes evaluaciones vencidas" : "Aún no has completado evaluaciones"}</div> : <div className={styles.stack}>{filtered.map((assignment) => <button className={styles.listButton} type="button" disabled={busy} key={assignment.id} onClick={() => void openAssignment(assignment.id)}><div className={styles.studentHeading}><strong>{assignment.snapshot.name}</strong><StatusBadge status={assignment.status} /></div><p className={styles.meta}>{assignment.coachName} · {assignment.dueAt ? `Vence: ${formatEvaluationDate(assignment.dueAt)}` : "Sin fecha límite"}</p></button>)}</div>}
+          {section === "formularios" ? <div className={styles.studentTabs} role="tablist" aria-label="Estados de evaluaciones">
+            {(["pending", "expired", "completed"] as StudentTab[]).map((item) => <button className={styles.studentTab} data-active={tab === item} type="button" role="tab" aria-selected={tab === item} key={item} onClick={() => setTab(item)}>{item === "pending" ? "Pendientes" : item === "expired" ? "Vencidas" : "Completadas"} ({counts[item]})</button>)}
+          </div> : null}
         </>
       ) : null}
 
-      {!loading && !loadError && view === "form" && active ? (
+      <div id="student-evaluations-content" className={styles.studentScroll} role={view === "list" ? "tabpanel" : undefined}>
+        {view === "list" && section === "formularios" ? (
+          loading ? <div className={styles.loading} role="status">Cargando tus evaluaciones…</div>
+            : loadError ? <div className={styles.error} role="alert"><div><p>{loadError}</p><button className={styles.button} type="button" onClick={() => void load()}>Reintentar</button></div></div>
+              : filtered.length === 0 ? <div className={styles.studentEmpty}>{tab === "pending" ? "No tienes evaluaciones pendientes" : tab === "expired" ? "No tienes evaluaciones vencidas" : "Aún no has completado evaluaciones"}</div>
+                : <div className={styles.stack}>{filtered.map((assignment) => <button className={styles.studentAssignmentCard} type="button" disabled={busy} key={assignment.id} onClick={() => void openAssignment(assignment.id)}><div className={styles.studentAssignmentHeading}><strong>{assignment.snapshot.name}</strong><StatusBadge status={assignment.status} /></div><p className={styles.studentAssignmentMeta}>{assignment.coachName} · {assignment.dueAt ? `Vence: ${formatEvaluationDate(assignment.dueAt)}` : "Sin fecha límite"}</p></button>)}</div>
+        ) : null}
+        {view === "list" && section === "documentos" ? medicalDocuments : null}
+        {view === "list" && section === "fotos" ? progressPhotos : null}
+
+      {view === "form" && active ? (
         <>
           <div className={`${styles.card} ${styles.stack}`}><h2 id="student-evaluations-title" className={styles.title}>{active.snapshot.name}</h2><p className={styles.meta}>{active.coachName} · {active.dueAt ? `Vence: ${formatEvaluationDate(active.dueAt)}` : "Sin fecha límite"}</p><p className={styles.bannerInfo}>Tus respuestas serán visibles para {active.coachName}, tu coach vinculado, para ajustar tu plan.</p></div>
           {active.status === "expired" ? <div className={styles.bannerError}>El plazo para responder venció. Tu borrador quedó guardado en modo solo lectura. Pide a tu coach que extienda la fecha si necesitas responder.</div> : null}
@@ -229,7 +256,8 @@ export function StudentEvaluations({
         </>
       ) : null}
 
-      {!loading && !loadError && view === "success" && active ? <div className={styles.success}><Check size={42} color="#4ade80" /><h2 id="student-evaluations-title" className={styles.title}>Evaluación enviada</h2><p className={styles.muted}>Enviaste «{active.snapshot.name}» a {active.coachName}. Tu coach recibirá una notificación.</p><button className={styles.button} type="button" onClick={() => { setView("list"); setActive(null); }}>Volver a mis evaluaciones</button></div> : null}
+      {view === "success" && active ? <div className={styles.success}><Check size={42} color="#4ade80" /><h2 id="student-evaluations-title" className={styles.title}>Evaluación enviada</h2><p className={styles.muted}>Enviaste «{active.snapshot.name}» a {active.coachName}. Tu coach recibirá una notificación.</p><button className={styles.button} type="button" onClick={() => { setView("list"); setActive(null); }}>Volver a mis evaluaciones</button></div> : null}
+      </div>
       {toast ? <div className={styles.toast} role="status">{toast}</div> : null}
     </section>
   );

@@ -108,6 +108,7 @@ import { DashboardScreen } from "@/features/dashboard/components/dashboard-scree
 import { EmptyDashboard } from "@/features/dashboard/components/empty-dashboard";
 import { StudentEvaluations } from "@/features/evaluations/components/student-evaluations";
 import { StudentProgressPhotos } from "@/features/progress-records/components/student-progress-photos";
+import { StudentMedicalDocuments } from "@/features/progress-records/components/student-medical-documents";
 import { useEvaluationNotifications } from "@/features/evaluations/hooks/use-evaluation-notifications";
 import {
   canAccessStudentEvaluations,
@@ -5158,6 +5159,7 @@ export function OrganizatechApp({
         <StudentEvaluations
           expectedUserId={supabaseUser.id}
           progressPhotos={<StudentProgressPhotos key={supabaseUser.id} />}
+          medicalDocuments={<StudentMedicalDocuments key={supabaseUser.id} />}
           notificationOpenRequest={studentEvaluationOpenRequest}
           onNotificationOpenRequestConsumed={(request) => {
             setStudentEvaluationOpenRequest((current) => (
@@ -5211,6 +5213,7 @@ export function OrganizatechApp({
         isNotificationPanelOpen={isNotificationPanelOpen}
         notificationBadgeText={notificationBadgeText}
         notificationBadgeAriaLabel={notificationBadgeAriaLabel}
+        contextLabel={screen === "evaluaciones" && hasStudentEvaluationsAccess ? "Evaluaciones" : null}
         notificationOverlay={notificationOverlay}
         screenHeader={screenHeader}
         avatarResetKey={profileAvatarResetKey}
@@ -5234,6 +5237,7 @@ export function OrganizatechApp({
           isMenuOpen={isMenuOpen}
           onMenuToggle={toggleMenu}
           trainingMeta={trainingTopbarMeta}
+          contextLabel={screen === "evaluaciones" && hasStudentEvaluationsAccess ? "Evaluaciones" : null}
           fallbackText={hasTrainingEntries ? `Semana ${currentWeek} · ${authModeLabel}` : "Sin registro de entrenamiento"}
           isNotificationPanelOpen={isNotificationPanelOpen}
           notificationBadgeText={notificationBadgeText}

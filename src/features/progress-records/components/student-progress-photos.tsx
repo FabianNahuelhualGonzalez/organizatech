@@ -11,12 +11,19 @@ import {
 } from "../data/student-progress-photo-gateway";
 import { prepareLocalProgressPhoto } from "../model/prepare-local-progress-photo";
 import type { ProgressPhotoPose } from "../model/progress-records-contract";
-import { AppBackButton } from "@/ui/navigation/app-back-button";
 
 import styles from "./student-progress-photos.module.css";
 
 const PAGE_SIZE = 50;
 const POSES: readonly ProgressPhotoPose[] = ["frente", "perfil", "espalda"];
+const PHOTO_GUIDE = [
+  "Mismo lugar y misma pared de fondo, lisa y despejada.",
+  "Misma luz: de frente y pareja. Evita el contraluz y la luz directa del techo.",
+  "Cámara fija en vertical, a la altura de la cintura y a 2 metros. Usa trípode o apoya el teléfono. Sin zoom, filtros ni modo retrato.",
+  "Misma hora y condición: idealmente en la mañana y en ayunas.",
+  "Misma ropa ajustada, postura relajada y brazos a los costados.",
+  "Siempre tres poses: frente, perfil y espalda.",
+] as const;
 const STATUS: Readonly<Record<StudentPhotoUpload["status"], string>> = {
   reservada: "Preparando subida",
   en_cola: "En cola",
@@ -43,19 +50,10 @@ function message(error: unknown): string {
 }
 
 export function StudentProgressPhotos() {
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  return open ? <ProgressContent onBack={() => { setOpen(false); window.requestAnimationFrame(() => triggerRef.current?.focus()); }} /> : (
-    <section className={styles.entry} aria-label="Fotos de progreso">
-      <div><h3>Fotos de progreso</h3><p>Guarda fotos y reúne tus avances en checks.</p></div>
-      <button ref={triggerRef} className={styles.primary} type="button" onClick={() => setOpen(true)}>Ver mis fotos</button>
-    </section>
-  );
-}
-
-function ProgressContent({ onBack }: { readonly onBack: () => void }) {
   const surfaceRef = useRef<HTMLElement>(null);
   const viewerCloseRef = useRef<HTMLButtonElement>(null);
+  const [guideOpen, setGuideOpen] = useState(true);
+  const [composerOpen, setComposerOpen] = useState(false);
   const [photos, setPhotos] = useState<readonly StudentPublishedPhoto[]>([]);
   const [checks, setChecks] = useState<readonly StudentPhotoCheck[]>([]);
   const [uploads, setUploads] = useState<readonly StudentPhotoUpload[]>([]);
@@ -98,7 +96,6 @@ function ProgressContent({ onBack }: { readonly onBack: () => void }) {
   }, []);
 
   useEffect(() => { void load(true); }, [load]);
-  useEffect(() => { surfaceRef.current?.focus(); }, []);
   useEffect(() => { if (viewer) viewerCloseRef.current?.focus(); }, [viewer]);
   useEffect(() => {
     if (!uploads.some((upload) => upload.status === "reservada" || upload.status === "en_cola" || upload.status === "procesando")) return;
@@ -178,6 +175,7 @@ function ProgressContent({ onBack }: { readonly onBack: () => void }) {
       await getStudentProgressPhotoGateway().createCheck(checkedOn, [...selected]);
       setSelected([]);
       setNotice("Check creado.");
+      setComposerOpen(false);
       await load();
     } catch (error) { setActionError(message(error)); }
     finally { busyRef.current = false; setBusy(false); }
@@ -210,15 +208,13 @@ function ProgressContent({ onBack }: { readonly onBack: () => void }) {
     finally { busyRef.current = false; setBusy(false); }
   }
 
-  function handleDialogKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+  function handleViewerKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
-      if (viewer) closeViewer();
-      else onBack();
+      closeViewer();
       return;
     }
     if (event.key !== "Tab") return;
-    const dialog = viewer ? event.currentTarget.querySelector(`.${styles.viewerPanel}`) : event.currentTarget;
-    const controls = Array.from(dialog?.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled)") ?? []);
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), a[href]"));
     if (controls.length === 0) return;
     if (event.shiftKey && document.activeElement === controls[0]) {
       event.preventDefault();
@@ -236,26 +232,41 @@ function ProgressContent({ onBack }: { readonly onBack: () => void }) {
 
   const available = photos.filter((photo) => photo.checkId === null && photo.pose !== null);
   return (
-    <section ref={surfaceRef} tabIndex={-1} className={styles.surface} role="dialog" aria-modal="true" aria-labelledby="progress-photos-title" onKeyDown={handleDialogKeyDown}>
-      <div className={styles.heading}><AppBackButton onBack={onBack} /><h3 id="progress-photos-title">Fotos de progreso</h3></div>
+    <section ref={surfaceRef} tabIndex={-1} className={styles.surface} aria-label="Fotos de progreso">
+      <div className={styles.guide}>
+        <button className={styles.guideToggle} type="button" aria-expanded={guideOpen} onClick={() => setGuideOpen((current) => !current)}>
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
+          <strong>Cómo tomar tus fotos</strong>
+          <svg className={guideOpen ? styles.guideChevronOpen : styles.guideChevron} aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+        </button>
+        {guideOpen ? <ol>{PHOTO_GUIDE.map((tip, index) => <li key={tip}><span aria-hidden="true">{index + 1}</span><span>{tip}</span></li>)}</ol> : null}
+      </div>
+      <p className={styles.privacy}><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg><span>Tus fotos son privadas. Solo tú puedes verlas aquí.</span></p>
+      <button className={styles.newCheckButton} type="button" aria-expanded={composerOpen} onClick={() => setComposerOpen((current) => !current)}>+ Nuevo check</button>
       {loading ? <p className={styles.state} role="status">Cargando tus fotos…</p> : null}
       {!loading && loadError ? <div className={styles.state} role="alert"><p>{loadError}</p><button className={styles.secondary} type="button" onClick={() => void load(true)}>Reintentar</button></div> : null}
       {!loading && !loadError ? <>
-        <div className={styles.card}>
+        {composerOpen ? <div className={styles.card}>
           <h4>Nueva carga</h4>
           <p>Selecciona de 1 a 3 fotos. Las prepararemos antes de subirlas.</p>
           <label className={styles.fileLabel}>Elegir fotos<input type="file" accept="image/*" multiple disabled={busy} onChange={(event) => { chooseFiles(event.target.files); event.target.value = ""; }} /></label>
           {drafts.map((draft) => <div className={styles.draft} key={draft.id}><span className={styles.fileName}>{draft.file.name}</span><label>Pose<select value={draft.pose} disabled={busy} onChange={(event) => setDrafts((current) => current.map((item) => item.id === draft.id ? { ...item, pose: event.target.value as ProgressPhotoPose } : item))}>{POSES.map((pose) => <option value={pose} key={pose}>{pose}</option>)}</select></label><span role="status">{draft.status === "seleccionada" ? "Lista" : draft.status === "preparación" ? "Preparación" : draft.status === "subida" ? "Subida" : "Error"}</span></div>)}
           {drafts.length > 0 ? <button className={styles.primary} type="button" disabled={busy} onClick={() => void upload()}>{drafts.some((draft) => draft.status === "error") ? "Reintentar carga" : "Subir fotos"}</button> : null}
-        </div>
+        </div> : null}
         {actionError ? <p className={styles.error} role="alert">{actionError}</p> : null}
         {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
+        <div className={styles.group}>
+          {checks.length === 0 ? <p className={styles.empty}>Aún no tienes checks.</p> : checks.map((check) => <article className={styles.check} key={check.id}>
+            <div className={styles.checkHeading}><div><strong>Check · {check.checkedOn.split("-").reverse().join("/")}</strong><span>{check.photos.length} {check.photos.length === 1 ? "foto" : "fotos"}</span></div><span className={styles.privateBadge}>Solo tú</span></div>
+            <div className={styles.checkGrid}>{check.photos.map((photo) => <PrivateCheckPhoto key={photo.assetId} assetId={photo.assetId} pose={photo.pose} onOpen={() => void openPhoto(photo.assetId)} />)}</div>
+          </article>)}
+          {checksMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("checks")}>Ver más checks</button> : null}
+        </div>
         <div className={styles.group}><h4>Cargas recientes</h4>{uploads.length === 0 ? <p className={styles.empty}>Aún no tienes cargas.</p> : uploads.map((item) => <div className={styles.row} key={item.uploadId}><span>{dateLabel(item.createdAt)} · {item.pose}</span><strong>{STATUS[item.status]}</strong></div>)}</div>
         <div className={styles.group}><h4>Mis fotos</h4>{photos.length === 0 ? <p className={styles.empty}>Aún no tienes fotos publicadas.</p> : photos.map((photo) => <div className={styles.row} key={photo.assetId}><div><strong>{photo.pose ?? "Foto"}</strong><span>{dateLabel(photo.availableAt)}</span></div><div className={styles.actions}><button className={styles.secondary} type="button" disabled={busy} onClick={() => void openPhoto(photo.assetId)}>Abrir</button>{photo.checkId === null && photo.pose ? <label className={styles.select}><input type="checkbox" checked={selected.includes(photo.assetId)} disabled={busy} onChange={() => togglePhoto(photo)} />Check</label> : null}</div></div>)}{photosMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("photos")}>Ver más fotos</button> : null}</div>
-        {available.length > 0 ? <div className={styles.card}><h4>Crear check</h4><p>Elige de 1 a 3 fotos publicadas con poses distintas.</p><label className={styles.dateLabel}>Fecha<input type="date" value={checkedOn} max={todayInChile()} onChange={(event) => setCheckedOn(event.target.value)} /></label><button className={styles.primary} type="button" disabled={busy || selected.length === 0 || !checkedOn || checkedOn > todayInChile()} onClick={() => void createCheck()}>Crear check ({selected.length})</button></div> : null}
-        <div className={styles.group}><h4>Mis checks</h4>{checks.length === 0 ? <p className={styles.empty}>Aún no tienes checks.</p> : checks.map((check) => <article className={styles.check} key={check.id}><strong>{dateLabel(`${check.checkedOn}T12:00:00-03:00`)}</strong><div className={styles.actions}>{check.photos.map((photo) => <button className={styles.secondary} type="button" key={photo.assetId} disabled={busy} onClick={() => void openPhoto(photo.assetId)}>{photo.pose}</button>)}</div></article>)}{checksMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("checks")}>Ver más checks</button> : null}</div>
+        {composerOpen && available.length > 0 ? <div className={styles.card}><h4>Crear check</h4><p>Elige de 1 a 3 fotos publicadas con poses distintas.</p><label className={styles.dateLabel}>Fecha<input type="date" value={checkedOn} max={todayInChile()} onChange={(event) => setCheckedOn(event.target.value)} /></label><button className={styles.primary} type="button" disabled={busy || selected.length === 0 || !checkedOn || checkedOn > todayInChile()} onClick={() => void createCheck()}>Crear check ({selected.length})</button></div> : null}
       </> : null}
-      {viewer ? <div className={styles.viewer} role="dialog" aria-modal="true" aria-label="Foto de progreso">
+      {viewer ? <div className={styles.viewer} role="dialog" aria-modal="true" aria-label="Foto de progreso" onKeyDown={handleViewerKeyDown}>
         <div className={styles.viewerPanel}>
           <button ref={viewerCloseRef} className={styles.secondary} type="button" onClick={closeViewer}>Cerrar foto</button>
           {viewerError ? <p>Tu navegador no pudo mostrar esta foto.</p> : (
@@ -267,4 +278,49 @@ function ProgressContent({ onBack }: { readonly onBack: () => void }) {
       </div> : null}
     </section>
   );
+}
+
+function PrivateCheckPhoto({ assetId, pose, onOpen }: {
+  readonly assetId: string;
+  readonly pose: ProgressPhotoPose;
+  readonly onOpen: () => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    async function loadThumbnail() {
+      try {
+        const blob = await getStudentProgressPhotoGateway().downloadOwnPhoto(assetId);
+        objectUrl = URL.createObjectURL(blob);
+        if (active) setUrl(objectUrl);
+        else URL.revokeObjectURL(objectUrl);
+      } catch { if (active) setFailed(true); }
+    }
+    const element = buttonRef.current;
+    if (!element || typeof IntersectionObserver === "undefined") {
+      void loadThumbnail();
+      return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        observer.disconnect();
+        void loadThumbnail();
+      }
+    });
+    observer.observe(element);
+    return () => { active = false; observer.disconnect(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [assetId]);
+
+  return <button ref={buttonRef} className={styles.checkTile} type="button" aria-label={`Abrir foto de ${pose}`} onClick={onOpen}>
+    {url && !failed ? (
+      // La miniatura privada proviene de un Blob autorizado por el gateway.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={url} alt="" onError={() => setFailed(true)} />
+    ) : <span className={styles.checkTileState}>{failed ? "Vista no disponible" : "Cargando foto…"}</span>}
+    <span className={styles.poseLabel}>{pose}</span>
+  </button>;
 }

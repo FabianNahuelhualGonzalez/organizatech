@@ -1,0 +1,240 @@
+.documents {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  color: #fff;
+  font-family: var(--font-roboto-mono), "Roboto Mono", ui-monospace, monospace;
+}
+
+.uploadButton,
+.retry,
+.openButton,
+.saveButton,
+.openLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.uploadButton {
+  gap: 8px;
+  min-height: 52px;
+  border: 1px dashed rgba(143, 178, 255, 0.5);
+  border-radius: 13px;
+  color: #8fb2ff;
+  background: rgba(60, 122, 255, 0.08);
+}
+
+.uploadButton span { font-size: 20px; line-height: 1; }
+
+.fileHint {
+  margin: -4px 0 0;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 10px;
+  text-align: center;
+}
+
+.list { display: flex; flex-direction: column; gap: 8px; }
+
+.documentCard,
+.selectedFile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 15px;
+  padding: 12px 12px 12px 14px;
+}
+
+.extension {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 48px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  color: #8fb2ff;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.documentCopy,
+.selectedFile > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.documentCopy strong,
+.selectedFile strong {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documentCopy > span:not(.privateBadge),
+.selectedFile > div > span {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.privateBadge {
+  align-self: flex-start;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 9px;
+  padding: 3px 8px;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.openButton,
+.retry {
+  flex: none;
+  border: 1px solid #3c7aff;
+  padding: 0 14px;
+  color: #fff;
+  background: rgba(60, 122, 255, 0.14);
+}
+
+.state,
+.error,
+.notice {
+  margin: 0;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 15px;
+  padding: 20px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  text-align: center;
+}
+
+.error { border-color: rgba(248, 113, 113, 0.4); color: #f87171; }
+.notice { border-color: rgba(74, 222, 128, 0.4); color: #4ade80; }
+
+.overlay { position: fixed; z-index: 1000; inset: 0; }
+.scrim { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(2, 8, 14, 0.7); }
+
+.sheet {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 88dvh;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 26px 26px 0 0;
+  padding: 14px 18px max(20px, env(safe-area-inset-bottom));
+  color: #fff;
+  background: #0d1a26;
+}
+
+.sheetHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sheetHeader h3 { margin: 0; font-size: 15px; font-weight: 700; }
+
+.closeButton {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  color: #fff;
+  background: transparent;
+  font: inherit;
+  font-size: 26px;
+  cursor: pointer;
+}
+
+.filePicker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 128px;
+  border: 1px dashed rgba(143, 178, 255, 0.5);
+  border-radius: 13px;
+  padding: 16px;
+  color: #8fb2ff;
+  background: rgba(60, 122, 255, 0.06);
+  text-align: center;
+  cursor: pointer;
+}
+
+.filePicker input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.filePicker span { font-size: 12.5px; font-weight: 700; }
+.filePicker small { color: rgba(255, 255, 255, 0.45); font-size: 10px; }
+.filePicker:focus-within { outline: 2px solid #8fb2ff; outline-offset: 2px; }
+
+.selectedFile { border-radius: 13px; }
+.selectedFile strong { overflow-wrap: anywhere; white-space: normal; }
+
+.saveButton,
+.openLink {
+  border: 0;
+  padding: 0 18px;
+  color: #fff;
+  background: #3c7aff;
+  text-decoration: none;
+}
+
+.saveButton:disabled,
+.openButton:disabled,
+.retry:disabled,
+.closeButton:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.viewer {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 430px;
+  margin: 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  padding: 18px;
+  color: #fff;
+  background: #0d1a26;
+  transform: translateY(-50%);
+}
+.viewer .closeButton { align-self: flex-end; }
+.viewer strong { font-size: 14px; font-weight: 700; }
+
+@media (max-width: 370px) {
+  .documentCard { flex-wrap: wrap; }
+  .documentCopy { flex-basis: calc(100% - 55px); }
+  .openButton { width: 100%; }
+}

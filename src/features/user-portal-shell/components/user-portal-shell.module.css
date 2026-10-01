@@ -108,6 +108,12 @@
   border-radius: 9px;
 }
 
+.brandText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .brandName {
   min-width: 0;
   overflow: hidden;
@@ -117,6 +123,14 @@
   line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.brandContext {
+  margin-top: 1px;
+  color: #3c7aff;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.1;
 }
 
 .notificationShell {

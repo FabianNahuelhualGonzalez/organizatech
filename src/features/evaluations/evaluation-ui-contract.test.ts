@@ -60,3 +60,43 @@ test("Alumno cubre tabs, borrador, vencimiento, consentimiento exacto y tablas a
   assert.doesNotMatch(student, /overflow-x|<table/);
   assert.match(student, /La evaluación fue enviada, pero el correo al coach está pendiente de reintento/);
 });
+
+test("Mis evaluaciones conserva el guard y compone Formularios, Documentos y Fotos", () => {
+  const root = readFileSync("src/components/organizatech-app.tsx", "utf8");
+  const topbar = readFileSync("src/features/app-shell/components/app-topbar.tsx", "utf8");
+  const portalShell = readFileSync("src/features/user-portal-shell/components/user-portal-shell.tsx", "utf8");
+  const portalTopbar = readFileSync("src/features/user-portal-shell/components/user-portal-topbar.tsx", "utf8");
+  assert.match(root, /screen === "evaluaciones" && supabaseUser\?\.id && hasStudentEvaluationsAccess/);
+  assert.match(root, /contextLabel=\{screen === "evaluaciones" && hasStudentEvaluationsAccess \? "Evaluaciones" : null\}/);
+  assert.match(topbar, /contextLabel \? \(/);
+  assert.match(portalShell, /contextLabel=\{contextLabel\}/);
+  assert.match(portalTopbar, /\{contextLabel \? <span className=\{styles\.brandContext\}>\{contextLabel\}<\/span> : null\}/);
+  assert.match(student, /Mis evaluaciones[\s\S]*\["formularios", "documentos", "fotos"\]/);
+  assert.match(student, /section === "formularios" \? <div className=\{styles\.studentTabs\}/);
+  assert.match(student, /section === "documentos" \? medicalDocuments/);
+  assert.match(student, /section === "fotos" \? progressPhotos/);
+});
+
+test("Documentos y Fotos usan sólo gateways propios y la tarjeta previa desaparece", () => {
+  const photos = readFileSync("src/features/progress-records/components/student-progress-photos.tsx", "utf8");
+  const documents = readFileSync("src/features/progress-records/components/student-medical-documents.tsx", "utf8");
+  assert.doesNotMatch(photos, /Ver mis fotos|styles\.entry/);
+  assert.match(photos, /getStudentProgressPhotoGateway\(\)\.downloadOwnPhoto/);
+  assert.match(documents, /getStudentMedicalDocumentGateway\(\)\.downloadOwn/);
+  assert.match(documents, /gateway\.reserve\(\)[\s\S]*gateway\.stage\([\s\S]*gateway\.enqueue\(/);
+  assert.doesNotMatch(`${photos}\n${documents}`, /\.storage\.from\(|\.rpc\(|getPublicUrl|createSignedUrl/);
+  assert.doesNotMatch(documents, /Enviar al coach|Guardar y enviar|\.docx|image\/jpeg/);
+  assert.match(documents, /PDF · máx\. 25 MiB por archivo/);
+});
+
+test("Mis evaluaciones mantiene márgenes, estado vacío y textos aprobados", () => {
+  const css = readFileSync("src/features/evaluations/components/evaluations.module.css", "utf8");
+  assert.match(css, /\.studentBack \{[\s\S]*padding: 12px 14px 0/);
+  assert.match(css, /\.studentIntro \{[\s\S]*padding: 12px 16px 0/);
+  assert.match(css, /\.studentSegmentWrap \{[\s\S]*padding: 14px 14px 0/);
+  assert.match(css, /\.studentScroll \{[\s\S]*padding: 16px 14px 20px/);
+  assert.match(css, /\.studentEmpty \{[\s\S]*min-height: 300px/);
+  for (const copy of ["No tienes evaluaciones pendientes", "No tienes evaluaciones vencidas", "Aún no has completado evaluaciones"]) {
+    assert.ok(student.includes(copy));
+  }
+});

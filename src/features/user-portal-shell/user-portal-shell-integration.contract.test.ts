@@ -2401,11 +2401,10 @@ test("la lista de consumidores del gestor de foco es exacta e incluye el drawer 
   ]);
 });
 
-test("Recovery, NotificationPanel y fallbacks no modificados conservan paridad", () => {
+test("Recovery, NotificationPanel y drawer no modificados conservan paridad", () => {
   for (const path of [
     "src/features/auth/model/password-recovery-portal-guard.ts",
     "src/features/notifications/components/NotificationPanel.tsx",
-    "src/features/app-shell/components/app-topbar.tsx",
     "src/features/app-shell/components/app-navigation-drawer.tsx",
   ]) {
     assert.equal(

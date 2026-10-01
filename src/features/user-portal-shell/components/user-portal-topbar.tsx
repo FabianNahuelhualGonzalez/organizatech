@@ -15,6 +15,7 @@ export interface UserPortalTopbarProps {
   readonly isNotificationPanelOpen: boolean;
   readonly notificationBadgeText: string | null;
   readonly notificationBadgeAriaLabel: string | null;
+  readonly contextLabel?: string | null;
   readonly menuButtonRef?: Ref<HTMLButtonElement>;
   readonly onMenuToggle: () => void;
   readonly onToggleNotifications: () => void;
@@ -26,6 +27,7 @@ export function UserPortalTopbar({
   isNotificationPanelOpen,
   notificationBadgeText,
   notificationBadgeAriaLabel,
+  contextLabel,
   menuButtonRef,
   onMenuToggle,
   onToggleNotifications,
@@ -52,7 +54,10 @@ export function UserPortalTopbar({
           height={34}
           alt=""
         />
-        <span className={styles.brandName}>Organizatech</span>
+        <span className={styles.brandText}>
+          <span className={styles.brandName}>Organizatech</span>
+          {contextLabel ? <span className={styles.brandContext}>{contextLabel}</span> : null}
+        </span>
       </div>
 
       <div className={styles.notificationShell}>
