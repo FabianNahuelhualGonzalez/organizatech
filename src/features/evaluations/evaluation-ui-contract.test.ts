@@ -84,7 +84,10 @@ test("Documentos y Fotos usan sólo gateways propios y la tarjeta previa desapar
   assert.doesNotMatch(photos, /Ver mis fotos|styles\.entry/);
   assert.match(photos, /getStudentProgressPhotoGateway\(\)\.downloadOwnPhoto/);
   assert.match(documents, /getStudentMedicalDocumentGateway\(\)\.downloadOwn/);
-  assert.match(documents, /gateway\.reserve\(\)[\s\S]*gateway\.stage\([\s\S]*gateway\.enqueue\(/);
+  assert.match(documents, /gateway\.reserve\(\)[\s\S]*gateway\.stage\([\s\S]*gateway\.finalize\(/);
+  assert.match(documents, /setNotice\("Guardado"\)/);
+  assert.match(documents, /Compartir con mi coach/);
+  assert.match(documents, /Dejar de compartir/);
   assert.doesNotMatch(`${photos}\n${documents}`, /\.storage\.from\(|\.rpc\(|getPublicUrl|createSignedUrl/);
   assert.doesNotMatch(documents, /Enviar al coach|Guardar y enviar|\.docx|image\/jpeg/);
   assert.match(documents, /PDF · máx\. 25 MB por archivo/);

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createStudentMedicalDocumentGateway, StudentMedicalDocumentGatewayError,
@@ -13,13 +14,14 @@ function fixture() {
   const calls: { name: string; args: unknown }[] = [];
   const storage: { bucket?: string; path?: string; options?: unknown } = {};
   const asset = { assetId, bucketId: "progress-medical-documents", objectName: path,
-    mimeType: "application/pdf", bytes: 100, pageCount: 1,
+    mimeType: "application/pdf", bytes: 100, pageCount: null, sharedWithCoach: false,
     displayName: "Documento médico", documentCategory: "otro",
     createdAt: now, availableAt: now };
   const outputs: Record<string, unknown> = {
-    begin_own_medical_document_upload: { uploadId, bucketId: "progress-document-staging",
+    begin_direct_medical_document_upload: { uploadId, bucketId: "progress-medical-documents",
       objectName: path, mimeType: "application/pdf", expiresAt: now },
-    finalize_own_medical_document_upload: uploadId,
+    finalize_direct_medical_document_upload: asset,
+    set_own_medical_document_shared: true,
     list_own_medical_documents: [asset], get_own_medical_document: asset,
   };
   const client = {
@@ -52,19 +54,19 @@ test("gateway stages only SQL-issued path with PDF MIME and no upsert", async ()
     new Blob([new Uint8Array(MEDICAL_DOCUMENT_MAX_BYTES + 1)], { type: "application/pdf" })),
   StudentMedicalDocumentGatewayError);
   await gateway.stage(uploadId, pdf);
-  await gateway.enqueue(uploadId);
+  assert.equal((await gateway.finalize(uploadId)).assetId, assetId);
   assert.deepEqual(calls, [
-    { name: "begin_own_medical_document_upload", args: {} },
-    { name: "finalize_own_medical_document_upload", args: { p_upload_id: uploadId } },
+    { name: "begin_direct_medical_document_upload", args: {} },
+    { name: "finalize_direct_medical_document_upload", args: { p_upload_id: uploadId } },
   ]);
-  assert.deepEqual(storage, { bucket: "progress-document-staging", path,
+  assert.deepEqual(storage, { bucket: "progress-medical-documents", path,
     options: { contentType: "application/pdf", upsert: false } });
 });
 
 test("list, detail and download use bounded RPC arguments and authorized output", async () => {
   const { gateway, calls, storage } = fixture();
   assert.equal((await gateway.list())[0].assetId, assetId);
-  assert.equal((await gateway.get(assetId)).pageCount, 1);
+  assert.equal((await gateway.get(assetId)).pageCount, null);
   await gateway.downloadOwn(assetId);
   assert.deepEqual(calls.map((call) => call.args), [
     { p_limit: 50, p_offset: 0 }, { p_asset_id: assetId }, { p_asset_id: assetId },
@@ -84,4 +86,27 @@ test("altered bucket, path, MIME and metadata fail closed", async () => {
     outputs.get_own_medical_document = { ...(outputs.list_own_medical_documents as object[])[0], ...alteration };
     await assert.rejects(gateway.downloadOwn(assetId), StudentMedicalDocumentGatewayError);
   }
+});
+
+test("sharing sends only asset ID and explicit boolean", async () => {
+  const { gateway, calls } = fixture();
+  await gateway.setShared(assetId, true);
+  assert.deepEqual(calls, [{ name: "set_own_medical_document_shared",
+    args: { p_asset_id: assetId, p_shared: true } }]);
+  await assert.rejects(gateway.setShared("other", false), StudentMedicalDocumentGatewayError);
+});
+
+test("direct document migration keeps ownership in SQL and leaves legacy queue intact", () => {
+  const sql = readFileSync(
+    "supabase/migrations/20261001212450_direct_private_student_medical_documents.sql", "utf8");
+  assert.match(sql, /create function public\.begin_direct_medical_document_upload\(\)/);
+  assert.match(sql, /v_student uuid := private\.require_own_medical_document_reader\(\)/);
+  assert.match(sql, /'bucketId', 'progress-medical-documents'/);
+  assert.match(sql, /v_bytes not between 1 and 26214400/);
+  assert.match(sql, /v_object\.metadata->>'mimetype' is distinct from 'application\/pdf'/);
+  assert.match(sql, /state = 'published', published_at = v_now/);
+  assert.match(sql, /private\.can_coach_read_medical_document_asset/);
+  assert.match(sql, /episode\.ended_at is null/);
+  assert.doesNotMatch(sql, /drop (?:table|bucket|function).*progress_document_uploads/i);
+  assert.doesNotMatch(sql, /service_role|signedUrl|getPublicUrl|training_sessions|exercise_entries/i);
 });

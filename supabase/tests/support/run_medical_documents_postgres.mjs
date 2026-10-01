@@ -247,6 +247,7 @@ try {
     "20260925012214_progress_photo_select_volatility.sql",
     "20260930163231_progress_photo_student_gateway.sql",
     "20261001141522_progress_medical_document_student_gateway.sql",
+    "20261001212450_direct_private_student_medical_documents.sql",
   ]) await admin.query(readSql(`supabase/migrations/${file}`));
   await admin.query("insert into private.progress_document_principals(auth_user_id,state) values($1,'active')",
     [ids.replacementPublisher]);
@@ -378,6 +379,74 @@ try {
     [`${randomUUID()}/${randomUUID()}.pdf`, claim.finalBucket, claim.finalPath])).rowCount === 0,
   "browser cannot update final PDF despite broad policy");
 
+  stage = "direct private document and explicit sharing";
+  const direct = await value(student, "select public.begin_direct_medical_document_upload() as value");
+  check(direct.bucketId === "progress-medical-documents"
+    && /^[0-9a-f-]{36}\/[0-9a-f-]{36}\.pdf$/.test(direct.objectName),
+  "direct reservation targets opaque path in final private bucket");
+  const unlinkedDirect = await value(otherStudent,
+    "select public.begin_direct_medical_document_upload() as value");
+  check(unlinkedDirect.bucketId === "progress-medical-documents",
+    "unlinked Student can save a private document");
+  await expectCode(otherStudent.query("insert into storage.objects(bucket_id,name) values($1,$2)",
+    [direct.bucketId, direct.objectName]), "42501", "other Student cannot use reserved path");
+  await expectCode(student.query("insert into storage.objects(bucket_id,name) values($1,$2)",
+    [direct.bucketId, `${randomUUID()}/${randomUUID()}.pdf`]), "42501",
+  "Student cannot invent final object path");
+  await student.query("insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3)",
+    [direct.bucketId, direct.objectName, { mimetype: "application/pdf", size: "26214400" }]);
+  await expectCode(value(otherStudent,
+    "select public.finalize_direct_medical_document_upload($1::uuid) as value", [direct.uploadId]),
+    "42501", "other Student cannot finalize by upload ID");
+  const directAsset = await value(student,
+    "select public.finalize_direct_medical_document_upload($1::uuid) as value", [direct.uploadId]);
+  check(directAsset.bytes === 26214400 && directAsset.sharedWithCoach === false
+    && directAsset.pageCount === null, "25 MiB document is immediately available and private");
+  await expectCode(value(student,
+    "select public.finalize_direct_medical_document_upload($1::uuid) as value", [direct.uploadId]),
+    "42501", "direct finalization cannot replay");
+  check((await value(student, "select public.list_own_medical_documents() as value"))
+    .some((asset) => asset.assetId === directAsset.assetId), "direct document appears in list");
+  check(await value(coach, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
+    [direct.bucketId, direct.objectName]) === 0, "Coach cannot read private direct document");
+  await expectCode(value(otherStudent,
+    "select public.set_own_medical_document_shared($1::uuid,true) as value", [directAsset.assetId]),
+    "42501", "other Student cannot share document by ID");
+  check(await value(student,
+    "select public.set_own_medical_document_shared($1::uuid,true) as value", [directAsset.assetId]) === true,
+  "owner shares explicitly");
+  check(await value(coach, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
+    [direct.bucketId, direct.objectName]) === 1, "linked Coach reads explicitly shared document");
+  check((await value(coach,
+    "select public.list_shared_student_medical_documents($1::uuid) as value", [ids.student]))
+    .some((asset) => asset.assetId === directAsset.assetId), "Coach lists only shared document");
+  check(await value(otherCoach, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
+    [direct.bucketId, direct.objectName]) === 0, "unrelated Coach cannot read direct document");
+  check(await value(student,
+    "select public.set_own_medical_document_shared($1::uuid,false) as value", [directAsset.assetId]) === false,
+  "owner revokes sharing");
+  check(await value(coach, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
+    [direct.bucketId, direct.objectName]) === 0, "revocation removes Coach access");
+  await value(student, "select public.set_own_medical_document_shared($1::uuid,true) as value",
+    [directAsset.assetId]);
+  const wrongMime = await value(student,
+    "select public.begin_direct_medical_document_upload() as value");
+  await student.query("insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3)",
+    [wrongMime.bucketId, wrongMime.objectName, { mimetype: "text/plain", size: "100" }]);
+  await expectCode(value(student,
+    "select public.finalize_direct_medical_document_upload($1::uuid) as value", [wrongMime.uploadId]),
+    "42501", "direct finalization rejects non-PDF MIME");
+  const tooLarge = await value(student,
+    "select public.begin_direct_medical_document_upload() as value");
+  await student.query("insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3)",
+    [tooLarge.bucketId, tooLarge.objectName, { mimetype: "application/pdf", size: "26214401" }]);
+  await expectCode(value(student,
+    "select public.finalize_direct_medical_document_upload($1::uuid) as value", [tooLarge.uploadId]),
+    "42501", "direct finalization rejects more than 25 MiB");
+  check((await value(student, "select public.list_own_medical_documents() as value"))
+    .every((asset) => asset.objectName !== wrongMime.objectName && asset.objectName !== tooLarge.objectName),
+  "invalid objects never appear in list");
+
   stage = "explicit report and revocation";
   const report = await value(student,
     "select public.create_own_progress_report('medical_document',$1::uuid[],null,$2::uuid) as value",
@@ -388,6 +457,16 @@ try {
     [claim.finalBucket, claim.finalPath]) === 1, "recipient Coach can read the reported PDF");
   check(await value(otherCoach, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
     [claim.finalBucket, claim.finalPath]) === 0, "nonrecipient Coach remains denied");
+  check((await value(student, "select public.get_own_medical_document($1::uuid) as value",
+    [assetId])).sharedWithCoach === true, "legacy reported document shows shared status");
+  await value(student, "select public.set_own_medical_document_shared($1::uuid,false) as value", [assetId]);
+  check(await value(coach, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
+    [claim.finalBucket, claim.finalPath]) === 0, "explicit legacy unshare revokes immutable report access");
+  check((await value(student, "select public.get_own_medical_document($1::uuid) as value",
+    [assetId])).sharedWithCoach === false, "legacy document shows private after revoke");
+  await value(student, "select public.set_own_medical_document_shared($1::uuid,true) as value", [assetId]);
+  check(await value(coach, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
+    [claim.finalBucket, claim.finalPath]) === 1, "legacy document can be shared again");
   const pending = await value(student, "select public.begin_own_medical_document_upload() as value");
   await student.query("insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3)",
     [pending.bucketId, pending.objectName, { mimetype: "application/pdf", size: "100" }]);
@@ -401,12 +480,23 @@ try {
   await expectCode(value(student,
     "select public.create_own_progress_report('medical_document',$1::uuid[],null,$2::uuid) as value",
     [[assetId], randomUUID()]), "42501", "lost link blocks new sending");
-  check((await value(student, "select public.list_own_medical_documents() as value"))[0].assetId === assetId,
+  check((await value(student, "select public.list_own_medical_documents() as value"))
+    .some((asset) => asset.assetId === assetId),
     "Student retains historical PDF listing");
   check(await value(student, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
     [claim.finalBucket, claim.finalPath]) === 1, "Student retains historical PDF bytes");
   check(await value(coach, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
     [claim.finalBucket, claim.finalPath]) === 0, "Coach loses PDF bytes when link ends");
+  check(await value(coach, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
+    [direct.bucketId, direct.objectName]) === 0, "Coach loses directly shared PDF when link ends");
+  check(await value(student, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
+    [direct.bucketId, direct.objectName]) === 1, "Student retains direct PDF after unlink");
+  check((await value(student, "select public.get_own_medical_document($1::uuid) as value",
+    [directAsset.assetId])).sharedWithCoach === false,
+  "Student sees private status when Coach relationship ends");
+  await expectCode(value(coach,
+    "select public.list_shared_student_medical_documents($1::uuid) as value", [ids.student]),
+    "42501", "Coach cannot list shared documents after unlink");
   check(await value(publisher, "select public.claim_medical_document_for_verification() as value") === null,
     "publisher cannot claim newly unlinked Student upload");
   await admin.query(`update private.progress_document_principals set state='revoked',

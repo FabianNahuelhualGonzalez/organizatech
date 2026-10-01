@@ -10,6 +10,7 @@
 .uploadButton,
 .retry,
 .openButton,
+.shareButton,
 .saveButton,
 .openLink {
   display: inline-flex;
@@ -53,6 +54,7 @@
   border-radius: 15px;
   padding: 12px 12px 12px 14px;
 }
+.documentCard { flex-wrap: wrap; }
 
 .extension {
   display: inline-flex;
@@ -110,6 +112,12 @@
   padding: 0 14px;
   color: #fff;
   background: rgba(60, 122, 255, 0.14);
+}
+.shareButton {
+  width: 100%;
+  border: 1px solid rgba(143, 178, 255, 0.5);
+  color: #8fb2ff;
+  background: rgba(60, 122, 255, 0.08);
 }
 
 .state,
@@ -225,6 +233,7 @@
 
 .saveButton:disabled,
 .openButton:disabled,
+.shareButton:disabled,
 .retry:disabled,
 .closeButton:disabled { opacity: 0.45; cursor: not-allowed; }
 

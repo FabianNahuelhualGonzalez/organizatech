@@ -7,7 +7,7 @@ const PATH = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 
 export interface MedicalDocumentReservation {
   readonly uploadId: string;
-  readonly bucketId: "progress-document-staging";
+  readonly bucketId: "progress-medical-documents";
   readonly objectName: string;
   readonly mimeType: "application/pdf";
   readonly expiresAt: string;
@@ -19,11 +19,12 @@ export interface MedicalDocumentAsset {
   readonly objectName: string;
   readonly mimeType: "application/pdf";
   readonly bytes: number;
-  readonly pageCount: number;
+  readonly pageCount: number | null;
   readonly displayName: string;
   readonly documentCategory: "otro";
   readonly createdAt: string;
   readonly availableAt: string;
+  readonly sharedWithCoach: boolean;
 }
 
 export class StudentMedicalDocumentGatewayError extends Error {
@@ -58,7 +59,7 @@ function path(value: unknown): string {
 }
 function parseReservation(value: unknown): MedicalDocumentReservation {
   const data = row(value);
-  if (data.bucketId !== "progress-document-staging" || data.mimeType !== "application/pdf") {
+  if (data.bucketId !== "progress-medical-documents" || data.mimeType !== "application/pdf") {
     throw new StudentMedicalDocumentGatewayError("unavailable");
   }
   return { uploadId: uuid(data.uploadId), bucketId: data.bucketId,
@@ -70,16 +71,18 @@ function parseAsset(value: unknown): MedicalDocumentAsset {
   if (data.bucketId !== "progress-medical-documents" || data.mimeType !== "application/pdf"
     || !Number.isSafeInteger(data.bytes) || Number(data.bytes) < 1
     || Number(data.bytes) > MEDICAL_DOCUMENT_MAX_BYTES
-    || !Number.isSafeInteger(data.pageCount) || Number(data.pageCount) < 1
-    || Number(data.pageCount) > 10000
+    || (data.pageCount !== null && (!Number.isSafeInteger(data.pageCount)
+      || Number(data.pageCount) < 1 || Number(data.pageCount) > 10000))
+    || typeof data.sharedWithCoach !== "boolean"
     || data.displayName !== "Documento médico" || data.documentCategory !== "otro") {
     throw new StudentMedicalDocumentGatewayError("unavailable");
   }
   return { assetId: uuid(data.assetId), bucketId: data.bucketId,
     objectName: path(data.objectName), mimeType: data.mimeType,
-    bytes: Number(data.bytes), pageCount: Number(data.pageCount),
+    bytes: Number(data.bytes), pageCount: data.pageCount === null ? null : Number(data.pageCount),
     displayName: data.displayName, documentCategory: data.documentCategory,
-    createdAt: timestamp(data.createdAt), availableAt: timestamp(data.availableAt) };
+    createdAt: timestamp(data.createdAt), availableAt: timestamp(data.availableAt),
+    sharedWithCoach: data.sharedWithCoach };
 }
 function rpcError(error: unknown): never {
   const code = error && typeof error === "object" && "code" in error ? error.code : null;
@@ -95,7 +98,7 @@ export function createStudentMedicalDocumentGateway(client: SupabaseClient) {
   }
   return {
     async reserve(): Promise<MedicalDocumentReservation> {
-      const reservation = parseReservation(await rpc("begin_own_medical_document_upload"));
+      const reservation = parseReservation(await rpc("begin_direct_medical_document_upload"));
       reservations.set(reservation.uploadId, reservation);
       return reservation;
     },
@@ -110,10 +113,20 @@ export function createStudentMedicalDocumentGateway(client: SupabaseClient) {
       });
       if (error) rpcError(error);
     },
-    async enqueue(uploadId: string): Promise<void> {
+    async finalize(uploadId: string): Promise<MedicalDocumentAsset> {
       if (!UUID.test(uploadId)) throw new StudentMedicalDocumentGatewayError("invalid_input");
-      uuid(await rpc("finalize_own_medical_document_upload", { p_upload_id: uploadId }));
+      const asset = parseAsset(await rpc("finalize_direct_medical_document_upload", { p_upload_id: uploadId }));
       reservations.delete(uploadId);
+      return asset;
+    },
+    async setShared(assetId: string, shared: boolean): Promise<void> {
+      if (!UUID.test(assetId) || typeof shared !== "boolean") {
+        throw new StudentMedicalDocumentGatewayError("invalid_input");
+      }
+      const result = await rpc("set_own_medical_document_shared", {
+        p_asset_id: assetId, p_shared: shared,
+      });
+      if (result !== shared) throw new StudentMedicalDocumentGatewayError("unavailable");
     },
     async list(limit = 50, offset = 0): Promise<readonly MedicalDocumentAsset[]> {
       if (!Number.isInteger(limit) || limit < 1 || limit > 100

@@ -115,12 +115,12 @@ export function StudentMedicalDocuments() {
         uploadId = reservation.uploadId;
         stagedUploadRef.current = { file, uploadId };
       }
-      await gateway.enqueue(uploadId);
+      const saved = await gateway.finalize(uploadId);
       stagedUploadRef.current = null;
       setFile(null);
       closeSheet();
-      setNotice("Documento recibido. Aparecerá en tu lista cuando esté disponible.");
-      await load();
+      setDocuments((current) => [saved, ...current]);
+      setNotice("Guardado");
     } catch (caught) { setError(errorMessage(caught)); }
     finally { busyRef.current = false; setBusy(false); }
   }
@@ -133,6 +133,20 @@ export function StudentMedicalDocuments() {
     try {
       const blob = await getStudentMedicalDocumentGateway().downloadOwn(asset.assetId);
       setViewer({ url: URL.createObjectURL(blob), name: asset.displayName });
+    } catch (caught) { setError(errorMessage(caught)); }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+
+  async function setShared(asset: MedicalDocumentAsset) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await getStudentMedicalDocumentGateway().setShared(asset.assetId, !asset.sharedWithCoach);
+      setDocuments((current) => current.map((item) => item.assetId === asset.assetId
+        ? { ...item, sharedWithCoach: !asset.sharedWithCoach } : item));
+      setNotice(asset.sharedWithCoach ? "Documento privado" : "Compartido con tu coach");
     } catch (caught) { setError(errorMessage(caught)); }
     finally { busyRef.current = false; setBusy(false); }
   }
@@ -159,9 +173,12 @@ export function StudentMedicalDocuments() {
           <div className={styles.documentCopy}>
             <strong title={asset.displayName}>{asset.displayName}</strong>
             <span>Otro · {formatSize(asset.bytes)} · {formatDate(asset.availableAt)}</span>
-            <span className={styles.privateBadge}>Solo tú</span>
+            <span className={styles.privateBadge}>{asset.sharedWithCoach ? "Compartido con mi coach" : "Privado"}</span>
           </div>
           <button className={styles.openButton} type="button" disabled={busy} onClick={() => void openDocument(asset)}>Abrir</button>
+          <button className={styles.shareButton} type="button" disabled={busy} onClick={() => void setShared(asset)}>
+            {asset.sharedWithCoach ? "Dejar de compartir" : "Compartir con mi coach"}
+          </button>
         </article>)}
       </div>
       {hasMore ? <button className={styles.retry} type="button" disabled={busy} onClick={() => void loadMore()}>Ver más documentos</button> : null}
