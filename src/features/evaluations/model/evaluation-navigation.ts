@@ -15,7 +15,8 @@ export function canAccessStudentEvaluations(input: {
 }): boolean {
   return input.expectedUserId !== null
     && !input.isCoachPortal
-    && input.activeCoachLinkState === "linked"
+    // Un refresh de un vínculo ya resuelto conserva la identidad; la carga inicial no.
+    && (input.activeCoachLinkState === "linked" || input.activeCoachLinkState === "loading")
     && input.activeCoachLinkIdentityKey === input.expectedUserId;
 }
 

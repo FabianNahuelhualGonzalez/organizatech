@@ -137,10 +137,12 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
           </div>;
         })}</div>
         <div className={styles.sheetQuality}><strong>Calidad de las fotos</strong><p>Preparamos y sanitizamos las fotos como JPEG antes de guardarlas, hasta 20 MB por foto preparada. Puedes elegir JPG, PNG o HEIC si tu navegador lo puede abrir. Recomendado: 1080 px de ancho o más.</p></div>
+      </div>
+      <div className={styles.sheetFooter}>
         {status ? <p className={styles.sheetStatus} role="status">{status}</p> : null}
         {error ? <p className={styles.sheetError} role="alert">{error}</p> : null}
+        <button className={styles.sheetSave} type="button" disabled={ready.length === 0 || preparing || saving} onClick={() => onSave(ready)}>{saving ? "Guardando check…" : "Guardar check"}</button>
       </div>
-      <div className={styles.sheetFooter}><button className={styles.sheetSave} type="button" disabled={ready.length === 0 || preparing || saving} onClick={() => onSave(ready)}>{saving ? "Guardando check…" : "Guardar check"}</button></div>
     </div>
   </div>;
 }

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getStudentProgressPhotoGateway,
   StudentProgressPhotoGatewayError,
+  type StudentPhotoReservation,
   type StudentPhotoCheck,
   type StudentPhotoUpload,
   type StudentPublishedPhoto,
@@ -31,7 +32,7 @@ const STATUS: Readonly<Record<StudentPhotoUpload["status"], string>> = {
   publicada: "Publicada",
   fallida: "Error",
 };
-type QueuedPhoto = { readonly pose: ProgressPhotoPose; readonly uploadId: string };
+type QueuedPhoto = { readonly reservation: StudentPhotoReservation; readonly staged: boolean; readonly enqueued: boolean };
 
 function todayInChile(): string {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -140,31 +141,65 @@ export function StudentProgressPhotos() {
     busyRef.current = true;
     setBusy(true);
     setSheetError("");
+    let failureMessage = "No pudimos guardar el check. Reintenta sin volver a elegir las fotos.";
     try {
       const gateway = getStudentProgressPhotoGateway();
       for (const [index, photo] of sheetPhotos.entries()) {
-        if (queuedPhotosRef.current[photo.pose]) continue;
+        let pending = queuedPhotosRef.current[photo.pose];
+        if (pending?.enqueued) continue;
         setSheetStatus(`Subiendo foto ${index + 1} de ${sheetPhotos.length}…`);
-        const reservation = await gateway.reserve(photo.pose, "jpeg");
-        await gateway.stage(reservation.uploadId, photo.prepared.blob);
-        await gateway.enqueue(reservation.uploadId);
-        queuedPhotosRef.current[photo.pose] = { pose: photo.pose, uploadId: reservation.uploadId };
+        if (!pending || Date.parse(pending.reservation.expiresAt) <= Date.now()) {
+          failureMessage = "No pudimos reservar la foto. Reintenta sin volver a elegirla.";
+          pending = { reservation: await gateway.reserve(photo.pose, "jpeg"), staged: false, enqueued: false };
+          queuedPhotosRef.current[photo.pose] = pending;
+        }
+        if (!pending.staged) {
+          failureMessage = "No pudimos subir la foto a la zona privada. Reintenta sin volver a elegirla.";
+          try {
+            await gateway.stage(pending.reservation.uploadId, photo.prepared.blob);
+            pending = { ...pending, staged: true };
+          } catch (stageError) {
+            // Una respuesta de Storage puede perderse después de aceptar el archivo.
+            // El RPC sólo encola si el objeto privado existe y sigue autorizado.
+            try {
+              await gateway.enqueue(pending.reservation.uploadId);
+              pending = { ...pending, staged: true, enqueued: true };
+            } catch { throw stageError; }
+          }
+          queuedPhotosRef.current[photo.pose] = pending;
+        }
+        if (!pending.enqueued) {
+          failureMessage = "No pudimos poner la foto en cola. Reintenta sin volver a elegirla.";
+          try {
+            await gateway.enqueue(pending.reservation.uploadId);
+          } catch (enqueueError) {
+            const recent = await gateway.listUploads(100);
+            const observed = recent.find((upload) => upload.uploadId === pending.reservation.uploadId);
+            if (observed?.status === "fallida") delete queuedPhotosRef.current[photo.pose];
+            const accepted = observed?.status === "en_cola" || observed?.status === "procesando" || observed?.status === "publicada";
+            if (!accepted) throw enqueueError;
+          }
+          queuedPhotosRef.current[photo.pose] = { ...pending, enqueued: true };
+        }
       }
       await load();
-      const uploadIds = sheetPhotos.map((photo) => queuedPhotosRef.current[photo.pose]?.uploadId);
+      const uploadIds = sheetPhotos.map((photo) => queuedPhotosRef.current[photo.pose]?.reservation.uploadId);
       for (let attempt = 0; attempt < 120; attempt += 1) {
+        failureMessage = "No pudimos confirmar la publicación de las fotos. Reintenta el guardado.";
         const recent = await gateway.listUploads(100);
         const matching = uploadIds.map((uploadId) => recent.find((upload) => upload.uploadId === uploadId));
         if (matching.some((upload) => upload?.status === "fallida")) {
           for (const photo of sheetPhotos) {
             const queued = queuedPhotosRef.current[photo.pose];
-            if (matching.some((upload) => upload?.uploadId === queued?.uploadId && upload?.status === "fallida")) delete queuedPhotosRef.current[photo.pose];
+            if (matching.some((upload) => upload?.uploadId === queued?.reservation.uploadId && upload?.status === "fallida")) delete queuedPhotosRef.current[photo.pose];
           }
-          throw new Error("Una foto no pudo publicarse. Reintenta el guardado.");
+          failureMessage = "Una foto no pudo publicarse. Reintenta el guardado.";
+          throw new Error("progress_photo_publication_failed");
         }
         const publishedAssetIds = matching.map((upload) => upload?.status === "publicada" ? upload.assetId : null);
         if (publishedAssetIds.every((assetId): assetId is string => typeof assetId === "string")) {
           setSheetStatus("Creando check…");
+          failureMessage = "No pudimos crear el check. Reintenta sin volver a elegir las fotos.";
           await gateway.createCheck(checkedOn, publishedAssetIds);
           setNotice("Check guardado");
           setGuideOpen(false);
@@ -175,10 +210,11 @@ export function StudentProgressPhotos() {
         setSheetStatus(matching.some((upload) => upload?.status === "procesando") ? "Procesando fotos…" : "Fotos en cola…");
         await new Promise((resolve) => window.setTimeout(resolve, 3000));
       }
-      throw new Error("Las fotos siguen procesándose. Reintenta el guardado en esta hoja.");
+      failureMessage = "Las fotos siguen procesándose. Reintenta el guardado en esta hoja.";
+      throw new Error("progress_photo_publication_pending");
     } catch (error) {
       setSheetStatus("");
-      setSheetError(error instanceof StudentProgressPhotoGatewayError ? message(error) : error instanceof Error ? error.message : message(error));
+      setSheetError(error instanceof StudentProgressPhotoGatewayError && error.code === "forbidden" ? message(error) : failureMessage);
     }
     finally { busyRef.current = false; setBusy(false); }
   }

@@ -382,7 +382,7 @@
 .sheetError { margin: 0; font-size: 11px; line-height: 1.5; }
 .sheetStatus { color: #8fb2ff; }
 .sheetError { color: #f87171; }
-.sheetFooter { flex: none; border-top: 1px solid rgba(255, 255, 255, 0.10); padding: 12px 16px max(16px, env(safe-area-inset-bottom)); background: #0d1a26; }
+.sheetFooter { display: grid; gap: 8px; flex: none; border-top: 1px solid rgba(255, 255, 255, 0.10); padding: 12px 16px max(16px, env(safe-area-inset-bottom)); background: #0d1a26; }
 .sheetSave { width: 100%; min-height: 50px; border: 0; border-radius: 12px; color: #fff; background: #3c7aff; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
 .sheetSave:disabled { color: rgba(255, 255, 255, 0.45); background: rgba(60, 122, 255, 0.35); cursor: not-allowed; }
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { canAccessStudentEvaluations } from "./model/evaluation-navigation";
 
 const coach = readFileSync("src/features/evaluations/components/coach-evaluations.tsx", "utf8");
 const student = readFileSync("src/features/evaluations/components/student-evaluations.tsx", "utf8");
@@ -124,4 +125,41 @@ test("Nuevo check usa hoja privada y espera fotos publicadas", () => {
   assert.match(photos, /publishedAssetIds\.every[\s\S]*gateway\.createCheck\(checkedOn, publishedAssetIds\)/);
   assert.match(photos, /setNotice\("Check guardado"\)/);
   assert.match(documents, /Aún no tienes documentos[\s\S]*\+ Subir documento[\s\S]*Tus documentos son privados/);
+});
+
+test("Fotos permanece montada al volver del selector durante la revalidación del vínculo", () => {
+  const controller = readFileSync("src/features/coach-linking/hooks/use-coach-linking-controller.ts", "utf8");
+  const root = readFileSync("src/components/organizatech-app.tsx", "utf8");
+  const photos = readFileSync("src/features/progress-records/components/student-progress-photos.tsx", "utf8");
+  const sheet = readFileSync("src/features/progress-records/components/student-progress-check-sheet.tsx", "utf8");
+  const refresh = controller.slice(controller.indexOf("const refreshActive = useCallback("), controller.indexOf("const openForm = useCallback("));
+  const access = { expectedUserId: "student", activeCoachLinkIdentityKey: "student", isCoachPortal: false } as const;
+
+  assert.match(refresh, /window\.addEventListener\("focus", onResume\)/);
+  assert.match(refresh, /document\.addEventListener\("visibilitychange", onResume\)/);
+  assert.match(refresh, /snapshotRef\.current\.activeState !== "linked"/);
+  assert.match(refresh, /activeState: "loading"/);
+  assert.equal(canAccessStudentEvaluations({ ...access, activeCoachLinkState: "linked" }), true);
+  assert.equal(canAccessStudentEvaluations({ ...access, activeCoachLinkState: "loading" }), true);
+  assert.equal(canAccessStudentEvaluations({ ...access, activeCoachLinkIdentityKey: null, activeCoachLinkState: "loading" }), false);
+  assert.match(root, /screen === "evaluaciones" && supabaseUser\?\.id && hasStudentEvaluationsAccess && \(/);
+  assert.match(root, /if \(coachLinking\.snapshot\.activeState === "loading"\) return;/);
+  assert.match(photos, /const \[composerOpen, setComposerOpen\] = useState\(false\)/);
+  assert.match(sheet, /const \[slots, setSlots\] = useState/);
+});
+
+test("fallas de reserva, staging o cola conservan la hoja y permiten reintentar sin exponer errores crudos", () => {
+  const photos = readFileSync("src/features/progress-records/components/student-progress-photos.tsx", "utf8");
+  const sheet = readFileSync("src/features/progress-records/components/student-progress-check-sheet.tsx", "utf8");
+  const save = photos.slice(photos.indexOf("async function saveNewCheck("), photos.indexOf("async function loadMore("));
+
+  assert.match(save, /queuedPhotosRef\.current\[photo\.pose\] = pending/);
+  assert.match(save, /if \(!pending\.staged\)/);
+  assert.match(save, /if \(!pending\.enqueued\)/);
+  assert.match(save, /No pudimos reservar la foto\. Reintenta sin volver a elegirla\./);
+  assert.match(save, /No pudimos subir la foto a la zona privada\. Reintenta sin volver a elegirla\./);
+  assert.match(save, /No pudimos poner la foto en cola\. Reintenta sin volver a elegirla\./);
+  assert.doesNotMatch(save, /error\.message/);
+  assert.ok(save.indexOf("await gateway.createCheck(checkedOn, publishedAssetIds)") < save.indexOf("closeCheckSheet()"));
+  assert.match(sheet, /className=\{styles\.sheetFooter\}[\s\S]*role="alert"[\s\S]*className=\{styles\.sheetSave\}/);
 });

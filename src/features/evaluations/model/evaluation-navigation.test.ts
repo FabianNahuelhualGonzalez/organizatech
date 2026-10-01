@@ -40,7 +40,7 @@ test("reinicia la secuencia al cambiar de identidad y admite el fallback sin ass
   });
 });
 
-test("sólo el vínculo activo aceptado de la identidad actual habilita Evaluaciones", () => {
+test("el vínculo confirmado o su revalidación de la identidad actual conserva Evaluaciones", () => {
   assert.equal(canAccessStudentEvaluations({
     expectedUserId: "student-1",
     activeCoachLinkState: "linked",
@@ -71,6 +71,13 @@ test("sólo el vínculo activo aceptado de la identidad actual habilita Evaluaci
 
   assert.equal(canAccessStudentEvaluations({
     expectedUserId: "student-1",
+    activeCoachLinkState: "loading",
+    activeCoachLinkIdentityKey: "student-1",
+    isCoachPortal: false,
+  }), true, "la revalidación de un vínculo resuelto conserva la pantalla");
+
+  assert.equal(canAccessStudentEvaluations({
+    expectedUserId: "student-1",
     activeCoachLinkState: "none",
     activeCoachLinkIdentityKey: "student-1",
     isCoachPortal: false,
@@ -90,12 +97,24 @@ test("logout y cambio de identidad invalidan un vínculo resuelto para la sesió
     activeCoachLinkIdentityKey: "student-1",
     isCoachPortal: false,
   }), false);
+  assert.equal(canAccessStudentEvaluations({
+    expectedUserId: "student-2",
+    activeCoachLinkState: "loading",
+    activeCoachLinkIdentityKey: "student-1",
+    isCoachPortal: false,
+  }), false);
 });
 
 test("Coach nunca obtiene la superficie Alumno aunque comparta identidad con un vínculo activo", () => {
   assert.equal(canAccessStudentEvaluations({
     expectedUserId: "student-1",
     activeCoachLinkState: "linked",
+    activeCoachLinkIdentityKey: "student-1",
+    isCoachPortal: true,
+  }), false);
+  assert.equal(canAccessStudentEvaluations({
+    expectedUserId: "student-1",
+    activeCoachLinkState: "loading",
     activeCoachLinkIdentityKey: "student-1",
     isCoachPortal: true,
   }), false);
