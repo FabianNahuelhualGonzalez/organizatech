@@ -23,6 +23,7 @@ export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260925004129_progress_photo_stage_volatility.sql": "2ea74c298b3d6d21f7b10f49fbc67029819720517ea3ee4c7ae705e477a673cc",
   "20260925012214_progress_photo_select_volatility.sql": "662f1ceff3a3b09ba0bff96b9092b98bc3f85d8d94994962f5a1a260c6f30fac",
   "20260930163231_progress_photo_student_gateway.sql": "cdd081c9350c7c500e3a53e6711bf86451a950fda1dd93d284465ab0716fc272",
+  "20261001141522_progress_medical_document_student_gateway.sql": "3c40abe999088e649f37a88ed25abb4105522f02b5d275b36fd162243e2377be",
 } as const;
 
 test("crea buckets privados con límites y MIME exactos", () => {
