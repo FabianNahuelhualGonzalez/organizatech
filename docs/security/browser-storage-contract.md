@@ -24,7 +24,7 @@ Una cuenta Supabase no lee claves globales legacy ni usa el repositorio demo com
 | `organizatech:workout-draft:<scope>` | localStorage | demo o Supabase UUID | Readiness, pesos, reps e IDs del intento activo | 24 h | Recuperar entrenamiento y reintentar el enlace readiness | Finalización completa, expiración, cancelación o logout |
 | `organizatech:seen-notifications-v2:<scope>` | localStorage | demo o Supabase UUID | Máximo 60 pares `id`/`seenAt` | Sin TTL | Mantener estado visto | Logout del scope |
 | `organizatech:password-recovery-flow` | sessionStorage | No aplica | Envelope `version`, `startedAt`, `expiresAt` | 60 min | Mantener recovery en la pestaña actual | Expiración, cancelación, finalización, sesión inválida o logout |
-| `organizatech-v1` | Cache API | Global | Shell público: página, manifest e icono | Versión del service worker | Soporte básico offline | Actualización o limpieza del service worker |
+| `organizatech-static-v2` | Cache API | Global | Sólo manifest e icono públicos; nunca HTML de la aplicación | Versión del service worker | Soporte básico offline sin servir un shell antiguo | Activación elimina `organizatech-v1`; actualización o limpieza del service worker |
 
 ## Reglas de seguridad
 

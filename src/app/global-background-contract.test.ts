@@ -17,6 +17,7 @@ function walk(path: string): string[] {
 const globals = readSource("src/app/globals.css");
 const layout = readSource("src/app/layout.tsx");
 const manifest = readSource("public/manifest.json");
+const serviceWorker = readSource("public/sw.js");
 const landingStyles = readSource("src/app/page.module.css");
 const qaCyclesClient = readSource("src/app/qa/training-cycles/training-cycles-qa-client.tsx");
 const authScreen = readSource("src/features/auth/components/auth-screen.tsx");
@@ -28,6 +29,17 @@ assert.match(globals, /body\s*\{[\s\S]*?background-color:\s*var\(--background\);
 assert.match(layout, /themeColor:\s*"#07101A"/);
 assert.equal(JSON.parse(manifest).background_color, "#07101A");
 assert.equal(JSON.parse(manifest).theme_color, "#07101A");
+assert.match(serviceWorker, /const CACHE_NAME = "organizatech-static-v2";/);
+assert.match(serviceWorker, /const LEGACY_CACHE_NAMES = \["organizatech-v1"\];/);
+assert.match(serviceWorker, /const STATIC_ASSETS = \["\/manifest\.json", "\/icon\.svg"\];/);
+assert.doesNotMatch(
+  serviceWorker,
+  /const STATIC_ASSETS = \[[^\]]*["']\/["']/,
+  "El service worker no puede precachear HTML de la aplicación.",
+);
+assert.match(serviceWorker, /self\.skipWaiting\(\)/);
+assert.match(serviceWorker, /self\.clients\.claim\(\)/);
+assert.match(serviceWorker, /caches\.delete\(cacheName\)/);
 
 const cssPaths = walk("src").filter((path) => path.endsWith(".css"));
 const cssSources = cssPaths.map(readSource).join("\n");
