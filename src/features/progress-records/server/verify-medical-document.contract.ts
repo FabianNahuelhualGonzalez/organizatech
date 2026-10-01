@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { jsPDF } from "jspdf";
-import { MAX_MEDICAL_DOCUMENT_BYTES, verifyMedicalDocument } from "./verify-medical-document";
+import { assertMedicalDocumentParserAvailable, MAX_MEDICAL_DOCUMENT_BYTES,
+  verifyMedicalDocument } from "./verify-medical-document";
 
 test("real PDF parses; forged magic, wrong MIME, truncation and >25 MiB fail", () => {
   const temp = mkdtempSync(join(tmpdir(), "org-medical-pdf-"));
@@ -37,6 +38,21 @@ print("JavaScript: no")
     assert.throws(() => verifyMedicalDocument(real.subarray(0, 80), "application/pdf"), /invalid_pdf/);
     assert.throws(() => verifyMedicalDocument(new Uint8Array(MAX_MEDICAL_DOCUMENT_BYTES + 1),
       "application/pdf"), /invalid_pdf/);
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("parser availability fails closed before processing a queued document", () => {
+  const temp = mkdtempSync(join(tmpdir(), "org-medical-parser-"));
+  const oldPath = process.env.PATH;
+  try {
+    process.env.PATH = temp;
+    assert.throws(() => assertMedicalDocumentParserAvailable(), /pdfinfo_unavailable/);
+    const executable = join(temp, "pdfinfo");
+    writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+    assert.doesNotThrow(() => assertMedicalDocumentParserAvailable());
   } finally {
     process.env.PATH = oldPath;
     rmSync(temp, { recursive: true, force: true });

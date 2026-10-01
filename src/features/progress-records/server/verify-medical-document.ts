@@ -2,6 +2,16 @@ import { execFileSync } from "node:child_process";
 
 export const MAX_MEDICAL_DOCUMENT_BYTES = 25 * 1024 * 1024;
 
+// Check the host before claiming a queued document. A missing parser must not
+// turn a valid upload into a failed reservation scheduled for cleanup.
+export function assertMedicalDocumentParserAvailable(): void {
+  try {
+    execFileSync("pdfinfo", ["-v"], { timeout: 5000, stdio: "ignore" });
+  } catch {
+    throw new Error("medical_document_pdfinfo_unavailable");
+  }
+}
+
 export interface VerifiedMedicalDocument {
   readonly bytes: Uint8Array;
   readonly pageCount: number;
