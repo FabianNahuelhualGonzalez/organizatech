@@ -86,7 +86,11 @@ test("Documentos y Fotos usan sólo gateways propios y la tarjeta previa desapar
   assert.match(documents, /gateway\.reserve\(\)[\s\S]*gateway\.stage\([\s\S]*gateway\.enqueue\(/);
   assert.doesNotMatch(`${photos}\n${documents}`, /\.storage\.from\(|\.rpc\(|getPublicUrl|createSignedUrl/);
   assert.doesNotMatch(documents, /Enviar al coach|Guardar y enviar|\.docx|image\/jpeg/);
-  assert.match(documents, /PDF · máx\. 25 MiB por archivo/);
+  assert.match(documents, /PDF · máx\. 25 MB por archivo/);
+  assert.match(documents, /Elige un PDF válido de hasta 25 MB\./);
+  assert.match(documents, /<small>PDF · máx\. 25 MB<\/small>/);
+  assert.match(documents, /format\(bytes \/ 1024 \/ 1024\)\} MB/);
+  assert.doesNotMatch(documents, /MiB/);
 });
 
 test("Mis evaluaciones mantiene márgenes, estado vacío y textos aprobados", () => {

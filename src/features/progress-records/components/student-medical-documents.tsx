@@ -15,7 +15,7 @@ const PAGE_SIZE = 50;
 const PDF_SIGNATURE = [0x25, 0x50, 0x44, 0x46, 0x2d];
 
 function formatSize(bytes: number): string {
-  return `${new Intl.NumberFormat("es-CL", { maximumFractionDigits: 1 }).format(bytes / 1024 / 1024)} MiB`;
+  return `${new Intl.NumberFormat("es-CL", { maximumFractionDigits: 1 }).format(bytes / 1024 / 1024)} MB`;
 }
 
 function formatDate(value: string): string {
@@ -104,7 +104,7 @@ export function StudentMedicalDocuments() {
       if (file.type !== "application/pdf" || !file.name.toLowerCase().endsWith(".pdf")
         || file.size < 1 || file.size > MEDICAL_DOCUMENT_MAX_BYTES
         || PDF_SIGNATURE.some((byte, index) => signature[index] !== byte)) {
-        setError("Elige un PDF válido de hasta 25 MiB.");
+        setError("Elige un PDF válido de hasta 25 MB.");
         return;
       }
       const gateway = getStudentMedicalDocumentGateway();
@@ -142,7 +142,7 @@ export function StudentMedicalDocuments() {
       <button ref={uploadButtonRef} className={styles.uploadButton} type="button" onClick={() => { setError(""); setSheetOpen(true); }}>
         <span aria-hidden="true">↑</span> Subir documento
       </button>
-      <p className={styles.fileHint}>PDF · máx. 25 MiB por archivo</p>
+      <p className={styles.fileHint}>PDF · máx. 25 MB por archivo</p>
       {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
       {error && !sheetOpen ? <p className={styles.error} role="alert">{error}</p> : null}
       {loading ? <div className={styles.state} role="status">Cargando tus documentos…</div> : null}
@@ -168,7 +168,7 @@ export function StudentMedicalDocuments() {
           <label className={styles.filePicker}>
             <input type="file" accept=".pdf,application/pdf" disabled={busy} onChange={(event) => { setFile(event.target.files?.[0] ?? null); stagedUploadRef.current = null; setError(""); event.target.value = ""; }} />
             <span>{file ? "Cambiar PDF" : "Elegir archivo"}</span>
-            <small>PDF · máx. 25 MiB</small>
+            <small>PDF · máx. 25 MB</small>
           </label>
           {file ? <div className={styles.selectedFile}><span className={styles.extension}>PDF</span><div><strong>{file.name}</strong><span>{formatSize(file.size)}</span></div></div> : null}
           {error ? <p className={styles.error} role="alert">{error}</p> : null}
