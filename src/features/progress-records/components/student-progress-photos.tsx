@@ -52,7 +52,8 @@ function message(error: unknown): string {
 export function StudentProgressPhotos() {
   const surfaceRef = useRef<HTMLElement>(null);
   const viewerCloseRef = useRef<HTMLButtonElement>(null);
-  const [guideOpen, setGuideOpen] = useState(true);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const guideInitializedRef = useRef(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [photos, setPhotos] = useState<readonly StudentPublishedPhoto[]>([]);
   const [checks, setChecks] = useState<readonly StudentPhotoCheck[]>([]);
@@ -88,6 +89,10 @@ export function StudentProgressPhotos() {
       setPhotos(nextPhotos);
       setChecks(nextChecks);
       setUploads(nextUploads);
+      if (!guideInitializedRef.current) {
+        guideInitializedRef.current = true;
+        setGuideOpen(nextChecks.length === 0);
+      }
       setPhotosMore(photoPages.at(-1)?.length === PAGE_SIZE);
       setChecksMore(checkPages.at(-1)?.length === PAGE_SIZE);
       setSelected((current) => current.filter((id) => nextPhotos.some((photo) => photo.assetId === id && photo.checkId === null)));
@@ -176,6 +181,7 @@ export function StudentProgressPhotos() {
       setSelected([]);
       setNotice("Check creado.");
       setComposerOpen(false);
+      setGuideOpen(false);
       await load();
     } catch (error) { setActionError(message(error)); }
     finally { busyRef.current = false; setBusy(false); }
@@ -231,6 +237,9 @@ export function StudentProgressPhotos() {
   }
 
   const available = photos.filter((photo) => photo.checkId === null && photo.pose !== null);
+  const noContent = checks.length === 0 && uploads.length === 0 && photos.length === 0;
+  const newCheckButton = <button className={styles.newCheckButton} type="button" aria-expanded={composerOpen} onClick={() => setComposerOpen((current) => !current)}>+ Nuevo check</button>;
+  const privacyNote = <p className={styles.privacy}><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg><span>Tus fotos son privadas. Solo tú puedes verlas aquí.</span></p>;
   return (
     <section ref={surfaceRef} tabIndex={-1} className={styles.surface} aria-label="Fotos de progreso">
       <div className={styles.guide}>
@@ -241,11 +250,16 @@ export function StudentProgressPhotos() {
         </button>
         {guideOpen ? <ol>{PHOTO_GUIDE.map((tip, index) => <li key={tip}><span aria-hidden="true">{index + 1}</span><span>{tip}</span></li>)}</ol> : null}
       </div>
-      <p className={styles.privacy}><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg><span>Tus fotos son privadas. Solo tú puedes verlas aquí.</span></p>
-      <button className={styles.newCheckButton} type="button" aria-expanded={composerOpen} onClick={() => setComposerOpen((current) => !current)}>+ Nuevo check</button>
       {loading ? <p className={styles.state} role="status">Cargando tus fotos…</p> : null}
       {!loading && loadError ? <div className={styles.state} role="alert"><p>{loadError}</p><button className={styles.secondary} type="button" onClick={() => void load(true)}>Reintentar</button></div> : null}
       {!loading && !loadError ? <>
+        {noContent ? <div className={styles.emptyState}>
+          <span className={styles.emptyCamera}><svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg></span>
+          <strong>Aún no tienes fotos de progreso</strong>
+          <p>Crea tu primer check con tus 3 poses: frente, perfil y espalda.</p>
+          {newCheckButton}
+          <div className={styles.emptyPrivacy}>{privacyNote}</div>
+        </div> : <>{newCheckButton}{privacyNote}</>}
         {composerOpen ? <div className={styles.card}>
           <h4>Nueva carga</h4>
           <p>Selecciona de 1 a 3 fotos. Las prepararemos antes de subirlas.</p>
@@ -255,15 +269,16 @@ export function StudentProgressPhotos() {
         </div> : null}
         {actionError ? <p className={styles.error} role="alert">{actionError}</p> : null}
         {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
-        <div className={styles.group}>
-          {checks.length === 0 ? <p className={styles.empty}>Aún no tienes checks.</p> : checks.map((check) => <article className={styles.check} key={check.id}>
+        {checks.length > 0 ? <section className={styles.historySection} aria-label="Checks">
+          <h4>Checks</h4>
+          <div className={styles.group}>{checks.map((check) => <article className={styles.check} key={check.id}>
             <div className={styles.checkHeading}><div><strong>Check · {check.checkedOn.split("-").reverse().join("/")}</strong><span>{check.photos.length} {check.photos.length === 1 ? "foto" : "fotos"}</span></div><span className={styles.privateBadge}>Solo tú</span></div>
             <div className={styles.checkGrid}>{check.photos.map((photo) => <PrivateCheckPhoto key={photo.assetId} assetId={photo.assetId} pose={photo.pose} onOpen={() => void openPhoto(photo.assetId)} />)}</div>
           </article>)}
-          {checksMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("checks")}>Ver más checks</button> : null}
-        </div>
-        <div className={styles.group}><h4>Cargas recientes</h4>{uploads.length === 0 ? <p className={styles.empty}>Aún no tienes cargas.</p> : uploads.map((item) => <div className={styles.row} key={item.uploadId}><span>{dateLabel(item.createdAt)} · {item.pose}</span><strong>{STATUS[item.status]}</strong></div>)}</div>
-        <div className={styles.group}><h4>Mis fotos</h4>{photos.length === 0 ? <p className={styles.empty}>Aún no tienes fotos publicadas.</p> : photos.map((photo) => <div className={styles.row} key={photo.assetId}><div><strong>{photo.pose ?? "Foto"}</strong><span>{dateLabel(photo.availableAt)}</span></div><div className={styles.actions}><button className={styles.secondary} type="button" disabled={busy} onClick={() => void openPhoto(photo.assetId)}>Abrir</button>{photo.checkId === null && photo.pose ? <label className={styles.select}><input type="checkbox" checked={selected.includes(photo.assetId)} disabled={busy} onChange={() => togglePhoto(photo)} />Check</label> : null}</div></div>)}{photosMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("photos")}>Ver más fotos</button> : null}</div>
+          {checksMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("checks")}>Ver más checks</button> : null}</div>
+        </section> : null}
+        {uploads.length > 0 ? <section className={styles.historySection} aria-label="Cargas recientes"><h4>Cargas recientes</h4><div className={styles.group}>{uploads.map((item) => <div className={styles.row} key={item.uploadId}><span>{dateLabel(item.createdAt)} · {item.pose}</span><strong>{STATUS[item.status]}</strong></div>)}</div></section> : null}
+        {photos.length > 0 ? <section className={styles.historySection} aria-label="Mis fotos"><h4>Mis fotos</h4><div className={styles.group}>{photos.map((photo) => <div className={styles.row} key={photo.assetId}><div><strong>{photo.pose ?? "Foto"}</strong><span>{dateLabel(photo.availableAt)}</span></div><div className={styles.actions}><button className={styles.secondary} type="button" disabled={busy} onClick={() => void openPhoto(photo.assetId)}>Abrir</button>{photo.checkId === null && photo.pose ? <label className={styles.select}><input type="checkbox" checked={selected.includes(photo.assetId)} disabled={busy} onChange={() => togglePhoto(photo)} />Check</label> : null}</div></div>)}{photosMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("photos")}>Ver más fotos</button> : null}</div></section> : null}
         {composerOpen && available.length > 0 ? <div className={styles.card}><h4>Crear check</h4><p>Elige de 1 a 3 fotos publicadas con poses distintas.</p><label className={styles.dateLabel}>Fecha<input type="date" value={checkedOn} max={todayInChile()} onChange={(event) => setCheckedOn(event.target.value)} /></label><button className={styles.primary} type="button" disabled={busy || selected.length === 0 || !checkedOn || checkedOn > todayInChile()} onClick={() => void createCheck()}>Crear check ({selected.length})</button></div> : null}
       </> : null}
       {viewer ? <div className={styles.viewer} role="dialog" aria-modal="true" aria-label="Foto de progreso" onKeyDown={handleViewerKeyDown}>
