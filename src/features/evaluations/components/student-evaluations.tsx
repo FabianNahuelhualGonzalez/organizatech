@@ -261,6 +261,7 @@ export function StudentEvaluations({
       {view === "success" && active ? <div className={styles.success}><Check size={42} color="#4ade80" /><h2 id="student-evaluations-title" className={styles.title}>Evaluación enviada</h2><p className={styles.muted}>Enviaste «{active.snapshot.name}» a {active.coachName}. Tu coach recibirá una notificación.</p><button className={styles.button} type="button" onClick={() => { setView("list"); setActive(null); }}>Volver a mis evaluaciones</button></div> : null}
       </div>
       </div>
+      <div id="student-progress-report-actions" className={styles.studentProgressReportActions} />
       {toast ? <div className={styles.toast} role="status">{toast}</div> : null}
     </section>
   );

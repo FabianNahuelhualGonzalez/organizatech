@@ -720,6 +720,11 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.studentProgressReportActions {
+  position: relative;
+  z-index: 40;
+}
+
 .studentContent {
   display: flex;
   flex: 1;

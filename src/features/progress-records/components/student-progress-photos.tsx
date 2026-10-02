@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import {
   getStudentProgressPhotoGateway,
@@ -779,8 +780,12 @@ export function StudentProgressPhotos() {
   const selectedPhotos = selectedIds.flatMap((id) => checks.flatMap((check) => check.photos.filter((photo) => photo.assetId === id).map((photo) => ({ ...photo, checkedOn: check.checkedOn }))));
   const selectedDates = [...new Set(selectedPhotos.map((photo) => checkDate(photo.checkedOn)))];
   const selectedSummary = `${selectedIds.length} ${selectedIds.length === 1 ? "foto" : "fotos"} · Check ${selectedDates.join(" y ")}${reportMessage.trim() ? " · con mensaje" : ""}`;
+  const selectionActionsLayer = selecting && typeof document !== "undefined"
+    ? document.getElementById("student-progress-report-actions")
+    : null;
+  const selectionBar = selecting ? <div className={styles.selectBar}><button className={styles.secondary} type="button" onClick={cancelSelection}>Cancelar</button><button className={styles.newCheckButton} type="button" disabled={selectedIds.length === 0} onClick={() => setSendSheetOpen(true)}>{selectedIds.length ? `Continuar (${selectedIds.length})` : "Selecciona fotos"}</button></div> : null;
   return (
-    <section ref={surfaceRef} tabIndex={-1} className={styles.surface} aria-label="Fotos de progreso">
+    <section ref={surfaceRef} tabIndex={-1} className={`${styles.surface} ${selecting ? styles.surfaceSelecting : ""}`} aria-label="Fotos de progreso">
       {sentResult ? <div className={styles.sentSuccess}>
         <span className={styles.sentIcon} aria-hidden="true">✓</span>
         <strong>Envío exitoso</strong>
@@ -846,7 +851,6 @@ export function StudentProgressPhotos() {
             {checksMore ? <button className={styles.secondary} type="button" disabled={busy} onClick={() => void loadMore("checks")}>Ver más checks</button> : null}</div>
           </section> : null}
         </> : null}
-        {selecting ? <div className={styles.selectBar}><button className={styles.secondary} type="button" onClick={cancelSelection}>Cancelar</button><button className={styles.newCheckButton} type="button" disabled={selectedIds.length === 0} onClick={() => setSendSheetOpen(true)}>{selectedIds.length ? `Continuar (${selectedIds.length})` : "Selecciona fotos"}</button></div> : null}
       </>}
       {notice ? <p className={styles.toast} role="status">{notice}</p> : null}
       {actionError ? <p className={styles.errorToast} role="alert">{actionError}</p> : null}
@@ -913,6 +917,7 @@ export function StudentProgressPhotos() {
           </div>
         </div>
       </div> : null}
+      {selectionBar && selectionActionsLayer ? createPortal(selectionBar, selectionActionsLayer) : null}
     </section>
   );
 }
