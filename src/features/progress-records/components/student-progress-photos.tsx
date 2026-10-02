@@ -150,13 +150,13 @@ export function StudentProgressPhotos() {
         setSheetStatus(`Subiendo foto ${index + 1} de ${sheetPhotos.length}…`);
         if (!pending || Date.parse(pending.reservation.expiresAt) <= Date.now()) {
           failureMessage = "No pudimos reservar la foto. Reintenta sin volver a elegirla.";
-          pending = { reservation: await gateway.reserve(photo.pose, "jpeg"), staged: false, enqueued: false };
+          pending = { reservation: await gateway.reserve(photo.pose, photo.selected.format), staged: false, enqueued: false };
           queuedPhotosRef.current[photo.pose] = pending;
         }
         if (!pending.staged) {
           failureMessage = "No pudimos subir la foto a la zona privada. Reintenta sin volver a elegirla.";
           try {
-            await gateway.stage(pending.reservation.uploadId, photo.prepared.blob);
+            await gateway.stage(pending.reservation.uploadId, photo.selected.file);
             pending = { ...pending, staged: true };
           } catch (stageError) {
             // Una respuesta de Storage puede perderse después de aceptar el archivo.
@@ -193,7 +193,7 @@ export function StudentProgressPhotos() {
             const queued = queuedPhotosRef.current[photo.pose];
             if (matching.some((upload) => upload?.uploadId === queued?.reservation.uploadId && upload?.status === "fallida")) delete queuedPhotosRef.current[photo.pose];
           }
-          failureMessage = "Una foto no pudo publicarse. Reintenta el guardado.";
+          failureMessage = "No pudimos guardar una foto. Elige otra foto e inténtalo de nuevo.";
           throw new Error("progress_photo_publication_failed");
         }
         const publishedAssetIds = matching.map((upload) => upload?.status === "publicada" ? upload.assetId : null);
@@ -327,7 +327,7 @@ export function StudentProgressPhotos() {
           )}
         </div>
       </div> : null}
-      {composerOpen ? <StudentProgressCheckSheet checkedOn={checkedOn} saving={busy} status={sheetStatus} error={sheetError} onClose={closeCheckSheet} onSlotChange={(pose) => { delete queuedPhotosRef.current[pose]; }} onSave={(sheetPhotos) => { void saveNewCheck(sheetPhotos); }} /> : null}
+      {composerOpen ? <StudentProgressCheckSheet checkedOn={checkedOn} saving={busy} status={sheetStatus} error={sheetError} onClose={closeCheckSheet} onSlotChange={(pose) => { delete queuedPhotosRef.current[pose]; setSheetError(""); setSheetStatus(""); }} onSave={(sheetPhotos) => { void saveNewCheck(sheetPhotos); }} /> : null}
     </section>
   );
 }

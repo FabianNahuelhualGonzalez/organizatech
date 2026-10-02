@@ -2,20 +2,20 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { PROGRESS_PHOTO_MAX_BYTES, type ProgressPhotoPose } from "../model/progress-records-contract";
+import { selectProgressPhoto, type StudentPhotoFormat } from "../model/select-progress-photo";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PATH_ID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
-const OPAQUE_PATH = new RegExp(`^${PATH_ID}/${PATH_ID}\\.(jpg|webp)$`, "i");
+const OPAQUE_PATH = new RegExp(`^${PATH_ID}/${PATH_ID}\\.(jpg|png|webp)$`, "i");
 const FINAL_PATH = new RegExp(`^${PATH_ID}/${PATH_ID}\\.(jpg|jpeg|png|webp|heic)$`, "i");
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type StudentPhotoStatus = "reservada" | "en_cola" | "procesando" | "publicada" | "fallida";
-export type StudentPhotoFormat = "jpeg" | "webp";
 export interface StudentPhotoReservation {
   readonly uploadId: string;
   readonly bucketId: "progress-check-staging";
   readonly objectName: string;
-  readonly mimeType: "image/jpeg" | "image/webp";
+  readonly mimeType: "image/jpeg" | "image/png" | "image/webp";
   readonly expiresAt: string;
 }
 export interface StudentPhotoUpload {
@@ -96,8 +96,10 @@ function parseArray<T>(value: unknown, parser: (value: unknown) => T): readonly 
 function parseReservation(value: unknown): StudentPhotoReservation {
   const data = row(value);
   if (data.bucketId !== "progress-check-staging" || typeof data.objectName !== "string" || !OPAQUE_PATH.test(data.objectName)
-    || (data.mimeType !== "image/jpeg" && data.mimeType !== "image/webp")
-    || !data.objectName.endsWith(data.mimeType === "image/jpeg" ? ".jpg" : ".webp")) {
+    || (data.mimeType !== "image/jpeg" && data.mimeType !== "image/png"
+      && data.mimeType !== "image/webp")
+    || !data.objectName.endsWith(data.mimeType === "image/jpeg" ? ".jpg"
+      : data.mimeType === "image/png" ? ".png" : ".webp")) {
     throw new StudentProgressPhotoGatewayError("unavailable");
   }
   return { uploadId: uuid(data.uploadId), bucketId: data.bucketId, objectName: data.objectName,
@@ -154,17 +156,22 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
   }
   return {
     async reserve(poseValue: ProgressPhotoPose, format: StudentPhotoFormat): Promise<StudentPhotoReservation> {
-      if (!["frente", "perfil", "espalda"].includes(poseValue) || (format !== "jpeg" && format !== "webp")) {
+      if (!["frente", "perfil", "espalda"].includes(poseValue)
+        || (format !== "jpeg" && format !== "png" && format !== "webp")) {
         throw new StudentProgressPhotoGatewayError("invalid_input");
       }
       const reservation = parseReservation(await rpc("begin_own_progress_photo_upload", { p_pose: poseValue, p_format: format }));
       reservations.set(reservation.uploadId, reservation);
       return reservation;
     },
-    async stage(uploadId: string, image: Blob): Promise<void> {
+    async stage(uploadId: string, image: File): Promise<void> {
       const safe = reservations.get(uploadId);
       if (!safe) throw new StudentProgressPhotoGatewayError("invalid_input");
-      if (image.size < 1 || image.size > PROGRESS_PHOTO_MAX_BYTES || image.type !== safe.mimeType) {
+      let selected: ReturnType<typeof selectProgressPhoto>;
+      try { selected = selectProgressPhoto(image); }
+      catch { throw new StudentProgressPhotoGatewayError("invalid_input"); }
+      const expectedMime = { jpeg: "image/jpeg", png: "image/png", webp: "image/webp" }[selected.format];
+      if (image.size < 1 || image.size > PROGRESS_PHOTO_MAX_BYTES || expectedMime !== safe.mimeType) {
         throw new StudentProgressPhotoGatewayError("invalid_input");
       }
       const { error } = await client.storage.from(safe.bucketId).upload(safe.objectName, image, {

@@ -18,7 +18,6 @@ test("acepta únicamente las parejas MIME/extensión cerradas para fotos", () =>
     ["image/jpeg", "jpeg"],
     ["image/png", "png"],
     ["image/webp", "webp"],
-    ["image/heic", "heic"],
   ] as const) {
     assert.deepEqual(validateProgressUploadDraft({ kind: "photo", mimeType, extension, bytes: 1 }), {
       kind: "photo", mimeType, extension, bytes: 1,
@@ -31,6 +30,12 @@ test("acepta únicamente las parejas MIME/extensión cerradas para fotos", () =>
   assert.throws(
     () => validateProgressUploadDraft({
       kind: "photo", mimeType: "image/gif", extension: "gif", bytes: 1,
+    } as never),
+    (error) => error instanceof ProgressContractError && error.code === "invalid_format",
+  );
+  assert.throws(
+    () => validateProgressUploadDraft({
+      kind: "photo", mimeType: "image/heic", extension: "heic", bytes: 1,
     } as never),
     (error) => error instanceof ProgressContractError && error.code === "invalid_format",
   );

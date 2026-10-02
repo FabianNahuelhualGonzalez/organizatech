@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import sharp from "sharp";
 import { jpegHasPrivateMetadata, verifyAndSanitizeProgressPhoto } from "./verify-progress-photo";
 
@@ -37,4 +38,45 @@ test("WebP staging is decoded and published as metadata-free JPEG", async () => 
   assert.equal(output.height, 12);
   assert.equal((await sharp(output.bytes).metadata()).format, "jpeg");
   assert.equal(jpegHasPrivateMetadata(output.bytes), false);
+});
+
+test("PNG staging is decoded and published as metadata-free JPEG", async () => {
+  const png = await sharp({ create: { width: 24, height: 12, channels: 4,
+    background: "#446688" } }).png().withExif({ IFD0: { Copyright: "fixture" } }).toBuffer();
+  const output = await verifyAndSanitizeProgressPhoto(png, "image/png", "image/png");
+  const metadata = await sharp(output.bytes).metadata();
+  assert.equal(output.width, 24);
+  assert.equal(output.height, 12);
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.exif, undefined);
+  assert.equal(metadata.xmp, undefined);
+  assert.equal(metadata.iptc, undefined);
+  assert.equal(metadata.icc, undefined);
+  assert.equal(jpegHasPrivateMetadata(output.bytes), false);
+});
+
+test("EXIF orientation is applied and final dimensions stay within 4096 px", async () => {
+  const source = await sharp({ create: { width: 5000, height: 2500, channels: 3,
+    background: "#446688" } }).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+  const output = await verifyAndSanitizeProgressPhoto(source, "image/jpeg", "image/jpeg");
+  assert.equal(output.width, 2048);
+  assert.equal(output.height, 4096);
+  assert.equal(jpegHasPrivateMetadata(output.bytes), false);
+});
+
+test("real HEIC and RAW bytes are rejected even with matching MIME", async () => {
+  const heic = readFileSync("src/features/progress-records/server/fixtures/real-heic.heic");
+  assert.equal(heic.subarray(4, 12).toString("ascii"), "ftypheic");
+  await assert.rejects(verifyAndSanitizeProgressPhoto(heic, "image/heic", "image/heic"));
+  await assert.rejects(verifyAndSanitizeProgressPhoto(heic, "image/jpeg", "image/jpeg"));
+  await assert.rejects(verifyAndSanitizeProgressPhoto(new Uint8Array([0x49, 0x49, 0x2a, 0x00]),
+    "image/x-adobe-dng", "image/x-adobe-dng"));
+});
+
+test("false format, false magic and corrupt PNG fail closed", async () => {
+  const png = await sharp({ create: { width: 5, height: 5, channels: 3,
+    background: "#446688" } }).png().toBuffer();
+  await assert.rejects(verifyAndSanitizeProgressPhoto(png, "image/jpeg", "image/jpeg"));
+  await assert.rejects(verifyAndSanitizeProgressPhoto(png, "image/png", "image/webp"));
+  await assert.rejects(verifyAndSanitizeProgressPhoto(png.subarray(0, 20), "image/png", "image/png"));
 });

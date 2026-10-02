@@ -8,6 +8,8 @@ export type ProgressPortal = "usuario";
 export type ProgressPhotoPose = "frente" | "perfil" | "espalda";
 export type ProgressPhotoMime = "image/jpeg" | "image/png" | "image/webp" | "image/heic";
 export type ProgressPhotoExtension = "jpg" | "jpeg" | "png" | "webp" | "heic";
+export type ProgressPhotoUploadMime = Exclude<ProgressPhotoMime, "image/heic">;
+export type ProgressPhotoUploadExtension = Exclude<ProgressPhotoExtension, "heic">;
 export type ProgressDocumentMime = "application/pdf";
 export type ProgressDocumentExtension = "pdf";
 export type ProgressDocumentCategory =
@@ -31,8 +33,8 @@ export interface StudentProgressAccess {
 export type ProgressUploadDraft =
   | {
       readonly kind: "photo";
-      readonly mimeType: ProgressPhotoMime;
-      readonly extension: ProgressPhotoExtension;
+      readonly mimeType: ProgressPhotoUploadMime;
+      readonly extension: ProgressPhotoUploadExtension;
       readonly bytes: number;
     }
   | {
@@ -146,11 +148,10 @@ export class ProgressContractError extends Error {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const MIME_EXTENSION: Readonly<Record<ProgressPhotoMime, readonly ProgressPhotoExtension[]>> = {
+const MIME_EXTENSION: Readonly<Record<ProgressPhotoUploadMime, readonly ProgressPhotoUploadExtension[]>> = {
   "image/jpeg": ["jpg", "jpeg"],
   "image/png": ["png"],
   "image/webp": ["webp"],
-  "image/heic": ["heic"],
 };
 const DOCUMENT_CATEGORIES = new Set<ProgressDocumentCategory>([
   "examen_medico", "informe_medico", "receta", "nutricion", "otro",

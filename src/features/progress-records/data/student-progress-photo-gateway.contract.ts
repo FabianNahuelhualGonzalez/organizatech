@@ -11,7 +11,7 @@ const now = "2026-09-30T12:00:00Z";
 
 function fixture() {
   const calls: { name: string; args: unknown }[] = [];
-  const storage: { bucket?: string; path?: string; upsert?: boolean; contentType?: string } = {};
+  const storage: { bucket?: string; path?: string; upsert?: boolean; contentType?: string; file?: File } = {};
   const outputs: Record<string, unknown> = {
     begin_own_progress_photo_upload: { uploadId, bucketId: "progress-check-staging", objectName,
       mimeType: "image/jpeg", expiresAt: now },
@@ -37,8 +37,9 @@ function fixture() {
     storage: { from: (bucket: string) => {
       storage.bucket = bucket;
       return {
-        upload: async (path: string, _image: Blob, options: { upsert: boolean; contentType: string }) => {
+        upload: async (path: string, image: File, options: { upsert: boolean; contentType: string }) => {
           storage.path = path;
+          storage.file = image;
           storage.upsert = options.upsert;
           storage.contentType = options.contentType;
           return { error: null };
@@ -55,18 +56,47 @@ function fixture() {
 
 test("reserva, staging y cola usan sólo la ruta entregada por SQL", async () => {
   const { gateway, calls, storage } = fixture();
-  await assert.rejects(gateway.stage(uploadId, new Blob(["image"], { type: "image/jpeg" })),
+  const original = new File(["image"], "source.jpg", { type: "image/jpeg" });
+  await assert.rejects(gateway.stage(uploadId, original),
     (error: unknown) => error instanceof StudentProgressPhotoGatewayError && error.code === "invalid_input");
   const reservation = await gateway.reserve("frente", "jpeg");
   assert.equal(reservation.objectName, objectName);
-  await gateway.stage(reservation.uploadId, new Blob(["image"], { type: "image/jpeg" }));
+  await gateway.stage(reservation.uploadId, original);
   await gateway.enqueue(reservation.uploadId);
   assert.deepEqual(calls, [
     { name: "begin_own_progress_photo_upload", args: { p_pose: "frente", p_format: "jpeg" } },
     { name: "finalize_own_progress_photo_upload", args: { p_upload_id: uploadId } },
   ]);
-  assert.deepEqual(storage, { bucket: "progress-check-staging", path: objectName,
+  assert.deepEqual(storage, { bucket: "progress-check-staging", path: objectName, file: original,
     upsert: false, contentType: "image/jpeg" });
+});
+
+test("PNG is staged unchanged with SQL MIME and opaque path", async () => {
+  const { gateway, outputs, storage } = fixture();
+  outputs.begin_own_progress_photo_upload = { uploadId, bucketId: "progress-check-staging",
+    objectName: `${uploadId}/${assetId}.png`, mimeType: "image/png", expiresAt: now };
+  const reservation = await gateway.reserve("perfil", "png");
+  const original = new File(["png bytes"], "selected.png", { type: "image/png" });
+  await gateway.stage(reservation.uploadId, original);
+  assert.equal(storage.file, original);
+  assert.equal(storage.contentType, "image/png");
+  assert.equal(storage.path, reservation.objectName);
+});
+
+test("gateway rejects HEIC, RAW and an unauthorized staging path", async () => {
+  const { gateway, outputs, calls, storage } = fixture();
+  await assert.rejects(gateway.reserve("perfil", "heic" as never), StudentProgressPhotoGatewayError);
+  await assert.rejects(gateway.reserve("perfil", "raw" as never), StudentProgressPhotoGatewayError);
+  assert.equal(calls.length, 0);
+  const reservation = await gateway.reserve("perfil", "jpeg");
+  await assert.rejects(gateway.stage(reservation.uploadId,
+    new File(["bytes"], "photo.heic", { type: "image/jpeg" })), StudentProgressPhotoGatewayError);
+  await assert.rejects(gateway.stage(reservation.uploadId,
+    new File(["bytes"], "photo.dng", { type: "image/x-adobe-dng" })), StudentProgressPhotoGatewayError);
+  assert.equal(storage.file, undefined);
+  outputs.begin_own_progress_photo_upload = { uploadId, bucketId: "progress-check-staging",
+    objectName: `${uploadId}/${assetId}.heic`, mimeType: "image/heic", expiresAt: now };
+  await assert.rejects(gateway.reserve("perfil", "jpeg"), StudentProgressPhotoGatewayError);
 });
 
 test("lecturas y check usan allowlist de argumentos; Storage recibe ruta autorizada por detalle", async () => {

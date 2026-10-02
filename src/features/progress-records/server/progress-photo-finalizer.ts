@@ -5,7 +5,7 @@ export interface ClaimedProgressPhoto {
   readonly uploadId: string;
   readonly stagingBucket: "progress-check-staging";
   readonly stagingPath: string;
-  readonly expectedMime: "image/jpeg" | "image/webp";
+  readonly expectedMime: "image/jpeg" | "image/png" | "image/webp";
   readonly finalBucket: "progress-check-photos";
   readonly finalPath: string;
 }
@@ -28,7 +28,7 @@ export interface ProgressPhotoPublicationPort {
 }
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
-const STAGING_PATH = new RegExp(`^${UUID}/${UUID}\\.(jpg|webp)$`);
+const STAGING_PATH = new RegExp(`^${UUID}/${UUID}\\.(jpg|png|webp)$`);
 const FINAL_PATH = new RegExp(`^${UUID}/${UUID}\\.jpg$`);
 const ID = new RegExp(`^${UUID}$`);
 
@@ -36,8 +36,10 @@ export function validClaim(value: ClaimedProgressPhoto): boolean {
   return ID.test(value.uploadId)
     && value.stagingBucket === "progress-check-staging"
     && STAGING_PATH.test(value.stagingPath)
-    && (value.expectedMime === "image/jpeg" || value.expectedMime === "image/webp")
-    && value.stagingPath.endsWith(value.expectedMime === "image/jpeg" ? ".jpg" : ".webp")
+    && (value.expectedMime === "image/jpeg" || value.expectedMime === "image/png"
+      || value.expectedMime === "image/webp")
+    && value.stagingPath.endsWith(value.expectedMime === "image/jpeg" ? ".jpg"
+      : value.expectedMime === "image/png" ? ".png" : ".webp")
     && value.finalBucket === "progress-check-photos"
     && FINAL_PATH.test(value.finalPath);
 }

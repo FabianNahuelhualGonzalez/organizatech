@@ -12,6 +12,10 @@ function matchesMagic(bytes: Uint8Array, mime: string): boolean {
   if (mime === "image/jpeg") {
     return bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
   }
+  if (mime === "image/png") {
+    return bytes.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+      .every((value, index) => bytes[index] === value);
+  }
   return mime === "image/webp" && bytes.length >= 12
     && String.fromCharCode(...bytes.subarray(0, 4)) === "RIFF"
     && String.fromCharCode(...bytes.subarray(8, 12)) === "WEBP";
@@ -54,8 +58,7 @@ export async function verifyAndSanitizeProgressPhoto(
   }
   const decoder = sharp(source, { failOn: "error", limitInputPixels: 40_000_000 });
   const input = await decoder.metadata();
-  if ((input.format !== "jpeg" && input.format !== "webp")
-    || input.format !== (expectedMime === "image/jpeg" ? "jpeg" : "webp")
+  if (input.format !== ({ "image/jpeg": "jpeg", "image/png": "png", "image/webp": "webp" } as Record<string, string>)[expectedMime]
     || !input.width || !input.height || input.width > 16_000 || input.height > 16_000) {
     throw new Error("progress_photo_invalid_dimensions");
   }
@@ -67,6 +70,7 @@ export async function verifyAndSanitizeProgressPhoto(
       if (bytes.byteLength > PROGRESS_PHOTO_MAX_BYTES) continue;
       const output = await sharp(bytes, { failOn: "error", limitInputPixels: 40_000_000 }).metadata();
       if (output.format !== "jpeg" || !output.width || !output.height
+        || output.width > 4096 || output.height > 4096
         || output.exif || output.xmp || output.iptc || output.icc
         || jpegHasPrivateMetadata(bytes)) throw new Error("progress_photo_sanitization_failed");
       return { bytes, width: output.width, height: output.height, mimeType: "image/jpeg" };

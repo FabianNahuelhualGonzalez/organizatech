@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import sharp from "sharp";
 import { cleanExpiredProgressPhotos, finalizeNextProgressPhoto,
-  type ClaimedProgressPhoto, type ProgressPhotoPublicationPort } from "./progress-photo-finalizer";
+  validClaim, type ClaimedProgressPhoto, type ProgressPhotoPublicationPort } from "./progress-photo-finalizer";
 
 const claim: ClaimedProgressPhoto = {
   uploadId: "10000000-0000-4000-8000-000000000001",
@@ -12,6 +12,15 @@ const claim: ClaimedProgressPhoto = {
   finalBucket: "progress-check-photos",
   finalPath: "40000000-0000-4000-8000-000000000001/50000000-0000-4000-8000-000000000001.jpg",
 };
+
+test("publisher rejects spoofed staging extensions before download", () => {
+  assert.equal(validClaim({ ...claim, stagingPath: claim.stagingPath.replace(/\.jpg$/, ".png") }), false);
+  assert.equal(validClaim({ ...claim, expectedMime: "image/png", stagingPath: claim.stagingPath }), false);
+  assert.equal(validClaim({ ...claim, expectedMime: "image/png",
+    stagingPath: claim.stagingPath.replace(/\.jpg$/, ".png") }), true);
+  assert.equal(validClaim({ ...claim, expectedMime: "image/heic",
+    stagingPath: claim.stagingPath.replace(/\.jpg$/, ".heic") } as never), false);
+});
 
 async function fixture() {
   const source = await sharp({ create: { width: 40, height: 20, channels: 3,

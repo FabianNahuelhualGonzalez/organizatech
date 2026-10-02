@@ -4,10 +4,14 @@ import type { ClaimedProgressPhoto, ProgressPhotoCleanupItem,
   ProgressPhotoPublicationPort } from "./progress-photo-finalizer";
 
 const BUCKETS = new Set(["progress-check-staging", "progress-check-photos"]);
-const PATH = /^[0-9a-f-]+\/[0-9a-f-]+\.(jpg|webp)$/;
+const ID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+const STAGING_PATH = new RegExp(`^${ID}/${ID}\\.(jpg|png|webp)$`);
+const FINAL_PATH = new RegExp(`^${ID}/${ID}\\.jpg$`);
 
 function assertObjectAddress(bucket: string, path: string): void {
-  if (!BUCKETS.has(bucket) || !PATH.test(path)) throw new Error("progress_photo_invalid_path");
+  if (!BUCKETS.has(bucket) || !(bucket === "progress-check-staging" ? STAGING_PATH : FINAL_PATH).test(path)) {
+    throw new Error("progress_photo_invalid_path");
+  }
 }
 
 export async function createSupabaseProgressPhotoPublisher(): Promise<ProgressPhotoPublicationPort> {

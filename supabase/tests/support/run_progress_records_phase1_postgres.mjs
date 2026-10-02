@@ -285,6 +285,7 @@ try {
     && isDeepStrictEqual(selectAfterAttributes, selectBeforeAttributes),
   "select function volatility is the only pg_proc attribute changed");
   await admin.query(readSql("supabase/migrations/20260930163231_progress_photo_student_gateway.sql"));
+  await admin.query(readSql("supabase/migrations/20261001230633_progress_photo_original_staging_jpeg_publication.sql"));
   check(await value(admin, `select count(*)::int as value from pg_constraint
     where conrelid = 'private.progress_check_photos'::regclass
       and conname in ('progress_check_photos_photo_asset_id_key',
@@ -425,6 +426,12 @@ try {
   );
 
   stage = "private resumable photo staging";
+  check(isDeepStrictEqual(await value(admin, `select allowed_mime_types as value
+    from storage.buckets where id='progress-check-staging'`),
+  ["image/jpeg", "image/png", "image/webp"]), "private staging allows only verified runtime formats");
+  check(await value(admin, `select public is false and file_size_limit = 20971520 as value
+    from storage.buckets where id='progress-check-staging'`) === true,
+  "staging remains private with 20 MiB server limit");
   await admin.query("create policy synthetic_broad_insert on storage.objects for insert to authenticated with check (true)");
   await admin.query("create policy synthetic_broad_select on storage.objects for select to authenticated using (true)");
   await admin.query("create policy synthetic_broad_update on storage.objects for update to authenticated using (true) with check (true)");
@@ -435,6 +442,25 @@ try {
   await expectCode(value(coach,
     "select public.begin_own_progress_photo_upload('frente','jpeg') as value"),
     "42501", "Coach cannot reserve staging");
+  await expectCode(value(student,
+    "select public.begin_own_progress_photo_upload('frente','heic') as value"),
+    "22023", "HEIC cannot reserve staging");
+  await expectCode(value(student,
+    "select public.begin_own_progress_photo_upload('frente','raw') as value"),
+    "22023", "RAW cannot reserve staging");
+  for (const [format, mime, extension] of [
+    ["png", "image/png", "png"], ["webp", "image/webp", "webp"],
+  ]) {
+    const formatReservation = await value(student,
+      "select public.begin_own_progress_photo_upload('perfil',$1) as value", [format]);
+    check(formatReservation.mimeType === mime && formatReservation.objectName.endsWith(`.${extension}`),
+      `${format} reservation derives MIME and opaque path in SQL`);
+    check(await value(unlinked, "select count(*)::int as value from storage.objects where bucket_id=$1 and name=$2",
+      [formatReservation.bucketId, formatReservation.objectName]) === 0,
+    `${format} staging is not visible to another student`);
+    await admin.query("delete from private.progress_photo_uploads where id=$1",
+      [formatReservation.uploadId]);
+  }
   const staged = await value(student,
     "select public.begin_own_progress_photo_upload('frente','jpeg') as value");
   check(staged.bucketId === "progress-check-staging" && staged.mimeType === "image/jpeg",
@@ -546,15 +572,19 @@ try {
     [claimed.finalPath])).rowCount === 0, "publisher cannot delete historical final asset");
   check((await student.query("delete from storage.objects where bucket_id='progress-check-photos' and name=$1",
     [claimed.finalPath])).rowCount === 0, "broad policy cannot delete historical final asset");
-  async function publishAdditionalPhoto(pose) {
+  async function publishAdditionalPhoto(pose, format = "jpeg") {
     const reservation = await value(student,
-      "select public.begin_own_progress_photo_upload($1,'jpeg') as value", [pose]);
+      "select public.begin_own_progress_photo_upload($1,$2) as value", [pose, format]);
     await student.query("insert into storage.objects(bucket_id,name) values($1,$2)",
       [reservation.bucketId, reservation.objectName]);
     await value(student, "select public.finalize_own_progress_photo_upload($1::uuid) as value",
       [reservation.uploadId]);
     const candidate = await value(publisher, "select public.claim_progress_photo_for_verification() as value");
     check(candidate.uploadId === reservation.uploadId, `publisher claims ${pose} reservation`);
+    check(candidate.expectedMime === reservation.mimeType
+      && candidate.stagingPath === reservation.objectName
+      && candidate.finalPath.endsWith(".jpg"),
+    `${format} claim preserves original format while final path stays JPEG`);
     await publisher.query("insert into storage.objects(bucket_id,name) values('progress-check-photos',$1)",
       [candidate.finalPath]);
     await publisher.query("delete from storage.objects where bucket_id=$1 and name=$2",
@@ -565,8 +595,8 @@ try {
     return { assetId, path: candidate.finalPath };
   }
   const samePosePhoto = await publishAdditionalPhoto("frente");
-  const profilePhoto = await publishAdditionalPhoto("perfil");
-  const backPhoto = await publishAdditionalPhoto("espalda");
+  const profilePhoto = await publishAdditionalPhoto("perfil", "png");
+  const backPhoto = await publishAdditionalPhoto("espalda", "webp");
   const pendingStage = await value(student,
     "select public.begin_own_progress_photo_upload('perfil','jpeg') as value");
   await student.query("insert into storage.objects(bucket_id,name) values($1,$2)",
