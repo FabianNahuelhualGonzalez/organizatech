@@ -222,7 +222,8 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
       reservations.set(reservation.uploadId, reservation);
       return reservation;
     },
-    async stage(uploadId: string, image: File, onProgress?: (percent: number) => void): Promise<void> {
+    async stage(uploadId: string, image: File, onProgress?: (percent: number) => void,
+      signal?: AbortSignal): Promise<void> {
       const safe = reservations.get(uploadId);
       if (!safe) throw new StudentProgressPhotoGatewayError("invalid_input");
       const previousFile = stagedFiles.get(uploadId);
@@ -236,6 +237,7 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
       }
       stagedFiles.set(uploadId, image);
       if (onProgress) {
+        if (signal?.aborted) throw new StudentProgressPhotoGatewayError("unavailable");
         const endpoint = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim().replace(/\/(?:rest|auth)\/v1\/?$/, "");
         const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
         const session = await client.auth.getSession();
@@ -246,6 +248,8 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
         await new Promise<void>((resolve, reject) => {
           const request = new XMLHttpRequest();
           request.open("POST", url.toString());
+          const onAbort = () => request.abort();
+          const release = () => signal?.removeEventListener("abort", onAbort);
           request.setRequestHeader("authorization", `Bearer ${session.data.session!.access_token}`);
           request.setRequestHeader("apikey", anonKey);
           request.setRequestHeader("content-type", safe.mimeType);
@@ -255,11 +259,14 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
               onProgress(Math.min(100, Math.round(event.loaded / event.total * 100)));
             }
           };
-          request.onload = () => request.status >= 200 && request.status < 300
-            ? resolve() : reject(new StudentProgressPhotoGatewayError("unavailable"));
-          request.onerror = () => reject(new StudentProgressPhotoGatewayError("unavailable"));
-          request.onabort = () => reject(new StudentProgressPhotoGatewayError("unavailable"));
-          request.send(image);
+          request.onload = () => { release(); request.status >= 200 && request.status < 300
+            ? resolve() : reject(new StudentProgressPhotoGatewayError("unavailable")); };
+          request.onerror = () => { release(); reject(new StudentProgressPhotoGatewayError("unavailable")); };
+          request.onabort = () => { release(); reject(new StudentProgressPhotoGatewayError("unavailable")); };
+          if (signal?.aborted) { reject(new StudentProgressPhotoGatewayError("unavailable")); return; }
+          signal?.addEventListener("abort", onAbort, { once: true });
+          try { request.send(image); }
+          catch { release(); reject(new StudentProgressPhotoGatewayError("unavailable")); }
         });
         return;
       }

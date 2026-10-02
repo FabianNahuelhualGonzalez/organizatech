@@ -22,13 +22,17 @@ export interface ProgressCheckSheetPhoto {
   readonly selected: SelectedProgressPhoto;
 }
 
-export function StudentProgressCheckSheet({ checkedOn, saving, status, error, uploadStates, onClose, onInvalidFile, onSlotChange, onSave }: {
+export function StudentProgressCheckSheet({ checkedOn, saving, creatingCheck, hasRemoteDraft, status, error, uploadStates, canDiscard, onClose, onDiscardPromptChange, onInvalidFile, onSlotChange, onSave }: {
   readonly checkedOn: string;
   readonly saving: boolean;
+  readonly creatingCheck: boolean;
+  readonly hasRemoteDraft: boolean;
+  readonly canDiscard: () => boolean;
   readonly status: string;
   readonly error: string;
   readonly uploadStates: Partial<Record<ProgressPhotoPose, { readonly state: "uploading" | "error"; readonly progress: number }>>;
   readonly onClose: () => void;
+  readonly onDiscardPromptChange: (open: boolean) => void;
   readonly onInvalidFile: () => void;
   readonly onSlotChange: (pose: ProgressPhotoPose) => Promise<boolean>;
   readonly onSave: (photos: readonly ProgressCheckSheetPhoto[]) => void;
@@ -36,9 +40,12 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, up
   const [slots, setSlots] = useState<Partial<Record<ProgressPhotoPose, Slot>>>({});
   const [changing, setChanging] = useState(false);
   const [showFormatHelp, setShowFormatHelp] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const urlsRef = useRef<Partial<Record<ProgressPhotoPose, string>>>({});
   const helpRef = useRef<HTMLParagraphElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const continueRef = useRef<HTMLButtonElement>(null);
+  const closeReturnRef = useRef<HTMLElement | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -54,6 +61,8 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, up
   useEffect(() => {
     if (showFormatHelp) helpRef.current?.scrollIntoView({ block: "nearest" });
   }, [showFormatHelp]);
+
+  useEffect(() => { if (confirmDiscard) continueRef.current?.focus(); }, [confirmDiscard]);
 
   async function chooseFile(pose: ProgressPhotoPose, file: File | null) {
     if (!file || saving || changing) return;
@@ -114,9 +123,41 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, up
   }
 
   function requestClose() {
-    if (saving || changing) return;
-    if (POSES.some((pose) => slots[pose]) && !window.confirm("¿Descartar este check?")) return;
+    if (!canDiscard() || confirmDiscard) return;
+    if (POSES.some((pose) => slots[pose]) || hasRemoteDraft || saving || changing) {
+      closeReturnRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      onDiscardPromptChange(true);
+      setConfirmDiscard(true);
+      return;
+    }
     onClose();
+  }
+
+  function continueEditing() {
+    setConfirmDiscard(false);
+    onDiscardPromptChange(false);
+    window.requestAnimationFrame(() => {
+      if (closeReturnRef.current?.isConnected) closeReturnRef.current.focus();
+      else closeRef.current?.focus();
+    });
+  }
+
+  function handleConfirmationKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      continueEditing();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
+    if (event.shiftKey && document.activeElement === controls[0]) {
+      event.preventDefault();
+      controls[controls.length - 1].focus();
+    } else if (!event.shiftKey && document.activeElement === controls[controls.length - 1]) {
+      event.preventDefault();
+      controls[0].focus();
+    }
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
@@ -139,15 +180,16 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, up
 
   const ready = POSES.flatMap((pose) => slots[pose]?.selected ? [{ pose, selected: slots[pose].selected }] : []);
   return <div className={styles.sheetOverlay}>
-    <button className={styles.sheetScrim} type="button" aria-label="Cerrar nuevo check" disabled={saving || changing} onClick={requestClose} />
-    <div className={styles.sheet} role="dialog" aria-modal="true" aria-label="Nuevo check" onKeyDown={handleKeyDown}>
+    <button className={styles.sheetScrim} type="button" aria-label="Cerrar nuevo check" disabled={creatingCheck} onClick={requestClose} />
+    <div className={styles.sheet} role="dialog" aria-modal="true" aria-label="Nuevo check"
+      aria-hidden={confirmDiscard} inert={confirmDiscard} onKeyDown={handleKeyDown}>
       <div className={styles.sheetHandle}><span /></div>
       <div className={styles.sheetHeader}>
         <h3>Nuevo check · {checkedOn.split("-").reverse().join("/")}</h3>
         <button className={styles.sheetInfo} type="button" aria-label="Información sobre fotos admitidas"
           aria-expanded={showFormatHelp} aria-controls="progress-photo-format-help"
           onClick={() => setShowFormatHelp((value) => !value)}><span aria-hidden="true">i</span></button>
-        <button ref={closeRef} className={styles.sheetClose} type="button" aria-label="Cerrar" disabled={saving || changing} onClick={requestClose}>×</button>
+        <button ref={closeRef} className={styles.sheetClose} type="button" aria-label="Cerrar" disabled={creatingCheck} onClick={requestClose}>×</button>
       </div>
       <div className={styles.sheetBody}>
         <p className={styles.sheetHelp}>Mismo lugar, misma luz y cámara a la altura de la cintura. Sube las tres poses para comparar mejor.</p>
@@ -185,5 +227,15 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, up
         <button className={styles.sheetSave} type="button" disabled={ready.length === 0 || saving || changing} onClick={() => onSave(ready)}>{saving ? "Subiendo…" : "Guardar check"}</button>
       </div>
     </div>
+    {confirmDiscard ? <div className={styles.deletionOverlay}>
+      <div className={styles.deletionPanel} role="alertdialog" aria-modal="true"
+        aria-labelledby="progress-check-discard-title" onKeyDown={handleConfirmationKeyDown}>
+        <h4 id="progress-check-discard-title">¿Descartar este check?</h4>
+        <div className={styles.deletionActions}>
+          <button ref={continueRef} className={styles.secondary} type="button" onClick={continueEditing}>Seguir editando</button>
+          <button className={`${styles.deletionConfirm} ${styles.discardConfirm}`} type="button" onClick={onClose}>Descartar</button>
+        </div>
+      </div>
+    </div> : null}
   </div>;
 }

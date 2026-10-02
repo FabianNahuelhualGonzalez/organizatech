@@ -13,8 +13,9 @@ import {
 } from "../data/student-progress-photo-gateway";
 import type { ProgressPhotoPose } from "../model/progress-records-contract";
 import { selectProgressPhoto } from "../model/select-progress-photo";
-import { abandonQueuedProgressPhoto, matchesSelectedProgressPhoto,
+import { abandonQueuedProgressPhoto, cancelDiscardedProgressCheckUploads, matchesSelectedProgressPhoto,
   type QueuedProgressPhoto } from "../model/progress-photo-upload-selection";
+import { createProgressCheckSaveGuard, type ProgressCheckSaveGuard } from "../model/progress-check-save-guard";
 import { StudentProgressCheckSheet, type ProgressCheckSheetPhoto } from "./student-progress-check-sheet";
 
 import styles from "./student-progress-photos.module.css";
@@ -54,6 +55,13 @@ function message(error: unknown): string {
 }
 
 type DeletionTarget = { readonly assetId: string; readonly kind: "photo" | "check" };
+type SheetSave = {
+  readonly guard: ProgressCheckSaveGuard;
+  readonly abort: AbortController;
+  readonly queued: Partial<Record<ProgressPhotoPose, QueuedProgressPhoto>>;
+  readonly gateway: ReturnType<typeof getStudentProgressPhotoGateway>;
+  promise: Promise<void> | null;
+};
 
 export function StudentProgressPhotos() {
   const surfaceRef = useRef<HTMLElement>(null);
@@ -64,6 +72,11 @@ export function StudentProgressPhotos() {
   const newCheckButtonRef = useRef<HTMLButtonElement>(null);
   const queuedPhotosRef = useRef<Partial<Record<ProgressPhotoPose, QueuedProgressPhoto>>>({});
   const uploadGatewayRef = useRef<ReturnType<typeof getStudentProgressPhotoGateway> | null>(null);
+  const activeSheetSaveRef = useRef<SheetSave | null>(null);
+  const sheetGenerationRef = useRef(0);
+  const creatingCheckRef = useRef(false);
+  const mountedRef = useRef(true);
+  const [creatingCheck, setCreatingCheck] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const guideInitializedRef = useRef(false);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -147,6 +160,11 @@ export function StudentProgressPhotos() {
   }, []);
 
   useEffect(() => { void load(true); }, [load]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false;
+      activeSheetSaveRef.current?.guard.cancel(); activeSheetSaveRef.current?.abort.abort(); };
+  }, []);
   useEffect(() => { if (viewer) viewerCloseRef.current?.focus(); }, [viewer]);
   useEffect(() => {
     if (!deletionTarget) return;
@@ -260,24 +278,28 @@ export function StudentProgressPhotos() {
   }
 
   function finishCheckSheet() {
+    const generation = ++sheetGenerationRef.current;
     setComposerOpen(false);
     setSheetError("");
     setSheetStatus("");
     queuedPhotosRef.current = {};
     setSheetUploads({});
     uploadGatewayRef.current = null;
-    window.requestAnimationFrame(() => newCheckButtonRef.current?.focus());
+    window.requestAnimationFrame(() => {
+      if (sheetGenerationRef.current === generation) newCheckButtonRef.current?.focus();
+    });
   }
 
-  async function abandonQueuedPose(pose: ProgressPhotoPose) {
-    const queued = queuedPhotosRef.current[pose];
+  async function abandonQueuedPose(pose: ProgressPhotoPose,
+    queuedPhotos = queuedPhotosRef.current, gateway = uploadGateway()) {
+    const queued = queuedPhotos[pose];
     if (!queued) return;
+    const generation = sheetGenerationRef.current;
     await abandonQueuedProgressPhoto(queued, async (uploadId) => {
-      const gateway = uploadGateway();
       const status = await gateway.abandon(uploadId);
       if (status === "published") {
         const published = await gateway.getUpload(uploadId);
-        if (published.assetId) {
+        if (published.assetId && sheetGenerationRef.current === generation) {
           deletionReturnRef.current = document.activeElement instanceof HTMLElement
             ? document.activeElement : null;
           setDeletionTarget({ assetId: published.assetId,
@@ -286,70 +308,108 @@ export function StudentProgressPhotos() {
         }
       }
     });
-    delete queuedPhotosRef.current[pose];
+    if (sheetGenerationRef.current === generation && queuedPhotos[pose] === queued) delete queuedPhotos[pose];
   }
 
   async function changeSlot(pose: ProgressPhotoPose): Promise<boolean> {
     if (busyRef.current) return false;
-    if (!queuedPhotosRef.current[pose]) return true;
+    const generation = sheetGenerationRef.current;
+    const queued = queuedPhotosRef.current;
+    if (!queued[pose]) return true;
     busyRef.current = true;
     setBusy(true);
     try {
-      await abandonQueuedPose(pose);
+      await abandonQueuedPose(pose, queued);
+      if (sheetGenerationRef.current !== generation) return false;
       // The SQL row tracks cleanup even if this best-effort pass is unavailable.
       try { await uploadGateway().cleanupOwn(); } catch { /* Retryable cleanup debt. */ }
+      if (sheetGenerationRef.current !== generation) return false;
       setSheetError("");
       setSheetUploads((current) => ({ ...current, [pose]: undefined }));
       return true;
     } catch (error) {
-      setSheetError(message(error));
+      if (sheetGenerationRef.current === generation) setSheetError(message(error));
       return false;
-    } finally { busyRef.current = false; setBusy(false); }
+    } finally {
+      if (sheetGenerationRef.current === generation) { busyRef.current = false; setBusy(false); }
+    }
   }
 
-  async function discardCheckSheet() {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    try {
-      for (const pose of POSES) await abandonQueuedPose(pose);
-      try { await uploadGateway().cleanupOwn(); } catch { /* Retryable cleanup debt. */ }
-      finishCheckSheet();
-    } catch (error) { setSheetError(message(error)); }
-    finally { busyRef.current = false; setBusy(false); }
+  function discardCheckSheet() {
+    if (creatingCheckRef.current) return;
+    const save = activeSheetSaveRef.current;
+    save?.guard.cancel();
+    save?.abort.abort();
+    const queued = queuedPhotosRef.current;
+    const gateway = uploadGatewayRef.current;
+    activeSheetSaveRef.current = null;
+    finishCheckSheet();
+    busyRef.current = false;
+    setBusy(false);
+    if (!gateway && !save) return;
+    void (async () => {
+      try { await save?.promise; } catch { /* A cancelled save is handled below. */ }
+      const ids = [...new Set(POSES.flatMap((pose) => queued[pose]?.reservation.uploadId ?? []))];
+      const { published, failed } = await cancelDiscardedProgressCheckUploads(ids, gateway!);
+      for (const pose of POSES) delete queued[pose];
+      if (!mountedRef.current) return;
+      if (ids.length > 0) await load();
+      if (!mountedRef.current) return;
+      if (published || failed) setActionError(message(new StudentProgressPhotoGatewayError(
+        published ? "changed" : "unavailable")));
+    })().catch(() => {
+      if (mountedRef.current) setActionError(message(new StudentProgressPhotoGatewayError("unavailable")));
+    });
   }
 
-  async function saveNewCheck(sheetPhotos: readonly ProgressCheckSheetPhoto[]) {
+  function saveNewCheck(sheetPhotos: readonly ProgressCheckSheetPhoto[]) {
     if (busyRef.current || sheetPhotos.length < 1 || sheetPhotos.length > 3) return;
+    let gateway: ReturnType<typeof getStudentProgressPhotoGateway>;
+    try { gateway = uploadGateway(); }
+    catch (error) { setSheetError(message(error)); return; }
+    const save: SheetSave = { guard: createProgressCheckSaveGuard(), abort: new AbortController(),
+      queued: queuedPhotosRef.current,
+      gateway, promise: null };
+    activeSheetSaveRef.current = save;
     busyRef.current = true;
     setBusy(true);
     setSheetError("");
+    save.promise = performSaveNewCheck(sheetPhotos, save);
+  }
+
+  async function performSaveNewCheck(sheetPhotos: readonly ProgressCheckSheetPhoto[], save: SheetSave) {
+    const { guard, queued: draft, gateway } = save;
     let failureMessage = "No pudimos guardar el check. Reintenta sin volver a elegir las fotos.";
     try {
-      const gateway = uploadGateway();
       let publicationNeeded = false;
       let uploadFailure: unknown = null;
       let uploadFailureMessage = failureMessage;
       for (const [index, photo] of sheetPhotos.entries()) {
+        guard.checkpoint();
         try {
-          let pending = queuedPhotosRef.current[photo.pose];
+          let pending = draft[photo.pose];
           if (pending && !matchesSelectedProgressPhoto(pending, photo.pose, photo.selected)) {
-            await abandonQueuedPose(photo.pose);
+            await abandonQueuedPose(photo.pose, draft, gateway);
+            guard.checkpoint();
             pending = undefined;
             try { await gateway.cleanupOwn(); } catch { /* Tracked by SQL. */ }
+            guard.checkpoint();
           }
           if (pending) {
             const observed = await gateway.getUpload(pending.reservation.uploadId);
+            guard.checkpoint();
             if (observed.status === "fallida") {
-              await abandonQueuedPose(photo.pose);
+              await abandonQueuedPose(photo.pose, draft, gateway);
+              guard.checkpoint();
               pending = undefined;
               try { await gateway.cleanupOwn(); } catch { /* Tracked by SQL. */ }
+              guard.checkpoint();
             } else if (observed.status === "publicada") {
-              queuedPhotosRef.current[photo.pose] = { ...pending, enqueued: true };
+              draft[photo.pose] = { ...pending, enqueued: true };
               publicationNeeded = true;
               continue;
             } else if (observed.status === "en_cola" || observed.status === "procesando") {
-              queuedPhotosRef.current[photo.pose] = { ...pending, enqueued: true };
+              draft[photo.pose] = { ...pending, enqueued: true };
               publicationNeeded = true;
               continue;
             }
@@ -360,53 +420,63 @@ export function StudentProgressPhotos() {
             pending = { reservation: await gateway.reserve(photo.pose, photo.selected.format),
               pose: photo.pose, file: photo.selected.file, format: photo.selected.format,
               staged: false, enqueued: false };
-            queuedPhotosRef.current[photo.pose] = pending;
+            draft[photo.pose] = pending;
+            guard.checkpoint();
           }
           if (!pending.staged) {
             failureMessage = "No pudimos subir la foto a la zona privada. Reintenta sin volver a elegirla.";
             setSheetUploads((current) => ({ ...current, [photo.pose]: { state: "uploading", progress: 0 } }));
             try {
               await gateway.stage(pending.reservation.uploadId, photo.selected.file, (progress) => {
-                setSheetUploads((current) => ({ ...current, [photo.pose]: { state: "uploading", progress } }));
-              });
+                if (!guard.cancelled) setSheetUploads((current) => ({ ...current,
+                  [photo.pose]: { state: "uploading", progress } }));
+              }, save.abort.signal);
+              guard.checkpoint();
               pending = { ...pending, staged: true };
             } catch (stageError) {
+              guard.checkpoint();
               // Storage may accept the bytes before its response is lost.
               try {
                 await gateway.enqueue(pending.reservation.uploadId);
+                guard.checkpoint();
                 pending = { ...pending, staged: true, enqueued: true };
               } catch {
+                guard.checkpoint();
                 setSheetUploads((current) => ({ ...current, [photo.pose]: { state: "error", progress: 0 } }));
                 setActionError(UPLOAD_ERROR);
                 throw stageError;
               }
             }
-            queuedPhotosRef.current[photo.pose] = pending;
+            draft[photo.pose] = pending;
           }
           if (!pending.enqueued) {
             failureMessage = "No pudimos poner la foto en cola. Reintenta sin volver a elegirla.";
-            try { await gateway.enqueue(pending.reservation.uploadId); }
+            try { await gateway.enqueue(pending.reservation.uploadId); guard.checkpoint(); }
             catch (enqueueError) {
+              guard.checkpoint();
               const observed = await gateway.getUpload(pending.reservation.uploadId);
+              guard.checkpoint();
               if (observed.status !== "en_cola" && observed.status !== "procesando"
                 && observed.status !== "publicada") throw enqueueError;
             }
             pending = { ...pending, enqueued: true };
-            queuedPhotosRef.current[photo.pose] = pending;
+            draft[photo.pose] = pending;
           }
           publicationNeeded = true;
           setSheetUploads((current) => ({ ...current, [photo.pose]: undefined }));
         } catch (error) {
+          guard.checkpoint();
           uploadFailure = error;
           uploadFailureMessage = failureMessage;
           break;
         }
       }
+      guard.checkpoint();
       // One server request per save action, regardless of the number of selected photos.
       if (publicationNeeded) {
         failureMessage = "No pudimos procesar las fotos ahora. Reintenta sin volver a elegirlas.";
         setSheetStatus("Procesando fotos…");
-        try { await gateway.publishOwnBatch(); }
+        try { await gateway.publishOwnBatch(); guard.checkpoint(); }
         catch (error) { if (!uploadFailure) throw error; }
       }
       if (uploadFailure) {
@@ -414,26 +484,36 @@ export function StudentProgressPhotos() {
         throw uploadFailure;
       }
       await load();
-      const uploadIds = sheetPhotos.map((photo) => queuedPhotosRef.current[photo.pose]?.reservation.uploadId);
+      guard.checkpoint();
+      const uploadIds = sheetPhotos.map((photo) => draft[photo.pose]?.reservation.uploadId);
       if (uploadIds.some((id) => !id)) throw new Error("progress_photo_missing_reservation");
       for (let attempt = 0; attempt < 40; attempt += 1) {
         failureMessage = "No pudimos confirmar la publicación. Reintenta el guardado en esta hoja.";
         const matching = await Promise.all(uploadIds.map((id) => gateway.getUpload(id!)));
+        guard.checkpoint();
         if (matching.some((upload) => upload.status === "fallida")) {
           for (const photo of sheetPhotos) {
-            const queued = queuedPhotosRef.current[photo.pose];
+            const queued = draft[photo.pose];
             if (matching.some((upload) => upload.uploadId === queued?.reservation.uploadId
-              && upload.status === "fallida")) await abandonQueuedPose(photo.pose);
+              && upload.status === "fallida")) {
+              await abandonQueuedPose(photo.pose, draft, gateway);
+              guard.checkpoint();
+            }
           }
           try { await gateway.cleanupOwn(); } catch { /* Tracked by SQL. */ }
+          guard.checkpoint();
           failureMessage = "No pudimos publicar una foto. Reintenta sin volver a elegirla.";
           throw new Error("progress_photo_publication_failed");
         }
         const publishedAssetIds = matching.map((upload) => upload.status === "publicada" ? upload.assetId : null);
         if (publishedAssetIds.every((assetId): assetId is string => typeof assetId === "string")) {
+          await guard.beforeCreateCheck();
+          creatingCheckRef.current = true;
+          setCreatingCheck(true);
           setSheetStatus("Creando check…");
           failureMessage = "No pudimos crear el check. Reintenta sin volver a elegir las fotos.";
-          await gateway.createCheck(checkedOn, publishedAssetIds);
+          try { await gateway.createCheck(checkedOn, publishedAssetIds); }
+          finally { creatingCheckRef.current = false; setCreatingCheck(false); }
           setNotice("Check guardado · solo tú puedes verlo");
           setGuideOpen(false);
           finishCheckSheet();
@@ -442,15 +522,23 @@ export function StudentProgressPhotos() {
         }
         setSheetStatus(matching.some((upload) => upload.status === "procesando")
           ? "Procesando fotos…" : "Fotos en cola…");
-        await new Promise((resolve) => window.setTimeout(resolve, 3000));
+        await guard.wait(3000);
       }
       failureMessage = "Las fotos siguen en proceso. Reintenta el guardado en esta hoja.";
       throw new Error("progress_photo_publication_pending");
     } catch (error) {
-      setSheetStatus("");
-      setSheetError(error instanceof StudentProgressPhotoGatewayError && error.code === "forbidden"
-        ? message(error) : failureMessage);
-    } finally { busyRef.current = false; setBusy(false); }
+      if (!guard.cancelled && activeSheetSaveRef.current === save) {
+        setSheetStatus("");
+        setSheetError(error instanceof StudentProgressPhotoGatewayError && error.code === "forbidden"
+          ? message(error) : failureMessage);
+      }
+    } finally {
+      if (activeSheetSaveRef.current === save) {
+        activeSheetSaveRef.current = null;
+        busyRef.current = false;
+        if (mountedRef.current) setBusy(false);
+      }
+    }
   }
 
   async function addPoseToCheck(checkId: string, pose: ProgressPhotoPose, file: File | null) {
@@ -686,7 +774,7 @@ export function StudentProgressPhotos() {
   }
 
   const noContent = checks.length === 0 && uploads.length === 0 && photos.length === 0;
-  const newCheckButton = <button ref={newCheckButtonRef} className={styles.newCheckButton} type="button" aria-expanded={composerOpen} onClick={() => { setCheckedOn(todayInChile()); setSheetError(""); setSheetStatus(""); setSheetUploads({}); setComposerOpen(true); }}>+ Nuevo check</button>;
+  const newCheckButton = <button ref={newCheckButtonRef} className={styles.newCheckButton} type="button" aria-expanded={composerOpen} onClick={() => { sheetGenerationRef.current += 1; setCheckedOn(todayInChile()); setSheetError(""); setSheetStatus(""); setSheetUploads({}); setComposerOpen(true); }}>+ Nuevo check</button>;
   const privacyNote = <p className={styles.privacy}><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg><span>Tus fotos son privadas. Tu coach solo verá las que tú decidas enviarle.</span></p>;
   const selectedPhotos = selectedIds.flatMap((id) => checks.flatMap((check) => check.photos.filter((photo) => photo.assetId === id).map((photo) => ({ ...photo, checkedOn: check.checkedOn }))));
   const selectedDates = [...new Set(selectedPhotos.map((photo) => checkDate(photo.checkedOn)))];
@@ -772,7 +860,16 @@ export function StudentProgressPhotos() {
           )}
         </div>
       </div> : null}
-      {composerOpen ? <StudentProgressCheckSheet checkedOn={checkedOn} saving={busy} status={sheetStatus} error={sheetError} uploadStates={sheetUploads} onClose={() => { void discardCheckSheet(); }} onInvalidFile={() => setActionError("Formato no admitido o foto superior a 20 MB. Usa JPG, PNG o WebP.")} onSlotChange={changeSlot} onSave={(sheetPhotos) => { void saveNewCheck(sheetPhotos); }} /> : null}
+      {composerOpen ? <StudentProgressCheckSheet checkedOn={checkedOn} saving={busy} creatingCheck={creatingCheck}
+        hasRemoteDraft={POSES.some((pose) => Boolean(queuedPhotosRef.current[pose]))}
+        canDiscard={() => !creatingCheckRef.current}
+        status={sheetStatus} error={sheetError} uploadStates={sheetUploads} onClose={discardCheckSheet}
+        onDiscardPromptChange={(open) => {
+          if (open) activeSheetSaveRef.current?.guard.pauseForConfirmation();
+          else activeSheetSaveRef.current?.guard.continueEditing();
+        }}
+        onInvalidFile={() => setActionError("Formato no admitido o foto superior a 20 MB. Usa JPG, PNG o WebP.")}
+        onSlotChange={changeSlot} onSave={saveNewCheck} /> : null}
       {sendSheetOpen && coachAccess ? <div className={styles.sheetOverlay}>
         <button className={styles.sheetScrim} type="button" aria-label="Cerrar envío" disabled={sending} onClick={() => setSendSheetOpen(false)} />
         <div className={styles.sheet} role="dialog" aria-modal="true" aria-label="Enviar reporte al coach">

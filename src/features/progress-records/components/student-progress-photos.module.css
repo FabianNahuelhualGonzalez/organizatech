@@ -373,6 +373,7 @@
   cursor: pointer;
 }
 .deletionConfirm:disabled { opacity: .5; cursor: not-allowed; }
+.discardConfirm { background: #b91c1c; }
 
 .sheetOverlay { position: fixed; z-index: 1000; inset: 0; }
 .sheetScrim {
