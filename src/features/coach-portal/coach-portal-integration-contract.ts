@@ -104,6 +104,8 @@ const PROGRESS_PHOTO_ORIGINAL_STAGING_MIGRATION_PATH =
   "supabase/migrations/20261001230633_progress_photo_original_staging_jpeg_publication.sql";
 const PROGRESS_PHOTO_AUTOMATIC_PUBLICATION_MIGRATION_PATH =
   "supabase/migrations/20261002014402_progress_photo_automatic_publication.sql";
+const PROGRESS_PHOTO_REPORT_V11_MIGRATION_PATH =
+  "supabase/migrations/20261002153205_progress_photos_v11_reports_delivery.sql";
 const PROGRESS_MEDICAL_DOCUMENT_GATEWAY_MIGRATION_PATH =
   "supabase/migrations/20261001141522_progress_medical_document_student_gateway.sql";
 const DIRECT_MEDICAL_DOCUMENT_MIGRATION_PATH =
@@ -643,6 +645,7 @@ function auditProhibitedArtifacts(
         && path !== PROGRESS_PHOTO_STUDENT_GATEWAY_MIGRATION_PATH
         && path !== PROGRESS_PHOTO_ORIGINAL_STAGING_MIGRATION_PATH
         && path !== PROGRESS_PHOTO_AUTOMATIC_PUBLICATION_MIGRATION_PATH
+        && path !== PROGRESS_PHOTO_REPORT_V11_MIGRATION_PATH
         && path !== PROGRESS_MEDICAL_DOCUMENT_GATEWAY_MIGRATION_PATH
         && path !== DIRECT_MEDICAL_DOCUMENT_MIGRATION_PATH
         && !(path === REMOVED_CLOUDINARY_PHOTO_MIGRATION_PATH && entryStatus === " D")

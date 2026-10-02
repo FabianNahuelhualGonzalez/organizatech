@@ -7,7 +7,7 @@ import { selectProgressPhoto, type StudentPhotoFormat } from "../model/select-pr
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PATH_ID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const OPAQUE_PATH = new RegExp(`^${PATH_ID}/${PATH_ID}\\.(jpg|png|webp)$`, "i");
-const FINAL_PATH = new RegExp(`^${PATH_ID}/${PATH_ID}\\.(jpg|jpeg|png|webp|heic)$`, "i");
+const FINAL_PATH = new RegExp(`^${PATH_ID}/${PATH_ID}\\.(jpg|jpeg|png|webp)$`, "i");
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type StudentPhotoStatus = "reservada" | "en_cola" | "procesando" | "publicada" | "fallida";
@@ -31,7 +31,7 @@ export interface StudentPublishedPhoto {
   readonly assetId: string;
   readonly bucketId: "progress-check-photos";
   readonly objectName: string;
-  readonly mimeType: "image/jpeg" | "image/png" | "image/webp" | "image/heic";
+  readonly mimeType: "image/jpeg" | "image/png" | "image/webp";
   readonly bytes: number;
   readonly width: number;
   readonly height: number;
@@ -48,6 +48,23 @@ export interface StudentPhotoCheck {
     readonly pose: ProgressPhotoPose;
     readonly position: 1 | 2 | 3;
   })[];
+}
+export interface StudentPhotoShareStatus {
+  readonly assetId: string;
+  readonly sentAt: string;
+  readonly coachName: string;
+}
+export interface StudentProgressCoachAccess {
+  readonly relationshipEpisodeId: string;
+  readonly coachName: string;
+  readonly coachEmail: string;
+}
+export interface StudentProgressReportDeliveryStatus {
+  readonly emailStatus: "pending" | "sending" | "sent" | "failed" | "ambiguous";
+  readonly notificationAccepted: boolean;
+  readonly sentAt: string | null;
+  readonly coachName: string;
+  readonly coachEmail: string;
 }
 
 export class StudentProgressPhotoGatewayError extends Error {
@@ -89,8 +106,8 @@ function pages(limit: number, offset: number): void {
     throw new StudentProgressPhotoGatewayError("invalid_input");
   }
 }
-function parseArray<T>(value: unknown, parser: (value: unknown) => T): readonly T[] {
-  if (!Array.isArray(value) || value.length > 100) throw new StudentProgressPhotoGatewayError("unavailable");
+function parseArray<T>(value: unknown, parser: (value: unknown) => T, max = 100): readonly T[] {
+  if (!Array.isArray(value) || value.length > max) throw new StudentProgressPhotoGatewayError("unavailable");
   return value.map(parser);
 }
 function parseReservation(value: unknown): StudentPhotoReservation {
@@ -117,7 +134,7 @@ function parseAssetFields(data: Record<string, unknown>): Pick<StudentPublishedP
   "assetId" | "bucketId" | "objectName" | "mimeType" | "bytes" | "width" | "height"> {
   if (data.bucketId !== "progress-check-photos" || typeof data.objectName !== "string" || !FINAL_PATH.test(data.objectName)
     || (data.mimeType !== "image/jpeg" && data.mimeType !== "image/png"
-      && data.mimeType !== "image/webp" && data.mimeType !== "image/heic")) {
+      && data.mimeType !== "image/webp")) {
     throw new StudentProgressPhotoGatewayError("unavailable");
   }
   return { assetId: uuid(data.assetId), bucketId: data.bucketId as "progress-check-photos", objectName: data.objectName,
@@ -141,6 +158,29 @@ function parseCheck(value: unknown): StudentPhotoCheck {
       if (photo.position !== 1 && photo.position !== 2 && photo.position !== 3) throw new StudentProgressPhotoGatewayError("unavailable");
       return { ...parseAssetFields(photo), pose: pose(photo.pose), position: photo.position };
     }) };
+}
+function parseShareStatus(value: unknown): StudentPhotoShareStatus {
+  const data = row(value);
+  if (typeof data.coachName !== "string" || !data.coachName.trim() || data.coachName.length > 201) {
+    throw new StudentProgressPhotoGatewayError("unavailable");
+  }
+  return { assetId: uuid(data.assetId), sentAt: timestamp(data.sentAt), coachName: data.coachName };
+}
+function parseDeliveryStatus(value: unknown): StudentProgressReportDeliveryStatus {
+  const data = row(value);
+  if (data.emailStatus !== "pending" && data.emailStatus !== "sending" && data.emailStatus !== "sent"
+    && data.emailStatus !== "failed" && data.emailStatus !== "ambiguous") {
+    throw new StudentProgressPhotoGatewayError("unavailable");
+  }
+  if (typeof data.notificationAccepted !== "boolean"
+    || typeof data.coachName !== "string" || !data.coachName.trim()
+    || typeof data.coachEmail !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.coachEmail)
+    || (data.sentAt !== null && typeof data.sentAt !== "string")) {
+    throw new StudentProgressPhotoGatewayError("unavailable");
+  }
+  return { emailStatus: data.emailStatus, notificationAccepted: data.notificationAccepted,
+    sentAt: data.sentAt === null ? null : timestamp(data.sentAt),
+    coachName: data.coachName, coachEmail: data.coachEmail };
 }
 function rpcError(error: unknown): never {
   const code = error && typeof error === "object" && "code" in error ? error.code : null;
@@ -182,7 +222,7 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
       reservations.set(reservation.uploadId, reservation);
       return reservation;
     },
-    async stage(uploadId: string, image: File): Promise<void> {
+    async stage(uploadId: string, image: File, onProgress?: (percent: number) => void): Promise<void> {
       const safe = reservations.get(uploadId);
       if (!safe) throw new StudentProgressPhotoGatewayError("invalid_input");
       const previousFile = stagedFiles.get(uploadId);
@@ -195,6 +235,34 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
         throw new StudentProgressPhotoGatewayError("invalid_input");
       }
       stagedFiles.set(uploadId, image);
+      if (onProgress) {
+        const endpoint = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim().replace(/\/(?:rest|auth)\/v1\/?$/, "");
+        const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        const session = await client.auth.getSession();
+        if (!endpoint || !anonKey || session.error || !session.data.session?.access_token) {
+          throw new StudentProgressPhotoGatewayError("forbidden");
+        }
+        const url = new URL(`/storage/v1/object/${safe.bucketId}/${safe.objectName}`, endpoint);
+        await new Promise<void>((resolve, reject) => {
+          const request = new XMLHttpRequest();
+          request.open("POST", url.toString());
+          request.setRequestHeader("authorization", `Bearer ${session.data.session!.access_token}`);
+          request.setRequestHeader("apikey", anonKey);
+          request.setRequestHeader("content-type", safe.mimeType);
+          request.setRequestHeader("x-upsert", "false");
+          request.upload.onprogress = (event) => {
+            if (event.lengthComputable && event.total > 0) {
+              onProgress(Math.min(100, Math.round(event.loaded / event.total * 100)));
+            }
+          };
+          request.onload = () => request.status >= 200 && request.status < 300
+            ? resolve() : reject(new StudentProgressPhotoGatewayError("unavailable"));
+          request.onerror = () => reject(new StudentProgressPhotoGatewayError("unavailable"));
+          request.onabort = () => reject(new StudentProgressPhotoGatewayError("unavailable"));
+          request.send(image);
+        });
+        return;
+      }
       const { error } = await client.storage.from(safe.bucketId).upload(safe.objectName, image, {
         contentType: safe.mimeType, upsert: false,
       });
@@ -272,6 +340,45 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
         || new Set(assetIds).size !== assetIds.length) throw new StudentProgressPhotoGatewayError("invalid_input");
       const data = row(await rpc("create_own_progress_check", { p_checked_on: checkedOn, p_asset_ids: [...assetIds] }));
       return { id: uuid(data.id), checkedOn: date(data.checkedOn) };
+    },
+    async attachPhotoToCheck(checkId: string, assetId: string): Promise<ProgressPhotoPose> {
+      if (!UUID.test(checkId) || !UUID.test(assetId)) throw new StudentProgressPhotoGatewayError("invalid_input");
+      return pose(await rpc("attach_own_progress_check_photo", { p_check_id: checkId, p_asset_id: assetId }));
+    },
+    async getCoachAccess(): Promise<StudentProgressCoachAccess> {
+      const data = row(await rpc("get_own_student_progress_access", {}));
+      if (typeof data.coachName !== "string" || !data.coachName.trim()
+        || typeof data.coachEmail !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.coachEmail)) {
+        throw new StudentProgressPhotoGatewayError("unavailable");
+      }
+      return { relationshipEpisodeId: uuid(data.relationshipEpisodeId),
+        coachName: data.coachName, coachEmail: data.coachEmail };
+    },
+    async listPhotoReportStatuses(assetIds: readonly string[]): Promise<readonly StudentPhotoShareStatus[]> {
+      if (assetIds.length === 0) return [];
+      if (assetIds.length > 150 || assetIds.some((id) => !UUID.test(id))
+        || new Set(assetIds).size !== assetIds.length) throw new StudentProgressPhotoGatewayError("invalid_input");
+      return parseArray(await rpc("list_own_progress_photo_report_statuses", { p_asset_ids: [...assetIds] }),
+        parseShareStatus, 150);
+    },
+    async createPhotoReport(assetIds: readonly string[], message: string, requestId: string,
+      expectedEpisodeId: string): Promise<string> {
+      if (!UUID.test(requestId) || !UUID.test(expectedEpisodeId) || assetIds.length < 1 || assetIds.length > 30
+        || assetIds.some((id) => !UUID.test(id)) || new Set(assetIds).size !== assetIds.length
+        || message.length > 2000) throw new StudentProgressPhotoGatewayError("invalid_input");
+      const data = row(await rpc("create_own_progress_photo_report", {
+        p_expected_episode_id: expectedEpisodeId, p_asset_ids: [...assetIds],
+        p_message: message.trim() || null, p_request_id: requestId,
+      }));
+      return uuid(data.id);
+    },
+    async getPhotoReportDeliveryStatus(reportId: string): Promise<StudentProgressReportDeliveryStatus> {
+      if (!UUID.test(reportId)) throw new StudentProgressPhotoGatewayError("invalid_input");
+      return parseDeliveryStatus(await rpc("get_own_progress_report_delivery_status", { p_report_id: reportId }));
+    },
+    async drainOwnReportEmail(): Promise<void> {
+      const { error } = await client.functions.invoke("send-evaluation-emails", { body: { kind: "progress_report" } });
+      if (error) throw new StudentProgressPhotoGatewayError("unavailable");
     },
     async downloadOwnPhoto(assetId: string): Promise<Blob> {
       if (!UUID.test(assetId)) throw new StudentProgressPhotoGatewayError("invalid_input");

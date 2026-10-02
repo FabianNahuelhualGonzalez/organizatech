@@ -1,6 +1,7 @@
 import { BrevoEmailError, sendBrevoTransactionalEmail } from "../_shared/email-onboarding/brevo-client.ts";
 import { invokeEmailRpc } from "../_shared/email-onboarding/supabase-rest.ts";
 import { renderEvaluationEmail, type EvaluationEmailEvent } from "../_shared/evaluations/templates.ts";
+import { renderProgressReportEmail } from "../_shared/progress-reports/templates.ts";
 
 export interface EvaluationEmailEnvironment {
   readonly supabaseUrl: string;
@@ -29,6 +30,19 @@ type DeliveryOutcome = "sent" | "failed" | "ambiguous";
 interface DeliveryAttemptResult {
   readonly outcome: DeliveryOutcome;
   readonly completionFailed: boolean;
+}
+
+interface ProgressDelivery {
+  readonly deliveryId: string;
+  readonly reportId: string;
+  readonly recipientEmail: string;
+  readonly studentName: string;
+  readonly coachName: string;
+  readonly studentMessage: string | null;
+  readonly checkDates: readonly string[];
+  readonly photoCount: number;
+  readonly idempotencyKey: string;
+  readonly attemptToken: string;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -102,6 +116,36 @@ function parseDeliveries(value: unknown): Delivery[] {
   });
 }
 
+function parseProgressDeliveries(value: unknown): ProgressDelivery[] {
+  if (!Array.isArray(value) || value.length > CLAIM_LIMIT) throw new TypeError("invalid progress claim");
+  return value.map((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new TypeError("invalid progress claim");
+    const row = candidate as Record<string, unknown>;
+    const delivery = {
+      deliveryId: String(row.delivery_id ?? ""), reportId: String(row.report_id ?? ""),
+      recipientEmail: String(row.recipient_email ?? ""), studentName: String(row.student_name ?? ""),
+      coachName: String(row.coach_name ?? ""),
+      studentMessage: row.student_message === null ? null : String(row.student_message ?? ""),
+      checkDates: Array.isArray(row.check_dates) && row.check_dates.every((date) => typeof date === "string")
+        ? row.check_dates as string[] : [],
+      photoCount: Number(row.photo_count), idempotencyKey: String(row.idempotency_key ?? ""),
+      attemptToken: String(row.attempt_token ?? ""),
+    };
+    if (![delivery.deliveryId, delivery.reportId, delivery.idempotencyKey, delivery.attemptToken].every((item) => UUID.test(item))
+      || !EMAIL.test(delivery.recipientEmail)
+      || !delivery.studentName.trim() || delivery.studentName.length > 201
+      || !delivery.coachName.trim() || delivery.coachName.length > 201
+      || (delivery.studentMessage !== null && delivery.studentMessage.length > 2000)
+      || !Array.isArray(delivery.checkDates) || delivery.checkDates.length < 1
+      || delivery.checkDates.length > 30 || delivery.checkDates.some((date) =>
+        typeof date !== "string" || !/^\d{2}\/\d{2}\/\d{4}$/.test(date))
+      || !Number.isInteger(delivery.photoCount) || delivery.photoCount < 1 || delivery.photoCount > 30) {
+      throw new TypeError("invalid progress claim");
+    }
+    return delivery;
+  });
+}
+
 function actionUrl(appUrl: string, delivery: Delivery) {
   const url = new URL("/login", appUrl);
   if (url.protocol !== "https:" || url.username || url.password) throw new TypeError("invalid app url");
@@ -164,6 +208,52 @@ async function attemptDelivery(
   }
 }
 
+async function attemptProgressDelivery(
+  environment: EvaluationEmailEnvironment,
+  authorization: string,
+  capability: string,
+  delivery: ProgressDelivery,
+  fetchImpl?: typeof fetch,
+): Promise<DeliveryAttemptResult> {
+  const completeProgress = async (outcome: DeliveryOutcome, value: string) => {
+    const completed = await invokeEmailRpc({
+      supabaseUrl: environment.supabaseUrl, anonKey: environment.supabaseAnonKey, authorization,
+      functionName: "complete_progress_report_email_delivery",
+      body: { p_capability: capability, p_delivery_id: delivery.deliveryId,
+        p_attempt_token: delivery.attemptToken, p_outcome: outcome,
+        p_provider_message_id: outcome === "sent" ? value : null,
+        p_provider_error_code: outcome === "sent" ? null : value }, fetchImpl,
+    });
+    if (completed !== true) throw new TypeError("progress email completion rejected");
+  };
+  try {
+    const appUrl = new URL("/login", environment.appUrl);
+    appUrl.searchParams.set("tipo", "coach");
+    const rendered = renderProgressReportEmail({
+      studentName: delivery.studentName, coachName: delivery.coachName,
+      studentMessage: delivery.studentMessage, checkDates: delivery.checkDates,
+      photoCount: delivery.photoCount,
+      actionUrl: appUrl.toString(),
+    });
+    const sent = await sendBrevoTransactionalEmail({
+      apiKey: environment.brevoApiKey, senderEmail: environment.senderEmail,
+      senderName: environment.senderName, recipientEmail: delivery.recipientEmail,
+      ...rendered, idempotencyKey: delivery.idempotencyKey, fetchImpl,
+    });
+    try {
+      await completeProgress("sent", sent.messageId);
+      return { outcome: "sent", completionFailed: false };
+    } catch { return { outcome: "ambiguous", completionFailed: true }; }
+  } catch (error) {
+    const outcome = error instanceof BrevoEmailError && error.ambiguous ? "ambiguous" : "failed";
+    const code = error instanceof BrevoEmailError ? error.code : "invalid_configuration";
+    try {
+      await completeProgress(outcome, code);
+      return { outcome, completionFailed: false };
+    } catch { return { outcome: "ambiguous", completionFailed: true }; }
+  }
+}
+
 export function createEvaluationEmailHandler(environment: EvaluationEmailEnvironment, fetchImpl?: typeof fetch) {
   const allowedOrigins = configuredAllowedOrigins(environment);
   return async (request: Request) => {
@@ -176,15 +266,27 @@ export function createEvaluationEmailHandler(environment: EvaluationEmailEnviron
       } });
     }
     if (request.method !== "POST") return response(405, { error: "method_not_allowed" }, origin);
+    let progressOnly = false;
+    try {
+      const raw = await request.text();
+      if (raw.length > 256) throw new TypeError("invalid request body");
+      const body = raw ? JSON.parse(raw) as unknown : {};
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("invalid request body");
+      const keys = Object.keys(body);
+      if (keys.length === 1 && keys[0] === "kind" && (body as { kind?: unknown }).kind === "progress_report") {
+        progressOnly = true;
+      } else if (keys.length !== 0) throw new TypeError("invalid request body");
+    } catch { return response(400, { error: "invalid_request" }, origin); }
     const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
     const scheduler = Boolean(environment.schedulerSecret) && constantTimeEqual(bearer, environment.schedulerSecret);
     if (!scheduler && (!origin || !bearer)) return response(401, { error: "unauthorized" }, origin);
+    if (scheduler && progressOnly) return response(401, { error: "unauthorized" }, origin);
     const authorization = scheduler ? `Bearer ${environment.supabaseAnonKey}` : `Bearer ${bearer}`;
     const capability = environment.evaluationRpcSecret;
     try {
       const aggregate = { claimed: 0, sent: 0, failed: 0, ambiguous: 0, completionFailed: 0 };
       let truncated = false;
-      for (let batch = 0; batch < MAX_CLAIM_BATCHES; batch += 1) {
+      if (!progressOnly) for (let batch = 0; batch < MAX_CLAIM_BATCHES; batch += 1) {
         const claimed = await invokeEmailRpc({
           supabaseUrl: environment.supabaseUrl, anonKey: environment.supabaseAnonKey, authorization,
           functionName: "claim_evaluation_email_deliveries",
@@ -206,6 +308,29 @@ export function createEvaluationEmailHandler(environment: EvaluationEmailEnviron
         }
         if (deliveries.length < CLAIM_LIMIT) break;
         if (batch === MAX_CLAIM_BATCHES - 1) truncated = true;
+      }
+      if (progressOnly) {
+        for (let batch = 0; batch < MAX_CLAIM_BATCHES; batch += 1) {
+          const claimed = await invokeEmailRpc({
+            supabaseUrl: environment.supabaseUrl, anonKey: environment.supabaseAnonKey, authorization,
+            functionName: "claim_progress_report_email_deliveries",
+            body: { p_capability: capability, p_limit: CLAIM_LIMIT }, fetchImpl,
+          });
+          const deliveries = parseProgressDeliveries(claimed);
+          aggregate.claimed += deliveries.length;
+          const settled = await Promise.allSettled(deliveries.map((delivery) => (
+            attemptProgressDelivery(environment, authorization, capability, delivery, fetchImpl)
+          )));
+          for (const result of settled) {
+            if (result.status === "rejected") { aggregate.ambiguous += 1; aggregate.completionFailed += 1; }
+            else {
+              aggregate[result.value.outcome] += 1;
+              if (result.value.completionFailed) aggregate.completionFailed += 1;
+            }
+          }
+          if (deliveries.length < CLAIM_LIMIT) break;
+          if (batch === MAX_CLAIM_BATCHES - 1) truncated = true;
+        }
       }
       return response(202, { accepted: true, ...aggregate, truncated }, origin);
     } catch {

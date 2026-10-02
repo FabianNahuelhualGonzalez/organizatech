@@ -6,6 +6,8 @@ import { createStudentProgressPhotoGateway, StudentProgressPhotoGatewayError } f
 
 const uploadId = "10000000-0000-4000-8000-000000000001";
 const assetId = "20000000-0000-4000-8000-000000000002";
+const reportId = "30000000-0000-4000-8000-000000000003";
+const requestId = "40000000-0000-4000-8000-000000000004";
 const objectName = `${uploadId}/${assetId}.jpg`;
 const now = "2026-09-30T12:00:00Z";
 
@@ -31,6 +33,13 @@ function fixture() {
     get_own_progress_photo_deletion_target: { kind: "photo" },
     delete_own_progress_photo: "photo_deleted",
     delete_own_progress_check: "check_deleted",
+    attach_own_progress_check_photo: "frente",
+    get_own_student_progress_access: { relationshipEpisodeId: uploadId,
+      coachName: "Coach QA", coachEmail: "coach@example.com" },
+    create_own_progress_photo_report: { id: reportId },
+    get_own_progress_report_delivery_status: { emailStatus: "sent", notificationAccepted: true,
+      sentAt: now, coachName: "Coach QA", coachEmail: "coach@example.com" },
+    list_own_progress_photo_report_statuses: [{ assetId, sentAt: now, coachName: "Coach QA" }],
   };
   const client = {
     rpc: async (name: string, args: unknown) => {
@@ -105,6 +114,22 @@ test("gateway rejects HEIC, RAW and an unauthorized staging path", async () => {
   await assert.rejects(gateway.reserve("perfil", "jpeg"), StudentProgressPhotoGatewayError);
 });
 
+test("final read routes reject HEIC path and MIME even when a server response claims an asset", async () => {
+  const { gateway, outputs } = fixture();
+  outputs.get_own_progress_photo = { ...(outputs.get_own_progress_photo as object),
+    objectName: `${uploadId}/${assetId}.heic`, mimeType: "image/heic" };
+  await assert.rejects(gateway.getPhoto(assetId), StudentProgressPhotoGatewayError);
+  await assert.rejects(gateway.downloadOwnPhoto(assetId), StudentProgressPhotoGatewayError);
+  outputs.list_own_progress_photos = [{ ...(outputs.list_own_progress_photos as object[])[0],
+    objectName: `${uploadId}/${assetId}.heic`, mimeType: "image/heic" }];
+  await assert.rejects(gateway.listPhotos(), StudentProgressPhotoGatewayError);
+  outputs.list_own_progress_checks = [{ id: uploadId, checkedOn: "2026-09-30", createdAt: now,
+    photos: [{ assetId, bucketId: "progress-check-photos",
+      objectName: `${uploadId}/${assetId}.heic`, mimeType: "image/heic",
+      bytes: 100, width: 10, height: 10, pose: "frente", position: 1 }] }];
+  await assert.rejects(gateway.listChecks(), StudentProgressPhotoGatewayError);
+});
+
 test("lecturas y check usan allowlist de argumentos; Storage recibe ruta autorizada por detalle", async () => {
   const { gateway, calls, storage } = fixture();
   assert.equal((await gateway.listUploads())[0].status, "en_cola");
@@ -150,4 +175,33 @@ test("delete target and confirmation send only one opaque asset ID", async () =>
     { name: "delete_own_progress_check", args: { p_asset_id: assetId } },
     { name: "delete_own_progress_check", args: { p_asset_id: assetId } },
   ]);
+});
+
+test("report gateway keeps ordered IDs and derives the recipient through the active episode", async () => {
+  const { gateway, calls, outputs } = fixture();
+  assert.equal(await gateway.attachPhotoToCheck(uploadId, assetId), "frente");
+  const coach = await gateway.getCoachAccess();
+  assert.deepEqual(coach, { relationshipEpisodeId: uploadId,
+    coachName: "Coach QA", coachEmail: "coach@example.com" });
+  assert.equal(await gateway.createPhotoReport([assetId], "  Avance  ", requestId, coach.relationshipEpisodeId), reportId);
+  assert.deepEqual(await gateway.getPhotoReportDeliveryStatus(reportId), {
+    emailStatus: "sent", notificationAccepted: true, sentAt: now,
+    coachName: "Coach QA", coachEmail: "coach@example.com",
+  });
+  assert.deepEqual(await gateway.listPhotoReportStatuses([assetId]), [{ assetId, sentAt: now,
+    coachName: "Coach QA" }]);
+  assert.deepEqual(calls, [
+    { name: "attach_own_progress_check_photo", args: { p_check_id: uploadId, p_asset_id: assetId } },
+    { name: "get_own_student_progress_access", args: {} },
+    { name: "create_own_progress_photo_report", args: {
+      p_expected_episode_id: uploadId, p_asset_ids: [assetId], p_message: "Avance", p_request_id: requestId,
+    } },
+    { name: "get_own_progress_report_delivery_status", args: { p_report_id: reportId } },
+    { name: "list_own_progress_photo_report_statuses", args: { p_asset_ids: [assetId] } },
+  ]);
+  outputs.get_own_progress_report_delivery_status = { ...(outputs.get_own_progress_report_delivery_status as object),
+    notificationAccepted: false };
+  assert.equal((await gateway.getPhotoReportDeliveryStatus(reportId)).notificationAccepted, false);
+  await assert.rejects(gateway.createPhotoReport([assetId, assetId], "", requestId, uploadId),
+    StudentProgressPhotoGatewayError);
 });

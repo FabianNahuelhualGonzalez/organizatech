@@ -167,7 +167,8 @@ test("one server action processes at most three exact own claims", async () => {
   assert.equal(claims, 3);
   assert.equal(cleanups, 2, "an empty retry pass reclaims prior cleanup debt");
   const ui = readFileSync("src/features/progress-records/components/student-progress-photos.tsx", "utf8");
-  assert.equal((ui.match(/await gateway\.publishOwnBatch\(\)/g) ?? []).length, 1);
+  assert.equal((ui.match(/await gateway\.publishOwnBatch\(\)/g) ?? []).length, 2,
+    "check save and tile upload each issue one bounded publication request");
   assert.doesNotMatch(ui, /publishNextOwn/);
 });
 

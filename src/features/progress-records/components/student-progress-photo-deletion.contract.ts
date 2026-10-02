@@ -25,7 +25,7 @@ test("unpublished sheet removal stays immediate and queued uploads use cancellat
   assert.match(sheet, /async function removeFile\(pose: ProgressPhotoPose\)/);
   assert.match(sheet, /await onSlotChange\(pose\)/);
   assert.doesNotMatch(sheet, /¿Seguro que quieres eliminar/);
-  assert.match(ui, /Cancelar carga/);
+  assert.doesNotMatch(ui, /Cargas recientes|Mis fotos|Publicada/);
   assert.match(ui, /gateway\.abandon\(uploadId\)/);
   assert.match(ui, /status === "published"[\s\S]*gateway\.getDeletionTarget\(published\.assetId\)/);
 });

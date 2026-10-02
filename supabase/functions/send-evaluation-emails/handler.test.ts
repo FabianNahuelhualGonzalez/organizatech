@@ -305,3 +305,69 @@ test("marca truncated si tres lotes completos no vacían el trabajo reclamable",
   });
   assert.equal(claims, 3);
 });
+
+test("el reporte de fotos usa la cola propia y sólo confirma aceptación durable del correo", async () => {
+  const calls: string[] = [];
+  const bodies: string[] = [];
+  const reportDelivery = {
+    delivery_id: "30000000-0000-4000-8000-000000000001",
+    report_id: "30000000-0000-4000-8000-000000000002",
+    recipient_email: "coach@example.com", student_name: "Alumno QA", coach_name: "Coach QA",
+    student_message: "Avance <privado>", check_dates: ["02/10/2026"], photo_count: 2,
+    idempotency_key: "30000000-0000-4000-8000-000000000003",
+    attempt_token: "30000000-0000-4000-8000-000000000004",
+  };
+  const handler = createEvaluationEmailHandler(environment, async (input, init) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith("claim_progress_report_email_deliveries")) return json([reportDelivery]);
+    if (url.includes("api.brevo.com")) {
+      bodies.push(String(init?.body));
+      return json({ messageId: "progress-message-id" });
+    }
+    if (url.endsWith("complete_progress_report_email_delivery")) {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      assert.equal(body.p_outcome, "sent");
+      assert.equal(body.p_delivery_id, reportDelivery.delivery_id);
+      return json(true);
+    }
+    throw new Error("unexpected endpoint");
+  });
+  const response = await handler(new Request("https://function.example.com", {
+    method: "POST", headers: { origin: environment.appUrl, authorization: "Bearer user-jwt" },
+    body: JSON.stringify({ kind: "progress_report" }),
+  }));
+  assert.equal(response.status, 202);
+  assert.deepEqual(await response.json(), {
+    accepted: true, claimed: 1, sent: 1, failed: 0, ambiguous: 0, completionFailed: 0, truncated: false,
+  });
+  assert.equal(calls.some((url) => url.endsWith("claim_evaluation_email_deliveries")), false);
+  assert.match(bodies[0] ?? "", /Alumno QA te envió un reporte de fotos de progreso/);
+  assert.match(bodies[0] ?? "", /Avance &lt;privado&gt;/);
+  assert.match(bodies[0] ?? "", /02\/10\/2026/);
+  assert.doesNotMatch(bodies[0] ?? "", /storage\/v1|\.jpg|\.png|service_role/i);
+});
+
+test("un proveedor ambiguo no se registra como correo aceptado", async () => {
+  const handler = createEvaluationEmailHandler(environment, async (input) => {
+    const url = String(input);
+    if (url.endsWith("claim_progress_report_email_deliveries")) return json([{
+      delivery_id: "30000000-0000-4000-8000-000000000001",
+      report_id: "30000000-0000-4000-8000-000000000002",
+      recipient_email: "coach@example.com", student_name: "Alumno QA", coach_name: "Coach QA",
+      student_message: null, check_dates: ["02/10/2026"], photo_count: 2,
+      idempotency_key: "30000000-0000-4000-8000-000000000003",
+      attempt_token: "30000000-0000-4000-8000-000000000004",
+    }]);
+    if (url.includes("api.brevo.com")) return json({ code: "unavailable" }, 500);
+    if (url.endsWith("complete_progress_report_email_delivery")) return json(true);
+    throw new Error("unexpected endpoint");
+  });
+  const response = await handler(new Request("https://function.example.com", {
+    method: "POST", headers: { origin: environment.appUrl, authorization: "Bearer user-jwt" },
+    body: JSON.stringify({ kind: "progress_report" }),
+  }));
+  assert.deepEqual(await response.json(), {
+    accepted: true, claimed: 1, sent: 0, failed: 0, ambiguous: 1, completionFailed: 0, truncated: false,
+  });
+});

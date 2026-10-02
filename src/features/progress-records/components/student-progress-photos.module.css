@@ -434,6 +434,7 @@
 .sheetSlotDimensions { color: rgba(255, 255, 255, 0.38); font-size: 9.5px; line-height: 1.4; text-align: center; }
 .sheetSlotDimensions { color: rgba(255, 255, 255, 0.6); }
 .sheetSlotWarning { color: #fbbf24; font-size: 9.5px; line-height: 1.4; text-align: center; }
+.sheetSlotError { color: #f87171; font-size: 9.5px; line-height: 1.4; text-align: center; }
 .sheetQuality { border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 13px; padding: 12px 13px; }
 .sheetQuality strong { font-size: 12px; font-weight: 700; }
 .sheetQuality p { margin: 6px 0 0; color: rgba(255, 255, 255, 0.55); font-size: 10.5px; line-height: 1.55; }
@@ -446,3 +447,106 @@
 .sheetSave:disabled { color: rgba(255, 255, 255, 0.45); background: rgba(60, 122, 255, 0.35); cursor: not-allowed; }
 
 @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+
+/* Fotos v1.1: checks, selección y envío. */
+.photoActions { display: flex; gap: 8px; }
+.photoActions .newCheckButton { flex: 1; min-width: 0; }
+.sendAction {
+  flex: 1.3; min-width: 0; min-height: 48px; border: 1px solid #3c7aff;
+  border-radius: 12px; color: #fff; background: rgba(60, 122, 255, .1);
+  font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer;
+}
+.sendAction:disabled, .selectBar .newCheckButton:disabled { opacity: .45; cursor: not-allowed; }
+.coachLinkHint { margin: 0; color: #8fb2ff; font-size: 11px; line-height: 1.5; }
+.selectBanner {
+  border: 1px solid rgba(60, 122, 255, .4); border-radius: 13px;
+  padding: 12px 14px; color: #8fb2ff; background: rgba(60, 122, 255, .08);
+  font-size: 11px; line-height: 1.55;
+}
+.checksTitle { display: flex; align-items: baseline; justify-content: space-between; margin-top: 6px; }
+.checksTitle h4 { margin: 0; font-size: 14px; font-weight: 700; }
+.checksTitle span { color: rgba(255, 255, 255, .45); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.monthGroup { display: flex; flex-direction: column; gap: 12px; }
+.monthHeading { color: rgba(255, 255, 255, .38); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.group { gap: 12px; margin-top: 12px; }
+.check {
+  display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  border: 1px solid rgba(255, 255, 255, .16); border-radius: 15px;
+}
+.checkHeading > div { gap: 3px; }
+.checkHeading strong { font-size: 13px; }
+.checkHeading .poseCountPending { color: #fbbf24; font-size: 10px; }
+.checkHeading .poseCount { color: rgba(255, 255, 255, .45); font-size: 10px; }
+.sentBadge {
+  flex: none; border: 1px solid rgba(74, 222, 128, .4); border-radius: 9px;
+  padding: 3px 8px; color: #4ade80; background: rgba(74, 222, 128, .1);
+  font-size: 9px; font-weight: 700;
+}
+.selectAll {
+  min-height: 44px; margin: -10px -6px; padding: 0 6px; border: 0;
+  color: #8fb2ff; background: transparent; font: inherit; font-size: 10.5px;
+  font-weight: 700; cursor: pointer;
+}
+.checkPhotoSlot { display: flex; flex-direction: column; gap: 5px; }
+.checkTile { display: block; width: 100%; }
+.checkTileSelected { box-shadow: inset 0 0 0 2px #3c7aff; border-color: #3c7aff; }
+.selectCircle {
+  position: absolute; top: 6px; right: 6px; display: grid; place-items: center;
+  width: 24px; height: 24px; box-sizing: border-box; border: 2px solid rgba(255, 255, 255, .7);
+  border-radius: 50%; color: #fff; background: rgba(2, 8, 14, .5);
+  font-size: 11px; font-weight: 700;
+}
+.selectCircleActive { border-color: #3c7aff; background: #3c7aff; }
+.tilePoseLabel { color: rgba(255, 255, 255, .45); font-size: 10px; text-align: center; }
+.tilePosePresent { color: #fff; font-weight: 700; }
+.missingTile {
+  box-sizing: border-box; width: 100%; display: grid; place-items: center;
+  border-color: rgba(255, 255, 255, .16); color: rgba(255, 255, 255, .45);
+  background: rgba(255, 255, 255, .02); font-size: 20px; font-weight: 400;
+  cursor: pointer; overflow: hidden;
+}
+.missingTile[aria-disabled="true"] { opacity: .4; cursor: default; }
+.missingTile input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.missingTile input:focus-visible { outline: 2px solid #8fb2ff; outline-offset: -2px; opacity: 1; }
+.missingTile img { width: 100%; height: 100%; object-fit: cover; }
+.uploadProgress { position: absolute; left: 0; bottom: 0; height: 3px; background: #3c7aff; }
+.uploadRetryTile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 5px; min-height: 44px; aspect-ratio: 3 / 4; border: 1px solid #f87171;
+  border-radius: 11px; color: #f87171; font-size: 9.5px;
+}
+.retryUpload { min-height: 44px; border: 0; color: #8fb2ff; background: transparent; font: inherit; font-size: 10.5px; font-weight: 700; cursor: pointer; }
+.uploadErrorFrame { border: 1px solid #f87171; border-radius: 11px; }
+.uploadDimmed { opacity: .5; }
+.selectBar {
+  position: fixed; z-index: 40; right: 0; bottom: 0; left: 0;
+  display: flex; gap: 8px; padding: 12px 14px max(22px, env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255, 255, 255, .16); background: #07101a;
+}
+.selectBar .secondary { flex: none; color: #fff; border-color: rgba(255, 255, 255, .28); background: transparent; }
+.selectBar .newCheckButton { flex: 1; }
+.surface:has(.selectBar) { padding-bottom: 90px; }
+.reportThumbs { display: flex; gap: 6px; overflow-x: auto; flex: none; }
+.reportThumbnail { position: relative; flex: none; width: 52px; height: 69px; overflow: hidden; border: 1px solid rgba(255, 255, 255, .16); border-radius: 9px; background: #07101a; }
+.reportThumbnail img { width: 100%; height: 100%; object-fit: cover; }
+.reportThumbnail span { position: absolute; bottom: 4px; left: 4px; border-radius: 5px; padding: 1px 4px; color: #fff; background: rgba(2, 8, 14, .72); font-size: 7.5px; font-weight: 700; }
+.reportSummary, .reportNote { margin: 0; color: rgba(255, 255, 255, .55); font-size: 11px; line-height: 1.6; }
+.coachCard { display: flex; align-items: center; gap: 12px; border: 1px solid rgba(255, 255, 255, .28); border-radius: 13px; padding: 12px; }
+.coachInitials { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: #8fb2ff; background: rgba(60, 122, 255, .18); font-size: 12px; font-weight: 700; }
+.coachCard > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.coachCard > div > span { overflow: hidden; color: rgba(255, 255, 255, .55); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.coachCard > div > strong { font-size: 12.5px; }
+.reportMessageLabel { display: flex; flex-direction: column; gap: 6px; color: rgba(255, 255, 255, .45); font-size: 10px; font-weight: 700; }
+.reportMessageLabel textarea { box-sizing: border-box; width: 100%; min-height: 90px; padding: 10px 12px; border: 1px solid rgba(255, 255, 255, .28); border-radius: 11px; color: #fff; background: transparent; font: inherit; font-size: 16px; font-weight: 400; resize: vertical; }
+.confirmOverlay { position: fixed; z-index: 1400; inset: 0; display: grid; place-items: center; padding: 20px; }
+.confirmScrim { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(2, 8, 14, .78); }
+.confirmPanel { position: relative; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; width: min(100%, 420px); border: 1px solid rgba(255, 255, 255, .16); border-radius: 18px; padding: 20px; color: #fff; background: #0d1a26; }
+.confirmPanel h3 { margin: 0; font-size: 15px; line-height: 1.4; }
+.confirmPanel p { margin: 0; color: rgba(255, 255, 255, .55); font-size: 11px; line-height: 1.55; }
+.confirmPanel .secondary { color: #fff; border-color: rgba(255, 255, 255, .28); background: transparent; }
+.sentSuccess { display: flex; flex-direction: column; align-items: center; gap: 14px; border: 1px solid rgba(74, 222, 128, .35); border-radius: 15px; padding: 22px; background: rgba(74, 222, 128, .05); text-align: center; }
+.sentIcon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; color: #4ade80; background: rgba(74, 222, 128, .15); font-size: 30px; }
+.sentSuccess strong { font-size: 15px; }
+.sentSuccess p { margin: 0; color: rgba(255, 255, 255, .75); font-size: 11.5px; line-height: 1.6; }
+.sentSuccess p + p { color: rgba(255, 255, 255, .5); font-size: 10.5px; }
+.errorToast { position: fixed; z-index: 1600; right: 16px; bottom: max(20px, env(safe-area-inset-bottom)); left: 16px; width: max-content; max-width: calc(100% - 32px); margin: 0 auto; border: 1px solid #f87171; border-radius: 12px; padding: 12px 16px; color: #f87171; background: #0d1a26; font-size: 11px; text-align: center; }

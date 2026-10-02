@@ -13,6 +13,8 @@ type Slot = {
   readonly selected?: SelectedProgressPhoto;
   readonly error?: string;
   readonly previewUrl?: string;
+  readonly width?: number;
+  readonly height?: number;
 };
 
 export interface ProgressCheckSheetPhoto {
@@ -20,12 +22,14 @@ export interface ProgressCheckSheetPhoto {
   readonly selected: SelectedProgressPhoto;
 }
 
-export function StudentProgressCheckSheet({ checkedOn, saving, status, error, onClose, onSlotChange, onSave }: {
+export function StudentProgressCheckSheet({ checkedOn, saving, status, error, uploadStates, onClose, onInvalidFile, onSlotChange, onSave }: {
   readonly checkedOn: string;
   readonly saving: boolean;
   readonly status: string;
   readonly error: string;
+  readonly uploadStates: Partial<Record<ProgressPhotoPose, { readonly state: "uploading" | "error"; readonly progress: number }>>;
   readonly onClose: () => void;
+  readonly onInvalidFile: () => void;
   readonly onSlotChange: (pose: ProgressPhotoPose) => Promise<boolean>;
   readonly onSave: (photos: readonly ProgressCheckSheetPhoto[]) => void;
 }) {
@@ -57,6 +61,7 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
     try {
       selected = selectProgressPhoto(file);
     } catch {
+      onInvalidFile();
       setSlots((current) => ({ ...current, [pose]: { ...current[pose],
         error: file.size > PROGRESS_PHOTO_MAX_BYTES ? "La foto supera 20 MB. Elige otra." : "No pudimos usar esta foto. Elige otra.",
       } }));
@@ -72,6 +77,15 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
       try { previewUrl = URL.createObjectURL(file); } catch { /* Preview is optional. */ }
       if (previewUrl) urlsRef.current[pose] = previewUrl;
       setSlots((current) => ({ ...current, [pose]: { selected, previewUrl } }));
+      if (previewUrl) {
+        const image = new Image();
+        image.onload = () => {
+          if (mountedRef.current && urlsRef.current[pose] === previewUrl) {
+            setSlots((current) => ({ ...current, [pose]: { ...current[pose], width: image.naturalWidth, height: image.naturalHeight } }));
+          }
+        };
+        image.src = previewUrl;
+      }
     } finally { if (mountedRef.current) setChanging(false); }
   }
 
@@ -137,32 +151,38 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
       </div>
       <div className={styles.sheetBody}>
         <p className={styles.sheetHelp}>Mismo lugar, misma luz y cámara a la altura de la cintura. Sube las tres poses para comparar mejor.</p>
-        <p ref={helpRef} id="progress-photo-format-help" className={styles.sheetFormatHelp} hidden={!showFormatHelp}>Puedes subir JPG, PNG o WebP. HEIC, HEIF, RAW y ProRAW no se admiten. Si tu foto está en HEIC, toma una captura de pantalla y sube esa captura. Tus fotos se almacenan de forma privada.</p>
+        <p ref={helpRef} id="progress-photo-format-help" className={styles.sheetFormatHelp} hidden={!showFormatHelp}>Por ahora puedes subir imágenes JPG, PNG o WebP. Si tu foto está en formato HEIC, toma una captura de pantalla de la foto y sube esa captura. En iPhone normalmente se guarda como PNG. Tus fotos se almacenan de forma privada.</p>
         <div className={styles.sheetSlots}>{POSES.map((pose) => {
           const slot = slots[pose];
+          const upload = uploadStates[pose];
           return <div className={styles.sheetSlot} key={pose}>
-            <div className={styles.sheetSlotFrame}>
+            <div className={`${styles.sheetSlotFrame} ${upload?.state === "error" ? styles.uploadErrorFrame : ""}`}>
               <label className={styles.sheetFileLabel}>
                 <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" aria-label={`Elegir foto de ${pose}`} disabled={saving || changing} onChange={(event) => { void chooseFile(pose, event.target.files?.[0] ?? null); event.target.value = ""; }} />
                 {slot?.previewUrl ? (
                   // Vista local opcional; next/image no optimiza blob:.
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={slot.previewUrl} alt="" onError={() => previewFailed(pose, slot.previewUrl!)} />
+                  <img className={upload?.state === "uploading" ? styles.uploadDimmed : ""} src={slot.previewUrl} alt="" onError={() => previewFailed(pose, slot.previewUrl!)} />
                 ) : <span className={styles.sheetSlotPrompt}><strong>+</strong><span>{pose}</span></span>}
               </label>
+              {upload?.state === "uploading" ? <span className={styles.uploadProgress} style={{ width: `${upload.progress}%` }} /> : null}
               {slot ? <button className={styles.sheetRemove} type="button" aria-label={`Quitar foto de ${pose}`} disabled={saving || changing} onClick={() => { void removeFile(pose); }}>×</button> : null}
             </div>
-            <span className={`${styles.sheetSlotMeta} ${slot?.error ? styles.sheetSlotWarning : ""}`}>
-              {!slot ? "Sin foto" : slot.error ?? "Foto elegida"}
+            <span className={`${styles.sheetSlotMeta} ${slot?.error || upload?.state === "error" ? styles.sheetSlotError
+              : slot?.width !== undefined && slot.width < 1080 ? styles.sheetSlotWarning : ""}`}>
+              {upload?.state === "error" ? "No se subió" : !slot ? "Sin foto" : slot.error
+                ?? (slot.width !== undefined && slot.width < 1080 ? "Baja resolución"
+                  : slot.width !== undefined && slot.height !== undefined ? `${slot.width}×${slot.height}` : "Foto elegida")}
             </span>
+            {upload?.state === "error" ? <button className={styles.retryUpload} type="button" disabled={saving} onClick={() => onSave(ready)}>Reintentar</button> : null}
           </div>;
         })}</div>
-        <div className={styles.sheetQuality}><strong>Calidad de las fotos</strong><p>Elige fotos nítidas, con buena luz, de hasta 20 MB cada una.</p></div>
+        <div className={styles.sheetQuality}><strong>Calidad original</strong><p>Guardamos tus fotos sin comprimir para que la comparación sea fiel. JPG, PNG o WebP, hasta 20 MB por foto. Recomendado: 1080 px de ancho o más.</p></div>
       </div>
       <div className={styles.sheetFooter}>
         {status ? <p className={styles.sheetStatus} role="status">{status}</p> : null}
         {error ? <p className={styles.sheetError} role="alert">{error}</p> : null}
-        <button className={styles.sheetSave} type="button" disabled={ready.length === 0 || saving || changing} onClick={() => onSave(ready)}>{saving ? "Guardando check…" : "Guardar check"}</button>
+        <button className={styles.sheetSave} type="button" disabled={ready.length === 0 || saving || changing} onClick={() => onSave(ready)}>{saving ? "Subiendo…" : "Guardar check"}</button>
       </div>
     </div>
   </div>;

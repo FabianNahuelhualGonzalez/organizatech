@@ -5,14 +5,14 @@ import test from "node:test";
 test("preview failure preserves original selection and does not disable saving", () => {
   const sheet = readFileSync("src/features/progress-records/components/student-progress-check-sheet.tsx", "utf8");
   const flow = readFileSync("src/features/progress-records/components/student-progress-photos.tsx", "utf8");
-  assert.match(sheet, /const selected = selectProgressPhoto\(file\)/);
+  assert.match(sheet, /selected = selectProgressPhoto\(file\)/);
   assert.match(sheet, /URL\.createObjectURL\(file\)/);
   assert.match(sheet, /catch \{ \/\* Preview is optional\. \*\/ \}/);
   assert.match(sheet, /onError=\{\(\) => previewFailed\(pose/);
   assert.match(sheet, /\[pose\]: \{ selected: current\[pose\]\?\.selected \}/);
   assert.match(sheet, /slots\[pose\]\?\.selected \? \[\{ pose, selected:/);
-  assert.match(sheet, /disabled=\{ready\.length === 0 \|\| saving\}/);
-  assert.match(flow, /gateway\.stage\(pending\.reservation\.uploadId, photo\.selected\.file\)/);
+  assert.match(sheet, /disabled=\{ready\.length === 0 \|\| saving \|\| changing\}/);
+  assert.match(flow, /gateway\.stage\(pending\.reservation\.uploadId, photo\.selected\.file, /);
   assert.doesNotMatch(sheet, /prepareLocalProgressPhoto|createImageBitmap|canvas|toBlob/);
 });
 
