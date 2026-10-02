@@ -51,7 +51,7 @@ export interface StudentPhotoCheck {
 }
 
 export class StudentProgressPhotoGatewayError extends Error {
-  constructor(readonly code: "invalid_input" | "forbidden" | "unavailable") {
+  constructor(readonly code: "invalid_input" | "forbidden" | "unavailable" | "changed") {
     super(code);
     this.name = "StudentProgressPhotoGatewayError";
   }
@@ -144,15 +144,33 @@ function parseCheck(value: unknown): StudentPhotoCheck {
 }
 function rpcError(error: unknown): never {
   const code = error && typeof error === "object" && "code" in error ? error.code : null;
-  throw new StudentProgressPhotoGatewayError(code === "42501" ? "forbidden" : "unavailable");
+  throw new StudentProgressPhotoGatewayError(code === "42501" ? "forbidden"
+    : code === "P4090" ? "changed" : "unavailable");
 }
 
 export function createStudentProgressPhotoGateway(client: SupabaseClient) {
   const reservations = new Map<string, StudentPhotoReservation>();
+  const stagedFiles = new Map<string, File>();
   async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
     const result = await client.rpc(name, args);
     if (result.error) rpcError(result.error);
     return result.data;
+  }
+  async function requestServerPass(path: "publish" | "cleanup"): Promise<unknown> {
+    const { data, error } = await client.auth.getSession();
+    if (error || !data.session?.access_token) throw new StudentProgressPhotoGatewayError("forbidden");
+    let response: Response;
+    try {
+      response = await fetch(`/api/progress-photos/${path}`, {
+        method: "POST", headers: { Authorization: `Bearer ${data.session.access_token}` },
+        cache: "no-store",
+      });
+    } catch { throw new StudentProgressPhotoGatewayError("unavailable"); }
+    if (!response.ok) throw new StudentProgressPhotoGatewayError(
+      response.status === 401 ? "forbidden" : "unavailable",
+    );
+    try { return (await response.json() as { status?: unknown }).status; }
+    catch { throw new StudentProgressPhotoGatewayError("unavailable"); }
   }
   return {
     async reserve(poseValue: ProgressPhotoPose, format: StudentPhotoFormat): Promise<StudentPhotoReservation> {
@@ -167,6 +185,8 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
     async stage(uploadId: string, image: File): Promise<void> {
       const safe = reservations.get(uploadId);
       if (!safe) throw new StudentProgressPhotoGatewayError("invalid_input");
+      const previousFile = stagedFiles.get(uploadId);
+      if (previousFile && previousFile !== image) throw new StudentProgressPhotoGatewayError("invalid_input");
       let selected: ReturnType<typeof selectProgressPhoto>;
       try { selected = selectProgressPhoto(image); }
       catch { throw new StudentProgressPhotoGatewayError("invalid_input"); }
@@ -174,6 +194,7 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
       if (image.size < 1 || image.size > PROGRESS_PHOTO_MAX_BYTES || expectedMime !== safe.mimeType) {
         throw new StudentProgressPhotoGatewayError("invalid_input");
       }
+      stagedFiles.set(uploadId, image);
       const { error } = await client.storage.from(safe.bucketId).upload(safe.objectName, image, {
         contentType: safe.mimeType, upsert: false,
       });
@@ -183,9 +204,54 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
       if (!UUID.test(uploadId)) throw new StudentProgressPhotoGatewayError("invalid_input");
       uuid(await rpc("finalize_own_progress_photo_upload", { p_upload_id: uploadId }));
     },
+    async publishOwnBatch(): Promise<void> {
+      const status = await requestServerPass("publish");
+      if (status !== "published" && status !== "queued" && status !== "idle") {
+        throw new StudentProgressPhotoGatewayError("unavailable");
+      }
+    },
+    async abandon(uploadId: string): Promise<"cleaning" | "cleaned" | "published"> {
+      if (!UUID.test(uploadId)) throw new StudentProgressPhotoGatewayError("invalid_input");
+      const status = await rpc("abandon_own_progress_photo_upload", { p_upload_id: uploadId });
+      if (status !== "cleaning" && status !== "cleaned" && status !== "published") {
+        throw new StudentProgressPhotoGatewayError("unavailable");
+      }
+      if (status !== "published") {
+        reservations.delete(uploadId);
+        stagedFiles.delete(uploadId);
+      }
+      return status;
+    },
+    async deletePublishedPhoto(assetId: string, deleteLastCheck: boolean): Promise<"photo_deleted" | "check_deleted" | "already_deleted"> {
+      if (!UUID.test(assetId)) throw new StudentProgressPhotoGatewayError("invalid_input");
+      const result = await rpc(deleteLastCheck
+        ? "delete_own_progress_check" : "delete_own_progress_photo",
+      { p_asset_id: assetId });
+      if (result !== "photo_deleted" && result !== "check_deleted" && result !== "already_deleted") {
+        throw new StudentProgressPhotoGatewayError("unavailable");
+      }
+      return result;
+    },
+    async getDeletionTarget(assetId: string): Promise<"photo" | "check"> {
+      if (!UUID.test(assetId)) throw new StudentProgressPhotoGatewayError("invalid_input");
+      const result = row(await rpc("get_own_progress_photo_deletion_target", { p_asset_id: assetId }));
+      if (result.kind !== "photo" && result.kind !== "check") {
+        throw new StudentProgressPhotoGatewayError("unavailable");
+      }
+      return result.kind;
+    },
+    async cleanupOwn(): Promise<void> {
+      if (await requestServerPass("cleanup") !== "cleaning") {
+        throw new StudentProgressPhotoGatewayError("unavailable");
+      }
+    },
     async listUploads(limit = 50, offset = 0): Promise<readonly StudentPhotoUpload[]> {
       pages(limit, offset);
       return parseArray(await rpc("list_own_progress_photo_uploads", { p_limit: limit, p_offset: offset }), parseUpload);
+    },
+    async getUpload(uploadId: string): Promise<StudentPhotoUpload> {
+      if (!UUID.test(uploadId)) throw new StudentProgressPhotoGatewayError("invalid_input");
+      return parseUpload(await rpc("get_own_progress_photo_upload", { p_upload_id: uploadId }));
     },
     async listPhotos(limit = 50, offset = 0): Promise<readonly StudentPublishedPhoto[]> {
       pages(limit, offset);

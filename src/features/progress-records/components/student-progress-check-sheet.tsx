@@ -26,10 +26,11 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
   readonly status: string;
   readonly error: string;
   readonly onClose: () => void;
-  readonly onSlotChange: (pose: ProgressPhotoPose) => void;
+  readonly onSlotChange: (pose: ProgressPhotoPose) => Promise<boolean>;
   readonly onSave: (photos: readonly ProgressCheckSheetPhoto[]) => void;
 }) {
   const [slots, setSlots] = useState<Partial<Record<ProgressPhotoPose, Slot>>>({});
+  const [changing, setChanging] = useState(false);
   const [showFormatHelp, setShowFormatHelp] = useState(false);
   const urlsRef = useRef<Partial<Record<ProgressPhotoPose, string>>>({});
   const helpRef = useRef<HTMLParagraphElement>(null);
@@ -50,23 +51,28 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
     if (showFormatHelp) helpRef.current?.scrollIntoView({ block: "nearest" });
   }, [showFormatHelp]);
 
-  function chooseFile(pose: ProgressPhotoPose, file: File | null) {
-    if (!file || saving) return;
-    onSlotChange(pose);
-    const previousUrl = urlsRef.current[pose];
-    if (previousUrl) URL.revokeObjectURL(previousUrl);
-    delete urlsRef.current[pose];
+  async function chooseFile(pose: ProgressPhotoPose, file: File | null) {
+    if (!file || saving || changing) return;
+    let selected: SelectedProgressPhoto;
     try {
-      const selected = selectProgressPhoto(file);
+      selected = selectProgressPhoto(file);
+    } catch {
+      setSlots((current) => ({ ...current, [pose]: { ...current[pose],
+        error: file.size > PROGRESS_PHOTO_MAX_BYTES ? "La foto supera 20 MB. Elige otra." : "No pudimos usar esta foto. Elige otra.",
+      } }));
+      return;
+    }
+    setChanging(true);
+    try {
+      if (!(await onSlotChange(pose)) || !mountedRef.current) return;
+      const previousUrl = urlsRef.current[pose];
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      delete urlsRef.current[pose];
       let previewUrl: string | undefined;
       try { previewUrl = URL.createObjectURL(file); } catch { /* Preview is optional. */ }
       if (previewUrl) urlsRef.current[pose] = previewUrl;
       setSlots((current) => ({ ...current, [pose]: { selected, previewUrl } }));
-    } catch {
-      setSlots((current) => ({ ...current, [pose]: {
-        error: file.size > PROGRESS_PHOTO_MAX_BYTES ? "La foto supera 20 MB. Elige otra." : "No pudimos usar esta foto. Elige otra.",
-      } }));
-    }
+    } finally { if (mountedRef.current) setChanging(false); }
   }
 
   function previewFailed(pose: ProgressPhotoPose, url: string) {
@@ -77,21 +83,24 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
       ? { ...current, [pose]: { selected: current[pose]?.selected } } : current);
   }
 
-  function removeFile(pose: ProgressPhotoPose) {
-    if (saving) return;
-    onSlotChange(pose);
-    const url = urlsRef.current[pose];
-    if (url) URL.revokeObjectURL(url);
-    delete urlsRef.current[pose];
-    setSlots((current) => {
-      const next = { ...current };
-      delete next[pose];
-      return next;
-    });
+  async function removeFile(pose: ProgressPhotoPose) {
+    if (saving || changing) return;
+    setChanging(true);
+    try {
+      if (!(await onSlotChange(pose)) || !mountedRef.current) return;
+      const url = urlsRef.current[pose];
+      if (url) URL.revokeObjectURL(url);
+      delete urlsRef.current[pose];
+      setSlots((current) => {
+        const next = { ...current };
+        delete next[pose];
+        return next;
+      });
+    } finally { if (mountedRef.current) setChanging(false); }
   }
 
   function requestClose() {
-    if (saving) return;
+    if (saving || changing) return;
     if (POSES.some((pose) => slots[pose]) && !window.confirm("¿Descartar este check?")) return;
     onClose();
   }
@@ -116,7 +125,7 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
 
   const ready = POSES.flatMap((pose) => slots[pose]?.selected ? [{ pose, selected: slots[pose].selected }] : []);
   return <div className={styles.sheetOverlay}>
-    <button className={styles.sheetScrim} type="button" aria-label="Cerrar nuevo check" disabled={saving} onClick={requestClose} />
+    <button className={styles.sheetScrim} type="button" aria-label="Cerrar nuevo check" disabled={saving || changing} onClick={requestClose} />
     <div className={styles.sheet} role="dialog" aria-modal="true" aria-label="Nuevo check" onKeyDown={handleKeyDown}>
       <div className={styles.sheetHandle}><span /></div>
       <div className={styles.sheetHeader}>
@@ -124,24 +133,24 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
         <button className={styles.sheetInfo} type="button" aria-label="Información sobre fotos admitidas"
           aria-expanded={showFormatHelp} aria-controls="progress-photo-format-help"
           onClick={() => setShowFormatHelp((value) => !value)}><span aria-hidden="true">i</span></button>
-        <button ref={closeRef} className={styles.sheetClose} type="button" aria-label="Cerrar" disabled={saving} onClick={requestClose}>×</button>
+        <button ref={closeRef} className={styles.sheetClose} type="button" aria-label="Cerrar" disabled={saving || changing} onClick={requestClose}>×</button>
       </div>
       <div className={styles.sheetBody}>
         <p className={styles.sheetHelp}>Mismo lugar, misma luz y cámara a la altura de la cintura. Sube las tres poses para comparar mejor.</p>
-        <p ref={helpRef} id="progress-photo-format-help" className={styles.sheetFormatHelp} hidden={!showFormatHelp}>Por ahora puedes subir imágenes JPG, PNG o WebP. Si tu foto está en formato HEIC, toma una captura de pantalla de la foto y sube esa captura. En iPhone normalmente se guarda como PNG. Tus fotos se almacenan de forma privada.</p>
+        <p ref={helpRef} id="progress-photo-format-help" className={styles.sheetFormatHelp} hidden={!showFormatHelp}>Puedes subir JPG, PNG o WebP. HEIC, HEIF, RAW y ProRAW no se admiten. Si tu foto está en HEIC, toma una captura de pantalla y sube esa captura. Tus fotos se almacenan de forma privada.</p>
         <div className={styles.sheetSlots}>{POSES.map((pose) => {
           const slot = slots[pose];
           return <div className={styles.sheetSlot} key={pose}>
             <div className={styles.sheetSlotFrame}>
               <label className={styles.sheetFileLabel}>
-                <input type="file" accept="image/*" aria-label={`Elegir foto de ${pose}`} disabled={saving} onChange={(event) => { chooseFile(pose, event.target.files?.[0] ?? null); event.target.value = ""; }} />
+                <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" aria-label={`Elegir foto de ${pose}`} disabled={saving || changing} onChange={(event) => { void chooseFile(pose, event.target.files?.[0] ?? null); event.target.value = ""; }} />
                 {slot?.previewUrl ? (
                   // Vista local opcional; next/image no optimiza blob:.
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={slot.previewUrl} alt="" onError={() => previewFailed(pose, slot.previewUrl!)} />
                 ) : <span className={styles.sheetSlotPrompt}><strong>+</strong><span>{pose}</span></span>}
               </label>
-              {slot ? <button className={styles.sheetRemove} type="button" aria-label={`Quitar foto de ${pose}`} disabled={saving} onClick={() => removeFile(pose)}>×</button> : null}
+              {slot ? <button className={styles.sheetRemove} type="button" aria-label={`Quitar foto de ${pose}`} disabled={saving || changing} onClick={() => { void removeFile(pose); }}>×</button> : null}
             </div>
             <span className={`${styles.sheetSlotMeta} ${slot?.error ? styles.sheetSlotWarning : ""}`}>
               {!slot ? "Sin foto" : slot.error ?? "Foto elegida"}
@@ -153,7 +162,7 @@ export function StudentProgressCheckSheet({ checkedOn, saving, status, error, on
       <div className={styles.sheetFooter}>
         {status ? <p className={styles.sheetStatus} role="status">{status}</p> : null}
         {error ? <p className={styles.sheetError} role="alert">{error}</p> : null}
-        <button className={styles.sheetSave} type="button" disabled={ready.length === 0 || saving} onClick={() => onSave(ready)}>{saving ? "Guardando check…" : "Guardar check"}</button>
+        <button className={styles.sheetSave} type="button" disabled={ready.length === 0 || saving || changing} onClick={() => onSave(ready)}>{saving ? "Guardando check…" : "Guardar check"}</button>
       </div>
     </div>
   </div>;

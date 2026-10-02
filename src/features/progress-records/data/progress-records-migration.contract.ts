@@ -24,6 +24,7 @@ export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20260925012214_progress_photo_select_volatility.sql": "662f1ceff3a3b09ba0bff96b9092b98bc3f85d8d94994962f5a1a260c6f30fac",
   "20260930163231_progress_photo_student_gateway.sql": "cdd081c9350c7c500e3a53e6711bf86451a950fda1dd93d284465ab0716fc272",
   "20261001230633_progress_photo_original_staging_jpeg_publication.sql": "abb821f9a5a7169212d941ff459cf74798fa876a3f1b185222f5fbd6988f23c2",
+  "20261002014402_progress_photo_automatic_publication.sql": "7ae13be09cbf73730752ca293bbc6c60e6a21f6db673eb09fe68e2906fc7483c",
   "20261001141522_progress_medical_document_student_gateway.sql": "3c40abe999088e649f37a88ed25abb4105522f02b5d275b36fd162243e2377be",
   "20261001212450_direct_private_student_medical_documents.sql": "1c3588cabadadc2a5555b5a71201bdcc18745bce6886f014cdd7b2bc02c1c418",
 } as const;

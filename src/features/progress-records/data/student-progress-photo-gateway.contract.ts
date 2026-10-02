@@ -28,6 +28,9 @@ function fixture() {
       photos: [{ assetId, bucketId: "progress-check-photos", objectName, mimeType: "image/jpeg",
         bytes: 100, width: 10, height: 10, pose: "frente", position: 1 }] }],
     create_own_progress_check: { id: uploadId, checkedOn: "2026-09-30" },
+    get_own_progress_photo_deletion_target: { kind: "photo" },
+    delete_own_progress_photo: "photo_deleted",
+    delete_own_progress_check: "check_deleted",
   };
   const client = {
     rpc: async (name: string, args: unknown) => {
@@ -62,6 +65,9 @@ test("reserva, staging y cola usan sólo la ruta entregada por SQL", async () =>
   const reservation = await gateway.reserve("frente", "jpeg");
   assert.equal(reservation.objectName, objectName);
   await gateway.stage(reservation.uploadId, original);
+  await assert.rejects(gateway.stage(reservation.uploadId,
+    new File(["image"], "replacement.jpg", { type: "image/jpeg" })),
+  (error: unknown) => error instanceof StudentProgressPhotoGatewayError && error.code === "invalid_input");
   await gateway.enqueue(reservation.uploadId);
   assert.deepEqual(calls, [
     { name: "begin_own_progress_photo_upload", args: { p_pose: "frente", p_format: "jpeg" } },
@@ -126,4 +132,22 @@ test("entrada inválida y respuesta con bucket o path alterado fallan cerradas",
   outputs.get_own_progress_photo = { ...(outputs.get_own_progress_photo as object),
     bucketId: "progress-check-staging" };
   await assert.rejects(gateway.downloadOwnPhoto(assetId), StudentProgressPhotoGatewayError);
+});
+
+test("delete target and confirmation send only one opaque asset ID", async () => {
+  const { gateway, calls, outputs } = fixture();
+  assert.equal(await gateway.getDeletionTarget(assetId), "photo");
+  assert.equal(await gateway.deletePublishedPhoto(assetId, false), "photo_deleted");
+  outputs.get_own_progress_photo_deletion_target = { kind: "check" };
+  assert.equal(await gateway.getDeletionTarget(assetId), "check");
+  assert.equal(await gateway.deletePublishedPhoto(assetId, true), "check_deleted");
+  outputs.delete_own_progress_check = "already_deleted";
+  assert.equal(await gateway.deletePublishedPhoto(assetId, true), "already_deleted");
+  assert.deepEqual(calls, [
+    { name: "get_own_progress_photo_deletion_target", args: { p_asset_id: assetId } },
+    { name: "delete_own_progress_photo", args: { p_asset_id: assetId } },
+    { name: "get_own_progress_photo_deletion_target", args: { p_asset_id: assetId } },
+    { name: "delete_own_progress_check", args: { p_asset_id: assetId } },
+    { name: "delete_own_progress_check", args: { p_asset_id: assetId } },
+  ]);
 });
