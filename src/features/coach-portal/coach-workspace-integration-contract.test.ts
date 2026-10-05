@@ -49,3 +49,13 @@ test("la creaciÃ³n distingue entrega pendiente y dirige al flujo aprobado sin cÃ
   assert.match(controller, /navigator\.share/);
   assert.doesNotMatch(controller, /wa\.me|coachCode=|URLSearchParams/);
 });
+
+test("Gestionar tarifas abre alumnos activos y no conecta el editor global legado", () => {
+  const boundary = readFileSync(BOUNDARY_PATH, "utf8");
+  const controller = readFileSync(CONTROLLER_PATH, "utf8");
+  assert.match(boundary, /onManageRates: controller\.available \? \(\) => controller\.actions\.openClients\("active"\)/);
+  assert.doesNotMatch(boundary, /CoachFeeSheet|saveFee|openFee/);
+  assert.doesNotMatch(controller, /saveFee:|openFee:/);
+  assert.match(controller, /item\.status === "needs_agreement"/);
+  assert.match(controller, /setSelected\(\{ kind: "relationship", id: missing\.episodeId \}\)/);
+});

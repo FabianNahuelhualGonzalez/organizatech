@@ -85,7 +85,8 @@ test("separa invitaciones pendientes de pagos y conserva métricas sin fuente co
 });
 
 test("la fila pendiente expone sólo email y metadatos de invitación", () => {
-  const view = buildCoachClientsView({ tab: "pending", query: "", active, pending });
+  const view = buildCoachClientsView({ tab: "pending", query: "", active, pending,
+    needsAgreementEpisodeIds: active.items.map((item) => item.id) });
   assert.equal(view.content.kind, "rows");
   if (view.content.kind !== "rows") return;
   assert.equal(view.content.rows.length, 1);
@@ -97,6 +98,16 @@ test("la fila pendiente expone sólo email y metadatos de invitación", () => {
   assert.equal(row && "progressRatio" in row, false);
   assert.equal(view.content.canLoadMore, false);
   assert.equal(view.content.isLoadingMore, false);
+});
+
+test("el vínculo aceptado sin acuerdo conserva una alerta en la cartera de alumnos", () => {
+  const episodeId = active.items[0]?.id;
+  assert.ok(episodeId);
+  const view = buildCoachClientsView({ tab: "active", query: "", active, pending,
+    needsAgreementEpisodeIds: [episodeId] });
+  assert.equal(view.content.kind, "rows");
+  if (view.content.kind !== "rows") return;
+  assert.equal(view.content.rows.find((row) => row.id === episodeId)?.metaLabel, "Sin acuerdo comercial");
 });
 
 test("expone paginación sólo cuando el cursor autoritativo permite cargar otra página", () => {

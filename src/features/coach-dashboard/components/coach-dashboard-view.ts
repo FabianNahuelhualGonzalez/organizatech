@@ -127,7 +127,7 @@ export interface CoachDashboardViewModel {
 }
 
 export interface CoachDashboardActions {
-  readonly onEditFee?: () => void;
+  readonly onManageRates?: () => void;
   /** Each destination is authorized independently; no generic catch-all handler. */
   readonly onPortfolio?: CoachPortfolioActions;
   readonly onAlert?: (id: string) => void;

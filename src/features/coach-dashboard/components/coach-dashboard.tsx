@@ -16,7 +16,7 @@ export function CoachDashboardView({ view, actions }: CoachDashboardViewProps) {
     <section className={styles.view} aria-label="Panel principal Coach" data-coach-dashboard="productive">
       <div className={styles.content}>
         <CoachWelcome view={view.welcome} />
-        <CoachIncomeCard view={view.income} onEditFee={actions.onEditFee} />
+        <CoachIncomeCard view={view.income} onManageRates={actions.onManageRates} />
         <CoachPortfolioGrid view={view.portfolio} onSelect={actions.onPortfolio} />
         <CoachAlertsCard view={view.alerts} onAdd={actions.onLink} onAlert={actions.onAlert}
           onViewAlerts={actions.onPortfolio?.alert} />

@@ -37,7 +37,6 @@ import { buildCoachCommercialDashboardView } from "@/features/coach-dashboard/in
 import {
   buildCoachClientsView,
   buildCoachDashboardView,
-  buildCoachFeeSheetView,
 } from "@/features/coach-dashboard/integration/coach-dashboard-productive-presentation";
 import type { CoachPreferencesControllerState } from "@/features/coach-dashboard/hooks/coach-preferences-controller-contract";
 import {
@@ -174,6 +173,7 @@ export function useCoachWorkspaceController(input: {
     [input.identityGeneration, input.userId],
   );
   const commercial = useCoachCommercialPortfolio(connection);
+  const reloadCommercial = commercial.reload;
   const [screen, setScreen] = useState<"dashboard" | "clients">("dashboard");
   const [selectedMonthId, setSelectedMonthId] = useState<string | null>(null);
   const [tab, setTab] = useState<CoachClientTab>("active");
@@ -197,6 +197,7 @@ export function useCoachWorkspaceController(input: {
   } | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const promptedAgreementIds = useRef(new Set<string>());
 
   const base = useMemo(() => {
     if (!connection) return null;
@@ -231,6 +232,33 @@ export function useCoachWorkspaceController(input: {
   const active = useControllerSnapshot(base?.active ?? null, EMPTY_ACTIVE);
   const pending = useControllerSnapshot(base?.pending ?? null, EMPTY_PENDING);
   const preferences = useControllerSnapshot(base?.preferences ?? null, EMPTY_PREFERENCES);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const refreshOnReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      void Promise.all([base?.active.reload(), base?.pending.reload(), reloadCommercial()]);
+    };
+    document.addEventListener("visibilitychange", refreshOnReturn);
+    return () => document.removeEventListener("visibilitychange", refreshOnReturn);
+  }, [base, reloadCommercial]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || selected || active.phase !== "ready"
+      || commercial.snapshot.needsRefresh || commercial.snapshot.uncertain) return;
+    const portfolio = commercial.snapshot.portfolio;
+    if (!portfolio) return;
+    const activeIds = new Set(active.items.map((item) => item.id));
+    const missing = portfolio.items.find((item) => item.unlinkedAt === null
+      && item.status === "needs_agreement" && activeIds.has(item.episodeId)
+      && !promptedAgreementIds.current.has(item.episodeId));
+    if (!missing) return;
+    promptedAgreementIds.current.add(missing.episodeId);
+    setSelected({ kind: "relationship", id: missing.episodeId });
+    setTab("active");
+    setScreen("clients");
+  }, [active, commercial.snapshot.needsRefresh, commercial.snapshot.portfolio,
+    commercial.snapshot.uncertain, screen, selected]);
 
   const creationController = useMemo(() => {
     if (!connection) return null;
@@ -543,12 +571,11 @@ export function useCoachWorkspaceController(input: {
     portfolio: commercial.snapshot.needsRefresh || commercial.snapshot.uncertain ? null : commercial.snapshot.portfolio,
     selectedMonthId, pendingInvitations: pending.totalPending,
   });
-  const clientsView = buildCoachClientsView({ tab, query, active, pending });
-  const feeView = buildCoachFeeSheetView({
-    preferences,
-    canSave: base?.preferences.canSaveFee() === true,
-    activeCount: active.totalActive,
-    pendingCount: pending.totalPending,
+  const clientsView = buildCoachClientsView({
+    tab, query, active, pending,
+    needsAgreementEpisodeIds: commercial.snapshot.needsRefresh || commercial.snapshot.uncertain
+      ? [] : commercial.snapshot.portfolio?.items.filter((item) => item.unlinkedAt === null
+        && item.status === "needs_agreement").map((item) => item.episodeId) ?? [],
   });
 
   async function refreshRelations() {
@@ -598,7 +625,6 @@ export function useCoachWorkspaceController(input: {
     dashboardView,
     commercial,
     clientsView,
-    feeView,
     chatView: Object.freeze({
       isOpen: preferences.chatOpen,
       isBusy: preferences.pending !== null,
@@ -762,10 +788,6 @@ export function useCoachWorkspaceController(input: {
           }
         }
       },
-      openFee: () => base?.preferences.openFee(),
-      editFee: (raw: string) => base?.preferences.editFee(raw),
-      cancelFee: () => base?.preferences.cancelFee(),
-      saveFee: () => { void base?.preferences.saveFee(); },
       openChat: () => base?.preferences.openChat(),
       cancelChat: () => base?.preferences.cancelChat(),
       registerChat: () => { void base?.preferences.registerChatInterest(); },

@@ -5,9 +5,9 @@ import type { CoachIncomeView } from "./coach-dashboard-view";
 import common from "./coach-dashboard-card.module.css";
 import styles from "./coach-income-card.module.css";
 
-export function CoachIncomeCard({ view, onEditFee }: {
+export function CoachIncomeCard({ view, onManageRates }: {
   readonly view: CoachIncomeView;
-  readonly onEditFee?: () => void;
+  readonly onManageRates?: () => void;
 }) {
   const titleId = useId();
   return (
@@ -15,8 +15,8 @@ export function CoachIncomeCard({ view, onEditFee }: {
       <div className={styles.main}>
         <div className={styles.head}>
           <h3 id={titleId} className={`${common.eyebrow} ${styles.heading}`}>INGRESO DE ESTE MES</h3>
-          <button className={styles.edit} type="button" disabled={!onEditFee} onClick={onEditFee}>
-            <span>Editar tarifa</span>
+          <button className={styles.edit} type="button" disabled={!onManageRates} onClick={onManageRates}>
+            <span>Gestionar tarifas</span>
           </button>
         </div>
         <div className={styles.figure}>

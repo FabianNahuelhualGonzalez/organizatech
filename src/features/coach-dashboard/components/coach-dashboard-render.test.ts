@@ -137,9 +137,11 @@ test("income preserves mapper labels, distinguishes estimates and does not turn 
   assert.doesNotMatch(markup, /\$0|NaN|vs\./);
 });
 
-test("income edit callback runs only on the supplied event, never during render", () => {
+test("income tariff management keeps its button and calls navigation only on click", () => {
   let calls = 0;
-  const { tree } = capture(CoachIncomeCard, { view: dashboard().income, onEditFee: () => { calls += 1; } });
+  const { tree, markup } = capture(CoachIncomeCard, { view: dashboard().income, onManageRates: () => { calls += 1; } });
+  assert.match(markup, /Gestionar tarifas/);
+  assert.doesNotMatch(markup, /Editar tarifa/);
   assert.equal(calls, 0);
   buttons(tree)[0].props.onClick?.();
   assert.equal(calls, 1);

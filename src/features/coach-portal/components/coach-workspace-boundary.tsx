@@ -8,7 +8,6 @@ import { CoachClientsView } from "@/features/coach-clients/components/coach-clie
 import { CoachChatComingSoonSheet } from "@/features/coach-dashboard/components/coach-chat-coming-soon-sheet";
 import { CoachDashboardView } from "@/features/coach-dashboard/components/coach-dashboard";
 import { CoachCommercialStudent } from "@/features/coach-dashboard/commercial/components/coach-commercial-student";
-import { CoachFeeSheet } from "@/features/coach-dashboard/components/coach-fee-sheet";
 import { useCoachWorkspaceController } from "../hooks/use-coach-workspace-controller";
 
 import styles from "./coach-workspace-boundary.module.css";
@@ -43,7 +42,6 @@ export function CoachWorkspaceBoundary({
 }) {
   const controller = useCoachWorkspaceController({ userId, coachName, identityGeneration });
   const backgroundRef = useRef<HTMLDivElement>(null);
-  const feeTriggerRef = useRef<HTMLElement>(null);
   const chatTriggerRef = useRef<HTMLElement>(null);
   const addTriggerRef = useRef<HTMLElement>(null);
   const detailTriggerRef = useRef<HTMLElement>(null);
@@ -87,10 +85,7 @@ export function CoachWorkspaceBoundary({
           <CoachDashboardView
             view={controller.dashboardView}
             actions={{
-              onEditFee: controller.available ? () => {
-                captureActiveElement(feeTriggerRef);
-                controller.actions.openFee();
-              } : undefined,
+              onManageRates: controller.available ? () => controller.actions.openClients("active") : undefined,
               onPortfolio: controller.available ? {
                 active: () => controller.actions.openClients("active"),
                 pending: () => controller.actions.openClients("pending"),
@@ -122,15 +117,6 @@ export function CoachWorkspaceBoundary({
         )}
       </div>
 
-      <CoachFeeSheet
-        view={controller.feeView}
-        backgroundRef={backgroundRef}
-        restoreFocusRef={feeTriggerRef}
-        onRawChange={controller.actions.editFee}
-        onPreset={controller.actions.editFee}
-        onSave={controller.actions.saveFee}
-        onCancel={controller.actions.cancelFee}
-      />
       <CoachChatComingSoonSheet
         view={controller.chatView}
         backgroundRef={backgroundRef}

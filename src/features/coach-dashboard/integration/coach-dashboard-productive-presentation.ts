@@ -117,12 +117,12 @@ export function buildCoachDashboardView(input: {
   });
 }
 
-function activeRows(snapshot: CoachActiveRelationshipsSnapshot): readonly CoachClientRowView[] {
+function activeRows(snapshot: CoachActiveRelationshipsSnapshot, needsAgreementIds: ReadonlySet<string>): readonly CoachClientRowView[] {
   return snapshot.items.map((item) => Object.freeze({
     id: item.id,
     email: item.studentEmail,
     state: "active" as const,
-    metaLabel: dateLabel(item.linkedAt),
+    metaLabel: needsAgreementIds.has(item.id) ? "Sin acuerdo comercial" : dateLabel(item.linkedAt),
     name: item.studentName.trim() || null,
     initials: item.studentName.trim()
       ? item.studentName.trim().split(/\s+/u).slice(0, 2).map((part) => [...part][0]).join("")
@@ -146,6 +146,7 @@ function listContent(
   tab: CoachClientTab,
   active: CoachActiveRelationshipsSnapshot,
   pending: CoachPendingInvitationsSnapshot,
+  needsAgreementIds: ReadonlySet<string>,
 ): CoachClientsContentView {
   if (tab === "inactive") {
     return Object.freeze({ kind: "message", tone: "polite", label: "Bajas no disponibles" });
@@ -157,7 +158,7 @@ function listContent(
   if (snapshot.phase === "error" || snapshot.phase === "disposed") {
     return Object.freeze({ kind: "message", tone: "error", label: "No pudimos cargar esta lista." });
   }
-  const rows = tab === "active" ? activeRows(active) : pendingRows(pending);
+  const rows = tab === "active" ? activeRows(active, needsAgreementIds) : pendingRows(pending);
   if (rows.length === 0) return Object.freeze({ kind: "empty", view: { kind: tab } });
   return Object.freeze({
     kind: "rows",
@@ -173,6 +174,7 @@ export function buildCoachClientsView(input: {
   readonly query: string;
   readonly active: CoachActiveRelationshipsSnapshot;
   readonly pending: CoachPendingInvitationsSnapshot;
+  readonly needsAgreementEpisodeIds?: readonly string[];
 }): CoachClientsViewModel {
   return Object.freeze({
     selectedTab: input.tab,
@@ -182,7 +184,8 @@ export function buildCoachClientsView(input: {
       pending: countMetric(input.pending.totalPending),
       inactive: countMetric(null),
     }),
-    content: listContent(input.tab, input.active, input.pending),
+    content: listContent(input.tab, input.active, input.pending,
+      new Set(input.needsAgreementEpisodeIds ?? [])),
   });
 }
 
