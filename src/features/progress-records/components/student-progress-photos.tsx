@@ -783,7 +783,7 @@ export function StudentProgressPhotos() {
   const selectionActionsLayer = selecting && typeof document !== "undefined"
     ? document.getElementById("student-progress-report-actions")
     : null;
-  const selectionBar = selecting ? <div className={styles.selectBar}><button className={styles.secondary} type="button" onClick={cancelSelection}>Cancelar</button><button className={styles.newCheckButton} type="button" disabled={selectedIds.length === 0} onClick={() => setSendSheetOpen(true)}>{selectedIds.length ? `Continuar (${selectedIds.length})` : "Selecciona fotos"}</button></div> : null;
+  const selectionBar = selecting && !sendSheetOpen && !confirmSendOpen ? <div className={styles.selectBar}><button className={styles.secondary} type="button" onClick={cancelSelection}>Cancelar</button><button className={styles.newCheckButton} type="button" disabled={selectedIds.length === 0} onClick={() => setSendSheetOpen(true)}>{selectedIds.length ? `Continuar (${selectedIds.length})` : "Selecciona fotos"}</button></div> : null;
   return (
     <section ref={surfaceRef} tabIndex={-1} className={`${styles.surface} ${selecting ? styles.surfaceSelecting : ""}`} aria-label="Fotos de progreso">
       {sentResult ? <div className={styles.sentSuccess}>
