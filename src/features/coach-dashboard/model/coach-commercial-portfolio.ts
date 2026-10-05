@@ -15,6 +15,8 @@ export interface CoachCommercialItem {
   readonly status: CoachCommercialStatus;
   readonly version: string | null;
   readonly latestPeriod: CoachCommercialPeriod | null;
+  /** Server aggregate for paginated reads; legacy snapshots omit it. */
+  readonly periodCount?: number;
 }
 export interface CoachCommercialPeriod {
   readonly id: string;
@@ -43,6 +45,22 @@ export interface CoachCommercialPortfolio {
   readonly items: readonly CoachCommercialItem[];
   readonly periods: readonly CoachCommercialPeriod[];
   readonly months: readonly CoachCommercialMonth[];
+  readonly itemCursor?: string | null;
+  readonly monthCursor?: string | null;
+  readonly stats?: CoachCommercialPageStats;
+}
+
+export interface CoachCommercialPageStats {
+  readonly alertCount: number;
+  readonly pendingCount: number;
+  readonly renewedCount: number;
+  readonly declinedCount: number;
+  readonly pendingAmount: number;
+  readonly monthlyRiskCount: number;
+  readonly monthlyRiskAmount: number;
+  readonly maxStudents: number;
+  readonly currentBreakdown: readonly CoachCommercialBreakdown[];
+  readonly years: readonly CoachCommercialYear[];
 }
 
 export interface CoachCommercialBreakdown {
@@ -115,7 +133,7 @@ export function summarizeCoachCommercialPortfolio(portfolio: CoachCommercialPort
   for (const period of portfolio.periods) {
     periodCountByEpisode.set(period.episodeId, (periodCountByEpisode.get(period.episodeId) ?? 0) + 1);
   }
-  const renewed = portfolio.items.filter((item) => (periodCountByEpisode.get(item.episodeId) ?? 0) > 1);
+  const renewed = portfolio.items.filter((item) => (item.periodCount ?? periodCountByEpisode.get(item.episodeId) ?? 0) > 1);
   const notContinuing = portfolio.items.filter((item) => item.status === "not_continuing");
   const years = new Map<number, CoachCommercialYear>();
   for (const month of portfolio.months) {
@@ -127,10 +145,10 @@ export function summarizeCoachCommercialPortfolio(portfolio: CoachCommercialPort
   return Object.freeze({
     currentEstimatedClp: current?.estimatedClp ?? 0,
     currentConfirmedPaymentsClp: current?.confirmedPaymentsClp ?? 0,
-    breakdown: Object.freeze([...breakdown.values()]),
+    breakdown: portfolio.stats?.currentBreakdown ?? Object.freeze([...breakdown.values()]),
     activeCount: portfolio.activeCount, unlinkedCount: portfolio.unlinkedCount,
-    alertCount: new Set([...needsAgreement, ...pendingRenewal, ...expiringSoon].map((item) => item.episodeId)).size,
+    alertCount: portfolio.stats?.alertCount ?? new Set([...needsAgreement, ...pendingRenewal, ...expiringSoon].map((item) => item.episodeId)).size,
     needsAgreement, expired, expiringSoon, pendingRenewal, renewed, notContinuing,
-    months: portfolio.months, years: Object.freeze([...years.values()].sort((a, b) => b.year - a.year)),
+    months: portfolio.months, years: portfolio.stats?.years ?? Object.freeze([...years.values()].sort((a, b) => b.year - a.year)),
   });
 }

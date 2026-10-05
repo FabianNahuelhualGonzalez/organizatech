@@ -23,6 +23,8 @@
 .income { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 9px; margin-top: 12px; padding-top: 11px; border-top: 1px solid rgba(255, 255, 255, .1); }
 .income > span { color: rgba(255, 255, 255, .55); font-size: 10.5px; }
 .income strong { font-size: 14px; }
+.loadMore { width: 100%; min-height: 48px; padding: 10px 15px; border: 0; border-top: 1px solid rgba(255, 255, 255, .1); background: rgba(60, 122, 255, .1); color: #8fb2ff; font: inherit; font-size: 12px; font-weight: 700; }
+.loadMore:focus-visible { outline: 2px solid #8fb2ff; outline-offset: -3px; }
 @container (max-width: 359px) {
   .chart { padding-inline: 12px; }
   .columns { height: 134px; gap: 0; }

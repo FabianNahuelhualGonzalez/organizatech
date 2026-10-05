@@ -6,9 +6,22 @@ import test from "node:test";
 export const POST_PERF_06_MIGRATION_OWNERSHIP = {
   "20261005000000_coach_commercial_portfolio_v1.sql":
     "aef9b4856ba28c15cf67467e83edfbe6160a31e78a85f5eb84fe486daa573910",
+  "20261005193856_coach_commercial_pagination_v1.sql":
+    "367825dcd209e326c8c705218a656eabe8de379266c9b448021e999618fe44e6",
 } as const;
 const filename = "20261005000000_coach_commercial_portfolio_v1.sql";
 const source = readFileSync(`supabase/migrations/${filename}`, "utf8");
+const pageSource = readFileSync("supabase/migrations/20261005193856_coach_commercial_pagination_v1.sql", "utf8");
+
+test("bounded commercial reads keep owner scope and frozen migration ownership", () => {
+  assert.equal(createHash("sha256").update(pageSource).digest("hex"),
+    POST_PERF_06_MIGRATION_OWNERSHIP["20261005193856_coach_commercial_pagination_v1.sql"]);
+  assert.match(pageSource, /p_limit > 50/);
+  assert.match(pageSource, /private\.lock_coach_invitation_owner\(\)/);
+  assert.match(pageSource, /e\.id = p_episode_id and e\.coach_user_id = v_owner/);
+  assert.match(pageSource, /p\.episode_id = p_episode_id/);
+  assert.doesNotMatch(pageSource, /\b(?:training_sessions|exercise_entries|service_role|storage\.)\b/i);
+});
 
 test("commercial migration owns its frozen history and avoids unrelated tables", () => {
   assert.equal(createHash("sha256").update(source).digest("hex"), POST_PERF_06_MIGRATION_OWNERSHIP[filename]);

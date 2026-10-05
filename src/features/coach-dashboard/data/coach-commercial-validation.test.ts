@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { COACH_COMMERCIAL_INITIAL_VERSION } from "./coach-commercial-contract";
-import { mapCoachCommercialCommand, mapCoachCommercialPortfolio,
+import { mapCoachCommercialCommand, mapCoachCommercialOverview, mapCoachCommercialPage, mapCoachCommercialPortfolio,
   mapCoachCommercialReceipt } from "./coach-commercial-validation";
 
 const episodeId = "10000000-0000-4000-8000-000000000001";
@@ -21,6 +21,28 @@ test("write allowlist accepts exact commercial fields and rejects ownership inje
     assert.throws(() => mapCoachCommercialCommand(injection));
   }
   assert.throws(() => mapCoachCommercialCommand(null));
+});
+
+test("bounded overview validates server totals independently of visible rows", () => {
+  const overview = {
+    serverToday: "2026-10-05", currentMonth: "2026-10", items: [], itemCursor: "2026-10-01T00:00:00.000000+00:00|" + episodeId,
+    months: [{ month: "2026-10", estimatedClp: 45000, confirmedPaymentsClp: 20000,
+      periodCount: 1, students: 8, joined: 2, left: 0 }], monthCursor: "2026-10",
+    stats: { activeCount: 8, unlinkedCount: 3, alertCount: 4, pendingCount: 2,
+      renewedCount: 5, declinedCount: 1, pendingAmount: 70000,
+      monthlyRiskCount: 2, monthlyRiskAmount: 70000, maxStudents: 10,
+      currentBreakdown: [{ frequency: "monthly", amountClp: 45000, students: 1,
+        periods: 1, estimatedClp: 45000 }],
+      years: [{ year: 2026, estimatedClp: 500000, confirmedPaymentsClp: 200000 }] },
+  };
+  const mapped = mapCoachCommercialOverview(overview);
+  assert.equal(mapped.stats?.alertCount, 4);
+  assert.equal(mapped.months[0].estimatedClp, 45000);
+  assert.throws(() => mapCoachCommercialOverview({ ...overview, ownerId: episodeId }));
+  assert.throws(() => mapCoachCommercialOverview({ ...overview,
+    stats: { ...overview.stats, pendingAmount: -1 } }));
+  assert.deepEqual(mapCoachCommercialPage({ rows: [], nextCursor: null }, "periods").rows, []);
+  assert.throws(() => mapCoachCommercialPage({ rows: [], nextCursor: "bad" }, "student"));
 });
 
 test("receipt and portfolio reject forged episode, amount and unknown fields", () => {

@@ -70,7 +70,9 @@ export function CoachWorkspaceBoundary({
     controller.actions.openCommercialStudent(id);
   };
   const selectedCommercial = controller.detail?.state === "active"
-    ? controller.commercial.snapshot.portfolio?.items.find((item) => item.episodeId === controller.detail?.id) ?? null
+    ? controller.commercial.snapshot.portfolio?.stats
+      ? controller.commercial.snapshot.students[controller.detail.id] ?? null
+      : controller.commercial.snapshot.portfolio?.items.find((item) => item.episodeId === controller.detail?.id) ?? null
     : null;
 
   return (
@@ -94,6 +96,8 @@ export function CoachWorkspaceBoundary({
               onAlert: controller.commercial.snapshot.portfolio ? openCommercialStudent : undefined,
               onSelectMonth: controller.commercial.snapshot.portfolio ? controller.actions.selectMonth : undefined,
               onRenewal: controller.commercial.snapshot.portfolio ? openCommercialStudent : undefined,
+              onLoadMoreCommercial: () => { void controller.commercial.loadMoreItems(); },
+              onLoadMoreMonths: () => { void controller.commercial.loadMoreMonths(); },
               onLink: controller.available ? openAddClient : undefined,
               onCalendar: onOpenCalendar,
               onChat: controller.available ? () => {
@@ -148,15 +152,27 @@ export function CoachWorkspaceBoundary({
           restoreFocusRef={detailTriggerRef}
           commercialContent={selectedCommercial && controller.commercial.snapshot.portfolio ? (
             <CoachCommercialStudent key={`${selectedCommercial.episodeId}:${selectedCommercial.version}`}
-              item={selectedCommercial} periods={controller.commercial.snapshot.portfolio.periods}
+              item={selectedCommercial}
+              periods={controller.commercial.snapshot.periodPages[selectedCommercial.episodeId]?.rows
+                ?? controller.commercial.snapshot.portfolio.periods}
+              hasMorePeriods={Boolean(controller.commercial.snapshot.periodPages[selectedCommercial.episodeId]?.cursor)}
               today={controller.commercial.snapshot.portfolio.serverToday}
               busy={controller.commercial.snapshot.busy} uncertain={controller.commercial.snapshot.uncertain}
               needsRefresh={controller.commercial.snapshot.needsRefresh}
               issue={controller.commercial.snapshot.issue}
               onSubmit={(command) => { void controller.commercial.submit(command); }}
               onReconcile={() => { void controller.commercial.reconcile(); }}
-              onReload={() => { void controller.commercial.reload(); }} />
-          ) : controller.detail.state === "active" ? <p role="status">Ficha comercial no disponible.</p> : undefined}
+              onReload={() => { void controller.commercial.reload(); }}
+              onLoadMorePeriods={() => { void controller.commercial.loadMorePeriods(selectedCommercial.episodeId); }} />
+          ) : controller.detail.state === "active" ? controller.commercial.snapshot.portfolio?.stats ? (
+            <div role="status">
+              <p>{controller.commercial.snapshot.studentIssues[controller.detail.id] || "Cargando ficha comercial…"}</p>
+              {controller.commercial.snapshot.studentIssues[controller.detail.id]
+                ? <button type="button" onClick={() => { void controller.commercial.loadStudent(controller.detail!.id); }}>
+                  Reintentar
+                </button> : null}
+            </div>
+          ) : <p role="status">Ficha comercial no disponible.</p> : undefined}
           actions={{
             onCancelDetail: controller.actions.closeClient,
             onCopyCode: controller.actions.copyInvitationCode,

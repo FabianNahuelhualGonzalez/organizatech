@@ -70,6 +70,7 @@ try {
   await admin.query("insert into public.coach_registrations(user_id,first_name,last_name,birth_date,gender,phone_number,professional_title) select id,'Synthetic','Coach','1990-01-01','prefer_not_to_say','test','Test' from auth.users where id<>$1", [ids[2]]);
   await admin.query(sql("supabase/migrations/20260909044235_coach_invitation_persistence.sql"));
   await admin.query(sql("supabase/migrations/20261005000000_coach_commercial_portfolio_v1.sql"));
+  await admin.query(sql("supabase/migrations/20261005193856_coach_commercial_pagination_v1.sql"));
   stage = "ACL and ownership";
   const a = await connect(ids[0]), a2 = await connect(ids[0]), b = await connect(ids[1]), student = await connect(ids[2]);
   const episode = await fixture(admin, ids[0]), foreignEpisode = await fixture(admin, ids[1]);
@@ -115,6 +116,32 @@ try {
   await rejected(write(a, "confirm_payment", episode, paid.version, randomUUID(), randomUUID()), "P0002");
   const snapshot = await value(a, "select public.read_own_coach_commercial() value");
   const raceAmount = competing[0].status === "fulfilled" ? 30000 : 35000;
+  const page = async (connection, kind, episodeId = null, cursor = null, limit = 20) =>
+    value(connection, "select public.read_own_coach_commercial_page($1,$2::uuid,$3,$4) value",
+      [kind, episodeId, cursor, limit]);
+  check(await value(admin, "select has_function_privilege('anon','public.read_own_coach_commercial_page(text,uuid,text,integer)','EXECUTE') value") === false, "anonymous page denied");
+  await rejected(page(student, "items"), "42501");
+  await rejected(page(a, "periods", foreignEpisode), "P0002");
+  await rejected(page(b, "periods", episode), "P0002");
+  await rejected(page(a, "periods", episode, "bad"), "22023");
+  await rejected(page(a, "items", null, null, 51), "22023");
+  await rejected(page(a, "months", episode), "22023");
+  const ownPeriods = await page(a, "periods", episode, null, 1);
+  check(ownPeriods.rows.length === 1 && ownPeriods.rows[0].id === period, "owner period page");
+  const ownItems = await page(a, "items", null, null, 1);
+  check(ownItems.rows.length === 1 && ownItems.nextCursor !== null, "bounded item page");
+  const nextItems = await page(a, "items", null, ownItems.nextCursor, 1);
+  check(nextItems.rows.length === 1 && nextItems.rows[0].episodeId !== ownItems.rows[0].episodeId,
+    "stable item cursor");
+  const monthPage = await page(a, "months", null, null, 1);
+  check(monthPage.rows.length === 1 && monthPage.rows[0].estimatedClp === 45000 + raceAmount,
+    "monthly sum unaffected by page size");
+  const overview = await value(a, "select public.read_own_coach_commercial_overview() value");
+  check(overview.stats.activeCount === snapshot.activeCount && overview.stats.alertCount === 0,
+    "overview counts match complete facts");
+  check(overview.months[0].estimatedClp === snapshot.months[0].estimatedClp
+    && overview.months[0].confirmedPaymentsClp === snapshot.months[0].confirmedPaymentsClp,
+  "overview money matches complete history");
   check(snapshot.months.some((month) => month.estimatedClp === 45000 + raceAmount
     && month.confirmedPaymentsClp === 45000), "estimate and payment separate facts");
   check(snapshot.items.find((item) => item.episodeId === episode).latestPeriod.amountClp === 45000, "amount pinned");
@@ -123,6 +150,10 @@ try {
   check(emptyMonths.months.length >= 3 && emptyMonths.months.every((month) =>
     month.estimatedClp === 0 && month.confirmedPaymentsClp === 0 && month.students === 1),
   "months with linked student and no agreement retain real zero money and student count");
+  const emptyOverview = await value(b, "select public.read_own_coach_commercial_overview() value");
+  check(emptyOverview.stats.years.length >= 1
+    && emptyOverview.stats.years.every((year) => year.estimatedClp === 0 && year.confirmedPaymentsClp === 0),
+  "annual zero-money history remains available");
   await rejected(write(a, "correct_future", episode, paid.version, randomUUID(), period, 50000, "monthly", today), "55000");
   stage = "future correction and renewal";
   const futureEpisode = await fixture(admin, ids[0]);
@@ -151,6 +182,64 @@ try {
   const declined = await write(a, "not_continuing", declinedEpisode, version, randomUUID());
   check(declined.status === "recorded", "explicit no-continuation");
   await rejected(write(a, "renew", declinedEpisode, declined.version, randomUUID(), null, 35000, "monthly", today), "55000");
+  stage = "paginated history";
+  await admin.query("insert into private.coach_commercial_periods(episode_id,coach_user_id,starts_on,ends_before,amount_clp,frequency,confirmed_at) values($1,$2,'2024-01-01','2024-02-01',1000,'monthly',clock_timestamp()-interval '1 year'),($1,$2,'2025-01-01','2025-02-01',2000,'monthly',clock_timestamp()-interval '1 year'),($1,$2,'2025-02-01','2025-03-01',3000,'monthly',clock_timestamp()-interval '1 year')", [episode, ids[0]]);
+  const full = await value(a, "select public.read_own_coach_commercial() value");
+  const overviewAfterHistory = await value(a, "select public.read_own_coach_commercial_overview() value");
+  const seenItems = [];
+  let itemCursor = null;
+  do {
+    const result = await page(a, "items", null, itemCursor, 2);
+    seenItems.push(...result.rows);
+    itemCursor = result.nextCursor;
+  } while (itemCursor);
+  check(JSON.stringify(seenItems.map((row) => row.episodeId))
+    === JSON.stringify(full.items.map((row) => row.episodeId)),
+  "all owned items reachable in deterministic order");
+  const seenPeriods = [];
+  let periodCursor = null;
+  do {
+    const result = await page(a, "periods", episode, periodCursor, 1);
+    seenPeriods.push(...result.rows);
+    periodCursor = result.nextCursor;
+  } while (periodCursor);
+  check(seenPeriods.length === full.periods.filter((row) => row.episodeId === episode).length,
+    "all periods reachable by cursor");
+  check(seenPeriods.every((row, index) => index === 0 || row.startsOn < seenPeriods[index - 1].startsOn),
+    "period order deterministic");
+  check(seenPeriods.reduce((sum, row) => sum + row.amountClp, 0)
+    === full.periods.filter((row) => row.episodeId === episode).reduce((sum, row) => sum + row.amountClp, 0),
+  "period sum preserved across pages");
+  const seenMonths = [];
+  let monthCursor = null;
+  do {
+    const result = await page(a, "months", null, monthCursor, 3);
+    seenMonths.push(...result.rows);
+    monthCursor = result.nextCursor;
+  } while (monthCursor);
+  check(JSON.stringify(seenMonths) === JSON.stringify(full.months), "all calendar months reachable in order");
+  check(overviewAfterHistory.stats.years.reduce((sum, year) => sum + year.estimatedClp, 0)
+    === full.months.reduce((sum, month) => sum + month.estimatedClp, 0),
+  "annual estimate remains complete with paged months");
+  check(overviewAfterHistory.stats.years.reduce((sum, year) => sum + year.confirmedPaymentsClp, 0)
+    === full.months.reduce((sum, month) => sum + month.confirmedPaymentsClp, 0),
+  "annual payments remain complete with paged months");
+  check((await page(a, "student", episode, null, 1)).rows[0].episodeId === episode,
+    "owner detail lookup");
+  await rejected(page(a, "student", foreignEpisode, null, 1), "P0002");
+  await rejected(page(b, "student", episode, null, 1), "P0002");
+  await rejected(page(a, "periods", episode, "2026-02-30|" + period), "22023");
+  await rejected(page(a, "months", null, "9999-12"), "22023");
+  await rejected(page(a, "student", episode, null, 2), "22023");
+  for (let index = 0; index < 31; index++) await fixture(admin, ids[0]);
+  const boundedOverview = await value(a, "select public.read_own_coach_commercial_overview() value");
+  check(boundedOverview.items.length === 30 && boundedOverview.itemCursor !== null,
+    "dashboard item payload stays bounded with many students");
+  check(boundedOverview.stats.alertCount === 31 && boundedOverview.stats.renewedCount === 2
+    && boundedOverview.stats.declinedCount === 1,
+  "dashboard alerts and renewal counts include students beyond its first page");
+  check((await page(a, "items", null, boundedOverview.itemCursor, 20)).rows.length > 0,
+    "older students remain reachable after dashboard page");
   const ownReceipt = await value(a, "select public.read_own_coach_commercial_operation($1::uuid) value", [request]);
   check(JSON.stringify(ownReceipt) === JSON.stringify(same[0]), "operation reconciliation");
   check(await value(b, "select public.read_own_coach_commercial_operation($1::uuid) value", [request]) === null, "foreign receipt hidden");

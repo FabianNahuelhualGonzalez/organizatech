@@ -75,7 +75,8 @@ export function buildCoachCommercialDashboardView(input: {
     reason: item.latestPeriod && item.latestPeriod.endsBefore <= portfolio.serverToday ? "Período vencido" : "Renovación pendiente",
     tone: "error" });
 
-  const maxStudents = summary.months.reduce((max, month) => Math.max(max, month.students), 0);
+  const maxStudents = portfolio.stats?.maxStudents
+    ?? summary.months.reduce((max, month) => Math.max(max, month.students), 0);
   const best = summary.months.find((month) => month.students === maxStudents && maxStudents > 0)?.month;
   const months = summary.months.map((month) => ({
     id: month.month, shortLabel: monthName(month.month, true), fullLabel: monthName(month.month),
@@ -97,14 +98,19 @@ export function buildCoachCommercialDashboardView(input: {
     ...renewed.map((item) => renewalRow(item, "renewed")),
     ...declined.map((item) => renewalRow(item, "declined")),
   ];
-  const totalRenewals = renewalRows.length;
+  const renewalCounts = portfolio.stats
+    ? { pending: portfolio.stats.pendingCount, renewed: portfolio.stats.renewedCount,
+      declined: portfolio.stats.declinedCount }
+    : { pending: pending.length, renewed: renewed.length, declined: declined.length };
+  const totalRenewals = renewalCounts.pending + renewalCounts.renewed + renewalCounts.declined;
 
   return {
     ...base,
     income: { ...base.income, amount: money(currentMonth?.estimatedClp ?? null), comparisonLabel: null,
       formulaLabel: currentMonth ? `${currentMonth.periodCount} períodos iniciados este mes` : null,
-      atRisk: money(currentMonth ? sumAmounts(monthlyRisk) : null),
-      atRiskNote: monthlyRisk.length ? `${monthlyRisk.length} renovaciones pendientes` : null,
+      atRisk: money(currentMonth ? portfolio.stats?.monthlyRiskAmount ?? sumAmounts(monthlyRisk) : null),
+      atRiskNote: (portfolio.stats?.monthlyRiskCount ?? monthlyRisk.length)
+        ? `${portfolio.stats?.monthlyRiskCount ?? monthlyRisk.length} renovaciones pendientes` : null,
       potential: money(currentMonth?.confirmedPaymentsClp ?? null), potentialLabel: "PAGOS CONFIRMADOS",
       potentialNote: currentMonth ? "Este mes" : null },
     portfolio: { ...base.portfolio, active: count(summary.activeCount), alert: count(summary.alertCount),
@@ -115,19 +121,22 @@ export function buildCoachCommercialDashboardView(input: {
         id: item.episodeId, clientName: item.studentName, initials: initials(item.studentName), reason,
         whenLabel: null, dateLabel: item.latestPeriod ? civilDate(item.latestPeriod.endsBefore) : null, tone,
       })),
-      emptyLabel: alerts.size === 0 ? "No hay alertas comerciales registradas." : null, footerLabel: null },
+      emptyLabel: summary.alertCount === 0 ? "No hay alertas comerciales registradas." : null,
+      footerLabel: portfolio.itemCursor ? "Cargar más" : null },
     chart: { months, selectedMonthId: months.some((month) => month.id === input.selectedMonthId)
       ? input.selectedMonthId : null,
       emptyLabel: months.length === 0 ? "Aún no hay meses comerciales registrados." : null,
-      noSelectionLabel: months.length ? "Selecciona un mes para ver su detalle." : null },
-    renewals: { ...base.renewals, atStake: money(totalRenewals ? sumAmounts(pending) : null),
-      stack: totalRenewals ? { ariaLabel: `${renewed.length} renovadas, ${pending.length} pendientes, ${declined.length} no continuadas`,
+      noSelectionLabel: months.length ? "Selecciona un mes para ver su detalle." : null,
+      hasMore: Boolean(portfolio.monthCursor) },
+    renewals: { ...base.renewals,
+      atStake: money(totalRenewals ? portfolio.stats?.pendingAmount ?? sumAmounts(pending) : null),
+      stack: totalRenewals ? { ariaLabel: `${renewalCounts.renewed} renovadas, ${renewalCounts.pending} pendientes, ${renewalCounts.declined} no continuadas`,
         segments: [
-          { state: "renewed" as const, label: `${renewed.length} renovadas`, ratio: renewed.length / totalRenewals },
-          { state: "pending" as const, label: `${pending.length} pendientes`, ratio: pending.length / totalRenewals },
-          { state: "declined" as const, label: `${declined.length} no continúan`, ratio: declined.length / totalRenewals },
+          { state: "renewed" as const, label: `${renewalCounts.renewed} renovadas`, ratio: renewalCounts.renewed / totalRenewals },
+          { state: "pending" as const, label: `${renewalCounts.pending} pendientes`, ratio: renewalCounts.pending / totalRenewals },
+          { state: "declined" as const, label: `${renewalCounts.declined} no continúan`, ratio: renewalCounts.declined / totalRenewals },
         ] } : null,
       rows: renewalRows, emptyLabel: totalRenewals ? null : "Aún no hay datos de renovaciones.",
-      retentionLabel: null },
+      retentionLabel: null, hasMore: Boolean(portfolio.itemCursor) },
   };
 }

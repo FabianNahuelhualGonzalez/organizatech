@@ -7,9 +7,10 @@ import { CoachMonthDetail } from "./coach-month-detail";
 import common from "./coach-dashboard-card.module.css";
 import styles from "./coach-monthly-chart.module.css";
 
-export function CoachMonthlyChart({ view, onSelectMonth }: {
+export function CoachMonthlyChart({ view, onSelectMonth, onLoadMore }: {
   readonly view: CoachMonthlyChartView;
   readonly onSelectMonth?: (id: string) => void;
+  readonly onLoadMore?: () => void;
 }) {
   const titleId = useId();
   // Resolving the controlled selected row is presentational, never a default month.
@@ -43,6 +44,8 @@ export function CoachMonthlyChart({ view, onSelectMonth }: {
       <div aria-live="polite" aria-atomic="true">
         {selected ? <CoachMonthDetail month={selected} /> : view.noSelectionLabel !== null ? <p className={common.empty}>{view.noSelectionLabel}</p> : null}
       </div>
+      {view.hasMore ? <button className={styles.loadMore} type="button" onClick={onLoadMore}
+        disabled={!onLoadMore}>Cargar más</button> : null}
     </section>
   );
 }

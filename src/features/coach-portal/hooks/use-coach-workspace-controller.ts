@@ -198,6 +198,14 @@ export function useCoachWorkspaceController(input: {
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const promptedAgreementIds = useRef(new Set<string>());
+  const loadCommercialStudent = commercial.loadStudent;
+  const commercialPortfolio = commercial.snapshot.portfolio;
+
+  useEffect(() => {
+    if (selected?.kind === "relationship" && commercialPortfolio?.stats) {
+      void loadCommercialStudent(selected.id);
+    }
+  }, [selected, commercialPortfolio, loadCommercialStudent]);
 
   const base = useMemo(() => {
     if (!connection) return null;

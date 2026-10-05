@@ -14,9 +14,11 @@ const STATUS = {
 } as const;
 const ACTION = { start: "Configurar acuerdo inicial", renew: "Renovar", correct_future: "Corregir período futuro" } as const;
 
-export function CoachCommercialStudent({ item, periods, today, busy, uncertain, needsRefresh, issue, onSubmit, onReconcile, onReload }: {
+export function CoachCommercialStudent({ item, periods, hasMorePeriods = false, today, busy, uncertain, needsRefresh,
+  issue, onSubmit, onReconcile, onReload, onLoadMorePeriods }: {
   readonly item: CoachCommercialItem;
   readonly periods: readonly CoachCommercialPeriod[];
+  readonly hasMorePeriods?: boolean;
   readonly today: string;
   readonly busy: boolean;
   readonly uncertain: boolean;
@@ -25,6 +27,7 @@ export function CoachCommercialStudent({ item, periods, today, busy, uncertain, 
   readonly onSubmit: (command: CoachCommercialCommand) => void;
   readonly onReconcile: () => void;
   readonly onReload: () => void;
+  readonly onLoadMorePeriods?: () => void;
 }) {
   const action = latestAction(item, today);
   const latest = item.latestPeriod;
@@ -131,6 +134,8 @@ export function CoachCommercialStudent({ item, periods, today, busy, uncertain, 
           <small>{period.paidAt ? "Pago confirmado" : "Pago sin confirmar"}</small>
         </li>)}
       </ul>}
+      {hasMorePeriods ? <button className={styles.action} type="button"
+        onClick={onLoadMorePeriods} disabled={!onLoadMorePeriods}>Cargar más</button> : null}
     </section>
   </section>;
 }

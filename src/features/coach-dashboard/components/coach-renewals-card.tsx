@@ -7,9 +7,10 @@ import { CoachRenewalRow } from "./coach-renewal-row";
 import common from "./coach-dashboard-card.module.css";
 import styles from "./coach-renewals-card.module.css";
 
-export function CoachRenewalsCard({ view, onSelect }: {
+export function CoachRenewalsCard({ view, onSelect, onLoadMore }: {
   readonly view: CoachRenewalsView;
   readonly onSelect?: (id: string) => void;
+  readonly onLoadMore?: () => void;
 }) {
   const titleId = useId();
   const visibleSegments = view.stack?.segments.flatMap((segment) => {
@@ -51,6 +52,8 @@ export function CoachRenewalsCard({ view, onSelect }: {
         {view.rows.map((row) => <li key={row.id}><CoachRenewalRow row={row} onSelect={onSelect} /></li>)}
       </ul>
       {view.retentionLabel !== null ? <p className={styles.footer}>{view.retentionLabel}</p> : null}
+      {view.hasMore ? <button className={styles.loadMore} type="button" onClick={onLoadMore}
+        disabled={!onLoadMore}>Cargar más</button> : null}
     </section>
   );
 }

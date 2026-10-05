@@ -16,3 +16,5 @@
 .legend li > span:last-child { color: rgba(255, 255, 255, .55); font-size: 10.5px; }
 .list { margin: 0; padding: 0; list-style: none; }
 .footer { margin: 0; padding: 13px 15px; border-top: 1px solid rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .02); color: rgba(255, 255, 255, .55); font-size: 10.5px; line-height: 1.5; }
+.loadMore { width: 100%; min-height: 48px; padding: 10px 15px; border: 0; border-top: 1px solid rgba(255, 255, 255, .1); background: rgba(60, 122, 255, .1); color: #8fb2ff; font: inherit; font-size: 12px; font-weight: 700; }
+.loadMore:focus-visible { outline: 2px solid #8fb2ff; outline-offset: -3px; }

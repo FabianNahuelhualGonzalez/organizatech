@@ -82,6 +82,7 @@ export interface CoachMonthlyChartView {
   readonly selectedMonthId: string | null;
   readonly emptyLabel: string | null;
   readonly noSelectionLabel: string | null;
+  readonly hasMore?: boolean;
 }
 
 export interface CoachRenewalRowView {
@@ -115,6 +116,7 @@ export interface CoachRenewalsView {
   readonly rows: readonly CoachRenewalRowView[];
   readonly emptyLabel: string | null;
   readonly retentionLabel: string | null;
+  readonly hasMore?: boolean;
 }
 
 export interface CoachDashboardViewModel {
@@ -136,6 +138,8 @@ export interface CoachDashboardActions {
   readonly onChat?: () => void;
   readonly onSelectMonth?: (id: string) => void;
   readonly onRenewal?: (id: string) => void;
+  readonly onLoadMoreCommercial?: () => void;
+  readonly onLoadMoreMonths?: () => void;
 }
 
 export interface CoachDashboardViewProps {

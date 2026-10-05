@@ -31,7 +31,7 @@ export interface CoachCommercialReceipt {
 
 export type CoachCommercialErrorCode = "invalid_input" | "invalid_response" | "forbidden"
   | "not_found" | "inactive_relationship" | "request_conflict" | "version_conflict"
-  | "conflict" | "operation_stale" | "aborted" | "timeout" | "unavailable";
+  | "conflict" | "operation_stale" | "aborted" | "timeout" | "unavailable" | "migration_pending";
 export class CoachCommercialError extends Error {
   readonly code: CoachCommercialErrorCode;
   constructor(code: CoachCommercialErrorCode) {

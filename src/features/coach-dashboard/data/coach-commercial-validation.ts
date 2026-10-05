@@ -89,8 +89,9 @@ function mapPeriod(value: unknown): CoachCommercialPeriod {
     amountClp: amount(row.amountClp), frequency: frequency(row.frequency), paidAt: optionalTimestamp(row.paidAt) });
 }
 function mapItem(value: unknown): CoachCommercialItem {
+  const hasCount = value !== null && typeof value === "object" && Object.hasOwn(value, "periodCount");
   const row = record(value, ["episodeId", "studentName", "linkedAt", "unlinkedAt", "agreementStart",
-    "agreementEnd", "status", "version", "latestPeriod"]);
+    "agreementEnd", "status", "version", "latestPeriod", ...(hasCount ? ["periodCount"] : [])]);
   if (typeof row.studentName !== "string" || !row.studentName.trim() || row.studentName.length > 201
     || !["needs_agreement", "active", "pending_renewal", "not_continuing"].includes(row.status as string)) return bad();
   const status = row.status as CoachCommercialItem["status"];
@@ -102,7 +103,8 @@ function mapItem(value: unknown): CoachCommercialItem {
   return Object.freeze({ episodeId, studentName: row.studentName, linkedAt: timestamp(row.linkedAt),
     unlinkedAt: optionalTimestamp(row.unlinkedAt), agreementStart: optionalDate(row.agreementStart),
     agreementEnd: optionalDate(row.agreementEnd), status,
-    version: row.version === null ? null : uuid(row.version), latestPeriod });
+    version: row.version === null ? null : uuid(row.version), latestPeriod,
+    ...(hasCount ? { periodCount: natural(row.periodCount) } : {}) });
 }
 function mapMonth(value: unknown): CoachCommercialMonth {
   const row = record(value, ["month", "estimatedClp", "confirmedPaymentsClp", "periodCount", "students", "joined", "left"]);
@@ -141,4 +143,57 @@ export function mapCoachCommercialPortfolio(value: unknown): CoachCommercialPort
   return Object.freeze({ serverToday, currentMonth: row.currentMonth,
     activeCount: natural(row.activeCount), unlinkedCount: natural(row.unlinkedCount),
     items: Object.freeze(items), periods: Object.freeze(periods), months: Object.freeze(months) });
+}
+
+const cursor = (value: unknown): string | null => value === null ? null
+  : typeof value === "string" && value.length <= 100 ? value : bad();
+
+export function mapCoachCommercialPage(value: unknown, kind: "items" | "student"): { rows: readonly CoachCommercialItem[]; nextCursor: string | null };
+export function mapCoachCommercialPage(value: unknown, kind: "periods"): { rows: readonly CoachCommercialPeriod[]; nextCursor: string | null };
+export function mapCoachCommercialPage(value: unknown, kind: "months"): { rows: readonly CoachCommercialMonth[]; nextCursor: string | null };
+export function mapCoachCommercialPage(value: unknown, kind: "items" | "student" | "periods" | "months"):
+  { rows: readonly (CoachCommercialItem | CoachCommercialPeriod | CoachCommercialMonth)[]; nextCursor: string | null };
+export function mapCoachCommercialPage(value: unknown, kind: "items" | "student" | "periods" | "months"):
+  { rows: readonly (CoachCommercialItem | CoachCommercialPeriod | CoachCommercialMonth)[]; nextCursor: string | null } {
+  const row = record(value, ["rows", "nextCursor"]);
+  if (!Array.isArray(row.rows) || row.rows.length > 50) return bad();
+  const rows = kind === "periods" ? row.rows.map(mapPeriod)
+    : kind === "months" ? row.rows.map(mapMonth) : row.rows.map(mapItem);
+  const nextCursor = cursor(row.nextCursor);
+  if (kind === "student" && (rows.length !== 1 || nextCursor !== null)) return bad();
+  if (nextCursor !== null && rows.length === 0) return bad();
+  return Object.freeze({ rows: Object.freeze(rows), nextCursor });
+}
+
+export function mapCoachCommercialOverview(value: unknown): CoachCommercialPortfolio {
+  const row = record(value, ["serverToday", "currentMonth", "items", "itemCursor", "months", "monthCursor", "stats"]);
+  const serverToday = date(row.serverToday);
+  if (row.currentMonth !== serverToday.slice(0, 7) || !Array.isArray(row.items) || row.items.length > 30
+    || !Array.isArray(row.months) || row.months.length > 12) return bad();
+  const stats = record(row.stats, ["activeCount", "unlinkedCount", "alertCount", "pendingCount",
+    "renewedCount", "declinedCount", "pendingAmount", "monthlyRiskCount", "monthlyRiskAmount",
+    "maxStudents", "currentBreakdown", "years"]);
+  if (!Array.isArray(stats.currentBreakdown) || !Array.isArray(stats.years)) return bad();
+  const breakdown = stats.currentBreakdown.map((entry) => {
+    const part = record(entry, ["frequency", "amountClp", "students", "periods", "estimatedClp"]);
+    return Object.freeze({ frequency: frequency(part.frequency), amountClp: amount(part.amountClp),
+      students: natural(part.students), periods: natural(part.periods), estimatedClp: natural(part.estimatedClp) });
+  });
+  const years = stats.years.map((entry) => {
+    const part = record(entry, ["year", "estimatedClp", "confirmedPaymentsClp"]);
+    if (typeof part.year !== "number" || !Number.isInteger(part.year) || part.year < 1 || part.year > 9999) return bad();
+    return Object.freeze({ year: part.year, estimatedClp: natural(part.estimatedClp),
+      confirmedPaymentsClp: natural(part.confirmedPaymentsClp) });
+  });
+  return Object.freeze({ serverToday, currentMonth: row.currentMonth as string,
+    activeCount: natural(stats.activeCount), unlinkedCount: natural(stats.unlinkedCount),
+    items: Object.freeze(row.items.map(mapItem)), periods: Object.freeze([]),
+    months: Object.freeze(row.months.map(mapMonth)),
+    itemCursor: cursor(row.itemCursor), monthCursor: cursor(row.monthCursor),
+    stats: Object.freeze({ alertCount: natural(stats.alertCount), pendingCount: natural(stats.pendingCount),
+      renewedCount: natural(stats.renewedCount), declinedCount: natural(stats.declinedCount),
+      pendingAmount: natural(stats.pendingAmount), monthlyRiskCount: natural(stats.monthlyRiskCount),
+      monthlyRiskAmount: natural(stats.monthlyRiskAmount), maxStudents: natural(stats.maxStudents),
+      currentBreakdown: Object.freeze(breakdown), years: Object.freeze(years) }),
+  });
 }

@@ -73,6 +73,25 @@ test("existing dashboard cards receive distinct real estimate, payments, alerts 
   assert.doesNotMatch(markup, /Portafolio comercial/);
 });
 
+test("paged dashboard keeps server totals beyond the visible commercial rows", () => {
+  const partial: CoachCommercialPortfolio = { ...portfolio, items: [portfolio.items[0]], periods: [],
+    itemCursor: "next", monthCursor: "2026-10", stats: {
+      alertCount: 7, pendingCount: 6, renewedCount: 8, declinedCount: 2,
+      pendingAmount: 180000, monthlyRiskCount: 4, monthlyRiskAmount: 120000,
+      maxStudents: 10, currentBreakdown: [], years: [{ year: 2026, estimatedClp: 500000,
+        confirmedPaymentsClp: 320000 }],
+    } };
+  const view = buildCoachCommercialDashboardView({ base: base(), portfolio: partial,
+    selectedMonthId: "2026-10", pendingInvitations: 3 });
+  assert.deepEqual([view.income.amount.value, view.income.potential.value,
+    view.income.atRisk.value, view.portfolio.alert.value, view.renewals.atStake.value],
+  [45000, 20000, 120000, 7, 180000]);
+  assert.match(view.renewals.stack?.ariaLabel ?? "", /8 renovadas, 6 pendientes, 2 no continuadas/);
+  assert.equal(view.chart.hasMore, true);
+  assert.equal(view.renewals.hasMore, true);
+  assert.equal(view.alerts.footerLabel, "Cargar más");
+});
+
 test("missing portfolio never falls back to tariff times invitations or invents months", () => {
   const initial = base();
   const legacy = { ...initial, income: { ...initial.income, amount: metric(99999, "$99.999") } };
