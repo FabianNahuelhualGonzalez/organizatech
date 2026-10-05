@@ -29,6 +29,10 @@ export function CoachMonthDetail({ month }: { readonly month: CoachMonthView }) 
         <span>Ingreso estimado del mes</span>
         <strong className={common.number} data-known={month.estimatedIncome.value !== null}>{month.estimatedIncome.label}</strong>
       </div>
+      {month.confirmedPayments ? <div className={styles.income}>
+        <span>Pagos confirmados del mes</span>
+        <strong className={common.number} data-known={month.confirmedPayments.value !== null}>{month.confirmedPayments.label}</strong>
+      </div> : null}
     </div>
   );
 }

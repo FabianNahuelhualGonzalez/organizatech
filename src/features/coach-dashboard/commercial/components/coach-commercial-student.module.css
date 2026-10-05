@@ -1,0 +1,25 @@
+.student { min-width: 0; margin: 0 0 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, .12); }
+.studentHead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.student h3 { margin: 0 0 8px; font-size: 13px; }
+.student h4 { margin: 14px 0 8px; font-size: 12px; }
+.status, .note, .empty { color: rgba(255, 255, 255, .6); font-size: 10.5px; line-height: 1.5; }
+.note, .empty { margin: 8px 0; }
+.error { color: #f87171; font-size: 11px; line-height: 1.5; }
+.facts { margin: 12px 0; border: 1px solid rgba(255, 255, 255, .14); border-radius: 13px; overflow: hidden; }
+.facts div { display: flex; justify-content: space-between; gap: 10px; padding: 11px 14px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.facts div:last-child { border-bottom: 0; }
+.facts dt { color: rgba(255, 255, 255, .55); font-size: 11px; }
+.facts dd { margin: 0; text-align: right; font-size: 11px; font-weight: 700; overflow-wrap: anywhere; }
+.form { display: grid; gap: 11px; margin: 14px 0; }
+.form label { display: grid; gap: 5px; font-size: 11px; }
+.form input, .form select { width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, .24); border-radius: 10px; background: transparent; color: inherit; font: inherit; color-scheme: dark; }
+.action, .buttons button { min-width: 44px; min-height: 44px; padding: 8px 12px; border: 1px solid rgba(255, 255, 255, .24); border-radius: 10px; background: transparent; color: inherit; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.action:disabled, .buttons button:disabled { opacity: .55; cursor: default; }
+.buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.payment { margin: 14px 0; }
+.payment p { font-size: 11px; line-height: 1.5; }
+.history { border-top: 1px solid rgba(255, 255, 255, .12); }
+.history ul { margin: 0; padding: 0; list-style: none; }
+.history li { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid rgba(255, 255, 255, .08); font-size: 11px; }
+.history small { color: rgba(255, 255, 255, .55); font-size: 10px; }
+.student button:focus-visible, .student input:focus-visible, .student select:focus-visible { outline: 2px solid #8fb2ff; outline-offset: 2px; }

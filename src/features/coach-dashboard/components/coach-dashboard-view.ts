@@ -68,6 +68,8 @@ export interface CoachMonthView {
   readonly left: CoachMetricView;
   readonly leftTone: "neutral" | "pending";
   readonly estimatedIncome: CoachMetricView;
+  /** Present only when a server-backed commercial month supplies the payment fact. */
+  readonly confirmedPayments?: CoachMetricView;
   readonly readingLabel: string | null;
   readonly readingTone: CoachDashboardTone;
   readonly isBest: boolean;
@@ -92,6 +94,7 @@ export interface CoachRenewalRowView {
   readonly endDateLabel: string | null;
   readonly remainingLabel: string | null;
   readonly ariaLabel: string;
+  readonly canOpen?: boolean;
 }
 
 export interface CoachRenewalSegmentView {

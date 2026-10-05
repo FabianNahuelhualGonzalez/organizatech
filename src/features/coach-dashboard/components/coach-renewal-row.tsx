@@ -10,8 +10,8 @@ export function CoachRenewalRow({ row, onSelect }: {
 }) {
   return (
     <button className={common.row} type="button" data-renewal-id={row.id} data-state={row.state}
-      aria-label={row.ariaLabel} disabled={!onSelect}
-      onClick={onSelect ? () => onSelect(row.id) : undefined}>
+      aria-label={row.ariaLabel} disabled={!onSelect || row.canOpen === false}
+      onClick={onSelect && row.canOpen !== false ? () => onSelect(row.id) : undefined}>
       <span className={`${common.dot} ${styles.state}`} data-state={row.state} aria-hidden="true" />
       <span className={common.body}>
         <span className={common.name}>{row.clientName}</span>

@@ -7,6 +7,7 @@ import { CoachClientDetailSheet } from "@/features/coach-clients/components/coac
 import { CoachClientsView } from "@/features/coach-clients/components/coach-clients";
 import { CoachChatComingSoonSheet } from "@/features/coach-dashboard/components/coach-chat-coming-soon-sheet";
 import { CoachDashboardView } from "@/features/coach-dashboard/components/coach-dashboard";
+import { CoachCommercialStudent } from "@/features/coach-dashboard/commercial/components/coach-commercial-student";
 import { CoachFeeSheet } from "@/features/coach-dashboard/components/coach-fee-sheet";
 import { useCoachWorkspaceController } from "../hooks/use-coach-workspace-controller";
 
@@ -63,8 +64,16 @@ export function CoachWorkspaceBoundary({
   };
   const openClient = (id: string) => {
     captureActiveElement(detailTriggerRef);
+    void controller.commercial.reload();
     controller.actions.openClient(id);
   };
+  const openCommercialStudent = (id: string) => {
+    captureActiveElement(detailTriggerRef);
+    controller.actions.openCommercialStudent(id);
+  };
+  const selectedCommercial = controller.detail?.state === "active"
+    ? controller.commercial.snapshot.portfolio?.items.find((item) => item.episodeId === controller.detail?.id) ?? null
+    : null;
 
   return (
     <div className={styles.workspace}>
@@ -87,6 +96,9 @@ export function CoachWorkspaceBoundary({
                 pending: () => controller.actions.openClients("pending"),
                 inactive: () => controller.actions.openClients("inactive"),
               } : undefined,
+              onAlert: controller.commercial.snapshot.portfolio ? openCommercialStudent : undefined,
+              onSelectMonth: controller.commercial.snapshot.portfolio ? controller.actions.selectMonth : undefined,
+              onRenewal: controller.commercial.snapshot.portfolio ? openCommercialStudent : undefined,
               onLink: controller.available ? openAddClient : undefined,
               onCalendar: onOpenCalendar,
               onChat: controller.available ? () => {
@@ -148,6 +160,17 @@ export function CoachWorkspaceBoundary({
           confirmation={controller.confirmation}
           backgroundRef={backgroundRef}
           restoreFocusRef={detailTriggerRef}
+          commercialContent={selectedCommercial && controller.commercial.snapshot.portfolio ? (
+            <CoachCommercialStudent key={`${selectedCommercial.episodeId}:${selectedCommercial.version}`}
+              item={selectedCommercial} periods={controller.commercial.snapshot.portfolio.periods}
+              today={controller.commercial.snapshot.portfolio.serverToday}
+              busy={controller.commercial.snapshot.busy} uncertain={controller.commercial.snapshot.uncertain}
+              needsRefresh={controller.commercial.snapshot.needsRefresh}
+              issue={controller.commercial.snapshot.issue}
+              onSubmit={(command) => { void controller.commercial.submit(command); }}
+              onReconcile={() => { void controller.commercial.reconcile(); }}
+              onReload={() => { void controller.commercial.reload(); }} />
+          ) : controller.detail.state === "active" ? <p role="status">Ficha comercial no disponible.</p> : undefined}
           actions={{
             onCancelDetail: controller.actions.closeClient,
             onCopyCode: controller.actions.copyInvitationCode,

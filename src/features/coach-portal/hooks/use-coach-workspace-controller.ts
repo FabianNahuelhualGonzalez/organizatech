@@ -32,6 +32,8 @@ import type { CoachInvitationCreationSnapshot } from "@/features/coach-clients/h
 import type { CoachInvitationActionsSnapshot } from "@/features/coach-clients/hooks/coach-invitation-actions-contract";
 import type { CoachClientDisconnectionSnapshot } from "@/features/coach-clients/hooks/coach-client-disconnection-contract";
 import { createCoachPreferencesRuntime } from "@/features/coach-dashboard/integration/coach-preferences-runtime";
+import { useCoachCommercialPortfolio } from "@/features/coach-dashboard/hooks/use-coach-commercial-portfolio";
+import { buildCoachCommercialDashboardView } from "@/features/coach-dashboard/integration/coach-commercial-dashboard-presentation";
 import {
   buildCoachClientsView,
   buildCoachDashboardView,
@@ -171,7 +173,9 @@ export function useCoachWorkspaceController(input: {
     () => createConnection(input.userId, input.identityGeneration),
     [input.identityGeneration, input.userId],
   );
+  const commercial = useCoachCommercialPortfolio(connection);
   const [screen, setScreen] = useState<"dashboard" | "clients">("dashboard");
+  const [selectedMonthId, setSelectedMonthId] = useState<string | null>(null);
   const [tab, setTab] = useState<CoachClientTab>("active");
   const [query, setQuery] = useState("");
   const [creationEpoch, setCreationEpoch] = useState(0);
@@ -323,7 +327,7 @@ export function useCoachWorkspaceController(input: {
     ? Object.freeze({
       id: selectedActive.id,
       isOpen: true,
-      isBusy: disconnection.pending !== null,
+      isBusy: disconnection.pending !== null || commercial.snapshot.busy,
       canClose: true,
       state: "active" as const,
       email: selectedActive.studentEmail,
@@ -527,12 +531,17 @@ export function useCoachWorkspaceController(input: {
     ? Object.freeze({ ...addClientBase, step: "receipt" as const, receipt: creationReceipt })
     : Object.freeze({ ...addClientBase, step: "email" as const });
 
-  const dashboardView = buildCoachDashboardView({
+  const dashboardBase = buildCoachDashboardView({
     coachName: input.coachName,
     now: new Date(),
     preferences,
     active,
     pending,
+  });
+  const dashboardView = buildCoachCommercialDashboardView({
+    base: dashboardBase,
+    portfolio: commercial.snapshot.needsRefresh || commercial.snapshot.uncertain ? null : commercial.snapshot.portfolio,
+    selectedMonthId, pendingInvitations: pending.totalPending,
   });
   const clientsView = buildCoachClientsView({ tab, query, active, pending });
   const feeView = buildCoachFeeSheetView({
@@ -543,7 +552,7 @@ export function useCoachWorkspaceController(input: {
   });
 
   async function refreshRelations() {
-    await Promise.all([base?.active.reload(), base?.pending.reload()]);
+    await Promise.all([base?.active.reload(), base?.pending.reload(), commercial.reload()]);
   }
 
   function codeForInvitation(invitationId: string): { code: string; expiresAt: string } | null {
@@ -587,6 +596,7 @@ export function useCoachWorkspaceController(input: {
     screen,
     tab,
     dashboardView,
+    commercial,
     clientsView,
     feeView,
     chatView: Object.freeze({
@@ -605,6 +615,24 @@ export function useCoachWorkspaceController(input: {
       openDashboard: () => setScreen("dashboard"),
       openClients: (nextTab: CoachClientTab = "active") => {
         setTab(nextTab);
+        setScreen("clients");
+        void refreshRelations();
+      },
+      selectMonth: setSelectedMonthId,
+      openCommercialStudent(id: string) {
+        if (active.items.some((item) => item.id === id)) {
+          setSelected({ kind: "relationship", id });
+          setTab("active");
+          setScreen("clients");
+          return;
+        }
+        const item = commercial.snapshot.portfolio?.items.find((candidate) => candidate.episodeId === id);
+        if (!item || item.unlinkedAt !== null || !base) return;
+        setQuery(item.studentName);
+        base.active.setQuery(item.studentName);
+        void base.active.reload();
+        setSelected({ kind: "relationship", id });
+        setTab("active");
         setScreen("clients");
       },
       selectTab: setTab,
