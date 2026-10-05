@@ -32,6 +32,7 @@ import type { CoachInvitationCreationSnapshot } from "@/features/coach-clients/h
 import type { CoachInvitationActionsSnapshot } from "@/features/coach-clients/hooks/coach-invitation-actions-contract";
 import type { CoachClientDisconnectionSnapshot } from "@/features/coach-clients/hooks/coach-client-disconnection-contract";
 import { createCoachPreferencesRuntime } from "@/features/coach-dashboard/integration/coach-preferences-runtime";
+import { useCoachCommercialPortfolio } from "@/features/coach-dashboard/hooks/use-coach-commercial-portfolio";
 import {
   buildCoachClientsView,
   buildCoachDashboardView,
@@ -171,6 +172,7 @@ export function useCoachWorkspaceController(input: {
     () => createConnection(input.userId, input.identityGeneration),
     [input.identityGeneration, input.userId],
   );
+  const commercial = useCoachCommercialPortfolio(connection);
   const [screen, setScreen] = useState<"dashboard" | "clients">("dashboard");
   const [tab, setTab] = useState<CoachClientTab>("active");
   const [query, setQuery] = useState("");
@@ -543,7 +545,7 @@ export function useCoachWorkspaceController(input: {
   });
 
   async function refreshRelations() {
-    await Promise.all([base?.active.reload(), base?.pending.reload()]);
+    await Promise.all([base?.active.reload(), base?.pending.reload(), commercial.reload()]);
   }
 
   function codeForInvitation(invitationId: string): { code: string; expiresAt: string } | null {
@@ -587,6 +589,7 @@ export function useCoachWorkspaceController(input: {
     screen,
     tab,
     dashboardView,
+    commercial,
     clientsView,
     feeView,
     chatView: Object.freeze({
@@ -606,6 +609,10 @@ export function useCoachWorkspaceController(input: {
       openClients: (nextTab: CoachClientTab = "active") => {
         setTab(nextTab);
         setScreen("clients");
+        void refreshRelations();
+      },
+      refreshPortfolio: () => {
+        void refreshRelations();
       },
       selectTab: setTab,
       loadMore: () => {

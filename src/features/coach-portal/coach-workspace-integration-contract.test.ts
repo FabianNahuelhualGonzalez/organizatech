@@ -21,7 +21,7 @@ test("el portal monta la composición productiva y la feature conserva sus runti
   const controller = readFileSync(CONTROLLER_PATH, "utf8");
 
   assert.match(portal, /<CoachWorkspaceBoundary/);
-  assert.match(boundary, /<CoachDashboardView/);
+  assert.match(boundary, /<CoachCommercialDashboard/);
   assert.match(boundary, /<CoachClientsView/);
   for (const runtime of [
     "createCoachActiveRelationshipsRuntime",

@@ -6,7 +6,8 @@ import { CoachAddClientSheet } from "@/features/coach-clients/components/coach-a
 import { CoachClientDetailSheet } from "@/features/coach-clients/components/coach-client-detail-sheet";
 import { CoachClientsView } from "@/features/coach-clients/components/coach-clients";
 import { CoachChatComingSoonSheet } from "@/features/coach-dashboard/components/coach-chat-coming-soon-sheet";
-import { CoachDashboardView } from "@/features/coach-dashboard/components/coach-dashboard";
+import { CoachCommercialDashboard } from "@/features/coach-dashboard/commercial/components/coach-commercial-dashboard";
+import { CoachCommercialStudent } from "@/features/coach-dashboard/commercial/components/coach-commercial-student";
 import { CoachFeeSheet } from "@/features/coach-dashboard/components/coach-fee-sheet";
 import { useCoachWorkspaceController } from "../hooks/use-coach-workspace-controller";
 
@@ -63,8 +64,12 @@ export function CoachWorkspaceBoundary({
   };
   const openClient = (id: string) => {
     captureActiveElement(detailTriggerRef);
+    void controller.commercial.reload();
     controller.actions.openClient(id);
   };
+  const selectedCommercial = controller.detail?.state === "active"
+    ? controller.commercial.snapshot.portfolio?.items.find((item) => item.episodeId === controller.detail?.id) ?? null
+    : null;
 
   return (
     <div className={styles.workspace}>
@@ -75,25 +80,24 @@ export function CoachWorkspaceBoundary({
           </p>
         ) : null}
         {controller.screen === "dashboard" ? (
-          <CoachDashboardView
-            view={controller.dashboardView}
-            actions={{
-              onEditFee: controller.available ? () => {
-                captureActiveElement(feeTriggerRef);
-                controller.actions.openFee();
-              } : undefined,
-              onPortfolio: controller.available ? {
-                active: () => controller.actions.openClients("active"),
-                pending: () => controller.actions.openClients("pending"),
-                inactive: () => controller.actions.openClients("inactive"),
-              } : undefined,
-              onLink: controller.available ? openAddClient : undefined,
-              onCalendar: onOpenCalendar,
-              onChat: controller.available ? () => {
-                captureActiveElement(chatTriggerRef);
-                controller.actions.openChat();
-              } : undefined,
-            }}
+          <CoachCommercialDashboard
+            coachName={coachName}
+            portfolio={controller.commercial.snapshot.portfolio}
+            phase={controller.commercial.snapshot.phase}
+            issue={controller.commercial.snapshot.issue}
+            busy={controller.commercial.snapshot.busy}
+            uncertain={controller.commercial.snapshot.uncertain}
+            onReload={controller.commercial.available ? controller.actions.refreshPortfolio : undefined}
+            onSubmit={(command) => { void controller.commercial.submit(command); }}
+            onReconcile={() => { void controller.commercial.reconcile(); }}
+            onLink={controller.available ? openAddClient : undefined}
+            onClients={() => controller.actions.openClients("active")}
+            onCalendar={onOpenCalendar}
+            onChat={controller.available ? () => {
+              captureActiveElement(chatTriggerRef);
+              controller.actions.openChat();
+            } : undefined}
+            pendingInvitations={controller.clientsView.counts.pending.value}
           />
         ) : (
           <CoachClientsView
@@ -148,6 +152,15 @@ export function CoachWorkspaceBoundary({
           confirmation={controller.confirmation}
           backgroundRef={backgroundRef}
           restoreFocusRef={detailTriggerRef}
+          commercialContent={selectedCommercial && controller.commercial.snapshot.portfolio ? (
+            <CoachCommercialStudent key={`${selectedCommercial.episodeId}:${selectedCommercial.version}`}
+              item={selectedCommercial} periods={controller.commercial.snapshot.portfolio.periods}
+              today={controller.commercial.snapshot.portfolio.serverToday}
+              busy={controller.commercial.snapshot.busy} uncertain={controller.commercial.snapshot.uncertain}
+              issue={controller.commercial.snapshot.issue}
+              onSubmit={(command) => { void controller.commercial.submit(command); }}
+              onReconcile={() => { void controller.commercial.reconcile(); }} />
+          ) : controller.detail.state === "active" ? <p role="status">Ficha comercial no disponible.</p> : undefined}
           actions={{
             onCancelDetail: controller.actions.closeClient,
             onCopyCode: controller.actions.copyInvitationCode,
