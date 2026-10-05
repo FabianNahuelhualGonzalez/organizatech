@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ExerciseEntry } from "@/lib/progress/types";
+import { getCycleScopedTrainingSessionRawData } from "@/lib/training/cycle-scoped-training-repository";
 
 import type {
   TrainingCycleBuilderGateway,
@@ -25,6 +26,7 @@ import {
 import {
   buildTrainingCycleProductViewModel,
   findTrainingCycleSourceCycleId,
+  type TrainingCycleActiveEntryRef,
 } from "../integration/training-cycle-product-view-model";
 
 const CATALOG_PAGE_LIMIT = 100;
@@ -43,6 +45,7 @@ export interface TrainingCycleProductData {
   readonly sourceCycle: TrainingCycleRpcSnapshot | null;
   readonly lastCycle: TrainingCycleRpcSnapshot | null;
   readonly draftReference: { readonly draftId: string; readonly version: number } | null;
+  readonly activeCycleEntryRefs?: readonly TrainingCycleActiveEntryRef[] | null;
 }
 
 export type TrainingCycleProductControllerState =
@@ -102,7 +105,10 @@ export function selectOwnedTrainingCycleProductSnapshot(
   return snapshot;
 }
 
-export async function loadTrainingCycleProductData(rpc: ProductRpc): Promise<TrainingCycleProductData> {
+export async function loadTrainingCycleProductData(
+  rpc: ProductRpc,
+  readActiveCycleEntries?: (cycleId: string) => Promise<readonly TrainingCycleActiveEntryRef[]>,
+): Promise<TrainingCycleProductData> {
   const activeGuard = await rpc.getActiveCycleGuard();
   if (activeGuard && !activeGuard.hasCanonicalPlan) {
     const compatibility = await rpc.adaptActiveLegacyCycle(activeGuard.cycleId);
@@ -138,6 +144,9 @@ export async function loadTrainingCycleProductData(rpc: ProductRpc): Promise<Tra
   await Promise.all(ids.map(async (cycleId) => {
     loadedCycles.set(cycleId, await rpc.getCycle(cycleId));
   }));
+  const activeCycleEntryRefs = activeCycle && readActiveCycleEntries
+    ? await readActiveCycleEntries(activeCycle.cycleId)
+    : null;
   return {
     catalog,
     draft,
@@ -145,6 +154,7 @@ export async function loadTrainingCycleProductData(rpc: ProductRpc): Promise<Tra
     sourceCycle: sourceCycleId ? loadedCycles.get(sourceCycleId) ?? null : null,
     lastCycle: lastCycleId ? loadedCycles.get(lastCycleId) ?? null : null,
     draftReference: draft ? { draftId: draft.draftId, version: draft.version } : null,
+    activeCycleEntryRefs,
   };
 }
 
@@ -241,7 +251,23 @@ export function useTrainingCycleProductController(input: {
       portalScope: "usuario",
       isCurrent,
     });
-    void loadTrainingCycleProductData(rpc).then((data) => {
+    void loadTrainingCycleProductData(rpc, async (cycleId) => {
+      const raw = await getCycleScopedTrainingSessionRawData(cycleId, expectedUserId, undefined, isCurrent);
+      if (raw.ownerUserId !== expectedUserId) {
+        throw new TrainingCycleTransportError("invalid_response", "La lectura del ciclo no pertenece al usuario actual.");
+      }
+      const sessionDays = new Map(raw.sessionRows.map((session) => [session.id, session.cycle_day_id]));
+      return raw.entryRows.flatMap((entry) => {
+        if (!sessionDays.has(entry.session_id)) return [];
+        return [{
+          sessionId: entry.session_id,
+          cycleId,
+          cycleDayId: sessionDays.get(entry.session_id) ?? null,
+          trainingCycleExerciseId: entry.training_cycle_exercise_id,
+          exerciseLineageId: entry.exercise_lineage_id,
+        }];
+      });
+    }).then((data) => {
       if (isCurrent()) setSnapshot({ ownerContextKey, status: "ready", rpc, data });
     }).catch((error: unknown) => {
       if (!isCurrent()) return;
@@ -335,6 +361,7 @@ export function useTrainingCycleProductController(input: {
         todayIsoDate: todayInSantiago(),
         catalog: data.catalog,
         entries: input.entries,
+        activeCycleEntryRefs: data.activeCycleEntryRefs ?? undefined,
         activeCycle: data.activeCycle,
         draft: data.draft,
         sourceCycle: data.sourceCycle,

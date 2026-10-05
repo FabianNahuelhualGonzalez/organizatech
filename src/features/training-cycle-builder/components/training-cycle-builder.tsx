@@ -274,7 +274,7 @@ function ConnectedTrainingCycleBuilder({
   }
 
   return (
-    <section className={styles.feature} aria-label="Creación y gestión del ciclo de entrenamiento">
+    <section className={`${styles.feature} ${state.screen === "active" ? styles.activeFeature : ""} ${state.screen === "active" && chromeMode === "embedded" ? styles.activeFeatureEmbedded : ""}`} aria-label="Creación y gestión del ciclo de entrenamiento">
       {chromeMode === "standalone" ? (
         <AppTopbar
           isHidden={false}
@@ -334,7 +334,7 @@ function ConnectedTrainingCycleBuilder({
           />
         ) : null}
       </div>
-      <main className={styles.content}>{screenContent}</main>
+      <main className={`${styles.content} ${state.screen === "active" ? styles.activeContent : ""}`}>{screenContent}</main>
       <CycleCopySheet state={state} dispatch={dispatch} />
       <CycleExtensionSheet state={state} viewModel={viewModel} dispatch={dispatch} onConfirm={() => void controller.extendCycle()} />
       {state.pendingNewCycleIntent && state.activeCycleCloseId ? (

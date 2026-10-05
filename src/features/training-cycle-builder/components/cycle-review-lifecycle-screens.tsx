@@ -273,8 +273,10 @@ export function CycleActiveScreen({
   const elapsed = viewModel.activeCycleElapsedDays ?? 0;
   const total = Math.max(1, viewModel.activeCycleTotalDays ?? 1);
   const progress = Math.min(100, Math.max(0, Math.round((elapsed / total) * 100)));
+  const sessions = viewModel.registeredSessions ?? 0;
+  const canEdit = Boolean(state.activeCycleRevision);
   return (
-    <div className={styles.screen}>
+    <div className={styles.activeScreen}>
       {state.activeEditSavedMessage ? (
         <StatusBanner
           tone="success"
@@ -292,37 +294,58 @@ export function CycleActiveScreen({
       ) : null}
       <ScreenHeading title="Mi ciclo" description={`En curso · ${elapsed} de ${total} días`} />
       <section className={styles.activeSummary}>
-        <header><span><small>OBJETIVO</small><strong>{TRAINING_CYCLE_GOAL_LABELS[state.draft.goal]}</strong></span><b>ACTIVO</b></header>
+        <button className={styles.activeGoalRow} type="button" disabled={!canEdit} onClick={() => dispatch({ type: "begin_active_edit" })}>
+          <span><small>OBJETIVO</small><strong>{TRAINING_CYCLE_GOAL_LABELS[state.draft.goal]}</strong></span>
+          <b>ACTIVO</b><span className={styles.activeChevron} aria-hidden="true">›</span>
+        </button>
         <dl>
-          <div><dt>INICIO</dt><dd>{formatCycleDate(state.draft.startDate)}</dd></div>
+          <div className={styles.activeStartDate}><dt>INICIO <Lock size={9} aria-label="Bloqueado" /></dt><dd>{formatCycleDate(state.draft.startDate)}</dd></div>
           <div><dt>TÉRMINO</dt><dd>{formatCycleDate(state.draft.endDate)}</dd></div>
-          <div><dt>RESTAN</dt><dd data-warning={remaining <= 7}>{remaining === 0 ? "Hoy" : `${remaining} días`}</dd></div>
+          <div><dt>RESTAN</dt><dd>{remaining} {remaining === 1 ? "día" : "días"}</dd></div>
         </dl>
         <div className={styles.progressTrack} aria-label={`${progress}% del ciclo completado`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }} /></div>
-        <p>{elapsed} de {total} días · {viewModel.registeredSessions ?? 0} sesiones registradas</p>
+        <p>{elapsed} de {total} días · {sessions} {sessions === 1 ? "sesión registrada" : "sesiones registradas"}</p>
+        <button className={styles.activeExtendRow} type="button" onClick={() => dispatch({ type: "open_extend" })}>Extender la fecha de término<span aria-hidden="true">›</span></button>
       </section>
-      <h3 className={styles.eyebrowTitle}>DÍAS DEL CICLO</h3>
-      <div className={styles.activeDays}>
-        {state.draft.selectedDays.map((day) => {
-          const routine = state.draft.routines[day];
-          return <div key={day}><small>{TRAINING_CYCLE_DAY_LABELS[day].slice(0, 3)}</small><span><strong>{routine.name || "Sin nombre"}</strong><small>{routine.exercises.length} ejercicios</small></span></div>;
-        })}
-      </div>
-      {state.activeCycleRevision ? (
-        <SecondaryAction onClick={() => dispatch({ type: "begin_active_edit" })}>Editar objetivo, días y rutinas</SecondaryAction>
-      ) : (
+      {!canEdit ? (
         <StatusBanner
           tone="error"
           title="Edición temporalmente no disponible"
           body="Falta la revisión del ciclo activo. Recarga antes de editar para evitar sobrescribir cambios."
         />
-      )}
-      <SecondaryAction
+      ) : null}
+      <div className={styles.activeSectionHeader}>
+        <h3>DÍAS DEL CICLO</h3>
+        <button type="button" disabled={!canEdit || state.draft.selectedDays.length >= 7} onClick={() => dispatch({ type: "begin_active_edit" })}>+ Agregar día</button>
+      </div>
+      <div className={styles.activeDays}>
+        {state.draft.selectedDays.map((day) => {
+          const routine = state.draft.routines[day];
+          const daySummary = viewModel.activeCycleDays?.find((item) => item.day === day);
+          const count = daySummary?.exerciseCount ?? routine.exercises.length;
+          const withLogs = daySummary?.exercisesWithLogs ?? 0;
+          return (
+            <button key={day} type="button" disabled={!canEdit} onClick={() => {
+              dispatch({ type: "begin_active_edit" });
+              dispatch({ type: "navigate", screen: "routine" });
+              dispatch({ type: "select_day", day });
+            }}>
+              <small>{TRAINING_CYCLE_DAY_LABELS[day].slice(0, 3)}</small>
+              <span><strong>{routine.name || "Sin nombre"}</strong><small>{count} {count === 1 ? "ejercicio" : "ejercicios"}{withLogs ? ` · ${withLogs} con registros` : ""}</small></span>
+              <span className={styles.activeChevron} aria-hidden="true">›</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className={styles.activeSpacer} aria-hidden="true" />
+      <button
+        className={styles.activeNewCycleLink}
+        type="button"
         disabled={state.committedSyncPending || state.activeCycleCloseState === "closing"}
         onClick={onRequestNewCycle}
       >
-        Crear un nuevo ciclo de entrenamiento
-      </SecondaryAction>
+        Crear un ciclo nuevo
+      </button>
     </div>
   );
 }

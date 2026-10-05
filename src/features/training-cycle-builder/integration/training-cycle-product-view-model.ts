@@ -45,6 +45,30 @@ export interface BuildTrainingCycleProductViewModelInput {
   readonly draft: TrainingCycleDraftSnapshot | null;
   readonly sourceCycle: TrainingCycleRpcSnapshot | null;
   readonly lastCycle: TrainingCycleRpcSnapshot | null;
+  readonly activeCycleEntryRefs?: readonly TrainingCycleActiveEntryRef[];
+}
+
+export interface TrainingCycleActiveEntryRef {
+  readonly sessionId: string;
+  readonly cycleId: string;
+  readonly cycleDayId: string | null;
+  readonly trainingCycleExerciseId: string | null;
+  readonly exerciseLineageId: string | null;
+}
+
+function activeEntryRefs(input: BuildTrainingCycleProductViewModelInput): readonly TrainingCycleActiveEntryRef[] {
+  const currentEntries = input.entries.map((entry) => ({
+    sessionId: entry.sessionId?.trim() || entry.id,
+    cycleId: entry.cycleId ?? "",
+    cycleDayId: entry.cycleDayId ?? null,
+    trainingCycleExerciseId: entry.trainingCycleExerciseId ?? null,
+    exerciseLineageId: entry.exerciseLineageId ?? null,
+  }));
+  if (!input.activeCycleEntryRefs || !input.activeCycle) return currentEntries;
+  return [
+    ...input.activeCycleEntryRefs,
+    ...currentEntries.filter((entry) => entry.cycleId === input.activeCycle?.cycleId),
+  ];
 }
 
 function sourceKey(source: TrainingCycleExerciseSource) {
@@ -406,11 +430,27 @@ export function buildTrainingCycleProductViewModel(
             selectedDays: [],
             routines: emptyRoutines(),
           };
-  const sessionsForCycle = new Set(input.entries.flatMap((entry) => (
-    effectiveSource && entry.cycleId === effectiveSource.cycleId
-      ? [entry.sessionId?.trim() || entry.id]
+  const refs = activeEntryRefs(input);
+  const sessionsForCycle = new Set(refs.flatMap((entry) => (
+    effectiveSource && entry.cycleId === effectiveSource.cycleId && entry.sessionId.trim()
+      ? [entry.sessionId]
       : []
   )));
+  const loggedExerciseIds = new Set<string>();
+  const activeCycleDays = input.activeCycle ? draft.selectedDays.map((day) => {
+    const snapshotDay = input.activeCycle?.plan.days.find((candidate) => candidate.day === day);
+    const exercisesWithLogs = snapshotDay?.exercises.filter((exercise) => {
+      const hasLogs = refs.some((entry) => (
+        entry.cycleId === input.activeCycle?.cycleId
+        && (!entry.cycleDayId || !snapshotDay.legacyCycleDayId || entry.cycleDayId === snapshotDay.legacyCycleDayId)
+        && ((Boolean(entry.exerciseLineageId) && entry.exerciseLineageId === exercise.exerciseLineageId)
+          || (Boolean(exercise.legacyCycleExerciseId) && entry.trainingCycleExerciseId === exercise.legacyCycleExerciseId))
+      ));
+      if (hasLogs) loggedExerciseIds.add(exercise.snapshotId);
+      return hasLogs;
+    }).length ?? 0;
+    return { day, exerciseCount: draft.routines[day].exercises.length, exercisesWithLogs };
+  }) : undefined;
   const durationDays = effectiveSource
     ? cycleDurationDays(effectiveSource.startDate, effectiveSource.endDate)
     : cycleDurationDays(draft.startDate, draft.endDate);
@@ -442,6 +482,8 @@ export function buildTrainingCycleProductViewModel(
       ? cycleDurationDays(input.activeCycle.startDate, input.activeCycle.endDate)
       : undefined,
     registeredSessions: sessionsForCycle.size,
+    activeCycleDays,
+    activeCycleLoggedExerciseIds: [...loggedExerciseIds],
     expiryAlerts: [
       { offsetDays: 7, whenLabel: "7 días antes", title: "Queda 1 semana de ciclo", body: "Tu ciclo termina en una semana. Puedes mantener la fecha o extenderla.", emailEnabled: true },
       { offsetDays: 3, whenLabel: "3 días antes", title: "Quedan 3 días de ciclo", body: "Tu ciclo termina pronto. Si quieres seguir con esta rutina, extiéndelo.", emailEnabled: true },

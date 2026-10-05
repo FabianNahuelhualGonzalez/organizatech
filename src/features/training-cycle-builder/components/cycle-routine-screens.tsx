@@ -132,23 +132,25 @@ export function CycleRoutineScreen({
         <ol className={styles.exerciseList}>
           {routine.exercises.map((exercise, index) => {
             const menuOpen = state.openExerciseMenuId === exercise.id;
+            const locked = state.workflow === "active_edit" && state.loggedExerciseIds.includes(exercise.id);
             return (
               <li
                 key={exercise.id}
-                draggable
+                draggable={!locked}
                 data-menu-open={menuOpen}
-                onDragStart={(event) => handleDragStart(event, exercise.id)}
+                onDragStart={(event) => { if (!locked) handleDragStart(event, exercise.id); }}
                 onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => handleDrop(event, exercise.id)}
+                onDrop={(event) => { if (!locked) handleDrop(event, exercise.id); }}
               >
                 <div className={styles.exerciseRow}>
                   <span className={styles.exerciseOrder}>{index + 1}</span>
-                  <span className={styles.exerciseDragHandle} aria-label={`Arrastrar ${exercise.name}`} role="img">
+                  <span className={styles.exerciseDragHandle} aria-label={locked ? undefined : `Arrastrar ${exercise.name}`} role={locked ? undefined : "img"} aria-hidden={locked || undefined}>
                     <GripVertical size={17} aria-hidden="true" />
                   </span>
                   <button
                     className={styles.exerciseMain}
                     type="button"
+                    disabled={locked}
                     onClick={() => dispatch({ type: "open_exercise", exerciseId: exercise.id })}
                   >
                     <strong>{exercise.name}</strong>
@@ -161,7 +163,7 @@ export function CycleRoutineScreen({
                         : null}
                     </span>
                   </button>
-                  <button
+                  {!locked ? <button
                     className={styles.touchIconButton}
                     type="button"
                     aria-label={`Acciones de ${exercise.name}`}
@@ -169,11 +171,11 @@ export function CycleRoutineScreen({
                     onClick={() => dispatch({ type: "toggle_exercise_menu", exerciseId: exercise.id })}
                   >
                     <EllipsisVertical size={17} aria-hidden="true" />
-                  </button>
+                  </button> : null}
                 </div>
                 {menuOpen ? (
                   <div className={styles.exerciseActions}>
-                    <button type="button" onClick={() => dispatch({ type: "duplicate_exercise", exerciseId: exercise.id })}><Copy size={13} aria-hidden="true" />Duplicar</button>
+                    {state.workflow !== "active_edit" ? <button type="button" onClick={() => dispatch({ type: "duplicate_exercise", exerciseId: exercise.id })}><Copy size={13} aria-hidden="true" />Duplicar</button> : null}
                     <button type="button" data-danger onClick={() => dispatch({ type: "remove_exercise", exerciseId: exercise.id })}><Trash2 size={13} aria-hidden="true" />Eliminar</button>
                   </div>
                 ) : null}
@@ -188,7 +190,9 @@ export function CycleRoutineScreen({
         </SecondaryAction>
         <div>
           <SecondaryAction onClick={() => dispatch({ type: "open_copy", mode: "exercises" })}>Copiar ejercicios de otro día</SecondaryAction>
-          <SecondaryAction onClick={() => dispatch({ type: "open_copy", mode: "day" })}>Copiar día completo</SecondaryAction>
+          {state.workflow !== "active_edit" || !routine.exercises.some((exercise) => state.loggedExerciseIds.includes(exercise.id))
+            ? <SecondaryAction onClick={() => dispatch({ type: "open_copy", mode: "day" })}>Copiar día completo</SecondaryAction>
+            : null}
         </div>
       </div>
       <SecondaryAction onClick={() => dispatch({ type: "navigate", screen: "muscle" })}>

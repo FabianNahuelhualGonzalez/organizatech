@@ -434,20 +434,15 @@ assert.match(featureSource, /requestNewCycle\("duplicate", "start"\)/);
 assert.match(featureSource, /actionLabel=\{state\.committedSyncPending \? "Recargar ahora" : undefined\}/);
 assert.match(featureSource, /window\.location\.reload\(\)/);
 assert.match(creationScreensSource, /state\.recoverableDraftAvailable/);
-assert.match(lifecycleScreensSource, /Editar objetivo, días y rutinas/);
 const setupScreenSource = creationScreensSource.match(/export function CycleSetupScreen[\s\S]*$/)?.[0] ?? "";
 const activeScreenSource = lifecycleScreensSource.match(/export function CycleActiveScreen[\s\S]*?export function CycleAlertsScreen/)?.[0] ?? "";
 assert.doesNotMatch(setupScreenSource, /Crear un nuevo ciclo de entrenamiento|onRequestNewCycle/);
 assert.match(activeScreenSource, /onRequestNewCycle/);
-assert.ok(
-  activeScreenSource.indexOf("Editar objetivo, días y rutinas")
-    < activeScreenSource.indexOf("Crear un nuevo ciclo de entrenamiento"),
-  "Crear un nuevo ciclo debe estar inmediatamente después de Editar en Mi ciclo",
-);
-assert.doesNotMatch(
-  activeScreenSource,
-  /Extender la fecha de término|Ver avisos de vencimiento|Ver qué pasa si no lo extiendo|PrimaryAction/,
-);
+assert.doesNotMatch(activeScreenSource, /Editar objetivo, días y rutinas|Crear un nuevo ciclo de entrenamiento|Duplicar/);
+for (const copy of ["OBJETIVO", "Extender la fecha de término", "DÍAS DEL CICLO", "+ Agregar día", "Crear un ciclo nuevo"]) {
+  assert.ok(activeScreenSource.includes(copy), `falta acción contextual en Mi ciclo: ${copy}`);
+}
+assert.ok(activeScreenSource.indexOf("+ Agregar día") < activeScreenSource.indexOf("Crear un ciclo nuevo"));
 assert.doesNotMatch(lifecycleScreensSource, /begin_active_edit[\s\S]{0,200}active_cycle_close/);
 const successScreenSource = lifecycleScreensSource.match(/export function CycleSuccessScreen[\s\S]*?export function CycleActiveScreen/)?.[0] ?? "";
 const successMarkRule = cssSource.match(/\.successMark\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
@@ -484,7 +479,7 @@ for (const copy of [
   "Extender el ciclo",
   "Un entrenamiento en curso nunca se interrumpe",
   "Listo para el siguiente",
-  "Editar objetivo, días y rutinas",
+  "Crear un ciclo nuevo",
   "Se guardarán con revisión optimista",
 ]) {
   assert.ok(combined.includes(copy), `falta copy/estado obligatorio: ${copy}`);

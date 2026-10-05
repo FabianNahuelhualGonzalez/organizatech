@@ -115,6 +115,50 @@ test("proyecta IDs reales, orden canónico y ciclo activo sin inventar catálogo
   assert.equal(model.catalog[0]?.videoUrl, catalog[0]?.videoUrl);
 });
 
+test("cuenta ejercicios con registros sólo por identidad del ciclo y del ejercicio", () => {
+  const active = cycle();
+  const ownedRef = {
+    sessionId: "session-1",
+    cycleId: CYCLE_ID,
+    cycleDayId: null,
+    trainingCycleExerciseId: LEGACY_EXERCISE_ID,
+    exerciseLineageId: LINEAGE_ID,
+  };
+  const model = buildTrainingCycleProductViewModel({
+    todayIsoDate: "2026-08-29",
+    catalog,
+    entries: [],
+    activeCycle: active,
+    draft: null,
+    sourceCycle: null,
+    lastCycle: null,
+    activeCycleEntryRefs: [
+      ownedRef,
+      { ...ownedRef, sessionId: "session-2" },
+      { ...ownedRef, cycleId: "other-cycle", sessionId: "foreign-session" },
+      { ...ownedRef, exerciseLineageId: "other-lineage", trainingCycleExerciseId: "other-exercise" },
+    ],
+  });
+  assert.deepEqual(model.activeCycleDays, [{ day: "monday", exerciseCount: 1, exercisesWithLogs: 1 }]);
+  assert.deepEqual(model.activeCycleLoggedExerciseIds, [EXERCISE_ID]);
+  assert.equal(model.registeredSessions, 2);
+});
+
+test("incorpora un registro nuevo al bloqueo de la pantalla ya abierta", () => {
+  const model = buildTrainingCycleProductViewModel({
+    todayIsoDate: "2026-08-29",
+    catalog,
+    entries: [entry({ id: "new", date: "2026-08-29", exerciseLineageId: LINEAGE_ID })],
+    activeCycle: cycle(),
+    draft: null,
+    sourceCycle: null,
+    lastCycle: null,
+    activeCycleEntryRefs: [],
+  });
+  assert.equal(model.activeCycleDays?.[0]?.exercisesWithLogs, 1);
+  assert.deepEqual(model.activeCycleLoggedExerciseIds, [EXERCISE_ID]);
+});
+
 test("un borrador remoto sin snapshot conserva su URL explícita, incluso null", () => {
   for (const videoUrl of [null, "https://www.youtube.com/watch?v=ZyXwVuTsR_2"]) {
     for (const sourceCycleId of [null, CYCLE_ID]) {

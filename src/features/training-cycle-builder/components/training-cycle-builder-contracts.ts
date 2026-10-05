@@ -184,6 +184,12 @@ export interface TrainingCycleBuilderInitialViewModel {
   readonly activeCycleElapsedDays?: number;
   readonly activeCycleTotalDays?: number;
   readonly registeredSessions?: number;
+  readonly activeCycleDays?: readonly {
+    readonly day: TrainingCycleWeekDay;
+    readonly exerciseCount: number;
+    readonly exercisesWithLogs: number;
+  }[];
+  readonly activeCycleLoggedExerciseIds?: readonly string[];
   readonly expiryAlerts: readonly TrainingCycleExpiryAlertViewModel[];
   readonly closedSummary: TrainingCycleClosedSummaryViewModel;
   readonly nextSessionLabel: string;

@@ -1407,6 +1407,35 @@ test("el plan activo no muta fuera del flujo explícito de edición", () => {
   assert.equal(unchanged, active);
 });
 
+test("el editor activo sólo agrega días y protege ejercicios con registros", () => {
+  const initial = createTrainingCycleBuilderState({
+    ...createTrainingCycleBuilderTestViewModel(),
+    activeCycleLoggedExerciseIds: ["press-flat"],
+  });
+  const active = reduce(initial, { type: "show_active" });
+  const editing = reduce(active, { type: "begin_active_edit" });
+  assert.equal(reduce(editing, { type: "toggle_day", day: "monday" }), editing);
+  assert.equal(reduce(editing, { type: "toggle_day", day: "saturday" }).draft.selectedDays.includes("saturday"), true);
+  assert.equal(reduce(editing, { type: "open_exercise", exerciseId: "press-flat" }), editing);
+  assert.equal(reduce(editing, { type: "remove_exercise", exerciseId: "press-flat" }), editing);
+  assert.equal(reduce(editing, { type: "duplicate_exercise", exerciseId: "press-flat" }), editing);
+  assert.equal(reduce(editing, { type: "open_copy", mode: "day" }), editing);
+  assert.equal(reduce(editing, { type: "move_exercise", exerciseId: "press-flat", direction: "down" }), editing);
+  const forcedSelection = { ...editing, selectedExerciseId: "press-flat" };
+  assert.equal(reduce(forcedSelection, { type: "edit_set", setId: "press-flat-set-1", field: "targetKg", value: "999" }), forcedSelection);
+  const newLog = reduce(editing, {
+    type: "sync_active_cycle_logs",
+    cycleId: editing.activeCycleId ?? "",
+    exerciseIds: ["press-incline"],
+  });
+  assert.equal(reduce(newLog, { type: "open_exercise", exerciseId: "press-incline" }), newLog);
+  assert.equal(reduce(editing, { type: "sync_active_cycle_logs", cycleId: "otro-ciclo", exerciseIds: ["press-incline"] }), editing);
+  const newExercise = reduce(editing, catalogAddAction());
+  assert.equal(newExercise.draft.routines.monday.exercises.length, editing.draft.routines.monday.exercises.length + 1);
+  const creation = createState();
+  assert.equal(reduce(creation, { type: "toggle_day", day: "monday" }).draft.selectedDays.includes("monday"), false);
+});
+
 test("editar el ciclo activo nunca abre ni ejecuta el reemplazo", () => {
   const active = reduce(createState(), { type: "show_active" });
   const editing = reduce(active, { type: "begin_active_edit" });

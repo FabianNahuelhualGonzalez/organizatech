@@ -220,6 +220,15 @@ export function useTrainingCycleBuilderController({
     initialViewModel,
     createTrainingCycleBuilderState,
   );
+  const loggedExerciseKey = initialViewModel.activeCycleLoggedExerciseIds?.join("|") ?? "";
+  useEffect(() => {
+    if (!initialViewModel.activeCycleId) return;
+    dispatch({
+      type: "sync_active_cycle_logs",
+      cycleId: initialViewModel.activeCycleId,
+      exerciseIds: loggedExerciseKey ? loggedExerciseKey.split("|") : [],
+    });
+  }, [initialViewModel.activeCycleId, loggedExerciseKey]);
   const gatewayRef = useRef(gateway);
   const draftRef = useRef(state.draft);
   const originRef = useRef(state.origin);

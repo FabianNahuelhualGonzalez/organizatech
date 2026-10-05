@@ -2344,6 +2344,271 @@
   font-size: 8.5px;
 }
 
+.activeFeature {
+  display: flex;
+  height: 100dvh;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.activeFeatureEmbedded {
+  height: max(0px, calc(100dvh - 64px - env(safe-area-inset-top, 0px) - clamp(16px, 4vw, 24px) - 28px - env(safe-area-inset-bottom, 0px)));
+  padding: 0;
+}
+
+.activeFeatureEmbedded .activeScreen {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.activeContent {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.activeScreen {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px clamp(4px, 1.6vw, 6px) 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.activeScreen > :not(.activeSpacer) {
+  flex: none;
+}
+
+.activeScreen .screenHeading {
+  margin: 0;
+}
+
+.activeScreen .screenHeading h2 {
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.activeScreen .screenHeading p {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.activeScreen .activeSummary {
+  border-radius: 15px;
+}
+
+.activeGoalRow {
+  display: flex;
+  width: 100%;
+  min-height: 64px;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 15px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.activeGoalRow > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.activeGoalRow small,
+.activeGoalRow strong {
+  display: block;
+}
+
+.activeGoalRow small {
+  margin-bottom: 3px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.activeGoalRow strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.activeGoalRow b {
+  padding: 4px 9px;
+  border-radius: 22px;
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.activeChevron {
+  flex: none;
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.activeScreen .activeSummary dl {
+  gap: 8px;
+  padding: 13px 15px 0;
+}
+
+.activeScreen .activeSummary dt {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 9px;
+}
+
+.activeScreen .activeSummary dd {
+  margin-top: 3px;
+  font-size: 11.5px;
+}
+
+.activeScreen .activeStartDate dt {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.activeScreen .activeStartDate dd {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.activeScreen .progressTrack {
+  margin: 12px 15px 8px;
+  border-radius: 4px;
+}
+
+.activeScreen .activeSummary > p {
+  padding: 0 15px 13px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10px;
+}
+
+.activeExtendRow {
+  display: flex;
+  width: 100%;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 15px;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: #8fb2ff;
+  background: transparent;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.activeSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: -6px;
+}
+
+.activeSectionHeader h3 {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.activeSectionHeader button {
+  min-height: 44px;
+  margin: -10px -10px -10px 0;
+  padding: 0 10px;
+  border: 0;
+  color: #8fb2ff;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.activeScreen .activeDays {
+  border-radius: 14px;
+}
+
+.activeDays > button {
+  display: flex;
+  width: 100%;
+  min-height: 56px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  color: #fff;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.activeDays > button:last-child {
+  border-bottom: 0;
+}
+
+.activeDays > button > small {
+  width: 32px;
+  flex: none;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.activeDays > button > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.activeDays > button strong,
+.activeDays > button span small {
+  display: block;
+}
+
+.activeDays > button strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.activeDays > button span small {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 10px;
+}
+
+.activeSpacer {
+  flex: 1;
+}
+
+.activeNewCycleLink {
+  min-height: 44px;
+  margin: 0 -10px;
+  padding: 0 10px;
+  border: 0;
+  color: rgba(255, 255, 255, 0.55);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.activeScreen button:disabled {
+  cursor: not-allowed;
+}
+
+.exerciseList li[draggable="false"] .exerciseDragHandle {
+  visibility: hidden;
+}
+
 .alertList {
   display: grid;
   gap: 9px;

@@ -98,6 +98,7 @@ export interface TrainingCycleBuilderState {
   readonly suggestionErrorMessage: string | null;
   readonly activeCycleId: string | null;
   readonly activeCycleRevision: string | null;
+  readonly loggedExerciseIds: readonly string[];
   readonly activeEditState: "idle" | "saving" | "error" | "conflict";
   readonly activeEditErrorMessage: string | null;
   readonly activeEditSavedMessage: string | null;
@@ -120,6 +121,7 @@ export type TrainingCycleBuilderAction =
   | { readonly type: "set_end_date"; readonly value: string }
   | { readonly type: "toggle_day"; readonly day: TrainingCycleWeekDay }
   | { readonly type: "select_day"; readonly day: TrainingCycleWeekDay }
+  | { readonly type: "sync_active_cycle_logs"; readonly cycleId: string; readonly exerciseIds: readonly string[] }
   | { readonly type: "set_routine_name"; readonly value: string }
   | { readonly type: "toggle_exercise_menu"; readonly exerciseId: string }
   | { readonly type: "move_exercise"; readonly exerciseId: string; readonly direction: "up" | "down" }
@@ -294,6 +296,7 @@ export function createTrainingCycleBuilderState(
     suggestionErrorMessage: null,
     activeCycleId: viewModel.activeCycleId ?? null,
     activeCycleRevision: viewModel.activeCycleRevision ?? null,
+    loggedExerciseIds: viewModel.activeCycleLoggedExerciseIds ?? [],
     activeEditState: "idle",
     activeEditErrorMessage: null,
     activeEditSavedMessage: null,
@@ -344,6 +347,7 @@ function applyOriginChoice(
     recoveredDraftBannerOpen: origin === "resume",
     activeCycleId: null,
     activeCycleRevision: null,
+    loggedExerciseIds: [],
     pendingNewCycleIntent: null,
     activeCycleCloseId: null,
     activeCycleCloseState: "idle",
@@ -372,6 +376,7 @@ function updateCurrentExercise(
 ): TrainingCycleBuilderState {
   const selectedExerciseId = state.selectedExerciseId;
   if (!selectedExerciseId) return state;
+  if (state.workflow === "active_edit" && state.loggedExerciseIds.includes(selectedExerciseId)) return state;
   let changed = false;
   const draft = updateRoutine(state.draft, state.currentDay, (routine) => ({
     ...routine,
@@ -635,6 +640,11 @@ export function trainingCycleBuilderReducer(
       exercise.id === state.selectedExerciseId && !hasUniformLinearSets(exercise));
   if (state.workflow === "active" && (PLAN_EDIT_ACTIONS.has(action.type) || convertsToLinear)) return state;
   switch (action.type) {
+    case "sync_active_cycle_logs": {
+      if (state.activeCycleId !== action.cycleId || state.workflow === "draft") return state;
+      const ids = [...new Set([...state.loggedExerciseIds, ...action.exerciseIds])];
+      return ids.length === state.loggedExerciseIds.length ? state : { ...state, loggedExerciseIds: ids };
+    }
     case "navigate":
       if (action.screen === state.screen) return state;
       return {
@@ -711,6 +721,7 @@ export function trainingCycleBuilderReducer(
       if (state.workflow === "active_edit") return state;
       return markDraftChanged(state, { ...state.draft, endDate: action.value });
     case "toggle_day": {
+      if (state.workflow === "active_edit" && state.draft.selectedDays.includes(action.day)) return state;
       const selectedDays = state.draft.selectedDays.includes(action.day)
         ? state.draft.selectedDays.filter((day) => day !== action.day)
         : TRAINING_CYCLE_WEEK_DAYS.filter((day) =>
@@ -729,6 +740,7 @@ export function trainingCycleBuilderReducer(
         updateRoutine(state.draft, state.currentDay, (routine) => ({ ...routine, name: action.value })),
       );
     case "toggle_exercise_menu":
+      if (state.workflow === "active_edit" && state.loggedExerciseIds.includes(action.exerciseId)) return state;
       return {
         ...state,
         openExerciseMenuId: state.openExerciseMenuId === action.exerciseId ? null : action.exerciseId,
@@ -738,6 +750,10 @@ export function trainingCycleBuilderReducer(
       const index = routine.exercises.findIndex((exercise) => exercise.id === action.exerciseId);
       const target = action.direction === "up" ? index - 1 : index + 1;
       if (index < 0 || target < 0 || target >= routine.exercises.length) return state;
+      if (state.workflow === "active_edit" && (
+        state.loggedExerciseIds.includes(action.exerciseId)
+        || state.loggedExerciseIds.includes(routine.exercises[target].id)
+      )) return state;
       const exercises = [...routine.exercises];
       [exercises[index], exercises[target]] = [exercises[target], exercises[index]];
       return markDraftChanged(
@@ -751,6 +767,10 @@ export function trainingCycleBuilderReducer(
       const fromIndex = routine.exercises.findIndex((exercise) => exercise.id === action.exerciseId);
       const targetIndex = routine.exercises.findIndex((exercise) => exercise.id === action.targetExerciseId);
       if (fromIndex < 0 || targetIndex < 0 || fromIndex === targetIndex) return state;
+      if (state.workflow === "active_edit" && (
+        state.loggedExerciseIds.includes(action.exerciseId)
+        || state.loggedExerciseIds.includes(action.targetExerciseId)
+      )) return state;
       const exercises = [...routine.exercises];
       const [exercise] = exercises.splice(fromIndex, 1);
       exercises.splice(fromIndex < targetIndex ? targetIndex - 1 : targetIndex, 0, exercise);
@@ -761,6 +781,7 @@ export function trainingCycleBuilderReducer(
       );
     }
     case "duplicate_exercise": {
+      if (state.workflow === "active_edit") return state;
       const routine = state.draft.routines[state.currentDay];
       const index = routine.exercises.findIndex((exercise) => exercise.id === action.exerciseId);
       if (index < 0) return state;
@@ -774,6 +795,7 @@ export function trainingCycleBuilderReducer(
       );
     }
     case "remove_exercise":
+      if (state.workflow === "active_edit" && state.loggedExerciseIds.includes(action.exerciseId)) return state;
       return markDraftChanged(
         state,
         updateRoutine(state.draft, state.currentDay, (routine) => ({
@@ -783,6 +805,7 @@ export function trainingCycleBuilderReducer(
         { openExerciseMenuId: null },
       );
     case "open_exercise": {
+      if (state.workflow === "active_edit" && state.loggedExerciseIds.includes(action.exerciseId)) return state;
       const exercise = state.draft.routines[state.currentDay].exercises.find(
         (candidate) => candidate.id === action.exerciseId,
       );
@@ -1017,6 +1040,7 @@ export function trainingCycleBuilderReducer(
         openReviewSection: state.openReviewSection === action.section ? null : action.section,
       };
     case "open_copy":
+      if (state.workflow === "active_edit" && action.mode === "day" && state.draft.routines[state.currentDay].exercises.some((exercise) => state.loggedExerciseIds.includes(exercise.id))) return state;
       return { ...state, copyMode: action.mode, copyStep: "days", copySourceDay: null, copyExerciseId: null };
     case "close_copy":
       return { ...state, copyMode: null, copyStep: "days", copySourceDay: null, copyExerciseId: null };
@@ -1052,6 +1076,7 @@ export function trainingCycleBuilderReducer(
     case "dismiss_copy_notice":
       return { ...state, copyNotice: null };
     case "copy_from_day": {
+      if (state.workflow === "active_edit" && state.copyMode === "day" && state.draft.routines[state.currentDay].exercises.some((exercise) => state.loggedExerciseIds.includes(exercise.id))) return state;
       const source = state.draft.routines[action.sourceDay];
       const clonedExercises = source.exercises.map((exercise, index) =>
         cloneExercise(exercise, "copy-day", state.nextEntityNumber + index));
@@ -1177,6 +1202,7 @@ export function trainingCycleBuilderReducer(
       return {
         ...state,
         workflow: "active",
+        loggedExerciseIds: [],
         activationState: "idle",
         activationErrorMessage: null,
         activeCycleId: action.cycleId,

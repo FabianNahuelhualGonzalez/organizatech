@@ -306,8 +306,10 @@ export function CycleSetupScreen({
                 key={day}
                 data-selected={selected}
                 aria-pressed={selected}
-                disabled={generating}
-                aria-label={`${selected ? "Quitar" : "Agregar"} ${TRAINING_CYCLE_DAY_LABELS[day]}`}
+                disabled={generating || (isActiveEdit && selected)}
+                aria-label={isActiveEdit && selected
+                  ? TRAINING_CYCLE_DAY_LABELS[day]
+                  : `${selected ? "Quitar" : "Agregar"} ${TRAINING_CYCLE_DAY_LABELS[day]}`}
                 onClick={() => dispatch({ type: "toggle_day", day })}
               >
                 {TRAINING_CYCLE_DAY_LETTERS[day]}

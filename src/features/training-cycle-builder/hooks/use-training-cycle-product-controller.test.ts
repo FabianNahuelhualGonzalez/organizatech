@@ -143,6 +143,27 @@ test("la lectura del activo conserva el video canónico del ciclo activado", asy
   );
 });
 
+test("la pantalla activa espera los registros del ciclo y falla cerrado si la lectura falla", async () => {
+  const cycleId = "20000000-0000-4000-8000-000000000098";
+  const rpc = fakeRpc({ activeCycle: { cycleId, plan: { days: [] } } });
+  const refs = [{
+    sessionId: "session-1",
+    cycleId,
+    cycleDayId: null,
+    trainingCycleExerciseId: "exercise-1",
+    exerciseLineageId: "lineage-1",
+  }];
+  const loaded = await loadTrainingCycleProductData(rpc as never, async (requestedCycleId) => {
+    assert.equal(requestedCycleId, cycleId);
+    return refs;
+  });
+  assert.deepEqual(loaded.activeCycleEntryRefs, refs);
+  await assert.rejects(
+    loadTrainingCycleProductData(rpc as never, async () => { throw new Error("lectura no disponible"); }),
+    /lectura no disponible/,
+  );
+});
+
 test("falla cerrado si el catálogo requiere más de tres páginas", async () => {
   await assert.rejects(loadTrainingCycleProductData(fakeRpc({ pages: 4 }) as never), (error) => {
     assert.ok(error instanceof TrainingCycleTransportError);
