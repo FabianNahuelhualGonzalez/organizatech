@@ -84,6 +84,8 @@ const STUDENT_COACH_LINK_ACCEPTANCE_MIGRATION_PATH =
   "supabase/migrations/20260917000000_student_coach_link_acceptance.sql";
 const COACH_INVITATION_CODE_DELIVERY_MIGRATION_PATH =
   "supabase/migrations/20260917120000_coach_invitation_code_delivery.sql";
+const COACH_COMMERCIAL_PORTFOLIO_MIGRATION_PATH =
+  "supabase/migrations/20261005000000_coach_commercial_portfolio_v1.sql";
 const COACH_STUDENT_EVALUATIONS_MIGRATION_PATH =
   "supabase/migrations/20260919225532_coach_student_evaluations.sql";
 const COACH_SELF_STUDENT_AND_EVALUATION_TEMPLATE_DELETION_MIGRATION_PATH =
@@ -630,6 +632,7 @@ function auditProhibitedArtifacts(
         && path !== COACH_DASHBOARD_PREFERENCES_MIGRATION_PATH
         && path !== COACH_INVITATIONS_MIGRATION_PATH
         && path !== COACH_PAID_PERIODS_MIGRATION_PATH
+        && path !== COACH_COMMERCIAL_PORTFOLIO_MIGRATION_PATH
         && path !== COACH_PENDING_INVITATIONS_LIST_MIGRATION_PATH
         && path !== COACH_ACTIVE_RELATIONSHIPS_LIST_MIGRATION_PATH
         && path !== COACH_INVITATION_GENERATION_MIGRATION_PATH
