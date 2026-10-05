@@ -1,5 +1,4 @@
 import { CalendarDays, ChevronRight } from "lucide-react";
-import type { ReactNode } from "react";
 import { StatusMessage } from "@/ui/feedback/status-message";
 import type { CoachClientDetailView, CoachClientDetailActions } from "./coach-client-detail-view";
 import { CoachClientCodeCard } from "./coach-client-code-card";
@@ -8,11 +7,10 @@ import styles from "./coach-client-detail-sheet.module.css";
 
 const STATE_LABELS = { active: "ACTIVO", pending: "PENDIENTE", inactive: "BAJA" } as const;
 
-export function CoachClientDetailContent({ view, disabled, actions, commercialContent }: {
+export function CoachClientDetailContent({ view, disabled, actions }: {
   readonly view: CoachClientDetailView;
   readonly disabled: boolean;
   readonly actions: Pick<CoachClientDetailActions, "onCopyCode" | "onShareCode" | "onResend" | "onRetryDelivery" | "onOpenCycle">;
-  readonly commercialContent?: ReactNode;
 }) {
   const facts = view.state === "active"
     ? [{ label: "Vinculado desde", value: view.facts.linkedOnLabel }, { label: "Último entrenamiento", value: view.facts.lastTrainingLabel }, { label: "Sesiones del ciclo", value: view.facts.sessionsLabel }]
@@ -39,7 +37,6 @@ export function CoachClientDetailContent({ view, disabled, actions, commercialCo
         <span className={styles.cycleTitle}>Ver su ciclo y rutinas</span><span className={styles.cycleLabel} data-known={view.cycle?.label != null}>{view.cycle?.label ?? "—"}</span>
       </span><ChevronRight size={13} aria-hidden="true" />
     </button> : null}
-    {view.state === "active" ? commercialContent : null}
     {view.state === "inactive" && view.historyNote !== null ? <p className={styles.note}>{view.historyNote}</p> : null}
     {view.message ? <StatusMessage className={shared.message} tone={view.message.tone}>{view.message.label}</StatusMessage> : null}
   </div>;

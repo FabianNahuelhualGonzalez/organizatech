@@ -1,5 +1,4 @@
 import type { CoachOverlayFocusProps, CoachOverlayMessageView } from "@/ui/coach-overlays/coach-overlay-view";
-import type { ReactNode } from "react";
 
 export interface CoachClientCodeView {
   readonly code: string | null;
@@ -88,7 +87,6 @@ export interface CoachClientDetailSheetProps extends CoachOverlayFocusProps {
   readonly view: CoachClientDetailView;
   readonly confirmation: CoachClientUnlinkConfirmationView | null;
   readonly actions: CoachClientDetailActions;
-  readonly commercialContent?: ReactNode;
 }
 
 export interface CoachClientUnlinkConfirmationProps extends CoachOverlayFocusProps {

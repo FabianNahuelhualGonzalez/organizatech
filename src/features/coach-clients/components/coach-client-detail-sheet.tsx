@@ -9,7 +9,7 @@ import { CoachClientUnlinkConfirmation } from "./coach-client-unlink-confirmatio
 import shared from "@/ui/coach-overlays/coach-overlay.module.css";
 import styles from "./coach-client-detail-sheet.module.css";
 
-export function CoachClientDetailSheet({ view, confirmation, actions, commercialContent, backgroundRef, restoreFocusRef }: CoachClientDetailSheetProps) {
+export function CoachClientDetailSheet({ view, confirmation, actions, backgroundRef, restoreFocusRef }: CoachClientDetailSheetProps) {
   const id = useId();
   const detailBackgroundRef = useRef<HTMLDivElement>(null);
   const unlinkTriggerRef = useRef<HTMLElement>(null);
@@ -36,7 +36,7 @@ export function CoachClientDetailSheet({ view, confirmation, actions, commercial
           <button className={styles.close} type="button" aria-label="Cerrar" disabled={disabled || !view.canClose || !actions.onCancelDetail}
             onClick={!disabled && view.canClose ? actions.onCancelDetail : undefined}><span><X size={13} aria-hidden="true" /></span></button>
         </div>
-        <CoachClientDetailContent view={view} disabled={disabled} actions={actions} commercialContent={commercialContent} />
+        <CoachClientDetailContent view={view} disabled={disabled} actions={actions} />
       </CoachOverlay>
     </div>
     {confirmationMatches && confirmation ? <CoachClientUnlinkConfirmation view={{ ...confirmation, isBusy: view.isBusy || confirmation.isBusy }}
