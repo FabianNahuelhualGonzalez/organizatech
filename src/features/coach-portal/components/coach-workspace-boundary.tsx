@@ -158,10 +158,12 @@ export function CoachWorkspaceBoundary({
               hasMorePeriods={Boolean(controller.commercial.snapshot.periodPages[selectedCommercial.episodeId]?.cursor)}
               today={controller.commercial.snapshot.portfolio.serverToday}
               busy={controller.commercial.snapshot.busy} uncertain={controller.commercial.snapshot.uncertain}
+              retryAllowed={controller.commercial.snapshot.retryAllowed}
               needsRefresh={controller.commercial.snapshot.needsRefresh}
               issue={controller.commercial.snapshot.issue}
               onSubmit={(command) => { void controller.commercial.submit(command); }}
               onReconcile={() => { void controller.commercial.reconcile(); }}
+              onRetry={() => { void controller.commercial.retry(); }}
               onReload={() => { void controller.commercial.reload(); }}
               onLoadMorePeriods={() => { void controller.commercial.loadMorePeriods(selectedCommercial.episodeId); }} />
           ) : controller.detail.state === "active" ? controller.commercial.snapshot.portfolio?.stats ? (

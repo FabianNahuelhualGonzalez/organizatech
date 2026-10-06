@@ -133,8 +133,8 @@ test("productive student sheet shows CLP, indefinite term, payment, renewal exit
   const noop = () => undefined;
   const render = (item: CoachCommercialPortfolio["items"][number], periods = portfolio.periods) =>
     renderToStaticMarkup(createElement(CoachCommercialStudent, { item, periods, today: portfolio.serverToday,
-      busy: false, uncertain: false, needsRefresh: false, issue: null,
-      onSubmit: noop, onReconcile: noop, onReload: noop }));
+      busy: false, uncertain: false, retryAllowed: false, needsRefresh: false, issue: null,
+      onSubmit: noop, onReconcile: noop, onRetry: noop, onReload: noop }));
   assert.match(render(portfolio.items[0]), /45\.000 CLP/);
   assert.match(render(portfolio.items[0]), /Indefinida/);
   assert.match(render(portfolio.items[0]), /Confirmar pago/);
@@ -156,4 +156,17 @@ test("productive student sheet shows CLP, indefinite term, payment, renewal exit
   const css = readFileSync("src/features/coach-dashboard/commercial/components/coach-commercial-student.module.css", "utf8");
   assert.match(css, /min-height: 44px/);
   assert.match(css, /:focus-visible/);
+});
+
+test("an uncertain request offers the same-request retry only after reconciliation found no receipt", () => {
+  const noop = () => undefined;
+  const render = (retryAllowed: boolean) => renderToStaticMarkup(createElement(CoachCommercialStudent, {
+    item: portfolio.items[1], periods: [expired], today: portfolio.serverToday,
+    busy: false, uncertain: true, retryAllowed, needsRefresh: false, issue: null,
+    onSubmit: noop, onReconcile: noop, onRetry: noop, onReload: noop,
+  }));
+  assert.match(render(false), /Revisar estado de la operación/);
+  assert.doesNotMatch(render(false), /Reintentar solicitud/);
+  assert.match(render(true), /Reintentar solicitud/);
+  assert.doesNotMatch(render(true), /<form/);
 });

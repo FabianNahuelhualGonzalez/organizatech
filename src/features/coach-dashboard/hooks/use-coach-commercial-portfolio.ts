@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CoachPublicRpcRuntimeInput } from "@/features/coach-clients/data/coach-public-rpc-runtime";
 import { createCoachCommercialRepository } from "../data/coach-commercial-repository";
 import type { CoachCommercialCommand } from "../data/coach-commercial-contract";
+import { CoachCommercialError } from "../data/coach-commercial-contract";
+import { isDefinitiveCoachCommercialRejection, matchesCoachCommercialOperation,
+  snapshotCoachCommercialCommand } from "../data/coach-commercial-operation";
 import type { CoachCommercialItem, CoachCommercialPeriod, CoachCommercialPortfolio } from "../model/coach-commercial-portfolio";
 
 type Phase = "loading" | "ready" | "error";
@@ -13,6 +16,7 @@ interface Snapshot {
   readonly issue: string | null;
   readonly busy: boolean;
   readonly uncertain: boolean;
+  readonly retryAllowed: boolean;
   readonly needsRefresh: boolean;
   readonly students: Readonly<Record<string, CoachCommercialItem>>;
   readonly studentIssues: Readonly<Record<string, string>>;
@@ -20,7 +24,7 @@ interface Snapshot {
 }
 
 const EMPTY: Snapshot = { phase: "loading", portfolio: null, issue: null, busy: false, uncertain: false,
-  needsRefresh: false, students: {}, studentIssues: {}, periodPages: {} };
+  retryAllowed: false, needsRefresh: false, students: {}, studentIssues: {}, periodPages: {} };
 
 /** An uncertain RPC result keeps its request id until the server confirms its outcome. */
 export function useCoachCommercialPortfolio(connection: CoachPublicRpcRuntimeInput | null) {
@@ -142,39 +146,68 @@ export function useCoachCommercialPortfolio(connection: CoachPublicRpcRuntimeInp
       const receipt = await repository.readOperation(pending.requestId);
       if (current !== generation.current) return;
       if (receipt === null) {
-        setSnapshot((prior) => ({ ...prior, busy: false, uncertain: true,
-          issue: "La operación aún no figura en el servidor. Vuelve a revisar su estado antes de otra acción." }));
+        setSnapshot((prior) => ({ ...prior, busy: false, uncertain: true, retryAllowed: true,
+          issue: "La operación aún no figura en el servidor. Puedes reintentar la misma solicitud." }));
+        return;
+      }
+      if (!matchesCoachCommercialOperation(pending, receipt)) {
+        setSnapshot((prior) => ({ ...prior, busy: false, uncertain: true, retryAllowed: false,
+          issue: "El resultado sigue sin confirmarse. Revisa el estado antes de otra acción." }));
         return;
       }
       operation.current = null;
       await reload();
       if (current !== generation.current) return;
-      setSnapshot((prior) => ({ ...prior, busy: false, uncertain: false }));
+      setSnapshot((prior) => ({ ...prior, busy: false, uncertain: false, retryAllowed: false }));
     } catch {
       if (current === generation.current) setSnapshot((prior) => ({ ...prior, busy: false, uncertain: true,
-        issue: "El resultado sigue sin confirmarse. Revisa el estado antes de otra acción." }));
+        retryAllowed: false, issue: "El resultado sigue sin confirmarse. Revisa el estado antes de otra acción." }));
+    } finally { if (current === generation.current) busy.current = false; }
+  }, [reload, repository]);
+
+  const dispatch = useCallback(async (command: CoachCommercialCommand, retrying: boolean) => {
+    if (!repository || busy.current || operation.current !== command) return;
+    const current = generation.current;
+    busy.current = true;
+    setSnapshot((prior) => ({ ...prior, busy: true, retryAllowed: false, issue: null }));
+    try {
+      const receipt = await repository.write(command);
+      if (current !== generation.current) return;
+      if (!matchesCoachCommercialOperation(command, receipt)) throw new CoachCommercialError("invalid_response");
+      operation.current = null;
+      await reload();
+      if (current !== generation.current) return;
+      setSnapshot((prior) => ({ ...prior, busy: false, uncertain: false, retryAllowed: false }));
+    } catch (error) {
+      if (current === generation.current) {
+        const rejected = isDefinitiveCoachCommercialRejection(error, retrying);
+        if (rejected) operation.current = null;
+        setSnapshot((prior) => ({ ...prior, busy: false, uncertain: !rejected,
+          retryAllowed: false, needsRefresh: rejected || prior.needsRefresh,
+          issue: rejected ? "No pudimos completar la operación. Actualiza la ficha comercial."
+            : "No pudimos confirmar el resultado. Revisa el estado antes de intentar de nuevo." }));
+      }
     } finally { if (current === generation.current) busy.current = false; }
   }, [reload, repository]);
 
   const submit = useCallback(async (command: CoachCommercialCommand) => {
     if (!repository || busy.current || operation.current) return;
-    const current = generation.current;
-    busy.current = true;
-    operation.current = command;
-    setSnapshot((prior) => ({ ...prior, busy: true, issue: null }));
-    try {
-      await repository.write(command);
-      if (current !== generation.current) return;
-      operation.current = null;
-      await reload();
-      if (current !== generation.current) return;
-      setSnapshot((prior) => ({ ...prior, busy: false, uncertain: false }));
-    } catch {
-      if (current === generation.current) setSnapshot((prior) => ({ ...prior, busy: false, uncertain: true,
-        issue: "No pudimos confirmar el resultado. Revisa el estado antes de intentar de nuevo." }));
-    } finally { if (current === generation.current) busy.current = false; }
-  }, [reload, repository]);
+    let stable: CoachCommercialCommand;
+    try { stable = snapshotCoachCommercialCommand(command); }
+    catch {
+      setSnapshot((prior) => ({ ...prior, issue: "No pudimos completar la operación. Actualiza la ficha comercial." }));
+      return;
+    }
+    operation.current = stable;
+    await dispatch(stable, false);
+  }, [dispatch, repository]);
 
-  return { available: repository !== null, snapshot, reload, submit, reconcile,
+  const retry = useCallback(async () => {
+    const pending = operation.current;
+    if (!pending || !snapshot.retryAllowed || busy.current) return;
+    await dispatch(pending, true);
+  }, [dispatch, snapshot.retryAllowed]);
+
+  return { available: repository !== null, snapshot, reload, submit, reconcile, retry,
     loadMoreItems, loadMoreMonths, loadStudent, loadMorePeriods };
 }

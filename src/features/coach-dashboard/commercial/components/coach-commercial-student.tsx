@@ -14,18 +14,20 @@ const STATUS = {
 } as const;
 const ACTION = { start: "Configurar acuerdo inicial", renew: "Renovar", correct_future: "Corregir período futuro" } as const;
 
-export function CoachCommercialStudent({ item, periods, hasMorePeriods = false, today, busy, uncertain, needsRefresh,
-  issue, onSubmit, onReconcile, onReload, onLoadMorePeriods }: {
+export function CoachCommercialStudent({ item, periods, hasMorePeriods = false, today, busy, uncertain, retryAllowed,
+  needsRefresh, issue, onSubmit, onReconcile, onRetry, onReload, onLoadMorePeriods }: {
   readonly item: CoachCommercialItem;
   readonly periods: readonly CoachCommercialPeriod[];
   readonly hasMorePeriods?: boolean;
   readonly today: string;
   readonly busy: boolean;
   readonly uncertain: boolean;
+  readonly retryAllowed: boolean;
   readonly needsRefresh: boolean;
   readonly issue: string | null;
   readonly onSubmit: (command: CoachCommercialCommand) => void;
   readonly onReconcile: () => void;
+  readonly onRetry: () => void;
   readonly onReload: () => void;
   readonly onLoadMorePeriods?: () => void;
 }) {
@@ -68,7 +70,10 @@ export function CoachCommercialStudent({ item, periods, hasMorePeriods = false, 
     </div>
     <p className={styles.note}>Acuerdo comercial independiente del ciclo de entrenamiento.</p>
     {issue ? <p className={styles.error} role="alert">{issue}</p> : null}
-    {uncertain ? <button className={styles.action} type="button" disabled={busy} onClick={onReconcile}>Revisar estado de la operación</button> : null}
+    {uncertain ? <div className={`${styles.payment} ${styles.buttons}`}>
+      <button className={styles.action} type="button" disabled={busy} onClick={onReconcile}>Revisar estado de la operación</button>
+      {retryAllowed ? <button className={styles.action} type="button" disabled={busy} onClick={onRetry}>Reintentar solicitud</button> : null}
+    </div> : null}
     {needsRefresh && !uncertain ? <button className={styles.action} type="button" disabled={busy} onClick={onReload}>Actualizar ficha comercial</button> : null}
     {latest ? <dl className={styles.facts}>
       <div><dt>Monto</dt><dd>{clp(latest.amountClp)}</dd></div>
