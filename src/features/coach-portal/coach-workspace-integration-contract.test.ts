@@ -30,7 +30,7 @@ test("el portal monta la composición productiva y la feature conserva sus runti
     "createCoachInvitationDeliveryRuntime",
     "createCoachInvitationActionsRuntime",
     "createCoachClientDisconnectionRuntime",
-    "createCoachPreferencesRuntime",
+    "createCoachChatInterestRuntime",
   ]) assert.match(controller, new RegExp(runtime));
   assert.match(controller, /creationController\?\.reconcile\(\)/);
   assert.match(controller, /creationController\?\.retry\(\)/);
@@ -55,7 +55,8 @@ test("Gestionar tarifas abre alumnos activos y no conecta el editor global legad
   const controller = readFileSync(CONTROLLER_PATH, "utf8");
   assert.match(boundary, /onManageRates: controller\.available \? \(\) => controller\.actions\.openClients\("active"\)/);
   assert.doesNotMatch(boundary, /CoachFeeSheet|saveFee|openFee/);
-  assert.doesNotMatch(controller, /saveFee:|openFee:/);
+  assert.doesNotMatch(controller, /CoachFeeSheet|saveFee|openFee|monthlyFeeClp|createCoachPreferencesRuntime|read_own_coach_dashboard_preferences/);
+  assert.match(controller, /chatInterest: createCoachChatInterestRuntime/);
   assert.match(controller, /item\.status === "needs_agreement"/);
   assert.match(controller, /setSelected\(\{ kind: "relationship", id: missing\.episodeId \}\)/);
 });

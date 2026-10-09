@@ -67,15 +67,15 @@ test("separa invitaciones pendientes de pagos y conserva métricas sin fuente co
   const view = buildCoachDashboardView({
     coachName: "Coach Uno",
     now: new Date("2026-09-16T12:00:00.000Z"),
-    preferences,
     active,
     pending,
   });
 
   assert.deepEqual(view.portfolio.active, { value: 2, label: "2" });
   assert.deepEqual(view.portfolio.pending, { value: 1, label: "1" });
-  assert.deepEqual(view.income.amount, { value: 70_000, label: "$70.000" });
-  assert.deepEqual(view.income.potential, { value: 105_000, label: "$105.000" });
+  assert.deepEqual(view.income.amount, { value: null, label: "Sin información" });
+  assert.deepEqual(view.income.potential, { value: null, label: "Sin información" });
+  assert.equal(view.income.formulaLabel, null);
   assert.equal(view.income.potentialLabel, "SI ACEPTAN LAS INVITACIONES");
   assert.equal(view.income.atRisk.value, null);
   assert.equal(view.chart.months.length, 0);

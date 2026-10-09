@@ -31,14 +31,14 @@ import type { CoachPendingInvitationsSnapshot } from "@/features/coach-clients/h
 import type { CoachInvitationCreationSnapshot } from "@/features/coach-clients/hooks/coach-invitation-creation-contract";
 import type { CoachInvitationActionsSnapshot } from "@/features/coach-clients/hooks/coach-invitation-actions-contract";
 import type { CoachClientDisconnectionSnapshot } from "@/features/coach-clients/hooks/coach-client-disconnection-contract";
-import { createCoachPreferencesRuntime } from "@/features/coach-dashboard/integration/coach-preferences-runtime";
+import { createCoachChatInterestRuntime } from "@/features/coach-dashboard/integration/coach-chat-interest-runtime";
 import { useCoachCommercialPortfolio } from "@/features/coach-dashboard/hooks/use-coach-commercial-portfolio";
 import { buildCoachCommercialDashboardView } from "@/features/coach-dashboard/integration/coach-commercial-dashboard-presentation";
 import {
   buildCoachClientsView,
   buildCoachDashboardView,
 } from "@/features/coach-dashboard/integration/coach-dashboard-productive-presentation";
-import type { CoachPreferencesControllerState } from "@/features/coach-dashboard/hooks/coach-preferences-controller-contract";
+import type { CoachChatInterestState } from "@/features/coach-dashboard/hooks/coach-chat-interest-controller";
 import {
   getActiveSupabaseAuthIdentityScope,
   getSupabaseBrowserClient,
@@ -96,9 +96,8 @@ const EMPTY_DISCONNECTION: CoachClientDisconnectionSnapshot = Object.freeze({
   needsRefresh: false,
   disposed: false,
 });
-const EMPTY_PREFERENCES: CoachPreferencesControllerState = Object.freeze({
+const EMPTY_CHAT_INTEREST: CoachChatInterestState = Object.freeze({
   confirmed: null,
-  feeDraft: null,
   chatOpen: false,
   pending: null,
   issue: null,
@@ -213,7 +212,7 @@ export function useCoachWorkspaceController(input: {
       return Object.freeze({
         active: createCoachActiveRelationshipsRuntime({ connection }),
         pending: createCoachPendingInvitationsRuntime({ connection }),
-        preferences: createCoachPreferencesRuntime({
+        chatInterest: createCoachChatInterestRuntime({
           configuration: connection.configuration,
           principal: connection.principal,
           expectedUserId: input.userId,
@@ -229,17 +228,17 @@ export function useCoachWorkspaceController(input: {
     if (!base) return;
     void base.active.load();
     void base.pending.load();
-    void base.preferences.load();
+    void base.chatInterest.load();
     return () => {
       base.active.dispose();
       base.pending.dispose();
-      base.preferences.dispose();
+      base.chatInterest.dispose();
     };
   }, [base]);
 
   const active = useControllerSnapshot(base?.active ?? null, EMPTY_ACTIVE);
   const pending = useControllerSnapshot(base?.pending ?? null, EMPTY_PENDING);
-  const preferences = useControllerSnapshot(base?.preferences ?? null, EMPTY_PREFERENCES);
+  const chatInterest = useControllerSnapshot(base?.chatInterest ?? null, EMPTY_CHAT_INTEREST);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -570,7 +569,6 @@ export function useCoachWorkspaceController(input: {
   const dashboardBase = buildCoachDashboardView({
     coachName: input.coachName,
     now: new Date(),
-    preferences,
     active,
     pending,
   });
@@ -634,10 +632,10 @@ export function useCoachWorkspaceController(input: {
     commercial,
     clientsView,
     chatView: Object.freeze({
-      isOpen: preferences.chatOpen,
-      isBusy: preferences.pending !== null,
-      isRegistered: preferences.confirmed?.chatInterestRegistered ?? null,
-      message: preferences.issue ? Object.freeze({
+      isOpen: chatInterest.chatOpen,
+      isBusy: chatInterest.pending !== null,
+      isRegistered: chatInterest.confirmed?.chatInterestRegistered ?? null,
+      message: chatInterest.issue ? Object.freeze({
         tone: "error" as const,
         label: "No pudimos completar la operación.",
       }) : null,
@@ -796,9 +794,9 @@ export function useCoachWorkspaceController(input: {
           }
         }
       },
-      openChat: () => base?.preferences.openChat(),
-      cancelChat: () => base?.preferences.cancelChat(),
-      registerChat: () => { void base?.preferences.registerChatInterest(); },
+      openChat: () => base?.chatInterest.openChat(),
+      cancelChat: () => base?.chatInterest.cancelChat(),
+      registerChat: () => { void base?.chatInterest.registerChatInterest(); },
     },
   };
 }

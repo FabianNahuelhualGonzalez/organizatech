@@ -46,21 +46,11 @@ function dateLabel(value: string): string | null {
 export function buildCoachDashboardView(input: {
   readonly coachName: string;
   readonly now: Date;
-  readonly preferences: CoachPreferencesControllerState;
   readonly active: CoachActiveRelationshipsSnapshot;
   readonly pending: CoachPendingInvitationsSnapshot;
 }): CoachDashboardViewModel {
   const activeCount = input.active.totalActive;
   const pendingInvitationCount = input.pending.totalPending;
-  const feeClp = input.preferences.confirmed?.monthlyFeeClp ?? null;
-  const commercial = calculateCoachCommercialMoney({
-    feeClp,
-    activeCount,
-    pendingInvitationCount,
-    declinedCount: null,
-    confirmedPaymentsClp: null,
-  });
-  const feeLabel = formatCoachClpAmount(feeClp);
   const todayLabel = Number.isFinite(input.now.getTime())
     ? new Intl.DateTimeFormat("es-CL", {
       weekday: "long",
@@ -73,15 +63,13 @@ export function buildCoachDashboardView(input: {
   return Object.freeze({
     welcome: Object.freeze({ coachName: input.coachName, todayLabel }),
     income: Object.freeze({
-      amount: moneyMetric(commercial.activeEstimateClp),
+      amount: moneyMetric(null),
       comparisonLabel: null,
       comparisonTone: "neutral" as const,
-      formulaLabel: activeCount !== null && feeLabel !== null
-        ? `${activeCount} alumnos activos × ${feeLabel} al mes`
-        : null,
+      formulaLabel: null,
       atRisk: moneyMetric(null),
       atRiskNote: null,
-      potential: moneyMetric(commercial.totalPotentialClp),
+      potential: moneyMetric(null),
       potentialLabel: "SI ACEPTAN LAS INVITACIONES",
       potentialNote: "activos + invitaciones pendientes",
     }),

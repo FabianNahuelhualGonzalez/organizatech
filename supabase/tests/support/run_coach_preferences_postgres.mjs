@@ -55,6 +55,7 @@ function same(actual, expected) {
 const readSql = "select public.read_own_coach_dashboard_preferences() as value";
 const saveSql = "select public.save_own_coach_dashboard_fee($1::numeric, $2::numeric) as value";
 const chatSql = "select public.register_own_coach_chat_interest() as value";
+const chatReadSql = "select public.read_own_coach_chat_interest() as value";
 
 try {
   execFileSync("curl", ["-fsSL", "--max-time", "90", archiveUrl, "-o", archive]);
@@ -71,6 +72,7 @@ try {
   await admin.query(sqlFile("supabase/migrations/20260816020743_auth_coach_multiportal_authorization.sql"));
   await admin.query("insert into public.coach_registrations (user_id,first_name,last_name,birth_date,gender,phone_number,professional_title) select id,'Synthetic','Coach','1990-01-01','prefer_not_to_say','test','Test' from auth.users where id <> $1", [ids[2]]);
   await admin.query(sqlFile("supabase/migrations/20260908201518_coach_dashboard_private_preferences.sql"));
+  await admin.query(sqlFile("supabase/migrations/20261009234519_coach_chat_interest_read_v1.sql"));
   const coachA = await client("authenticated", ids[0]);
   const coachB = await client("authenticated", ids[1]);
   const noCoach = await client("authenticated", ids[2]);
@@ -78,12 +80,14 @@ try {
   const noIdentity = await client("authenticated");
   const virgin = { monthlyFeeClp: null, version: 0, chatInterestRegistered: false };
   same(await result(coachA, readSql), virgin);
+  same(await result(coachA, chatReadSql), { chatInterestRegistered: false });
   same(await result(admin, "select count(*)::int as value from private.coach_dashboard_settings"), 0);
 
   for (const unauthorised of [noCoach, anon, noIdentity]) {
     await rejects(unauthorised, readSql, [], "42501");
     await rejects(unauthorised, saveSql, [35000, 0], "42501");
     await rejects(unauthorised, chatSql, [], "42501");
+    await rejects(unauthorised, chatReadSql, [], "42501");
   }
   for (const amount of [null, -1, "0.1", "NaN", "Infinity", "-Infinity", "9007199254740992"]) {
     await rejects(coachA, saveSql, [amount, 0], "22023");
@@ -101,6 +105,8 @@ try {
   same(await result(coachA, readSql), { monthlyFeeClp: 35000, version: 1, chatInterestRegistered: false });
   same(await result(coachA, saveSql, ["9007199254740991", 1]), { monthlyFeeClp: Number.MAX_SAFE_INTEGER, version: 2 });
   same(await result(coachA, chatSql), { chatInterestRegistered: true });
+  same(await result(coachA, chatReadSql), { chatInterestRegistered: true });
+  same(await result(coachB, chatReadSql), { chatInterestRegistered: false });
   const chatCreatedAt = await result(admin, "select created_at as value from private.coach_dashboard_feature_interests where coach_user_id=$1", [ids[0]]);
   same(await result(coachA, chatSql), { chatInterestRegistered: true });
   same(await result(admin, "select created_at as value from private.coach_dashboard_feature_interests where coach_user_id=$1", [ids[0]]), chatCreatedAt);
@@ -117,9 +123,9 @@ try {
     same(row, { relrowsecurity: true, relforcerowsecurity: true });
     await rejects(coachA, `select * from private.${table}`, [], "42501");
   }
-  const publicRpcNames = ["read_own_coach_dashboard_preferences", "save_own_coach_dashboard_fee", "register_own_coach_chat_interest"];
+  const publicRpcNames = ["read_own_coach_dashboard_preferences", "save_own_coach_dashboard_fee", "register_own_coach_chat_interest", "read_own_coach_chat_interest"];
   const functions = (await admin.query("select p.proname,p.prosecdef,p.proconfig,exists(select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) as acl where acl.grantee=0 and acl.privilege_type='EXECUTE') as public_execute,has_function_privilege('anon',p.oid,'EXECUTE') as anon_execute,has_function_privilege('authenticated',p.oid,'EXECUTE') as authenticated_execute from pg_proc as p join pg_namespace as ns on ns.oid=p.pronamespace where ns.nspname='public' and p.proname=any($1::text[])", [publicRpcNames])).rows;
-  same(functions.length, 3);
+  same(functions.length, 4);
   for (const fn of functions) {
     same({ definer: fn.prosecdef, path: fn.proconfig, public: fn.public_execute, anon: fn.anon_execute, authenticated: fn.authenticated_execute }, {
       definer: true, path: ['search_path=""'], public: false, anon: false, authenticated: true,
@@ -149,6 +155,7 @@ try {
   await rejects(coachB, readSql, [], "42501");
   await rejects(coachB, saveSql, [100, 1], "42501");
   await rejects(coachB, chatSql, [], "42501");
+  await rejects(coachB, chatReadSql, [], "42501");
   await admin.query("delete from auth.users where id=$1", [ids[0]]);
   same(await result(admin, "select count(*)::int as value from private.coach_dashboard_settings where coach_user_id=$1", [ids[0]]), 0);
   same(await result(admin, "select count(*)::int as value from private.coach_dashboard_feature_interests where coach_user_id=$1", [ids[0]]), 0);
