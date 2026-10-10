@@ -36,6 +36,8 @@ export function CoachLinkConfirmationScreen({
 
   const errorMessage = snapshot.confirmationError === "ya_tiene_coach"
     ? COACH_LINK_MESSAGES.ya_tiene_coach
+    : snapshot.confirmationError === "requiere_renovacion"
+      ? COACH_LINK_MESSAGES.requiere_renovacion
     : snapshot.confirmationError === "network"
       ? "No pudimos completar la vinculación. Intenta de nuevo — no se creará un vínculo duplicado."
       : "";
@@ -65,7 +67,7 @@ export function CoachLinkConfirmationScreen({
           <span>Vinculando…</span>
         </div>
       ) : errorMessage ? (
-        <div className={styles.confirmStatus} role={snapshot.confirmationError === "ya_tiene_coach" ? "alert" : "status"} aria-live="polite">
+        <div className={styles.confirmStatus} role={snapshot.confirmationError === "ya_tiene_coach" || snapshot.confirmationError === "requiere_renovacion" ? "alert" : "status"} aria-live="polite">
           <span>{errorMessage}</span>
         </div>
       ) : null}
@@ -73,7 +75,7 @@ export function CoachLinkConfirmationScreen({
       {snapshot.confirmationError === "network" ? (
         <button className={styles.secondaryButton} type="button" onClick={() => void accept()}>Reintentar</button>
       ) : null}
-      <button className={styles.primaryButton} type="button" disabled={snapshot.accepting} onClick={() => void accept()}>
+      <button className={styles.primaryButton} type="button" disabled={snapshot.accepting || snapshot.confirmationError === "requiere_renovacion"} onClick={() => void accept()}>
         {snapshot.accepting ? "Vinculando…" : "Vincularme"}
       </button>
       <button className={styles.secondaryButton} type="button" disabled={snapshot.accepting} onClick={cancel}>Cancelar</button>

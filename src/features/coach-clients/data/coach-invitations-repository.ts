@@ -12,6 +12,7 @@ import {
   type CoachRelationshipRevokeInput,
 } from "./coach-invitations-contract";
 import { withCoachInvitationsDeadline } from "./coach-invitations-deadline";
+import { coachInvitationAmount, coachInvitationFrequency } from "./coach-invitation-terms";
 import {
   invitationGeneration, mapCoachInvitationGenerationMutation, mapCoachInvitationGenerationOperation,
 } from "./coach-invitation-generation-validation";
@@ -21,7 +22,7 @@ import {
 } from "./coach-invitations-validation";
 
 const rpcParameters: Readonly<Record<CoachInvitationsRpcName, readonly string[]>> = {
-  create_own_coach_invitation: ["p_recipient_email", "p_request_id"],
+  create_own_coach_invitation: ["p_recipient_email", "p_request_id", "p_amount_clp", "p_frequency"],
   resend_own_coach_invitation: ["p_invitation_id", "p_request_id"],
   regenerate_own_coach_invitation: ["p_invitation_id", "p_request_id"],
   cancel_own_coach_invitation: ["p_invitation_id", "p_request_id"],
@@ -44,7 +45,9 @@ export function createCoachInvitationsRpcAdapter(client: CoachInvitationsSupabas
       const row = exactRecord(args, rpcParameters[name], "invalid_input");
       const params = Object.freeze(Object.fromEntries(rpcParameters[name].map((key) => [key,
         key === "p_expected_generation" ? invitationGeneration(row[key], "invalid_input")
-          : key === "p_recipient_email" ? normalizeRecipientEmail(row[key]) : uuid(row[key], "invalid_input")])));
+          : key === "p_recipient_email" ? normalizeRecipientEmail(row[key])
+            : key === "p_amount_clp" ? coachInvitationAmount(row[key])
+              : key === "p_frequency" ? coachInvitationFrequency(row[key]) : uuid(row[key], "invalid_input")])));
       if (signal.aborted) throw new CoachInvitationsError("aborted");
       return client.rpc(name, params, { get: false, head: false }).abortSignal(signal);
     },
@@ -152,10 +155,13 @@ export function createCoachInvitationsRepository(input: {
 
   return {
     async createInvitation(value: CoachInvitationCreateInput, options?: CoachInvitationCallOptions) {
-      const row = exactRecord(value, ["recipientEmail", "requestId"], "invalid_input");
+      const row = exactRecord(value, ["recipientEmail", "requestId", "amountClp", "frequency"], "invalid_input");
       const recipientEmail = normalizeRecipientEmail(row.recipientEmail);
       const requestId = uuid(row.requestId, "invalid_input");
-      return call("create_own_coach_invitation", { p_recipient_email: recipientEmail, p_request_id: requestId },
+      const amountClp = coachInvitationAmount(row.amountClp);
+      const frequency = coachInvitationFrequency(row.frequency);
+      return call("create_own_coach_invitation", { p_recipient_email: recipientEmail, p_request_id: requestId,
+        p_amount_clp: amountClp, p_frequency: frequency },
         (response) => mapCoachInvitationMutation(response, { action: "create", requestId }), options);
     },
     resendInvitation: (value: CoachInvitationCommandInput, options?: CoachInvitationCallOptions) => invitationCommand("resend", value, options),

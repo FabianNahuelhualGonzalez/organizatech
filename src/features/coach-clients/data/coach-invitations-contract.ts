@@ -91,7 +91,8 @@ export interface CoachRelationshipDetail {
   readonly endedAt: string | null;
 }
 
-export interface CoachInvitationCreateInput { readonly recipientEmail: string; readonly requestId: string }
+export interface CoachInvitationCreateInput { readonly recipientEmail: string; readonly requestId: string;
+  readonly amountClp: number; readonly frequency: string }
 export interface CoachInvitationCommandInput { readonly invitationId: string; readonly requestId: string }
 export interface CoachInvitationGenerationCommandInput extends CoachInvitationCommandInput { readonly expectedGeneration: number }
 export interface CoachRelationshipRevokeInput { readonly episodeId: string; readonly requestId: string }

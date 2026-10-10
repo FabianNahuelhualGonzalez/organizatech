@@ -19,7 +19,7 @@ const deferred = <T>() => {
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
 };
-type Request = { name: string; body: Record<string, string>; signal?: AbortSignal | null };
+type Request = { name: string; body: Record<string, string | number>; signal?: AbortSignal | null };
 
 /** Auth/fetch are synthetic. The installed Supabase SDK constructs every RPC. */
 function fixture(timeoutMilliseconds?: number) {
@@ -36,10 +36,10 @@ function fixture(timeoutMilliseconds?: number) {
     if (request.name === "read_own_coach_invitation_operation") return json(operation);
     if (request.name === "read_own_coach_invitation") return json(invitation);
     assert.equal(request.name, "create_own_coach_invitation");
-    assert.deepEqual(Object.keys(request.body).sort(), ["p_recipient_email", "p_request_id"]);
-    operation = { requestId: request.body.p_request_id, action: "create", state: "reserved",
+    assert.deepEqual(Object.keys(request.body).sort(), ["p_amount_clp", "p_frequency", "p_recipient_email", "p_request_id"]);
+    operation = { requestId: request.body.p_request_id as string, action: "create", state: "reserved",
       invitationId, generation: 1, episodeId: null, reservedAt: time };
-    invitation = { ...invitation, recipientEmail: request.body.p_recipient_email };
+    invitation = { ...invitation, recipientEmail: request.body.p_recipient_email as string };
     return json({ status: "recorded", serverNow: time, operation });
   };
   const input: CoachInvitationCreationRuntimeInput = {
@@ -76,6 +76,8 @@ function fixture(timeoutMilliseconds?: number) {
 function open(f: ReturnType<typeof fixture>, email = "fixture@example.invalid") {
   assert.equal(f.controller.open(), true);
   assert.equal(f.controller.setEmail(email), true);
+  assert.equal(f.controller.setAmount("25000"), true);
+  assert.equal(f.controller.setFrequency("monthly"), true);
   assert.equal(f.controller.canSubmit(), true);
 }
 const writes = (requests: Request[]) => requests.filter((request) => request.name === "create_own_coach_invitation");
@@ -91,7 +93,8 @@ test("creation is explicit and allowlisted; the authorized receipt exposes only 
   assert.equal(await f.controller.submit(), false);
   assert.equal(f.controller.open(), true);
   assert.equal(await f.controller.submit(), true);
-  assert.deepEqual(writes(f.requests)[0].body, { p_recipient_email: "fixture@example.invalid", p_request_id: requestId });
+  assert.deepEqual(writes(f.requests)[0].body, { p_recipient_email: "fixture@example.invalid", p_request_id: requestId,
+    p_amount_clp: 25000, p_frequency: "monthly" });
   const snapshot = f.controller.getSnapshot();
   assert.equal(snapshot.attempt?.resolution, "reserved");
   assert.deepEqual(snapshot.confirmed, { id: invitationId, recipientEmail: "fixture@example.invalid",

@@ -55,13 +55,13 @@ function harness() {
 
 test("five commands forward only exact RPC allowlists and the caller requestId", async () => {
   const h = harness();
-  await h.repo.createInvitation({ recipientEmail: " Synthetic@Example.Test ", requestId: requestId.toUpperCase() });
+  await h.repo.createInvitation({ recipientEmail: " Synthetic@Example.Test ", requestId: requestId.toUpperCase(), amountClp: 25000, frequency: "monthly" });
   h.setAnswer(recorded("resend")); await h.repo.resendInvitation({ invitationId, requestId });
   h.setAnswer(recorded("regenerate")); await h.repo.regenerateInvitation({ invitationId, requestId });
   h.setAnswer(recorded("cancel")); await h.repo.cancelInvitation({ invitationId, requestId });
   h.setAnswer(recorded("revoke")); await h.repo.revokeRelationship({ episodeId, requestId });
   assert.deepEqual(h.calls.map(({ name, args }) => [name, args]), [
-    ["create_own_coach_invitation", { p_recipient_email: "synthetic@example.test", p_request_id: requestId }],
+    ["create_own_coach_invitation", { p_recipient_email: "synthetic@example.test", p_request_id: requestId, p_amount_clp: 25000, p_frequency: "monthly" }],
     ["resend_own_coach_invitation", { p_invitation_id: invitationId, p_request_id: requestId }],
     ["regenerate_own_coach_invitation", { p_invitation_id: invitationId, p_request_id: requestId }],
     ["cancel_own_coach_invitation", { p_invitation_id: invitationId, p_request_id: requestId }],
@@ -87,7 +87,7 @@ test("three own reads use ids only; missing operation remains null without retri
 
 test("invalid ids, extra ownership/code/state and non-data form properties never capture or dispatch", async () => {
   const h = harness();
-  const valid = { recipientEmail: "synthetic@example.test", requestId };
+  const valid = { recipientEmail: "synthetic@example.test", requestId, amountClp: 25000, frequency: "monthly" };
   const getter = Object.defineProperty({ requestId }, "recipientEmail", { enumerable: true, get() { throw new Error("private detail"); } });
   const malicious = new Proxy(valid, { getPrototypeOf() { throw new Error("private detail"); } });
   for (const input of [null, [], {}, { ...valid, user_id: owner }, { ...valid, code: detail.code },
@@ -109,11 +109,11 @@ test("invalid ids, extra ownership/code/state and non-data form properties never
 test("input snapshot cannot change while capture is pending", async () => {
   const h = harness(); const pending = deferred<CapturedCoachInvitationsOperation>();
   const repo = createCoachInvitationsRepository({ captureOperation: () => pending.promise });
-  const input = { recipientEmail: "original@example.test", requestId };
+  const input = { recipientEmail: "original@example.test", requestId, amountClp: 25000, frequency: "monthly" };
   const result = repo.createInvitation(input);
   input.recipientEmail = "changed@example.test"; input.requestId = episodeId;
   pending.resolve(h.captured); await result;
-  assert.deepEqual(h.calls[0].args, { p_recipient_email: "original@example.test", p_request_id: requestId });
+  assert.deepEqual(h.calls[0].args, { p_recipient_email: "original@example.test", p_request_id: requestId, p_amount_clp: 25000, p_frequency: "monthly" });
 });
 
 test("stale before dispatch or after a successful/rejected RPC cannot reach a different session", async () => {
@@ -135,7 +135,7 @@ test("known SQL errors are sanitized and 40001 is a technical retry, never a pre
     ["55000", "state_conflict"], ["40001", "retry_required"], ["23505", "unavailable"]] as const) {
     const h = harness();
     h.setTransport(async () => ({ data: null, error: { code: database, message: "private data", details: "private data", hint: "private data" } }));
-    await assert.rejects(h.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId }), isError(mapped));
+    await assert.rejects(h.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId, amountClp: 25000, frequency: "monthly" }), isError(mapped));
     assert.equal(h.calls.length, 1);
   }
   const h = harness();
@@ -150,9 +150,9 @@ test("known SQL errors are sanitized and 40001 is a technical retry, never a pre
 test("rate limits and cancelled replays never fabricate email success or trigger another RPC", async () => {
   const h = harness();
   h.setAnswer({ status: "rate_limited", serverNow: now, retryAt: "2026-09-09T07:00:00.123456+00:00" });
-  assert.equal((await h.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId })).status, "rate_limited");
+  assert.equal((await h.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId, amountClp: 25000, frequency: "monthly" })).status, "rate_limited");
   h.setAnswer({ ...recorded(), operation: { ...operation(), state: "cancelled" } });
-  const replay = await h.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId });
+  const replay = await h.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId, amountClp: 25000, frequency: "monthly" });
   assert.ok(replay.status === "recorded" && replay.operation.state === "cancelled");
   assert.equal(h.calls.length, 2);
   for (const response of [{ ...recorded(), sent: true }, { ...recorded(), message: "Correo enviado" },
@@ -160,7 +160,7 @@ test("rate limits and cancelled replays never fabricate email success or trigger
     { ...recorded(), operation: { ...operation(), requestId: episodeId } },
     { ...recorded(), operation: { ...operation(), action: "resend" } }]) {
     h.setAnswer(response);
-    await assert.rejects(h.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId }), isError("invalid_response"));
+    await assert.rejects(h.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId, amountClp: 25000, frequency: "monthly" }), isError("invalid_response"));
   }
 });
 
@@ -236,9 +236,9 @@ test("adapter and repository compose without an SDK/Auth constructor", async () 
   } });
   const repo = createCoachInvitationsRepository({ captureOperation: async () => ({ identity: { userId: owner, generation: 1 },
     isCurrent: (identity) => identity.userId === owner && identity.generation === 1, client: adapter }) });
-  const result = await repo.createInvitation({ recipientEmail: " Synthetic@Example.Test ", requestId });
+  const result = await repo.createInvitation({ recipientEmail: " Synthetic@Example.Test ", requestId, amountClp: 25000, frequency: "monthly" });
   assert.equal(result.status, "recorded");
-  assert.deepEqual(calls, [{ name: "create_own_coach_invitation", args: { p_recipient_email: "synthetic@example.test", p_request_id: requestId }, options: { get: false, head: false } }]);
+  assert.deepEqual(calls, [{ name: "create_own_coach_invitation", args: { p_recipient_email: "synthetic@example.test", p_request_id: requestId, p_amount_clp: 25000, p_frequency: "monthly" }, options: { get: false, head: false } }]);
 });
 
 test("caller abort during capture prevents dispatch even if capture resolves late", async () => {

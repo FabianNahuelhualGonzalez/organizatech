@@ -134,6 +134,8 @@ export function CoachWorkspaceBoundary({
         restoreFocusRef={addTriggerRef}
         actions={{
           onEmailChange: controller.actions.setInvitationEmail,
+          onAmountChange: controller.actions.setInvitationAmount,
+          onFrequencyChange: controller.actions.setInvitationFrequency,
           onSubmit: controller.actions.submitInvitation,
           onCancel: controller.actions.closeAddClient,
           onCopyCode: controller.actions.copyInvitationCode,

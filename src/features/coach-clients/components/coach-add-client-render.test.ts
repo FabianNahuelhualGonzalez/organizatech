@@ -40,7 +40,8 @@ function elements(node: ReactNode): ReactElement<Props>[] {
 const controls = (node: ReactNode) => elements(node).filter((element) => element.type === "button");
 const focus = { backgroundRef: { current: null }, restoreFocusRef: { current: null } };
 function draft(): CoachClientInviteDraftView {
-  return { emailRaw: "draft@example.test", canEdit: true, validation: { tone: "ok", errorLabel: null }, canSubmit: true, action: "submit",
+  return { emailRaw: "draft@example.test", amountRaw: "25000", amountValid: true, frequency: "monthly",
+    canEdit: true, validation: { tone: "ok", errorLabel: null }, canSubmit: true, action: "submit",
     submitLabel: "Enviar solicitud", busyLabel: "Enviando…",
     hint: "Ayuda del envío aprobada", steps: [{ id: "send", label: "Paso de envío aprobado" }, { id: "accept", label: "Paso de aceptación aprobado" }, { id: "manage", label: "Paso posterior aprobado" }] };
 }
@@ -83,6 +84,26 @@ test("raw email changes are delegated exactly and do not mutate the controlled d
   const { tree } = render(view, { onEmailChange: (raw) => calls.push(raw) });
   elements(tree).find((element) => element.type === "input")?.props.onChange?.({ currentTarget: { value: "  NEW@Example.test " } });
   assert.deepEqual(calls, ["  NEW@Example.test "]); assert.equal(view.draft.emailRaw, "draft@example.test");
+});
+
+test("commercial fields show only approved frequencies and delegate controlled values", () => {
+  const calls: unknown[] = [];
+  const { markup, tree } = render(emailView(), {
+    onEmailChange: () => {}, onAmountChange: (raw) => calls.push(["amount", raw]),
+    onFrequencyChange: (value) => calls.push(["frequency", value]), onSubmit: () => {},
+  });
+  const amount = elements(tree).find((element) => element.type === "input" && element.props.type === "number")!;
+  const select = elements(tree).find((element) => element.type === "select")!;
+  assert.equal(amount.props.required, true);
+  assert.equal(amount.props.min, "1");
+  assert.equal(select.props.required, true);
+  assert.deepEqual(elements(select).filter((element) => element.type === "option").map((element) => element.props.value),
+    ["", "daily", "weekly", "monthly", "quarterly", "semiannual", "annual"]);
+  amount.props.onChange?.({ currentTarget: { value: "25000" } });
+  select.props.onChange?.({ currentTarget: { value: "weekly" } });
+  assert.deepEqual(calls, [["amount", "25000"], ["frequency", "weekly"]]);
+  assert.match(markup, /Monto de asesoría \(CLP\)/);
+  assert.match(markup, /Frecuencia de cobro/);
 });
 
 test("empty and invalid drafts remain editable for immediate typing and native paste", () => {
@@ -144,6 +165,8 @@ test("submit stays disabled for busy, missing callback, empty email, mapper refu
   const cases: CoachAddClientView[] = [{ ...emailView(), isBusy: true }, { ...emailView(), isOpen: false },
     ...["", "   "].map((emailRaw) => ({ ...emailView(), draft: { ...draft(), emailRaw } })),
     { ...emailView(), draft: { ...draft(), canSubmit: false } },
+    { ...emailView(), draft: { ...draft(), amountRaw: "0", amountValid: false } },
+    { ...emailView(), draft: { ...draft(), frequency: "" } },
     { ...emailView(), draft: { ...draft(), validation: { tone: "neutral", errorLabel: null } } },
     { ...emailView(), draft: { ...draft(), validation: { tone: "err", errorLabel: "Error provisto" } } }];
   for (const view of cases) {

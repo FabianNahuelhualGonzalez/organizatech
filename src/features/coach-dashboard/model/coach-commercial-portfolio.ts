@@ -1,8 +1,7 @@
 /** Commercial facts only. Training cycles and pending invitations are separate. */
-export const COACH_COMMERCIAL_FREQUENCIES = [
-  "daily", "weekly", "monthly", "quarterly", "semiannual", "annual",
-] as const;
-export type CoachCommercialFrequency = typeof COACH_COMMERCIAL_FREQUENCIES[number];
+import type { CoachCommercialFrequency } from "@/lib/coach-commercial-terms";
+export { COACH_COMMERCIAL_FREQUENCIES } from "@/lib/coach-commercial-terms";
+export type { CoachCommercialFrequency } from "@/lib/coach-commercial-terms";
 export type CoachCommercialStatus = "needs_agreement" | "active" | "pending_renewal" | "not_continuing";
 
 export interface CoachCommercialItem {

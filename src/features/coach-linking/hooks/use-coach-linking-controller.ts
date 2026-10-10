@@ -30,7 +30,7 @@ export interface CoachLinkingSnapshot {
     readonly requestId: string;
   };
   readonly accepting: boolean;
-  readonly confirmationError: "network" | "ya_tiene_coach" | null;
+  readonly confirmationError: "network" | "ya_tiene_coach" | "requiere_renovacion" | null;
   readonly success: null | { readonly kind: "new" | "recovered"; readonly coachName: string };
   readonly authGateOpen: boolean;
 }
@@ -442,6 +442,10 @@ export function useCoachLinkingController(input: {
       }
       if (result.status === "ya_tiene_coach") {
         setSnapshot((current) => ({ ...current, accepting: false, confirmationError: "ya_tiene_coach" }));
+        return null;
+      }
+      if (result.status === "requiere_renovacion") {
+        setSnapshot((current) => ({ ...current, accepting: false, confirmationError: "requiere_renovacion" }));
         return null;
       }
       setSnapshot((current) => ({ ...current, accepting: false, confirmationError: "network" }));

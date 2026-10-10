@@ -70,6 +70,9 @@ const EMPTY_CREATION: CoachInvitationCreationSnapshot = Object.freeze({
   isOpen: false,
   emailRaw: "",
   emailValid: false,
+  amountRaw: "",
+  amountValid: false,
+  frequency: "",
   pending: null,
   attempt: null,
   confirmed: null,
@@ -529,6 +532,11 @@ export function useCoachWorkspaceController(input: {
       emailRaw: creationAction === "submit"
         ? creation.emailRaw
         : creation.attempt?.recipientEmail ?? creation.emailRaw,
+      amountRaw: creationAction === "submit" ? creation.amountRaw
+        : creation.attempt?.amountClp.toString() ?? creation.amountRaw,
+      amountValid: creationAction === "submit" ? creation.amountValid : creation.attempt !== null,
+      frequency: creationAction === "submit" ? creation.frequency
+        : creation.attempt?.frequency ?? creation.frequency,
       canEdit: creation.isOpen
         && creation.pending === null
         && !creation.disposed
@@ -698,6 +706,8 @@ export function useCoachWorkspaceController(input: {
         if (closed && canStartAnotherIntent) setCreationEpoch((value) => value + 1);
       },
       setInvitationEmail: (raw: string) => creationController?.setEmail(raw),
+      setInvitationAmount: (raw: string) => creationController?.setAmount(raw),
+      setInvitationFrequency: (value: string) => creationController?.setFrequency(value),
       async submitInvitation() {
         const completed = creationAction === "reconcile"
           ? await creationController?.reconcile()

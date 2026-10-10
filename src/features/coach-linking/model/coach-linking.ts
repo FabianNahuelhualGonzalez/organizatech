@@ -36,6 +36,7 @@ export type CoachLinkLookupStatus =
   | "vencido"
   | "cancelado"
   | "ya_tiene_coach"
+  | "requiere_renovacion"
   | "error_red";
 
 export type CoachLinkServerStatus = Exclude<CoachLinkLookupStatus, "idle" | "incompleto" | "validando">;
@@ -80,6 +81,7 @@ export const COACH_LINK_MESSAGES: Readonly<Record<Exclude<CoachLinkLookupStatus,
   vencido: "Pendiente: este código venció. Pídele a tu coach que te comparta uno nuevo.",
   cancelado: "Pendiente: tu coach canceló esta invitación. Pídele que te envíe un código nuevo.",
   ya_tiene_coach: "Atención: ya tienes un coach activo. No puedes reemplazarlo desde aquí.",
+  requiere_renovacion: "Esta invitación debe ser renovada por tu Coach antes de poder aceptarla.",
   error_red: "No pudimos verificar el código. Revisa tu conexión e intenta de nuevo. Si ya se procesó, no se creará un vínculo duplicado.",
 };
 
@@ -101,6 +103,7 @@ export function coachInitial(name: string): string {
 
 export function lookupMessageRole(status: CoachLinkLookupStatus): "alert" | "status" {
   return status === "invalido" || status === "ya_usado" || status === "no_corresponde"
+    || status === "requiere_renovacion"
     ? "alert"
     : "status";
 }

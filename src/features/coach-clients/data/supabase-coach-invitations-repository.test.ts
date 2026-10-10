@@ -80,7 +80,7 @@ function fixture(timeoutMilliseconds?: number) {
 
 test("real SDK serializes all eight RPCs as POST with pinned identity and exact allowlists", async () => {
   const f = fixture();
-  const created = await f.repo.createInvitation({ recipientEmail: " Synthetic@Example.Test ", requestId });
+  const created = await f.repo.createInvitation({ recipientEmail: " Synthetic@Example.Test ", requestId, amountClp: 25000, frequency: "monthly" });
   assert.ok(created.status === "recorded" && created.operation.state === "reserved");
   await f.repo.resendInvitation({ invitationId, requestId });
   await f.repo.regenerateInvitation({ invitationId, requestId });
@@ -90,7 +90,7 @@ test("real SDK serializes all eight RPCs as POST with pinned identity and exact 
   await f.repo.readOwnOperation(requestId);
   await f.repo.readRelationship(episodeId);
   assert.deepEqual(f.requests.map(({ name, body }) => [name, body]), [
-    ["create_own_coach_invitation", { p_recipient_email: "synthetic@example.test", p_request_id: requestId }],
+    ["create_own_coach_invitation", { p_recipient_email: "synthetic@example.test", p_request_id: requestId, p_amount_clp: 25000, p_frequency: "monthly" }],
     ["resend_own_coach_invitation", { p_invitation_id: invitationId, p_request_id: requestId }],
     ["regenerate_own_coach_invitation", { p_invitation_id: invitationId, p_request_id: requestId }],
     ["cancel_own_coach_invitation", { p_invitation_id: invitationId, p_request_id: requestId }],
@@ -194,7 +194,7 @@ test("HTTP/network uncertainty is sanitized, not retried, and can reconcile the 
     const f = fixture();
     f.transport(async () => { if (kind === "network") throw new Error("private sentinel");
       return json({ code: "XX000", message: "private sentinel", details: "private sentinel" }, 503); });
-    await assert.rejects(f.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId }), issue("unavailable"));
+    await assert.rejects(f.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId, amountClp: 25000, frequency: "monthly" }), issue("unavailable"));
     assert.equal(f.requests.length, 1);
     f.transport(null);
     assert.equal((await f.repo.readOwnOperation(requestId))?.requestId, requestId);
@@ -204,7 +204,7 @@ test("HTTP/network uncertainty is sanitized, not retried, and can reconcile the 
 
 test("SDK malformed successes and private Auth exceptions are sanitized without inventing delivery", async () => {
   const f = fixture(); f.transport(async () => json({ status: "sent", recipientEmail: "private sentinel" }));
-  await assert.rejects(f.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId }), issue("invalid_response"));
+  await assert.rejects(f.repo.createInvitation({ recipientEmail: "synthetic@example.test", requestId, amountClp: 25000, frequency: "monthly" }), issue("invalid_response"));
   const g = fixture(); g.session(async () => { throw new Error("private sentinel"); });
   await assert.rejects(g.repo.readOwnOperation(requestId), issue("unavailable"));
   assert.equal(g.requests.length, 0);

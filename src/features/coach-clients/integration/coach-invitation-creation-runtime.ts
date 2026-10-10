@@ -38,7 +38,7 @@ export function createCoachInvitationCreationRuntime(input: CoachInvitationCreat
   const source: CoachInvitationCreationSource = {
     async create(command, options) {
       const result = await repository.createInvitation({ recipientEmail: command.recipientEmail,
-        requestId: command.requestId }, options);
+        requestId: command.requestId, amountClp: command.amountClp, frequency: command.frequency }, options);
       return result.status === "rate_limited"
         ? Object.freeze({ status: result.status, serverNow: result.serverNow, retryAt: result.retryAt })
         : Object.freeze({ status: result.status, serverNow: result.serverNow, operation: operation(result.operation) });

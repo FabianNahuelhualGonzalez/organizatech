@@ -40,11 +40,11 @@ interface PrincipalClient {
 
 const LOOKUP_STATUSES = new Set([
   "valido", "ya_aceptado", "invalido", "ya_usado", "no_corresponde", "vencido",
-  "cancelado", "ya_tiene_coach", "error_red",
+  "cancelado", "ya_tiene_coach", "requiere_renovacion", "error_red",
 ]);
 const ACCEPT_STATUSES = new Set([
   "linked", "already_linked", "invalido", "ya_usado", "no_corresponde", "vencido",
-  "cancelado", "ya_tiene_coach", "error_red",
+  "cancelado", "ya_tiene_coach", "requiere_renovacion", "error_red",
 ]);
 
 function principalClient(): PrincipalClient | null {
@@ -134,10 +134,26 @@ function parseActive(value: unknown): CoachLinkActiveResult {
   throw new CoachLinkingRepositoryError("invalid_response");
 }
 
+/** Only the dedicated SQLSTATE may become a renewal status; never trust error copy. */
+export function isCoachInvitationTermsRequired(error: unknown): boolean {
+  try {
+    return typeof error === "object" && error !== null
+      && Object.getOwnPropertyDescriptor(error, "code")?.value === "P0C01";
+  } catch { return false; }
+}
+
 async function rpc(expectedUserId: string, name: RpcName, args: Readonly<Record<string, unknown>>, signal: AbortSignal) {
   const operation = await captureOperation(expectedUserId);
   const result = await operation.client.rpc(name, args).abortSignal(signal);
-  if (result.error) throw new CoachLinkingRepositoryError("unavailable");
+  if (result.error) {
+    const termsRequired = name === "accept_own_coach_invitation"
+      && isCoachInvitationTermsRequired(result.error);
+    await operation.verify();
+    if (termsRequired) {
+      return { status: "requiere_renovacion" };
+    }
+    throw new CoachLinkingRepositoryError("unavailable");
+  }
   await operation.verify();
   return result.data;
 }

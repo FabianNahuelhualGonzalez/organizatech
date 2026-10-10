@@ -3,8 +3,10 @@ import type { CoachInvitationCreationAttempt, CoachInvitationCreationController,
 } from "./coach-invitation-creation-contract";
 import { copyCreationOperation, copyCreationResult, creationIssue, creationOpaque,
   resolveCreationRead } from "./coach-invitation-creation-reconciliation";
+import { coachInvitationFrequency, parseCoachInvitationAmount } from "../data/coach-invitation-terms";
 
 const EMPTY: CoachInvitationCreationSnapshot = Object.freeze({ isOpen: false, emailRaw: "", emailValid: false,
+  amountRaw: "", amountValid: false, frequency: "",
   pending: null, attempt: null, confirmed: null, rateLimit: null, issue: null, needsRefresh: false, disposed: false });
 const UNCERTAIN: readonly CoachInvitationCreationIssue[] = ["invalid_response", "request_conflict", "aborted", "timeout", "unavailable"];
 interface Flight {
@@ -144,7 +146,8 @@ export function createCoachInvitationCreationController(input: CoachInvitationCr
   async function dispatch(flight: Flight, attempt: CoachInvitationCreationAttempt) {
     if (!current(flight)) { flight.settle(false); return; }
     try {
-      const command = Object.freeze({ recipientEmail: attempt.recipientEmail, requestId: attempt.requestId });
+      const command = Object.freeze({ recipientEmail: attempt.recipientEmail, requestId: attempt.requestId,
+        amountClp: attempt.amountClp, frequency: attempt.frequency });
       const create = source.create;
       if (!current(flight)) { flight.settle(false); return; }
       // The call can synchronously close/edit via a synthetic source; from this point tracking must survive.
@@ -187,6 +190,7 @@ export function createCoachInvitationCreationController(input: CoachInvitationCr
 
   function canSubmit(): boolean {
     return available() && state.isOpen && state.emailValid && preparedEmail !== null
+      && state.amountValid && state.frequency !== ""
       && (state.attempt === null || state.attempt.phase === "rejected");
   }
 
@@ -225,10 +229,28 @@ export function createCoachInvitationCreationController(input: CoachInvitationCr
       publish({ emailValid: preparedEmail !== null });
       return live() && revision === draftRevision && state.emailValid;
     },
+    setAmount: (raw) => {
+      if (!available() || typeof raw !== "string") return false;
+      ++draftRevision;
+      cancelInitial();
+      const valid = parseCoachInvitationAmount(raw) !== null;
+      publish({ amountRaw: raw, amountValid: valid });
+      return valid;
+    },
+    setFrequency: (value) => {
+      if (!available() || typeof value !== "string") return false;
+      const valid = (() => { try { coachInvitationFrequency(value); return true; } catch { return false; } })();
+      ++draftRevision;
+      cancelInitial();
+      publish({ frequency: valid ? value : "" });
+      return valid;
+    },
     canSubmit,
     submit: () => {
       if (!canSubmit()) return Promise.resolve(false);
       const email = preparedEmail!;
+      const amountClp = parseCoachInvitationAmount(state.amountRaw)!;
+      const frequency = state.frequency;
       const draft = draftRevision;
       const opening = openingRevision;
       const started = begin("submit");
@@ -246,7 +268,7 @@ export function createCoachInvitationCreationController(input: CoachInvitationCr
         finish(flight, { issue: "invalid_request_id" }); return promise;
       }
       usedRequestIds.add(requestId);
-      const attempt: CoachInvitationCreationAttempt = Object.freeze({ requestId, recipientEmail: email,
+      const attempt: CoachInvitationCreationAttempt = Object.freeze({ requestId, recipientEmail: email, amountClp, frequency,
         phase: "in-flight", operation: null, retryAllowed: false, resolution: null });
       uncertainHistory = false;
       publish({ attempt, confirmed: null, rateLimit: null, needsRefresh: false });

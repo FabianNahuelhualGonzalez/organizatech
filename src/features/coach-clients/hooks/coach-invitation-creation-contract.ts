@@ -20,6 +20,8 @@ export interface CoachInvitationCreationRead {
 export interface CoachInvitationCreationCommand {
   readonly recipientEmail: string;
   readonly requestId: string;
+  readonly amountClp: number;
+  readonly frequency: string;
 }
 export type CoachInvitationCreationResult =
   | Readonly<{ status: "recorded"; serverNow: string; operation: CoachInvitationCreationOperation }>
@@ -38,6 +40,8 @@ export interface CoachInvitationCreationAttempt {
   readonly requestId: string;
   /** Canonical email frozen at submit; later draft edits never change this intent. */
   readonly recipientEmail: string;
+  readonly amountClp: number;
+  readonly frequency: string;
   readonly phase: "in-flight" | "uncertain" | "recorded" | "resolved" | "rejected" | "rate-limited";
   readonly operation: CoachInvitationCreationOperation | null;
   readonly retryAllowed: boolean;
@@ -49,6 +53,9 @@ export interface CoachInvitationCreationSnapshot {
   readonly emailRaw: string;
   /** Format readiness only, not uniqueness, an account lookup or authorization. */
   readonly emailValid: boolean;
+  readonly amountRaw: string;
+  readonly amountValid: boolean;
+  readonly frequency: string;
   readonly pending: "submit" | "reconcile" | "retry" | null;
   readonly attempt: CoachInvitationCreationAttempt | null;
   readonly confirmed: CoachInvitationCreationRead | null;
@@ -74,6 +81,8 @@ export interface CoachInvitationCreationController {
   close(): boolean;
   /** Preserve exact raw text; false for invalid format. Never replaces an already dispatched intent. */
   setEmail(raw: string): boolean;
+  setAmount(raw: string): boolean;
+  setFrequency(value: string): boolean;
   canSubmit(): boolean;
   /** Initial explicit reservation only. True requires matching create/reserved plus fresh pending detail. */
   submit(): Promise<boolean>;

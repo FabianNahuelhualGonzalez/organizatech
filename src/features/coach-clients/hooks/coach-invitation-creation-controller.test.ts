@@ -65,6 +65,8 @@ function harness(options: { prepare?: (raw: string) => string; factory?: () => s
 }
 function ready(h: ReturnType<typeof harness>, raw = "  STUDENT@Example.Test  ") {
   assert.equal(h.controller.setEmail(raw), true);
+  assert.equal(h.controller.setAmount("25000"), true);
+  assert.equal(h.controller.setFrequency("monthly"), true);
   assert.equal(h.controller.open(), true);
   assert.equal(h.controller.canSubmit(), true);
 }
@@ -78,7 +80,8 @@ async function uncertain(h: ReturnType<typeof harness>) {
 test("construction/open/edit/close/subscribe perform no source I/O or request id generation", async () => {
   const h = harness();
   const initial = h.controller.getSnapshot();
-  assert.deepEqual(initial, { isOpen: false, emailRaw: "", emailValid: false, pending: null, attempt: null,
+  assert.deepEqual(initial, { isOpen: false, emailRaw: "", emailValid: false,
+    amountRaw: "", amountValid: false, frequency: "", pending: null, attempt: null,
     confirmed: null, rateLimit: null, issue: null, needsRefresh: false, disposed: false });
   assert.equal(initial, h.controller.getSnapshot());
   let notifications = 0;
@@ -98,13 +101,40 @@ test("construction/open/edit/close/subscribe perform no source I/O or request id
   unsubscribe();
 });
 
+test("commercial terms are required before reservation and remain frozen across retries", async () => {
+  const h = harness();
+  h.controller.open();
+  assert.equal(h.controller.setEmail(canonicalEmail), true);
+  assert.equal(h.controller.canSubmit(), false);
+  for (const raw of ["", "0", "1.5", "1e3", "1000000000001"]) {
+    assert.equal(h.controller.setAmount(raw), false);
+    assert.equal(h.controller.canSubmit(), false);
+  }
+  assert.equal(h.controller.setAmount("00025000"), true);
+  assert.equal(h.controller.setFrequency("biweekly"), false);
+  assert.equal(h.controller.canSubmit(), false);
+  assert.equal(h.controller.setFrequency("weekly"), true);
+  assert.equal(h.controller.canSubmit(), true);
+  h.handler.create = async () => { throw { code: "timeout" }; };
+  assert.equal(await h.controller.submit(), false);
+  assert.deepEqual(h.calls[0].command, { recipientEmail: canonicalEmail, requestId: "request-1",
+    amountClp: 25000, frequency: "weekly" });
+  assert.equal(h.controller.setAmount("30000"), true);
+  assert.equal(h.controller.setFrequency("annual"), true);
+  assert.equal(await h.controller.reconcile(), false);
+  assert.equal(h.controller.getSnapshot().attempt?.retryAllowed, true);
+  assert.equal(await h.controller.retry(), false);
+  assert.deepEqual(h.calls[2].command, h.calls[0].command);
+});
+
 test("canonical aliases bind exactly to the intent; raw draft is not overwritten by confirmed detail", async () => {
   for (const raw of ["STUDENT@EXAMPLE.TEST", "  student@example.test  "]) {
     const h = harness();
     ready(h, raw);
     assert.equal(await h.controller.submit(), true);
     assert.deepEqual(h.calls.map((call) => call.kind), ["create", "detail"]);
-    assert.deepEqual(h.calls[0].command, { recipientEmail: canonicalEmail, requestId: "request-1" });
+    assert.deepEqual(h.calls[0].command, { recipientEmail: canonicalEmail, requestId: "request-1",
+      amountClp: 25000, frequency: "monthly" });
     const snapshot = h.controller.getSnapshot();
     assert.equal(snapshot.emailRaw, raw);
     assert.equal(snapshot.confirmed!.recipientEmail, canonicalEmail);
@@ -154,7 +184,7 @@ test("only allowlisted immutable copies escape, including the authorized pending
   assert.equal(privateReads, 0);
   assert.deepEqual(Object.keys(snapshot.confirmed!).sort(), ["code", "expiresAt", "generation", "id", "issuedAt", "recipientEmail", "state"]);
   assert.deepEqual(Object.keys(snapshot.attempt!.operation!).sort(), ["action", "generation", "invitationId", "requestId", "reservedAt", "state"]);
-  assert.deepEqual(Object.keys(h.calls[0].command!).sort(), ["recipientEmail", "requestId"]);
+  assert.deepEqual(Object.keys(h.calls[0].command!).sort(), ["amountClp", "frequency", "recipientEmail", "requestId"]);
   for (const value of [snapshot, snapshot.attempt, snapshot.attempt!.operation, snapshot.confirmed, h.calls[0].command]) assert.equal(Object.isFrozen(value), true);
   for (const value of [h.input, h.source, operation, detail]) assert.equal(Object.isFrozen(value), false);
   operation.generation = 8; detail.recipientEmail = "changed@example.test";
@@ -759,7 +789,7 @@ test("creation lifecycle stays local and has no provider/UI/lookup/clock/automat
   const helper = readFileSync(new URL("./coach-invitation-creation-reconciliation.ts", import.meta.url), "utf8");
   const contract = readFileSync(new URL("./coach-invitation-creation-contract.ts", import.meta.url), "utf8");
   assert.deepEqual([...controller.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]),
-    ["./coach-invitation-creation-contract", "./coach-invitation-creation-reconciliation"]);
+    ["./coach-invitation-creation-contract", "./coach-invitation-creation-reconciliation", "../data/coach-invitation-terms"]);
   assert.deepEqual([...helper.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]), ["./coach-invitation-creation-contract"]);
   for (const code of [controller, helper]) {
     assert.doesNotMatch(code, /\b(?:fetch|setTimeout|setInterval|getUser|localStorage|sessionStorage)\s*\(|Date\.now|new Date|Math\.random|crypto\./);

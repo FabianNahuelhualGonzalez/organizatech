@@ -9,6 +9,9 @@ function snapshot(patch: Partial<CoachInvitationCreationSnapshot> = {}): CoachIn
     isOpen: true,
     emailRaw: "student@example.test",
     emailValid: true,
+    amountRaw: "25000",
+    amountValid: true,
+    frequency: "monthly",
     pending: null,
     attempt: null,
     confirmed: null,
@@ -23,6 +26,8 @@ function snapshot(patch: Partial<CoachInvitationCreationSnapshot> = {}): CoachIn
 const uncertainAttempt = Object.freeze({
   requestId: "11111111-1111-4111-8111-111111111111",
   recipientEmail: "student@example.test",
+  amountClp: 25000,
+  frequency: "monthly",
   phase: "uncertain" as const,
   operation: null,
   retryAllowed: false,

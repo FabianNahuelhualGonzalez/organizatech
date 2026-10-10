@@ -9,6 +9,9 @@ export type CoachClientInstructionSteps = readonly [CoachClientInstructionView, 
 
 export interface CoachClientInviteDraftView {
   readonly emailRaw: string;
+  readonly amountRaw: string;
+  readonly amountValid: boolean;
+  readonly frequency: string;
   /** Editing is independent from whether the current draft is ready to submit. */
   readonly canEdit: boolean;
   readonly validation: {
@@ -57,6 +60,8 @@ export type CoachAddClientView =
 
 export interface CoachAddClientActions {
   readonly onEmailChange?: (raw: string) => void;
+  readonly onAmountChange?: (raw: string) => void;
+  readonly onFrequencyChange?: (value: string) => void;
   /** Controller validates, submits, owns single-flight and later provides the receipt. */
   readonly onSubmit?: () => void;
   readonly onCancel?: () => void;

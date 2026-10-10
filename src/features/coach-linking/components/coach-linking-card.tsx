@@ -83,7 +83,7 @@ export function CoachLinkingCardBoundary({
           <input
             ref={inputRef}
             className={styles.codeInput}
-            data-error={messageStatus === "invalido" || messageStatus === "ya_usado" || messageStatus === "no_corresponde"}
+            data-error={messageStatus === "invalido" || messageStatus === "ya_usado" || messageStatus === "no_corresponde" || messageStatus === "requiere_renovacion"}
             value={normalizeCoachLinkCode(snapshot.code).display}
             onChange={(event) => actions.setCode(event.target.value)}
             onPaste={(event) => {
@@ -117,7 +117,7 @@ export function CoachLinkingCardBoundary({
           <button
             className={styles.primaryButton}
             type="submit"
-            disabled={!complete || snapshot.lookupStatus === "validando"}
+            disabled={!complete || snapshot.lookupStatus === "validando" || snapshot.lookupStatus === "requiere_renovacion"}
           >
             {snapshot.lookupStatus === "validando" ? "Validando…" : "Vincular"}
           </button>
