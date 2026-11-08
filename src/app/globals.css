@@ -1859,7 +1859,8 @@ h3 {
 }
 
 .weekly-metric-summary strong {
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
   color: var(--muted);
   font-size: clamp(24px, 8vw, 42px);
   font-weight: 500;
@@ -1933,6 +1934,37 @@ h3 {
     gap: 4px;
     padding-right: 2px;
     padding-left: 2px;
+  }
+
+  .weekly-metric-summary.reps-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .weekly-metric-summary.reps-summary .weekly-metric-divider {
+    width: min(100%, 260px);
+    min-height: 1px;
+    height: 1px;
+    justify-self: center;
+  }
+
+  .weekly-metric-summary.reps-summary strong {
+    font-size: clamp(22px, 7vw, 30px);
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  .weekly-metric-summary.reps-summary .weekly-metric-difference,
+  .weekly-metric-summary.reps-summary .weekly-metric-insight {
+    grid-column: 1;
+  }
+
+  .weekly-metric-summary.reps-summary .weekly-metric-difference {
+    margin-top: 8px;
+    font-size: clamp(28px, 9vw, 40px) !important;
+    line-height: 1.08;
+    overflow-wrap: normal;
+    word-break: normal;
   }
 
 }

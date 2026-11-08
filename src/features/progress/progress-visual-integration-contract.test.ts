@@ -115,6 +115,21 @@ assert.match(
 
 const registration = "tsx src/features/progress/progress-visual-integration-contract.test.ts";
 assert.equal(packageSource.split(registration).length - 1, 1);
+assert.match(
+  globalStylesSource,
+  /\.weekly-metric-summary strong\s*\{[^}]*overflow-wrap:\s*normal;[^}]*word-break:\s*normal;/,
+  "la métrica no debe cortar palabras letra por letra",
+);
+assert.match(
+  globalStylesSource,
+  /@media \(max-width:\s*430px\)[\s\S]*?\.weekly-metric-summary\.reps-summary\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/,
+  "en móvil la comparación de repeticiones debe apilar sus métricas",
+);
+assert.match(
+  globalStylesSource,
+  /\.weekly-metric-summary\.reps-summary \.weekly-metric-divider\s*\{[^}]*min-height:\s*1px;[^}]*height:\s*1px;/,
+  "el divisor de la comparación móvil debe cambiar de vertical a horizontal",
+);
 
 // -------------------------------------------------------------------------------------------
 // P3-38 — ShareWorkoutCard (preparación visual aislada).
