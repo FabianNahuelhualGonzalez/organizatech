@@ -371,3 +371,30 @@ test("un proveedor ambiguo no se registra como correo aceptado", async () => {
     accepted: true, claimed: 1, sent: 0, failed: 0, ambiguous: 1, completionFailed: 0, truncated: false,
   });
 });
+
+test("el documento médico usa enlace directo sin revelar el nombre del archivo", async () => {
+  const bodies: string[] = [];
+  const reportDelivery = {
+    delivery_id: "40000000-0000-4000-8000-000000000001",
+    report_id: "40000000-0000-4000-8000-000000000002",
+    recipient_email: "coach@example.com", student_name: "Alumno QA", coach_name: "Coach QA",
+    student_message: null, check_dates: [], photo_count: 0,
+    idempotency_key: "40000000-0000-4000-8000-000000000003",
+    attempt_token: "40000000-0000-4000-8000-000000000004",
+  };
+  const handler = createEvaluationEmailHandler(environment, async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("claim_progress_report_email_deliveries")) return json([reportDelivery]);
+    if (url.includes("api.brevo.com")) { bodies.push(String(init?.body)); return json({ messageId: "medical-message-id" }); }
+    if (url.endsWith("complete_progress_report_email_delivery")) return json(true);
+    throw new Error("unexpected endpoint");
+  });
+  const response = await handler(new Request("https://function.example.com", {
+    method: "POST", headers: { origin: environment.appUrl, authorization: "Bearer user-jwt" },
+    body: JSON.stringify({ kind: "progress_report" }),
+  }));
+  assert.equal(response.status, 202);
+  assert.match(bodies[0] ?? "", /compartió un documento médico contigo/);
+  assert.match(bodies[0] ?? "", /coachReport=40000000-0000-4000-8000-000000000002/);
+  assert.doesNotMatch(bodies[0] ?? "", /\.pdf|storage\/v1|diagnóstico|service_role/i);
+});

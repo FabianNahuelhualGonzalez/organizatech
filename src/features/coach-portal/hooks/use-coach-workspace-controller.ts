@@ -33,6 +33,7 @@ import type { CoachInvitationActionsSnapshot } from "@/features/coach-clients/ho
 import type { CoachClientDisconnectionSnapshot } from "@/features/coach-clients/hooks/coach-client-disconnection-contract";
 import { createCoachChatInterestRuntime } from "@/features/coach-dashboard/integration/coach-chat-interest-runtime";
 import { useCoachCommercialPortfolio } from "@/features/coach-dashboard/hooks/use-coach-commercial-portfolio";
+import { useCoachReports } from "@/features/coach-reports/hooks/use-coach-reports";
 import { buildCoachCommercialDashboardView } from "@/features/coach-dashboard/integration/coach-commercial-dashboard-presentation";
 import {
   buildCoachClientsView,
@@ -176,7 +177,8 @@ export function useCoachWorkspaceController(input: {
   );
   const commercial = useCoachCommercialPortfolio(connection);
   const reloadCommercial = commercial.reload;
-  const [screen, setScreen] = useState<"dashboard" | "clients">("dashboard");
+  const [screen, setScreen] = useState<"dashboard" | "clients" | "reports">("dashboard");
+  const reports = useCoachReports(connection);
   const [selectedMonthId, setSelectedMonthId] = useState<string | null>(null);
   const [tab, setTab] = useState<CoachClientTab>("active");
   const [query, setQuery] = useState("");
@@ -638,6 +640,7 @@ export function useCoachWorkspaceController(input: {
     tab,
     dashboardView,
     commercial,
+    reports,
     clientsView,
     chatView: Object.freeze({
       isOpen: chatInterest.chatOpen,
@@ -653,6 +656,10 @@ export function useCoachWorkspaceController(input: {
     addClient,
     actions: {
       openDashboard: () => setScreen("dashboard"),
+      openReports: () => {
+        setScreen("reports");
+        void reports.reload();
+      },
       openClients: (nextTab: CoachClientTab = "active") => {
         setTab(nextTab);
         setScreen("clients");

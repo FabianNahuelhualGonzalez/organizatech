@@ -1,12 +1,13 @@
 "use client";
 
-import { CalendarDays, Link, MessageSquare } from "lucide-react";
+import { CalendarDays, FileText, Link, MessageSquare } from "lucide-react";
 import styles from "./coach-quick-actions.module.css";
 
-export function CoachQuickActions({ onCalendar, onLink, onChat }: {
+export function CoachQuickActions({ onCalendar, onLink, onChat, onReports }: {
   readonly onCalendar?: () => void;
   readonly onLink?: () => void;
   readonly onChat?: () => void;
+  readonly onReports?: () => void;
 }) {
   return (
     <nav className={styles.tiles} aria-label="Accesos rápidos Coach">
@@ -25,6 +26,11 @@ export function CoachQuickActions({ onCalendar, onLink, onChat }: {
         <MessageSquare size={21} strokeWidth={1.9} aria-hidden="true" />
         <span className={styles.title}>Chat</span>
         <span className={styles.subtitle}>Habla con tus alumnos</span>
+      </button>
+      <button className={styles.tile} type="button" disabled={!onReports} onClick={onReports}>
+        <FileText size={21} strokeWidth={1.9} aria-hidden="true" />
+        <span className={styles.title}>Reportes</span>
+        <span className={styles.subtitle}>Fotos y documentos</span>
       </button>
     </nav>
   );

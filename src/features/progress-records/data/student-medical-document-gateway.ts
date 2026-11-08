@@ -128,6 +128,12 @@ export function createStudentMedicalDocumentGateway(client: SupabaseClient) {
       });
       if (result !== shared) throw new StudentMedicalDocumentGatewayError("unavailable");
     },
+    async drainOwnShareEmail(): Promise<void> {
+      const { error } = await client.functions.invoke("send-evaluation-emails", {
+        body: { kind: "progress_report" },
+      });
+      if (error) throw new StudentMedicalDocumentGatewayError("unavailable");
+    },
     async list(limit = 50, offset = 0): Promise<readonly MedicalDocumentAsset[]> {
       if (!Number.isInteger(limit) || limit < 1 || limit > 100
         || !Number.isInteger(offset) || offset < 0 || offset > 100000) {

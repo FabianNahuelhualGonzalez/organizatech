@@ -13,6 +13,7 @@ const now = new Date(Date.now() + 60_000).toISOString();
 function fixture() {
   const calls: { name: string; args: unknown }[] = [];
   const storage: { bucket?: string; path?: string; options?: unknown } = {};
+  const functions: { name?: string; body?: unknown } = {};
   const asset = { assetId, bucketId: "progress-medical-documents", objectName: path,
     mimeType: "application/pdf", bytes: 100, pageCount: null, sharedWithCoach: false,
     displayName: "Documento médico", documentCategory: "otro",
@@ -39,8 +40,11 @@ function fixture() {
         return { data: new Blob(["%PDF"], { type: "application/pdf" }), error: null };
       },
     }) },
+    functions: { invoke: async (name: string, options: { body: unknown }) => {
+      functions.name = name; functions.body = options.body; return { error: null };
+    } },
   } as unknown as SupabaseClient;
-  return { gateway: createStudentMedicalDocumentGateway(client), calls, storage, outputs };
+  return { gateway: createStudentMedicalDocumentGateway(client), calls, storage, functions, outputs };
 }
 
 test("gateway stages only SQL-issued path with PDF MIME and no upsert", async () => {
@@ -89,11 +93,13 @@ test("altered bucket, path, MIME and metadata fail closed", async () => {
 });
 
 test("sharing sends only asset ID and explicit boolean", async () => {
-  const { gateway, calls } = fixture();
+  const { gateway, calls, functions } = fixture();
   await gateway.setShared(assetId, true);
+  await gateway.drainOwnShareEmail();
   assert.deepEqual(calls, [{ name: "set_own_medical_document_shared",
     args: { p_asset_id: assetId, p_shared: true } }]);
   await assert.rejects(gateway.setShared("other", false), StudentMedicalDocumentGatewayError);
+  assert.deepEqual(functions, { name: "send-evaluation-emails", body: { kind: "progress_report" } });
 });
 
 test("direct document migration keeps ownership in SQL and leaves legacy queue intact", () => {

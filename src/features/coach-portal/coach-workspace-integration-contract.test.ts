@@ -23,6 +23,9 @@ test("el portal monta la composición productiva y la feature conserva sus runti
   assert.match(portal, /<CoachWorkspaceBoundary/);
   assert.match(boundary, /<CoachDashboardView/);
   assert.match(boundary, /<CoachClientsView/);
+  assert.match(boundary, /<CoachReportsView/);
+  assert.match(controller, /useCoachReports/);
+  assert.match(controller, /openReports/);
   for (const runtime of [
     "createCoachActiveRelationshipsRuntime",
     "createCoachPendingInvitationsRuntime",

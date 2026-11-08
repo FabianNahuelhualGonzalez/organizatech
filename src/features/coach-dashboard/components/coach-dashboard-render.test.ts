@@ -184,16 +184,19 @@ test("empty alerts render supplied empty content, not example people or payment 
 
 test("quick actions without a handler do not pretend to navigate or open a chat", () => {
   const { tree, markup } = capture(CoachQuickActions, {});
-  assert.equal(buttons(tree).length, 3);
+  assert.equal(buttons(tree).length, 4);
   for (const button of buttons(tree)) {
     assert.equal(button.props.disabled, true);
     assert.equal(button.props.onClick, undefined);
   }
   assert.match(markup, /PRONTO/);
   const calls: string[] = [];
-  const live = capture(CoachQuickActions, { onCalendar: () => calls.push("calendar"), onLink: () => calls.push("link"), onChat: () => calls.push("coming-soon") });
+  const live = capture(CoachQuickActions, {
+    onCalendar: () => calls.push("calendar"), onLink: () => calls.push("link"),
+    onChat: () => calls.push("coming-soon"), onReports: () => calls.push("reports"),
+  });
   for (const button of buttons(live.tree)) button.props.onClick?.();
-  assert.deepEqual(calls, ["calendar", "link", "coming-soon"]);
+  assert.deepEqual(calls, ["calendar", "link", "coming-soon", "reports"]);
 });
 
 test("chart selection is controlled and clicking preserves identity without mutating the month", () => {

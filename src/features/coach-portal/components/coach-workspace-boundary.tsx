@@ -8,6 +8,7 @@ import { CoachClientsView } from "@/features/coach-clients/components/coach-clie
 import { CoachChatComingSoonSheet } from "@/features/coach-dashboard/components/coach-chat-coming-soon-sheet";
 import { CoachDashboardView } from "@/features/coach-dashboard/components/coach-dashboard";
 import { CoachCommercialStudent } from "@/features/coach-dashboard/commercial/components/coach-commercial-student";
+import { CoachReportsView } from "@/features/coach-reports/components/coach-reports-view";
 import { useCoachWorkspaceController } from "../hooks/use-coach-workspace-controller";
 
 import styles from "./coach-workspace-boundary.module.css";
@@ -46,6 +47,7 @@ export function CoachWorkspaceBoundary({
   const addTriggerRef = useRef<HTMLElement>(null);
   const detailTriggerRef = useRef<HTMLElement>(null);
   const consumedRequestRef = useRef<string | null>(null);
+  const consumedReportRouteRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!clientOpenRequest || clientOpenRequest.ownerUserId !== userId) return;
@@ -55,6 +57,18 @@ export function CoachWorkspaceBoundary({
     consumedRequestRef.current = requestKey;
     onClientOpenRequestConsumed(clientOpenRequest);
   }, [clientOpenRequest, controller, onClientOpenRequestConsumed, userId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !controller.available) return;
+    const reportId = new URLSearchParams(window.location.search).get("coachReport");
+    if (!reportId || consumedReportRouteRef.current === reportId) return;
+    consumedReportRouteRef.current = reportId;
+    controller.actions.openReports();
+    void controller.reports.open(reportId);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("coachReport");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [controller]);
 
   const openAddClient = () => {
     captureActiveElement(addTriggerRef);
@@ -104,9 +118,10 @@ export function CoachWorkspaceBoundary({
                 captureActiveElement(chatTriggerRef);
                 controller.actions.openChat();
               } : undefined,
+              onReports: controller.available ? controller.actions.openReports : undefined,
             }}
           />
-        ) : (
+        ) : controller.screen === "clients" ? (
           <CoachClientsView
             view={controller.clientsView}
             actions={{
@@ -117,6 +132,14 @@ export function CoachWorkspaceBoundary({
               onOpenClient: openClient,
               onLoadMore: controller.actions.loadMore,
             }}
+          />
+        ) : (
+          <CoachReportsView
+            state={controller.reports.state}
+            onBack={controller.actions.openDashboard}
+            onRetry={() => { void controller.reports.reload(); }}
+            onOpen={(reportId) => { void controller.reports.open(reportId); }}
+            onDownload={controller.reports.download}
           />
         )}
       </div>

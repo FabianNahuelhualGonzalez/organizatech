@@ -136,10 +136,12 @@ function parseProgressDeliveries(value: unknown): ProgressDelivery[] {
       || !delivery.studentName.trim() || delivery.studentName.length > 201
       || !delivery.coachName.trim() || delivery.coachName.length > 201
       || (delivery.studentMessage !== null && delivery.studentMessage.length > 2000)
-      || !Array.isArray(delivery.checkDates) || delivery.checkDates.length < 1
+      || !Array.isArray(delivery.checkDates)
       || delivery.checkDates.length > 30 || delivery.checkDates.some((date) =>
         typeof date !== "string" || !/^\d{2}\/\d{2}\/\d{4}$/.test(date))
-      || !Number.isInteger(delivery.photoCount) || delivery.photoCount < 1 || delivery.photoCount > 30) {
+      || !Number.isInteger(delivery.photoCount) || delivery.photoCount < 0 || delivery.photoCount > 30
+      || (delivery.photoCount > 0 && delivery.checkDates.length < 1)
+      || (delivery.photoCount === 0 && delivery.checkDates.length !== 0)) {
       throw new TypeError("invalid progress claim");
     }
     return delivery;
@@ -229,6 +231,7 @@ async function attemptProgressDelivery(
   try {
     const appUrl = new URL("/login", environment.appUrl);
     appUrl.searchParams.set("tipo", "coach");
+    appUrl.searchParams.set("coachReport", delivery.reportId);
     const rendered = renderProgressReportEmail({
       studentName: delivery.studentName, coachName: delivery.coachName,
       studentMessage: delivery.studentMessage, checkDates: delivery.checkDates,

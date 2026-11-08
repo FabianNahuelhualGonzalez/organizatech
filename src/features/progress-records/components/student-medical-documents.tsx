@@ -143,10 +143,20 @@ export function StudentMedicalDocuments() {
     setBusy(true);
     setError("");
     try {
-      await getStudentMedicalDocumentGateway().setShared(asset.assetId, !asset.sharedWithCoach);
+      const gateway = getStudentMedicalDocumentGateway();
+      await gateway.setShared(asset.assetId, !asset.sharedWithCoach);
+      let deliveryPending = false;
+      if (!asset.sharedWithCoach) {
+        try { await gateway.drainOwnShareEmail(); }
+        catch { deliveryPending = true; }
+      }
       setDocuments((current) => current.map((item) => item.assetId === asset.assetId
         ? { ...item, sharedWithCoach: !asset.sharedWithCoach } : item));
-      setNotice(asset.sharedWithCoach ? "Documento privado" : "Compartido con tu coach");
+      setNotice(asset.sharedWithCoach
+        ? "Documento privado"
+        : deliveryPending
+          ? "Compartido con tu coach. El correo se enviará cuando se reintente la entrega."
+          : "Compartido con tu coach y enviado para revisión");
     } catch (caught) { setError(errorMessage(caught)); }
     finally { busyRef.current = false; setBusy(false); }
   }

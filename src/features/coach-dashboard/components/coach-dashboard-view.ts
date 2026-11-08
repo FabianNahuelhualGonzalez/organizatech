@@ -136,6 +136,7 @@ export interface CoachDashboardActions {
   readonly onLink?: () => void;
   readonly onCalendar?: () => void;
   readonly onChat?: () => void;
+  readonly onReports?: () => void;
   readonly onSelectMonth?: (id: string) => void;
   readonly onRenewal?: (id: string) => void;
   readonly onLoadMoreCommercial?: () => void;
