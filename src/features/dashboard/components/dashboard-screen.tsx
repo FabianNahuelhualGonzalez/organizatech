@@ -215,6 +215,7 @@ export function DashboardScreen({
     isCurrentWeekEmptyCoach,
     comparisonStatus: coachInput.comparisonStatus,
     displayedCoachFeedback,
+    comparisonSource: weeklyEquivalentProgress.comparisonSource,
   });
   const activeDayAction = resolveTrainingCarouselAction(activeDayData.status);
   const cardVisibility = resolveDashboardCardVisibility({
@@ -293,8 +294,8 @@ export function DashboardScreen({
             <p className="small-label">Progreso semanal</p>
             {weeklyEquivalentProgress.status === "ready" ? (
               <div className="weekly-progress-comparison-list">
-                <span>Volumen semana anterior: <strong>{weeklyEquivalentProgress.previousVolumeLabel}</strong></span>
-                <span>Volumen actual: <strong>{weeklyEquivalentProgress.currentVolumeLabel}</strong></span>
+                <span>Volumen {weeklyEquivalentProgress.referenceLabel.toLowerCase()}: <strong>{weeklyEquivalentProgress.previousVolumeLabel}</strong></span>
+                <span>Volumen {weeklyEquivalentProgress.currentLabel.toLowerCase()}: <strong>{weeklyEquivalentProgress.currentVolumeLabel}</strong></span>
                 <span className={`weekly-progress-difference ${weeklyEquivalentProgress.tone}`}>
                   Diferencia de volumen: <strong>{weeklyEquivalentProgress.primaryLabel}</strong>
                 </span>

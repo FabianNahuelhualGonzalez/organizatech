@@ -32,7 +32,7 @@ export const DASHBOARD_DOTS_ARIA_LABEL = "Posición del carrusel";
 export function buildWeeklyProgressAriaLabel(progress: WeeklyEquivalentProgressResult): string {
   if (progress.currentEquivalentValue <= 0) return "Progreso semanal: sin datos suficientes para comparar";
   if (progress.status === "ready") {
-    return `Progreso semanal: diferencia ${progress.primaryLabel}; semana actual ${progress.currentVolumeLabel}; semana anterior ${progress.previousVolumeLabel}`;
+    return `Progreso semanal: diferencia ${progress.primaryLabel}; ${progress.currentLabel.toLowerCase()} ${progress.currentVolumeLabel}; ${progress.referenceLabel.toLowerCase()} ${progress.previousVolumeLabel}`;
   }
   if (progress.status === "no_previous") {
     return `Progreso semanal: volumen acumulado actual ${progress.primaryLabel}; sin comparación anterior`;
@@ -42,9 +42,10 @@ export function buildWeeklyProgressAriaLabel(progress: WeeklyEquivalentProgressR
 
 /** Igual a `buildWeeklyProgressTrendLabel`. */
 export function buildWeeklyProgressTrendLabel(progress: WeeklyEquivalentProgressResult): string {
-  if (progress.differenceValue > 0) return "Vas por encima del ritmo de la semana anterior";
-  if (progress.differenceValue < 0) return "Vas por debajo del ritmo de la semana anterior";
-  return "Mantienes un ritmo similar a la semana anterior";
+  const reference = progress.referenceLabel.toLowerCase();
+  if (progress.differenceValue > 0) return `Vas por encima del ritmo de la ${reference}`;
+  if (progress.differenceValue < 0) return `Vas por debajo del ritmo de la ${reference}`;
+  return `Mantienes un ritmo similar a la ${reference}`;
 }
 
 /** Igual a `feedbackHeadlineForStatus`. */
@@ -86,6 +87,7 @@ export interface ResolveDashboardCoachVisualStatusInput {
   isCurrentWeekEmptyCoach: boolean;
   comparisonStatus: CoachComparisonStatus;
   displayedCoachFeedback: TrainingCoachFeedback;
+  comparisonSource?: WeeklyEquivalentProgressResult["comparisonSource"];
 }
 
 /** Igual al ternario que produce `coachVisualStatus`. */
@@ -104,6 +106,15 @@ export function resolveDashboardCoachVisualStatus(
   }
 
   if (input.comparisonStatus === "ready") {
+    if (input.comparisonSource === "registered_plan") {
+      return {
+        showScore: true,
+        showFactors: true,
+        label: feedbackHeadlineForStatus(input.displayedCoachFeedback),
+        detail: "Rutina registrada vs Semana 1",
+        factorLabel: "Factores de la comparación inicial",
+      };
+    }
     return {
       showScore: true,
       showFactors: true,

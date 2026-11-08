@@ -226,6 +226,7 @@ import {
 import { parseDateKeyAsLocalNoon } from "@/lib/progress/week-day";
 import { isDecimalWeightDraftInput, parseDecimalWeightInput } from "@/lib/progress/weight-format";
 import { calculateEquivalentWeeklyProgress } from "@/lib/progress/weekly-equivalent-progress";
+import { buildTrainingProgressTimeline } from "@/lib/progress/training-progress-week";
 import type { ExerciseEntry, ExerciseMetrics, ExerciseTemplate, TrainingDayCode, TrainingSession } from "@/lib/progress/types";
 import { validateSignupEmail } from "@/lib/auth/signup-email-validation";
 import {
@@ -1595,7 +1596,7 @@ export function OrganizatechApp({
 
   const isTrainingCyclesRepositoryActive = trainingCyclesRepositoryEnabled && dataMode === "supabase" && hasSupabaseSession;
   const todayKey = getSantiagoDateKey(new Date());
-  const currentWeek = isCycleScopedActiveCycle && persistedActiveCycle?.plannedStartDate
+  const calendarWeek = isCycleScopedActiveCycle && persistedActiveCycle?.plannedStartDate
     ? getCycleCalendarWeekNumber(persistedActiveCycle.plannedStartDate, todayKey)
     : getLegacyWeekNumberForTrainingDate(displayTrainingSessions, displayEntries, todayKey);
   const calendarNormalizedTrainingSessions = useMemo(
@@ -1610,7 +1611,23 @@ export function OrganizatechApp({
       : displayEntries,
     [displayEntries, isCycleScopedActiveCycle, persistedActiveCycle?.plannedStartDate],
   );
-  const metrics = useMemo(() => calculateWeeklyComparison(calendarNormalizedEntries), [calendarNormalizedEntries]);
+  const progressTimeline = useMemo(() => isCycleScopedActiveCycle
+    ? buildTrainingProgressTimeline({
+        entries: calendarNormalizedEntries,
+        sessions: calendarNormalizedTrainingSessions,
+        referenceDate: todayKey,
+        activeCycleId: persistedActiveCycle?.id ?? null,
+      })
+    : {
+        anchorDate: null,
+        currentWeek: calendarWeek,
+        entries: calendarNormalizedEntries,
+        sessions: calendarNormalizedTrainingSessions,
+      }, [calendarNormalizedEntries, calendarNormalizedTrainingSessions, calendarWeek, isCycleScopedActiveCycle, persistedActiveCycle?.id, todayKey]);
+  const currentWeek = progressTimeline.currentWeek;
+  const progressEntries = progressTimeline.entries;
+  const progressSessions = progressTimeline.sessions;
+  const metrics = useMemo(() => calculateWeeklyComparison(progressEntries), [progressEntries]);
   const hasTrainingEntries = isCycleScopedActiveCycle
     ? calendarNormalizedEntries.length > 0 || calendarNormalizedTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0)
     : calendarNormalizedTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
@@ -1618,13 +1635,13 @@ export function OrganizatechApp({
   const routineDays = getActiveRoutineDays(displayExercises, displayTrainingPlan);
   const flexibleComparison = useMemo(() => flexibleSchedule && persistedActiveCycle
     ? selectFlexibleComparisonEntries({
-        sessions: calendarNormalizedTrainingSessions,
-        entries: calendarNormalizedEntries,
+        sessions: progressSessions,
+        entries: progressEntries,
         exercises: displayExercises,
         routineDays,
         cycleId: persistedActiveCycle.id,
       })
-    : null, [calendarNormalizedEntries, calendarNormalizedTrainingSessions, displayExercises, flexibleSchedule, persistedActiveCycle, routineDays]);
+    : null, [displayExercises, flexibleSchedule, persistedActiveCycle, progressEntries, progressSessions, routineDays]);
   const progressControllerSource = useMemo(() => ({
       plannedExercises: displayExercises,
       entries: flexibleComparison ? calculateWeeklyComparison(flexibleComparison.entries) : metrics,
@@ -1691,12 +1708,14 @@ export function OrganizatechApp({
   const currentMetrics = metrics.filter((entry) => entry.week === currentWeek);
   const summary = calculateWeeklySummary(metrics, currentWeek);
   const weeklyEquivalentProgress = useMemo(() => calculateEquivalentWeeklyProgress({
-    entries: calendarNormalizedEntries,
-    sessions: calendarNormalizedTrainingSessions,
+    entries: progressEntries,
+    sessions: progressSessions,
     referenceDate: new Date(),
     activeCycleId: isCycleScopedActiveCycle ? persistedActiveCycle?.id ?? null : null,
     plannedDays: flexibleSchedule ? [...TRAINING_DAY_LABELS] : routineDays,
-  }), [calendarNormalizedEntries, calendarNormalizedTrainingSessions, flexibleSchedule, isCycleScopedActiveCycle, persistedActiveCycle?.id, routineDays]);
+    plannedExercises: displayExercises,
+    currentWeek,
+  }), [currentWeek, displayExercises, flexibleSchedule, isCycleScopedActiveCycle, persistedActiveCycle?.id, progressEntries, progressSessions, routineDays]);
   const visibleCycleHistoryCount = isTrainingCyclesRepositoryActive ? persistedCycleHistory.length : legacyCycleHistoryCount;
   const visibleCycleNumber = isTrainingCyclesRepositoryActive
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
@@ -3884,7 +3903,7 @@ export function OrganizatechApp({
           if (!cycleDay || !isNonEmptyString(persistedActiveCycle.plannedStartDate)) return null;
           return getCycleCalendarPlannedDate({
             plannedStartDate: persistedActiveCycle.plannedStartDate,
-            weekNumber: currentWeek,
+            weekNumber: calendarWeek,
             plannedDay,
           });
         })()
@@ -4241,9 +4260,7 @@ export function OrganizatechApp({
     });
     if (!operationContext.isCurrent()) return null;
     const plannedDaysCount = hasRoutinePlan ? dashboardCarouselDays.length : routineDays.length;
-    const completionWeek = flexibleSchedule && persistedActiveCycle?.plannedStartDate
-      ? getCycleCalendarWeekNumber(persistedActiveCycle.plannedStartDate, input.trainedDate)
-      : currentWeek;
+    const completionWeek = currentWeek;
     const completedDaysAfterSave = flexibleSchedule && persistedActiveCycle
       ? countFlexibleCompletedRoutines({
           sessions: calendarNormalizedTrainingSessions,
@@ -4998,8 +5015,8 @@ export function OrganizatechApp({
             summary={summary}
             weeklyEquivalentProgress={weeklyEquivalentProgress}
             currentWeek={currentWeek}
-            entries={calendarNormalizedEntries}
-            sessions={calendarNormalizedTrainingSessions}
+            entries={progressEntries}
+            sessions={progressSessions}
             startRegistration={() => navigateTo("registro-entrenamiento")}
             goToRoutine={() => openRoutineDay(dashboardDay)}
             viewSummary={(selectedDay) => {

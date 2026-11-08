@@ -59,6 +59,19 @@ import {
   assert.equal(input.weeklyTrend?.phase, "no_history");
 }
 
+{
+  const input = mapDashboardInput({
+    summary: summary({ week: 1, exerciseCount: 1 }),
+    currentMetrics: [metric({ week: 1, exerciseName: "Jalón al pecho" })],
+    entries: [entry({ week: 1, exerciseName: "Jalón al pecho" })],
+    currentWeek: 1,
+    weeklyEquivalentProgress: { status: "ready", comparisonSource: "registered_plan" },
+  });
+
+  assert.equal(input.comparisonStatus, "ready", "el primer registro completo se compara con la rutina registrada");
+  assert.equal(input.referenceWeek, null, "la referencia inicial es el plan, no una semana histórica inventada");
+}
+
 // Escenario 1: el estado semanal global no convierte en ready un día sin referencia.
 {
   const input = mapDashboardInput({
