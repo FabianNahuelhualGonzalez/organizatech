@@ -587,6 +587,18 @@ assert.match(
   cssSource,
   /@media \(max-width: 389px\)[\s\S]*?\.dateFields\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/,
 );
+assert.match(
+  cssSource,
+  /\.scheduleModePicker > div\s*\{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?gap: 9px;/,
+);
+assert.match(
+  cssSource,
+  /\.scheduleModePicker button\s*\{[\s\S]*?width: 100%;[\s\S]*?min-height: 48px;/,
+);
+assert.match(
+  cssSource,
+  /@media \(max-width: 389px\)[\s\S]*?\.scheduleModePicker > div\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/,
+);
 assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)/);
 
 // Sólo archivos focales nuevos dentro del owner autorizado.
