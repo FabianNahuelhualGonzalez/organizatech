@@ -57,6 +57,15 @@ export interface WeeklyExerciseResultComparison {
   effective: WeeklyExerciseComparisonRecord | null;
 }
 
+export interface WeeklyExerciseFirstWeekPlanComparison {
+  targetSets: number;
+  targetReps: number;
+  targetWeight: number;
+  targetTotalReps: number;
+  completedSets: number;
+  actual: WeeklyExerciseComparisonRecord;
+}
+
 export interface WeeklyExerciseComparisonModel {
   availableDays: string[];
   selectedDay: string;
@@ -74,6 +83,7 @@ export interface WeeklyExerciseComparisonModel {
   hasCurrent: boolean;
   plannedExercises: WeeklyExerciseComparisonPlannedExercise[];
   resultComparison: WeeklyExerciseResultComparison;
+  firstWeekPlanComparison: WeeklyExerciseFirstWeekPlanComparison | null;
   kgChartSeries: WeeklyExerciseComparisonSeriesPoint[];
   repsChartSeries: WeeklyExerciseComparisonSeriesPoint[];
   kgSummary: WeeklyExerciseMetricSummary;
@@ -152,7 +162,24 @@ export function buildWeeklyExerciseComparisonModel(input: {
   const selected = safeSelectedWeek ? records.find((record) => record.week === safeSelectedWeek) ?? null : null;
   const effective = selected ?? current ?? records.at(-1) ?? null;
   const selectedWeek = effective?.week ?? null;
-  const emptyState = getEmptyState({ records, baseline, effective, hasReliableIdentity: Boolean(identity) });
+  const firstWeekPlanComparison = effective?.week === 1 && selectedPlannedExercise &&
+    selectedPlannedExercise.targetSets > 0 && selectedPlannedExercise.targetReps > 0
+    ? {
+      targetSets: selectedPlannedExercise.targetSets,
+      targetReps: selectedPlannedExercise.targetReps,
+      targetWeight: selectedPlannedExercise.baseWeight,
+      targetTotalReps: selectedPlannedExercise.targetSets * selectedPlannedExercise.targetReps,
+      completedSets: effective.reps.filter((reps) => reps > 0).length,
+      actual: effective,
+    }
+    : null;
+  const emptyState = getEmptyState({
+    records,
+    baseline,
+    effective,
+    hasReliableIdentity: Boolean(identity),
+    hasFirstWeekPlanComparison: Boolean(firstWeekPlanComparison),
+  });
   const kgChartSeries = records.map((record) => ({
     week: record.week,
     label: `S${record.week}`,
@@ -186,18 +213,19 @@ export function buildWeeklyExerciseComparisonModel(input: {
       baseline,
       effective,
     },
+    firstWeekPlanComparison,
     kgChartSeries,
     repsChartSeries,
     kgSummary: buildMetricSummary({
-      baselineValue: baseline?.weight ?? null,
+      baselineValue: firstWeekPlanComparison?.targetWeight ?? baseline?.weight ?? null,
       effectiveValue: effective?.weight ?? null,
-      baselineDate: baseline?.date ?? null,
+      baselineDate: firstWeekPlanComparison ? null : baseline?.date ?? null,
       effectiveDate: effective?.date ?? null,
     }),
     repsSummary: buildMetricSummary({
-      baselineValue: baseline?.totalReps ?? null,
+      baselineValue: firstWeekPlanComparison?.targetTotalReps ?? baseline?.totalReps ?? null,
       effectiveValue: effective?.totalReps ?? null,
-      baselineDate: baseline?.date ?? null,
+      baselineDate: firstWeekPlanComparison ? null : baseline?.date ?? null,
       effectiveDate: effective?.date ?? null,
     }),
     emptyState,
@@ -235,6 +263,7 @@ function createEmptyModel(input: {
       baseline: null,
       effective: null,
     },
+    firstWeekPlanComparison: null,
     kgChartSeries: [],
     repsChartSeries: [],
     kgSummary: createUnavailableSummary(),
@@ -393,10 +422,12 @@ function getEmptyState(input: {
   baseline: WeeklyExerciseComparisonRecord | null;
   effective: WeeklyExerciseComparisonRecord | null;
   hasReliableIdentity: boolean;
+  hasFirstWeekPlanComparison: boolean;
 }): WeeklyExerciseComparisonEmptyState {
   if (!input.hasReliableIdentity) return "no_reliable_identity";
   if (input.records.length === 0) return "no_real_records";
   if (!input.baseline) return "no_baseline_week";
+  if (input.hasFirstWeekPlanComparison) return "none";
   if (input.records.length < 2 || input.effective?.week === input.baseline.week) return "insufficient_chart_data";
   return "none";
 }

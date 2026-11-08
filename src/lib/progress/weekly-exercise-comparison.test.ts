@@ -31,6 +31,7 @@ import { buildWeeklyExerciseComparisonModel } from "@/lib/progress/weekly-exerci
   assert.equal(model.repsChartSeries[1].value, 32);
   assert.equal(model.resultComparison.baseline?.repsLabel, "6/6/6/6", "detalle por serie respeta cantidad real");
   assert.equal(model.repsSummary.difference, 8, "diferencia reps = total actual - total Semana 1");
+  assert.equal(model.firstWeekPlanComparison, null, "semana posterior conserva comparación entre registros reales");
   assert.equal(model.repsSummary.tone, "positive");
   assert.equal(model.kgSummary.difference, 5);
   assert.equal(model.kgSummary.tone, "positive");
@@ -41,6 +42,22 @@ import { buildWeeklyExerciseComparisonModel } from "@/lib/progress/weekly-exerci
   assert.equal(model.effectiveWeek, 2, "semana derecha usa currentWeek si tiene datos");
   assert.equal(model.emptyState, "none");
   assert.deepEqual(model.kgChartSeries.map((point) => point.label), ["S1", "S2"], "solo grafica semanas reales");
+}
+
+{
+  const plannedExercises = [exercise({ id: "sentadilla", lineage: "lineage-sentadilla", name: "Sentadilla", day: "Martes", routine: "Piernas", targetSets: 4, targetReps: 8, baseWeight: 100 })];
+  const entries = [
+    entry({ id: "sentadilla-w1", exerciseId: "sentadilla", lineage: "lineage-sentadilla", name: "Sentadilla", routine: "Piernas", week: 1, date: "2026-06-24", weight: 100, reps: [8, 8, 8, 7] }),
+    entry({ id: "sentadilla-w2", exerciseId: "sentadilla", lineage: "lineage-sentadilla", name: "Sentadilla", routine: "Piernas", week: 2, date: "2026-07-01", weight: 102, reps: [8, 8, 8, 8] }),
+  ];
+  const weekOne = buildWeeklyExerciseComparisonModel({ plannedExercises, entries, selectedDay: "Martes", selectedWeek: 1, currentWeek: 2 });
+  const weekTwo = buildWeeklyExerciseComparisonModel({ plannedExercises, entries, selectedDay: "Martes", selectedWeek: 2, currentWeek: 2 });
+
+  assert.equal(weekOne.firstWeekPlanComparison?.actual.week, 1, "semana 1 elegida usa el plan incluso cuando existe semana 2");
+  assert.equal(weekOne.repsSummary.difference, -1);
+  assert.equal(weekOne.emptyState, "none");
+  assert.equal(weekTwo.firstWeekPlanComparison, null);
+  assert.equal(weekTwo.repsSummary.difference, 1, "semana 2 conserva la referencia real de semana 1");
 }
 
 {
@@ -131,9 +148,9 @@ import { buildWeeklyExerciseComparisonModel } from "@/lib/progress/weekly-exerci
 
 {
   const model = buildWeeklyExerciseComparisonModel({
-    plannedExercises: [exercise({ id: "press", lineage: "lineage-press", name: "Press", day: "Lunes", routine: "Pecho" })],
+    plannedExercises: [exercise({ id: "press", lineage: "lineage-press", name: "Press", day: "Lunes", routine: "Pecho", targetSets: 4, targetReps: 8, baseWeight: 100 })],
     entries: [
-      entry({ id: "press-w1", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 1, date: "2026-06-24", weight: 100, reps: [6, 6, 6, 6] }),
+      entry({ id: "press-w1", exerciseId: "press", lineage: "lineage-press", name: "Press", routine: "Pecho", week: 1, date: "2026-06-24", weight: 100, reps: [8, 8, 8, 7] }),
     ],
     selectedDay: "Lunes",
     selectedExerciseId: "press",
@@ -143,14 +160,22 @@ import { buildWeeklyExerciseComparisonModel } from "@/lib/progress/weekly-exerci
   assert.equal(model.hasBaseline, true);
   assert.equal(model.baselineWeek, 1);
   assert.equal(model.effectiveWeek, 1);
-  assert.equal(model.emptyState, "insufficient_chart_data");
+  assert.equal(model.emptyState, "none", "semana 1 compara plan con entrenamiento real");
   assert.deepEqual(model.availableWeeks, [1], "no inventa semana actual si no existe registro");
   assert.deepEqual(model.kgChartSeries, [{ week: 1, label: "S1", value: 100, date: "2026-06-24" }]);
-  assert.deepEqual(model.repsChartSeries, [{ week: 1, label: "S1", value: 24, date: "2026-06-24" }]);
-  assert.equal(model.kgSummary.difference, 0, "no genera diferencias falsas con una sola semana");
+  assert.deepEqual(model.repsChartSeries, [{ week: 1, label: "S1", value: 31, date: "2026-06-24" }]);
+  assert.deepEqual(model.firstWeekPlanComparison, {
+    targetSets: 4,
+    targetReps: 8,
+    targetWeight: 100,
+    targetTotalReps: 32,
+    completedSets: 4,
+    actual: model.resultComparison.effective,
+  });
+  assert.equal(model.kgSummary.difference, 0, "peso real se compara con el plan");
   assert.equal(model.kgSummary.tone, "neutral");
-  assert.equal(model.repsSummary.difference, 0);
-  assert.equal(model.repsSummary.tone, "neutral");
+  assert.equal(model.repsSummary.difference, -1, "muestra la repetición que faltó frente al plan");
+  assert.equal(model.repsSummary.tone, "negative");
 }
 
 {

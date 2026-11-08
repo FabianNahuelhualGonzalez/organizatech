@@ -28,14 +28,20 @@ export function WeeklyMetricProgressCard({
 }: WeeklyMetricProgressCardProps) {
   const summary = metric === "kg" ? model.kgSummary : model.repsSummary;
   const series = metric === "kg" ? model.kgChartSeries : model.repsChartSeries;
-  const chartData = series.map((point) => ({ label: point.label, value: point.value, date: point.date }));
-  const hasEnoughChartData = series.length > 1;
+  const firstWeekPlan = model.firstWeekPlanComparison;
+  const chartData = firstWeekPlan
+    ? [
+      { label: "Plan", value: metric === "kg" ? firstWeekPlan.targetWeight : firstWeekPlan.targetTotalReps, date: "" },
+      { label: "S1", value: metric === "kg" ? firstWeekPlan.actual.weight : firstWeekPlan.actual.totalReps, date: firstWeekPlan.actual.date },
+    ]
+    : series.map((point) => ({ label: point.label, value: point.value, date: point.date }));
+  const hasEnoughChartData = chartData.length > 1;
   const unit = metric === "kg" ? "kg" : "reps";
 
   return (
     <section className="weekly-comparison-section weekly-metric-card">
       <h3>{title}</h3>
-      <p>{helper}</p>
+      <p>{firstWeekPlan ? "Compara lo planificado con tu primer entrenamiento." : helper}</p>
       <div className="weekly-selected-exercise">{model.selectedExercise?.name ?? "Sin ejercicio seleccionado"}</div>
 
       {hasEnoughChartData ? (
@@ -55,7 +61,9 @@ export function WeeklyMetricProgressCard({
       )}
 
       <p className="weekly-chart-copy">
-        {metric === "kg"
+        {firstWeekPlan
+          ? "El gráfico compara tu rutina planificada con lo que registraste en la semana 1."
+          : metric === "kg"
           ? "El gráfico muestra cómo cambia la carga registrada para este ejercicio durante el ciclo de entrenamiento."
           : "El gráfico muestra cómo cambian las repeticiones registradas para este ejercicio durante el ciclo de entrenamiento."}
       </p>

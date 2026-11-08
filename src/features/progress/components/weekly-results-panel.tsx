@@ -9,6 +9,7 @@ export interface WeeklyResultsPanelProps {
 export function WeeklyResultsPanel({ model }: WeeklyResultsPanelProps) {
   const baseline = model.resultComparison.baseline;
   const effective = model.resultComparison.effective;
+  const firstWeekPlan = model.firstWeekPlanComparison;
 
   if (!model.selectedExercise) {
     return <div className="weekly-comparison-empty">Selecciona un día con ejercicios para revisar resultados.</div>;
@@ -36,7 +37,26 @@ export function WeeklyResultsPanel({ model }: WeeklyResultsPanelProps) {
       {model.isUsingFallbackBaseline ? (
         <p className="weekly-results-note">Usaremos tu primera semana registrada como punto de partida.</p>
       ) : null}
-      {isFirstReferenceOnly ? (
+      {firstWeekPlan ? (
+        <>
+          <div className="weekly-results-grid">
+            <div className="weekly-series-column">
+              <span>Rutina planificada</span>
+              <small>{firstWeekPlan.targetSets} series de {firstWeekPlan.targetReps} reps</small>
+              {Array.from({ length: firstWeekPlan.targetSets }, (_, index) => (
+                <div className="weekly-series-pill" key={`planned-${index}`}>
+                  <span>S{index + 1}:</span>
+                  <strong>{formatKg(firstWeekPlan.targetWeight)} · {firstWeekPlan.targetReps} reps</strong>
+                </div>
+              ))}
+            </div>
+            <WeeklySeriesColumn title="Semana 1" record={firstWeekPlan.actual} />
+          </div>
+          <p className="weekly-results-note">
+            Realizaste {firstWeekPlan.completedSets} de {firstWeekPlan.targetSets} series y {firstWeekPlan.actual.totalReps} de {firstWeekPlan.targetTotalReps} repeticiones planificadas.
+          </p>
+        </>
+      ) : isFirstReferenceOnly ? (
         <div className="weekly-comparison-empty">{firstReferenceCopy}</div>
       ) : (
         <div className="weekly-results-grid">
@@ -44,7 +64,7 @@ export function WeeklyResultsPanel({ model }: WeeklyResultsPanelProps) {
           <WeeklySeriesColumn title={`Semana ${effective?.week ?? "—"}`} record={effective} />
         </div>
       )}
-      <p className="weekly-results-note">Primer registro vs semana elegida</p>
+      <p className="weekly-results-note">{firstWeekPlan ? "Rutina planificada vs semana 1" : "Primer registro vs semana elegida"}</p>
     </div>
   );
 }
