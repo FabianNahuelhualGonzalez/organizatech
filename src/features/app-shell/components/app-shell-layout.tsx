@@ -5,6 +5,7 @@ export interface AppShellLayoutProps {
   notificationOverlay?: ReactNode;
   navigationOverlay?: ReactNode;
   screenHeader?: ReactNode;
+  isContentWide?: boolean;
   children: ReactNode;
 }
 
@@ -13,10 +14,11 @@ export function AppShellLayout({
   notificationOverlay,
   navigationOverlay,
   screenHeader,
+  isContentWide = false,
   children,
 }: AppShellLayoutProps) {
   return (
-    <main className="app-shell">
+    <main className={`app-shell${isContentWide ? " app-shell-wide" : ""}`}>
       {topbar}
       {notificationOverlay}
       {navigationOverlay}

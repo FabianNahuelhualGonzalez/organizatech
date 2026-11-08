@@ -21,6 +21,10 @@
   font-family: inherit;
 }
 
+.wideShell {
+  width: min(100%, 1280px);
+}
+
 .shell,
 .shell * {
   box-sizing: border-box;

@@ -23,6 +23,7 @@ import { removeAccents } from "@/lib/training/exercise-name-normalization";
 import { getSantiagoDateKey } from "@/lib/training/santiago-training-date";
 import {
   flexibleCompletionTitle,
+  flexibleRoutineLabel,
   getFlexibleTrainingStartDate,
   isFlexibleTrainingPlan,
 } from "@/lib/training/flexible-training-schedule";
@@ -347,7 +348,6 @@ import {
   type TrainingWorkoutReadinessPayload,
 } from "@/lib/training/training-workout-readiness-repository";
 import {
-  getLatestExercisePerformanceByLineage,
   normalizeExerciseLineageId,
 } from "@/lib/training/exercise-last-performance-repository";
 import { createStableWorkoutStartedAt } from "@/lib/training/exercise-last-performance-loader";
@@ -452,8 +452,8 @@ import {
 } from "@/lib/training/training-carousel-card-presentation";
 import {
   buildTrainingCompletionExerciseInputs,
+  buildTrainingCompletionHistoricalInputsFromSessions,
   buildTrainingCompletionSummary,
-  loadTrainingCompletionHistoricalInputs,
 } from "@/lib/training/training-completion-summary";
 
 const ComparisonScreenV2 = dynamic<ComparisonScreenV2Props>(
@@ -4229,16 +4229,17 @@ export function OrganizatechApp({
     savedAt: string;
     trainedDate: string;
   }, operationContext: ActiveWorkoutOperationContext) {
-    const historicalResult = await operationContext.settle(
-      loadTrainingCompletionHistoricalInputs({
-        currentSessionId: input.sessionId,
-        exercises: input.validExercises,
-        loadLatestByLineage: getLatestExercisePerformanceByLineage,
-      }),
-    );
-    if (historicalResult.kind === "stale") return null;
-    if (historicalResult.kind === "error") throw historicalResult.error;
-    const historicalByExerciseId = historicalResult.value;
+    const historicalByExerciseId = buildTrainingCompletionHistoricalInputsFromSessions({
+      currentSessionId: input.sessionId,
+      currentDate: input.trainedDate,
+      cycleId: input.validExercises[0]?.cycleId ?? null,
+      cycleDayId: input.validExercises[0]?.cycleDayId ?? null,
+      plannedDay: getTrainingDayCode(visibleDay),
+      routine: visibleRoutine,
+      exercises: input.validExercises,
+      sessions: calendarNormalizedTrainingSessions,
+    });
+    if (!operationContext.isCurrent()) return null;
     const plannedDaysCount = hasRoutinePlan ? dashboardCarouselDays.length : routineDays.length;
     const completionWeek = flexibleSchedule && persistedActiveCycle?.plannedStartDate
       ? getCycleCalendarWeekNumber(persistedActiveCycle.plannedStartDate, input.trainedDate)
@@ -4268,7 +4269,7 @@ export function OrganizatechApp({
 
     return buildTrainingCompletionSummary({
       sessionId: input.sessionId,
-      dayLabel: flexibleSchedule ? flexibleCompletionTitle(visibleDay, input.trainedDate) : visibleDay,
+      dayLabel: flexibleSchedule ? flexibleRoutineLabel(visibleDay) : visibleDay,
       statusLabel: `Completado · ${input.validExercises.length} de ${input.validExercises.length}`,
       workoutName: visibleRoutine,
       cycleLabel: completionTopbarMeta?.cycleLabel ?? trainingTopbarMeta?.cycleLabel ?? getCycleTypeTitle(displayTrainingPlan),
@@ -5257,6 +5258,7 @@ export function OrganizatechApp({
         contextLabel={screen === "evaluaciones" && hasStudentEvaluationsAccess ? "Evaluaciones" : null}
         notificationOverlay={notificationOverlay}
         screenHeader={screenHeader}
+        isContentWide={screen === "training-summary"}
         avatarResetKey={profileAvatarResetKey}
         onAvatarImageError={handleProfileAvatarImageError}
         onOpen={toggleMenu}
@@ -5287,6 +5289,7 @@ export function OrganizatechApp({
         />
       }
       notificationOverlay={notificationOverlay}
+      isContentWide={screen === "training-summary"}
       navigationOverlay={
         <AppNavigationDrawer
           isOpen={isMenuOpen}

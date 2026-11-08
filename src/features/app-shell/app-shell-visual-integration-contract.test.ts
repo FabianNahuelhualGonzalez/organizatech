@@ -198,7 +198,7 @@ assert.doesNotMatch(appSource, /import \{[^}]*\bChevronLeft\b[^}]*\} from "lucid
 assert.doesNotMatch(appSource, /import \{[^}]*\bLogOut\b[^}]*\} from "lucide-react"/, "LogOut ya no se usa directamente en el root");
 
 // 3-4. DOM/clases/ARIA criticos, ahora en los componentes, con la estructura exacta preservada.
-assert.match(components.shellLayout, /<main className="app-shell">/);
+assert.match(components.shellLayout, /<main className=\{`app-shell\$\{isContentWide \? " app-shell-wide" : ""\}`\}>/);
 assert.match(components.topbar, /className={`topbar \$\{isHidden \? "hidden" : ""\}`}/);
 assert.match(components.topbar, /aria-label="Ver notificaciones"/);
 assert.match(components.topbar, /aria-expanded={isNotificationPanelOpen}/);

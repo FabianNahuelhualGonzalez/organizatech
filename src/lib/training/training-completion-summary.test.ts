@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import type { ExerciseTemplate } from "@/lib/progress/types";
+import type { ExerciseTemplate, TrainingSession } from "@/lib/progress/types";
 import {
   activeWorkoutCompletionMessages,
   buildCycleScopedWorkoutCompletionEntries,
@@ -14,10 +14,11 @@ import type { CycleScopedTrainingPlan } from "@/lib/training/cycle-scoped-traini
 import type { LatestExercisePerformance } from "@/lib/training/exercise-last-performance-repository";
 import {
   buildTrainingCompletionExerciseInputs,
+  buildTrainingCompletionHistoricalInputsFromSessions,
   buildTrainingCompletionSummary,
   calculateWorkoutDurationMinutes,
+  compareTrainingCompletionSummary,
   formatDurationLabel,
-  loadTrainingCompletionHistoricalInputs,
 } from "@/lib/training/training-completion-summary";
 import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
 
@@ -92,6 +93,73 @@ import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
     { label: "Este será tu punto de partida.", tone: "neutral" },
     { label: "Cuando completes la próxima semana, podrás comparar tu progreso.", tone: "neutral" },
   ]);
+}
+
+{
+  const sample = [
+    ["e1", "Sentadilla Smith", 24, 105, 27, 105],
+    ["e2", "Hack", 46, 145, 45, 140],
+    ["e3", "Ext. de rodilla", 48, 92.2, 48, 92.2],
+    ["e4", "Hip thrust", 24, 55, 23, 55],
+    ["e5", "Búlgaras Smith", 32, 10, 51, 10],
+    ["e6", "Peso muerto rumano", 24, 95, 31, 100],
+    ["e7", "Curl femoral", 51, 45, 50, 45],
+  ] as const;
+  const summary = buildTrainingCompletionSummary({
+    ...baseInput(),
+    currentDate: "2026-10-21",
+    exercises: sample.map(([id, name, currentReps, currentKg]) => ({
+      exerciseId: id,
+      exerciseName: name,
+      targetSets: 3,
+      draft: { reps: [currentReps], weight: currentKg, registered: true },
+    })),
+    historicalByExerciseId: Object.fromEntries(sample.map(([id, , , , previousReps, previousKg]) => [
+      id,
+      {
+        status: "ready",
+        latest: performance({
+          sessionId: "session-previous",
+          exerciseLineageId: `${id}-lineage`,
+          trainedDate: "2026-10-14",
+          reps: [previousReps],
+          weights: [previousKg],
+        }),
+      },
+    ])),
+  });
+  const comparison = compareTrainingCompletionSummary(summary);
+  assert.equal(comparison.increased, 3);
+  assert.equal(comparison.equal, 1);
+  assert.equal(comparison.decreased, 3);
+  assert.equal(comparison.previousTotalReps, 275);
+  assert.equal(comparison.currentTotalReps, 249);
+  assert.equal(comparison.totalRepsDifference, -26);
+
+  const firstSession = compareTrainingCompletionSummary(buildTrainingCompletionSummary({
+    ...baseInput(),
+    exercises: sample.map(([id, name, currentReps, currentKg]) => ({
+      exerciseId: id,
+      exerciseName: name,
+      targetSets: 3,
+      draft: { reps: [currentReps], weight: currentKg, registered: true },
+    })),
+  }));
+  assert.equal(firstSession.hasComparison, false);
+  assert.equal(firstSession.exercises.every((item) => item.state === "new"), true);
+
+  const incomplete = compareTrainingCompletionSummary(buildTrainingCompletionSummary({
+    ...baseInput(),
+    exercises: sample.map(([id, name, currentReps, currentKg], index) => ({
+      exerciseId: id,
+      exerciseName: name,
+      targetSets: 3,
+      draft: { reps: [currentReps], weight: currentKg, registered: index < 5 },
+    })),
+  }));
+  assert.equal(incomplete.registered, 5);
+  assert.equal(incomplete.total, 7);
+  assert.equal(incomplete.exercises.filter((item) => item.state === "pending").length, 2);
 }
 
 {
@@ -650,39 +718,78 @@ async function runCompletionDecompositionTests() {
     exerciseLineageId: "lineage-1",
     exerciseName: "Press",
     targetSets: 2,
-    draft: { weight: "42,5", reps: [10, 9] },
+    draft: { weight: "42,5", reps: [10, 9], registered: true },
   });
   assert.notEqual(summaryInputs[0].draft?.reps, drafts["exercise-1"].reps);
 
-  const historicalCalls: Array<{ exerciseLineageId: string; currentSessionId: string }> = [];
-  const historical = await loadTrainingCompletionHistoricalInputs({
+  const historical = buildTrainingCompletionHistoricalInputsFromSessions({
     currentSessionId: "session-current",
+    currentDate: "2026-07-08",
+    cycleId: "cycle-1",
+    cycleDayId: "cycle-day-1",
+    plannedDay: "wednesday",
+    routine: "Rutina A",
     exercises: [
       { id: "first", exerciseLineageId: null },
-      { id: "ready", exerciseLineageId: "lineage-ready" },
-      { id: "unavailable", exerciseLineageId: "lineage-error" },
+      { id: "exercise-1", exerciseLineageId: "lineage-ready" },
     ],
-    async loadLatestByLineage(input) {
-      historicalCalls.push(input);
-      if (input.exerciseLineageId === "lineage-error") throw new Error("historical unavailable");
-      return performance({
-        sessionId: "session-previous",
-        exerciseLineageId: input.exerciseLineageId,
+    sessions: [
+      completionSession({
+        id: "newer-wrong-day",
+        cycleDayId: "cycle-day-2",
+        trainedDate: "2026-07-07",
+      }),
+      completionSession({
+        id: "session-previous",
+        cycleDayId: "cycle-day-1",
         trainedDate: "2026-07-01",
-        reps: [10],
-        weights: [40],
-      });
-    },
+        entries: [{
+          id: "entry-previous",
+          sessionId: "session-previous",
+          cycleId: "cycle-1",
+          cycleDayId: "cycle-day-1",
+          trainingCycleExerciseId: "exercise-1",
+          exerciseLineageId: "lineage-ready",
+          exerciseId: "exercise-1",
+          exerciseName: "Press",
+          routine: "Rutina A",
+          week: 1,
+          date: "2026-07-01",
+          targetSets: 2,
+          targetReps: 10,
+          weight: 40,
+          previousWeight: 37.5,
+          reps: [10, 9],
+        }],
+      }),
+    ],
   });
   assert.equal(historical.first.status, "first_reference");
-  assert.equal(historical.ready.status, "ready");
-  assert.equal(historical.unavailable.status, "unavailable");
-  assert.deepEqual(historicalCalls, [
-    { exerciseLineageId: "lineage-ready", currentSessionId: "session-current" },
-    { exerciseLineageId: "lineage-error", currentSessionId: "session-current" },
-  ], "el histórico excluye la sesión actual y no consulta ejercicios sin lineage");
+  assert.equal(historical["exercise-1"]?.status, "ready");
+  assert.equal(historical["exercise-1"]?.latest?.sessionId, "session-previous");
+  assert.deepEqual(historical["exercise-1"]?.latest?.series.map((series) => series.reps), [10, 9]);
 
   console.log("training-completion-summary and active-workout-completion tests passed");
+}
+
+function completionSession(overrides: Partial<TrainingSession> = {}): TrainingSession {
+  return {
+    id: "session-default",
+    cycleId: "cycle-1",
+    cycleDayId: "cycle-day-1",
+    routineId: "routine-1",
+    routine: "Rutina A",
+    weekNumber: 1,
+    calendarWeekStart: "2026-06-29",
+    plannedDay: "wednesday",
+    plannedDate: "2026-07-01",
+    trainedDate: "2026-07-01",
+    trainedAt: "2026-07-01T10:00:00.000Z",
+    status: "completed",
+    completedAt: "2026-07-01T11:00:00.000Z",
+    entries: [],
+    ...overrides,
+  };
 }
 
 function createCompletionExercises(): ExerciseTemplate[] {

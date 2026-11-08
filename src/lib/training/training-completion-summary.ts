@@ -1,17 +1,19 @@
 import { formatDecimalEs, formatKg, roundDecimal } from "@/lib/progress/weight-format";
-import type { ExerciseTemplate } from "@/lib/progress/types";
+import type { ExerciseTemplate, TrainingSession } from "@/lib/progress/types";
 import type { LatestExercisePerformance } from "@/lib/training/exercise-last-performance-repository";
 import {
   normalizeExerciseDraft,
   type ExerciseDraft,
 } from "@/lib/training/training-exercise-draft";
 
-export type TrainingCompletionComparisonStatus = "ready" | "first_reference" | "unavailable";
+export type TrainingCompletionComparisonStatus = "ready" | "first_reference" | "unavailable" | "pending";
 export type TrainingCompletionTone = "positive" | "danger" | "neutral";
+export type TrainingCompletionExerciseState = "up" | "down" | "eq" | "new" | "pending";
 
 export interface TrainingCompletionExerciseDraftInput {
   weight?: string | number | null;
   reps?: Array<number | "" | null | undefined>;
+  registered?: boolean;
 }
 
 export interface TrainingCompletionExerciseInput {
@@ -78,48 +80,76 @@ export interface TrainingCompletionExerciseSummary {
   resultLines: TrainingCompletionResultLine[];
 }
 
+export interface TrainingCompletionComparedExercise extends TrainingCompletionExerciseSummary {
+  state: TrainingCompletionExerciseState;
+}
+
+export interface TrainingCompletionComparison {
+  exercises: TrainingCompletionComparedExercise[];
+  registered: number;
+  total: number;
+  increased: number;
+  decreased: number;
+  equal: number;
+  hasComparison: boolean;
+  previousDateLabel: string;
+  previousTotalReps: number;
+  currentTotalReps: number;
+  totalRepsDifference: number;
+}
+
 export interface TrainingCompletionResultLine {
   label: string;
   tone: TrainingCompletionTone;
 }
 
-export async function loadTrainingCompletionHistoricalInputs(input: {
+export function buildTrainingCompletionHistoricalInputsFromSessions(input: {
   currentSessionId: string;
-  exercises: readonly Pick<ExerciseTemplate, "id" | "exerciseLineageId">[];
-  loadLatestByLineage: (input: {
-    exerciseLineageId: string;
-    currentSessionId: string;
-  }) => Promise<LatestExercisePerformance | null>;
-}): Promise<Record<string, TrainingCompletionHistoricalInput>> {
-  const settled = await Promise.allSettled(input.exercises.map(async (exercise) => {
-    if (!exercise.exerciseLineageId) {
-      return {
-        exerciseId: exercise.id,
-        historical: { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput,
-      };
+  currentDate: string;
+  cycleId?: string | null;
+  cycleDayId?: string | null;
+  plannedDay?: TrainingSession["plannedDay"];
+  routine: string;
+  exercises: readonly Pick<ExerciseTemplate, "id" | "trainingCycleExerciseId" | "exerciseLineageId">[];
+  sessions: readonly TrainingSession[];
+}): Record<string, TrainingCompletionHistoricalInput> {
+  const previousSession = selectPreviousTrainingCompletionSession(input);
+
+  return Object.fromEntries(input.exercises.map((exercise) => {
+    if (!previousSession) {
+      return [exercise.id, { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput];
     }
 
-    const latest = await input.loadLatestByLineage({
-      exerciseLineageId: exercise.exerciseLineageId,
-      currentSessionId: input.currentSessionId,
-    });
-    return {
-      exerciseId: exercise.id,
-      historical: latest
-        ? { status: "ready", latest } satisfies TrainingCompletionHistoricalInput
-        : { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput,
+    const exerciseIds = new Set([exercise.id, exercise.trainingCycleExerciseId].filter(isNonEmptyString));
+    const entries = previousSession.entries.filter((entry) =>
+      exerciseIds.has(entry.exerciseId) ||
+      (entry.trainingCycleExerciseId ? exerciseIds.has(entry.trainingCycleExerciseId) : false)
+    );
+    if (entries.length === 0) {
+      return [exercise.id, { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput];
+    }
+
+    const historicalTimestamp = previousSession.completedAt ?? previousSession.trainedAt ?? previousSession.trainedDate;
+    const latest: LatestExercisePerformance = {
+      sessionId: previousSession.id,
+      exerciseLineageId: exercise.exerciseLineageId ?? entries[0]?.exerciseLineageId ?? exercise.id,
+      trainedDate: previousSession.trainedDate,
+      trainedAt: previousSession.trainedAt,
+      completedAt: previousSession.completedAt ?? null,
+      createdAt: historicalTimestamp,
+      series: entries.flatMap((entry) => entry.reps.map((reps, index) => ({
+        entryId: `${entry.id}:${index}`,
+        order: index + 1,
+        weight: readNonNegativeNumber(entry.weight),
+        previousWeight: readNonNegativeNumber(entry.previousWeight),
+        reps: readNonNegativeNumber(reps),
+        rir: entry.rir ?? null,
+        notes: entry.notes ?? null,
+        createdAt: historicalTimestamp,
+      }))),
     };
+    return [exercise.id, { status: "ready", latest } satisfies TrainingCompletionHistoricalInput];
   }));
-
-  return Object.fromEntries(settled.map((result, index) => {
-    if (result.status === "fulfilled") {
-      return [result.value.exerciseId, result.value.historical];
-    }
-    return [
-      input.exercises[index]?.id ?? "",
-      { status: "unavailable", latest: null } satisfies TrainingCompletionHistoricalInput,
-    ];
-  }).filter(([exerciseId]) => exerciseId !== ""));
 }
 
 export function buildTrainingCompletionExerciseInputs(input: {
@@ -136,6 +166,7 @@ export function buildTrainingCompletionExerciseInputs(input: {
       draft: {
         weight: draft.weight,
         reps: [...draft.reps],
+        registered: draft.registered,
       },
     };
   });
@@ -166,6 +197,45 @@ export function buildTrainingCompletionSummary(
   };
 }
 
+export function compareTrainingCompletionSummary(
+  summary: Pick<TrainingCompletionSummary, "exercises">,
+): TrainingCompletionComparison {
+  const exercises = summary.exercises.map((exercise): TrainingCompletionComparedExercise => {
+    if (exercise.comparisonStatus === "pending") return { ...exercise, state: "pending" };
+    if (exercise.comparisonStatus !== "ready") return { ...exercise, state: "new" };
+    if (exercise.repsTone === "positive") return { ...exercise, state: "up" };
+    if (exercise.repsTone === "danger") return { ...exercise, state: "down" };
+    if (exercise.weightTone === "positive") return { ...exercise, state: "up" };
+    if (exercise.weightTone === "danger") return { ...exercise, state: "down" };
+    return { ...exercise, state: "eq" };
+  });
+  const comparables = exercises.filter((exercise) =>
+    exercise.state === "up" || exercise.state === "down" || exercise.state === "eq"
+  );
+  const previousTotalReps = comparables.reduce(
+    (total, exercise) => total + (exercise.previousTotalReps ?? 0),
+    0,
+  );
+  const currentTotalReps = comparables.reduce(
+    (total, exercise) => total + exercise.currentTotalReps,
+    0,
+  );
+
+  return {
+    exercises,
+    registered: exercises.filter((exercise) => exercise.state !== "pending").length,
+    total: exercises.length,
+    increased: exercises.filter((exercise) => exercise.state === "up").length,
+    decreased: exercises.filter((exercise) => exercise.state === "down").length,
+    equal: exercises.filter((exercise) => exercise.state === "eq").length,
+    hasComparison: comparables.length > 0,
+    previousDateLabel: comparables.find((exercise) => exercise.previousDateLabel)?.previousDateLabel ?? "",
+    previousTotalReps,
+    currentTotalReps,
+    totalRepsDifference: currentTotalReps - previousTotalReps,
+  };
+}
+
 export function calculateWorkoutDurationMinutes(startedAt: Date | null, savedAt: Date | null) {
   if (!startedAt || !savedAt) return null;
   const diffMs = savedAt.getTime() - startedAt.getTime();
@@ -190,10 +260,13 @@ function buildExerciseSummary(input: {
 }): TrainingCompletionExerciseSummary {
   const draft = input.exercise.draft ?? {};
   const currentReps = normalizeReps(draft.reps ?? []);
-  const currentSeriesCount = currentReps.length;
+  const currentSeriesCount = draft.registered === false
+    ? Math.max(0, Math.trunc(input.exercise.targetSets ?? 0))
+    : currentReps.length;
   const currentTotalReps = currentReps.reduce((total, item) => total + item, 0);
   const currentWeight = readNonNegativeNumber(draft.weight);
   const historical = input.historical ?? { status: "first_reference" as const, latest: null };
+  const comparisonStatus = draft.registered === false ? "pending" : historical.status;
   const previous = historical.status === "ready" && historical.latest
     ? summarizeHistoricalPerformance(historical.latest)
     : null;
@@ -204,7 +277,6 @@ function buildExerciseSummary(input: {
   const weightDifference = previousWeight !== null && currentWeight !== null
     ? sanitizeDifference(currentWeight - previousWeight)
     : null;
-  const comparisonStatus = historical.status;
   const repsTone = getDifferenceTone(repsDifference);
   const weightTone = getDifferenceTone(weightDifference);
 
@@ -236,6 +308,37 @@ function buildExerciseSummary(input: {
   };
 }
 
+function selectPreviousTrainingCompletionSession(input: {
+  currentSessionId: string;
+  currentDate: string;
+  cycleId?: string | null;
+  cycleDayId?: string | null;
+  plannedDay?: TrainingSession["plannedDay"];
+  routine: string;
+  sessions: readonly TrainingSession[];
+}) {
+  return input.sessions
+    .filter((session) => {
+      if (session.id === input.currentSessionId || session.status !== "completed" || session.deletedAt) return false;
+      if (toDateKey(session.trainedDate) > toDateKey(input.currentDate)) return false;
+      if (input.cycleDayId) {
+        return session.cycleDayId === input.cycleDayId && (!input.cycleId || session.cycleId === input.cycleId);
+      }
+      return session.plannedDay === input.plannedDay && session.routine === input.routine;
+    })
+    .sort((left, right) => getTrainingSessionTime(right) - getTrainingSessionTime(left) || right.id.localeCompare(left.id))[0] ?? null;
+}
+
+function getTrainingSessionTime(session: TrainingSession) {
+  const value = Date.parse(session.completedAt ?? session.trainedAt ?? session.trainedDate);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function toDateKey(value: string) {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value);
+  return match?.[1] ?? value;
+}
+
 function summarizeHistoricalPerformance(performance: LatestExercisePerformance) {
   const reps = normalizeReps(performance.series.map((series) => series.reps));
   const weights = performance.series.map((series) => readNonNegativeNumber(series.weight)).filter(isNumber);
@@ -260,6 +363,9 @@ function buildResultLines(input: {
   repsDifference: number | null;
   weightDifference: number | null;
 }): TrainingCompletionResultLine[] {
+  if (input.comparisonStatus === "pending") {
+    return [{ label: "Sin registro", tone: "neutral" }];
+  }
   if (input.comparisonStatus === "first_reference") {
     return [
       { label: "Este será tu punto de partida.", tone: "neutral" },
@@ -339,4 +445,8 @@ function formatShortDate(value: string) {
 
 function isNumber(value: number | null): value is number {
   return value !== null && Number.isFinite(value);
+}
+
+function isNonEmptyString(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.trim() !== "";
 }
