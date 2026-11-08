@@ -45,6 +45,8 @@ import type { WeeklyEquivalentProgressResult } from "@/lib/progress/weekly-equiv
 import { getSessionEffectiveCalendarWeekStart } from "@/lib/training/cycle-calendar-week";
 import { getCycleScopedDayCoverage } from "@/lib/training/cycle-scoped-plan-edit";
 import { getSantiagoDateKey } from "@/lib/training/santiago-training-date";
+import { flexibleRoutineLabel, formatFlexibleTrainingDate } from "@/lib/training/flexible-training-schedule";
+import { latestFlexibleRoutineSession } from "@/lib/training/flexible-training-progress";
 import { buildTrainingCoachDashboardInput } from "@/lib/training/training-coach-dashboard-mapper";
 import { buildTrainingCoachFeedback } from "@/lib/training/training-coach-feedback";
 import {
@@ -58,6 +60,7 @@ export interface DashboardScreenProps {
   hasTrainingEntries: boolean;
   hasRoutinePlan: boolean;
   usesCycleScopedSessions: boolean;
+  flexibleSchedule?: boolean;
   day: string;
   weekDays: readonly string[];
   dayExercises: ExerciseTemplate[];
@@ -77,6 +80,7 @@ export function DashboardScreen({
   hasTrainingEntries,
   hasRoutinePlan,
   usesCycleScopedSessions,
+  flexibleSchedule = false,
   day,
   weekDays,
   dayExercises,
@@ -130,7 +134,9 @@ export function DashboardScreen({
     const itemExercises = exercises.filter((exercise) => (exercise.day ?? item) === item);
     const expectedDate = currentWeekDates[item] ?? "";
     const plannedDay = getTrainingDayCode(item);
-    const session = findDashboardSessionForDay(activeSessions, itemExercises, expectedDate, plannedDay, usesCycleScopedSessions);
+    const session = flexibleSchedule
+      ? latestFlexibleRoutineSession(activeSessions, itemExercises[0]?.cycleDayId)
+      : findDashboardSessionForDay(activeSessions, itemExercises, expectedDate, plannedDay, usesCycleScopedSessions);
     const sessionEntries = session ? findDashboardEntries(session.entries, itemExercises, expectedDate, usesCycleScopedSessions) : [];
     const allMatchingEntries = usesCycleScopedSessions ? [] : findDashboardEntries(entries, itemExercises, expectedDate, false);
     const fallbackEntries = sessionEntries.length > 0 ? [] : allMatchingEntries;
@@ -154,7 +160,9 @@ export function DashboardScreen({
 
     return {
       day: item,
-      title: itemExercises.length > 0 ? `Entrenamiento · ${item}` : `Entrenamiento · ${item}: no registra entrenamientos`,
+      displayDay: flexibleSchedule ? flexibleRoutineLabel(item) : undefined,
+      completedOn: flexibleSchedule && session ? formatFlexibleTrainingDate(session.trainedDate) : undefined,
+      title: itemExercises.length > 0 ? `Entrenamiento · ${flexibleSchedule ? flexibleRoutineLabel(item) : item}` : `Entrenamiento · ${item}: no registra entrenamientos`,
       exercises: itemExercises,
       metrics: itemMetrics,
       session,
@@ -162,7 +170,7 @@ export function DashboardScreen({
       registeredCount: coverage?.registeredCount ?? itemMetrics.length,
       plannedCount: coverage?.plannedCount ?? itemExercises.length,
       pendingExercises,
-      isToday: expectedDate === getSantiagoDateKey(new Date()),
+      isToday: flexibleSchedule ? session?.trainedDate === getSantiagoDateKey(new Date()) : expectedDate === getSantiagoDateKey(new Date()),
       hasRoutine: itemExercises.length > 0 || isCompleted,
       isCompleted,
     };
@@ -246,7 +254,7 @@ export function DashboardScreen({
         <div className="card wide dashboard-empty-progress">
           <p className="eyebrow">Rutina creada</p>
           <h3>Aún no registras progreso</h3>
-          <p>Ya tienes tu planificación lista. Para comenzar a medir avances, inicia el entrenamiento del día y registra tus series.</p>
+          <p>{flexibleSchedule ? "Ya tienes tus rutinas listas. Elige una para entrenar hoy y registra tus series." : "Ya tienes tu planificación lista. Para comenzar a medir avances, inicia el entrenamiento del día y registra tus series."}</p>
           {cardVisibility.showEmptyRoutineAction ? (
             <button className="button dashboard-routine-button" onClick={goToRoutine}>
               Ir a rutina de entrenamiento
@@ -264,7 +272,7 @@ export function DashboardScreen({
                   {itemData.hasRoutine ? (
                     <DashboardTrainingCardContent model={itemModel} />
                   ) : (
-                    <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
+                    <p className="eyebrow">No hay rutina registrada para {flexibleSchedule ? flexibleRoutineLabel(item) : item}. Puedes agregarla desde Registro de entrenamiento.</p>
                   )}
                 </article>
               );
@@ -316,7 +324,7 @@ export function DashboardScreen({
                 {itemData.hasRoutine ? (
                   <DashboardTrainingCardContent model={itemModel} />
                 ) : (
-                  <p className="eyebrow">No hay rutina registrada para {item}. Puedes agregarla desde Registro de entrenamiento.</p>
+                  <p className="eyebrow">No hay rutina registrada para {flexibleSchedule ? flexibleRoutineLabel(item) : item}. Puedes agregarla desde Registro de entrenamiento.</p>
                 )}
               </article>
             );

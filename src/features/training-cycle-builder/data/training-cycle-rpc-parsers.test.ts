@@ -36,6 +36,12 @@ const plan = {
   }],
 };
 
+test("el contrato conserva horario flexible y rechaza modos desconocidos", () => {
+  assert.deepEqual(parseTrainingCycleRpcPlan({ ...plan, scheduleMode: "flexible" }), { ...plan, scheduleMode: "flexible" });
+  assert.throws(() => parseTrainingCycleRpcPlan({ ...plan, scheduleMode: "rotativo" }), TrainingCycleTransportError);
+  assert.deepEqual(parseTrainingCycleRpcPlan(plan), plan);
+});
+
 test("accepted_operation exige shape exacto, UUID y versión acotada", () => {
   assert.deepEqual(parseAcceptedOperation({
     responseKind: "accepted_operation",

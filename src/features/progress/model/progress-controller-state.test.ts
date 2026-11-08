@@ -282,8 +282,8 @@ function testStaticProductiveIntegrationContract() {
   assert.match(appSource, /useProgressController\(\{/);
   assert.match(viewSource, /cycleId: persistedActiveCycle\?\.id \?\? null,/);
   assert.match(viewSource, /plannedExercises: displayExercises,/);
-  assert.match(viewSource, /entries: metrics,/);
-  assert.match(viewSource, /routineDays,/);
+  assert.match(viewSource, /entries: flexibleComparison \? calculateWeeklyComparison\(flexibleComparison\.entries\) : metrics,/);
+  assert.match(viewSource, /routineDays: flexibleComparison\?\.routineDays \?\? routineDays,/);
   assert.match(viewSource, /currentWeek,/);
   assert.doesNotMatch(viewSource, /entries: (?:entries|displayEntries|calendarNormalizedEntries),/);
 

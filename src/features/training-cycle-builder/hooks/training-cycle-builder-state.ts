@@ -22,6 +22,7 @@ import {
   type TrainingCycleTechnique,
   type TrainingCycleWeekDay,
 } from "@/features/training-cycle-builder/components/training-cycle-builder-contracts";
+import { FLEXIBLE_ROUTINE_SLOTS } from "@/lib/training/flexible-training-schedule";
 import {
   normalizeOptionalYouTubeVideoUrl,
   validateOptionalYouTubeVideoUrl,
@@ -119,6 +120,8 @@ export type TrainingCycleBuilderAction =
   | { readonly type: "set_goal"; readonly goal: TrainingCycleGoal }
   | { readonly type: "set_start_date"; readonly value: string }
   | { readonly type: "set_end_date"; readonly value: string }
+  | { readonly type: "set_schedule_mode"; readonly mode: "fixed" | "flexible" }
+  | { readonly type: "set_flexible_routine_count"; readonly count: number }
   | { readonly type: "toggle_day"; readonly day: TrainingCycleWeekDay }
   | { readonly type: "select_day"; readonly day: TrainingCycleWeekDay }
   | { readonly type: "sync_active_cycle_logs"; readonly cycleId: string; readonly exerciseIds: readonly string[] }
@@ -233,6 +236,7 @@ export function createTrainingCycleDraftAfterDiscard(
   return {
     ...source,
     draftId,
+    scheduleMode: undefined,
     selectedDays: [],
     routines: createManualRoutines(source.routines),
   };
@@ -329,6 +333,7 @@ function applyOriginChoice(
   const draft = origin === "manual" || origin === "suggested"
     ? {
         ...state.sourceDraft,
+        ...(state.sourceDraft.scheduleMode === "flexible" ? { scheduleMode: undefined, selectedDays: [] } : {}),
         routines: createManualRoutines(state.sourceDraft.routines),
       }
     : state.sourceDraft;
@@ -596,6 +601,8 @@ const PLAN_EDIT_ACTIONS = new Set<TrainingCycleBuilderAction["type"]>([
   "set_goal",
   "set_start_date",
   "set_end_date",
+  "set_schedule_mode",
+  "set_flexible_routine_count",
   "toggle_day",
   "set_routine_name",
   "move_exercise",
@@ -720,7 +727,28 @@ export function trainingCycleBuilderReducer(
     case "set_end_date":
       if (state.workflow === "active_edit") return state;
       return markDraftChanged(state, { ...state.draft, endDate: action.value });
+    case "set_schedule_mode": {
+      if (state.workflow === "active_edit" || state.draft.selectedDays.some((day) => state.draft.routines[day].exercises.length > 0)) return state;
+      if ((state.draft.scheduleMode === "flexible") === (action.mode === "flexible")) return state;
+      if (action.mode === "fixed") {
+        return markDraftChanged(state, { ...state.draft, scheduleMode: undefined, selectedDays: [] }, { currentDay: "monday" });
+      }
+      const count = Math.max(1, state.draft.selectedDays.length || 3);
+      const selectedDays = FLEXIBLE_ROUTINE_SLOTS.slice(0, count);
+      return markDraftChanged(state, { ...state.draft, scheduleMode: "flexible", selectedDays }, { currentDay: selectedDays[0] });
+    }
+    case "set_flexible_routine_count": {
+      if (state.draft.scheduleMode !== "flexible" || !Number.isInteger(action.count) || action.count < 1 || action.count > 7) return state;
+      const previousCount = state.draft.selectedDays.length;
+      if (state.workflow === "active_edit" && action.count < previousCount) return state;
+      if (action.count < previousCount && FLEXIBLE_ROUTINE_SLOTS.slice(action.count, previousCount).some((slot) => state.draft.routines[slot].exercises.length > 0)) return state;
+      const selectedDays = FLEXIBLE_ROUTINE_SLOTS.slice(0, action.count);
+      return markDraftChanged(state, { ...state.draft, selectedDays }, {
+        currentDay: selectedDays.includes(state.currentDay) ? state.currentDay : selectedDays[0],
+      });
+    }
     case "toggle_day": {
+      if (state.draft.scheduleMode === "flexible") return state;
       if (state.workflow === "active_edit" && state.draft.selectedDays.includes(action.day)) return state;
       const selectedDays = state.draft.selectedDays.includes(action.day)
         ? state.draft.selectedDays.filter((day) => day !== action.day)
@@ -1345,6 +1373,7 @@ export function buildTrainingCycleSaveDraftInput(
 ): TrainingCycleSaveDraftInput {
   return {
     draftId: draft.draftId,
+    ...(draft.scheduleMode ? { scheduleMode: draft.scheduleMode } : {}),
     origin,
     goal: draft.goal,
     startDate: draft.startDate,
@@ -1418,6 +1447,7 @@ export function buildTrainingCycleSaveActiveInput(
 ): TrainingCycleSaveActiveInput {
   return {
     cycleId,
+    ...(draft.scheduleMode ? { scheduleMode: draft.scheduleMode } : {}),
     expectedRevision,
     goal: draft.goal,
     days: buildTrainingCyclePlanDays(draft),

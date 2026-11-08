@@ -156,7 +156,7 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
   }
 
   private async persistNewDraft(input: TrainingCycleSaveDraftInput) {
-    const plan = mapBuilderDraftDaysToRpcPlan(input.days);
+    const plan = mapBuilderDraftDaysToRpcPlan(input.days, input.scheduleMode);
     if (input.origin === "duplicate") {
       if (!this.newDraftSourceCycleId) {
         throw new TrainingCycleTransportError("invalid_state", "No encontramos el ciclo que quieres duplicar.");
@@ -198,7 +198,7 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
           goal: input.goal,
           startDate: input.startDate,
           endDate: input.endDate,
-          plan: mapBuilderDraftDaysToRpcPlan(input.days),
+          plan: mapBuilderDraftDaysToRpcPlan(input.days, input.scheduleMode),
         }));
       }
       return { status: "saved" as const, savedAtLabel: savedAtLabel() };
@@ -321,7 +321,7 @@ export class TrainingCycleProductGateway implements TrainingCycleBuilderGateway 
           cycleId: input.cycleId,
           expectedVersion: asVersion(input.expectedRevision),
           goal: input.goal,
-          plan: mapBuilderDaysToRpcPlan(input.days),
+          plan: mapBuilderDaysToRpcPlan(input.days, undefined, input.scheduleMode),
         });
         return await afterCommitted(async () => {
           const version = requiredVersion(result);

@@ -23,6 +23,15 @@ import {
 
 const CATALOG_ID = "10000000-0000-4000-8000-000000000001";
 
+test("el mapper sólo añade el marcador flexible cuando se elige esa modalidad", () => {
+  const days: TrainingCyclePlanDayInput[] = [{ day: "monday", name: "A", exercises: [] }];
+  assert.deepEqual(mapBuilderDraftDaysToRpcPlan(days, "flexible"), {
+    scheduleMode: "flexible",
+    days: [{ day: "monday", name: "A", order: 0, exercises: [] }],
+  });
+  assert.equal("scheduleMode" in mapBuilderDraftDaysToRpcPlan(days), false);
+});
+
 test("guardar Objetivo conserva días vacíos sin convertirlos en un plan activable", () => {
   const days: TrainingCyclePlanDayInput[] = [{ day: "monday", name: "", exercises: [] }];
   const result = mapBuilderDraftDaysToRpcPlan(days);

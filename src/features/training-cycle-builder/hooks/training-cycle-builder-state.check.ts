@@ -44,6 +44,22 @@ function reduce(
   return actions.reduce(trainingCycleBuilderReducer, state);
 }
 
+test("Horario flexible usa A–G como slots y conserva Días fijos por defecto", () => {
+  const initial = reduce(createState(), { type: "choose_origin", origin: "manual", screen: "setup" });
+  assert.equal(initial.draft.scheduleMode, undefined);
+  const flexible = reduce(initial,
+    { type: "set_schedule_mode", mode: "flexible" },
+    { type: "set_flexible_routine_count", count: 3 },
+  );
+  assert.equal(flexible.draft.scheduleMode, "flexible");
+  assert.deepEqual(flexible.draft.selectedDays, ["monday", "tuesday", "wednesday"]);
+  assert.equal(reduce(flexible, { type: "toggle_day", day: "friday" }), flexible);
+  assert.equal(buildTrainingCycleSaveDraftInput(flexible.draft, "manual").scheduleMode, "flexible");
+  const fixed = reduce(flexible, { type: "set_schedule_mode", mode: "fixed" });
+  assert.equal(fixed.draft.scheduleMode, undefined);
+  assert.deepEqual(fixed.draft.selectedDays, []);
+});
+
 function catalogAddAction(): Extract<TrainingCycleBuilderAction, { type: "add_catalog_exercise" }> {
   return {
     type: "add_catalog_exercise",

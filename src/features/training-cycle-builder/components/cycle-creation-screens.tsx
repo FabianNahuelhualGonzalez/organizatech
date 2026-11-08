@@ -31,6 +31,7 @@ import {
   StatusBanner,
 } from "@/features/training-cycle-builder/components/training-cycle-builder-ui";
 import styles from "@/features/training-cycle-builder/components/training-cycle-builder.module.css";
+import { flexibleRoutineLabel } from "@/lib/training/flexible-training-schedule";
 
 type BuilderDispatch = Dispatch<TrainingCycleBuilderAction>;
 
@@ -188,13 +189,13 @@ export function CycleDuplicateScreen({
         </div>
       </section>
       <section className={styles.daySummaryCard}>
-        <h3>{state.draft.selectedDays.length} días con rutina</h3>
+        <h3>{state.draft.selectedDays.length} {state.draft.scheduleMode === "flexible" ? "rutinas por semana" : "días con rutina"}</h3>
         {state.draft.selectedDays.map((day) => {
           const routine = state.draft.routines[day];
           const groups = [...new Set(routine.exercises.map((exercise) => exercise.muscleGroup))];
           return (
             <div key={day}>
-              <small>{TRAINING_CYCLE_DAY_SHORT_LABELS[day]}</small>
+              <small>{state.draft.scheduleMode === "flexible" ? flexibleRoutineLabel(day) : TRAINING_CYCLE_DAY_SHORT_LABELS[day]}</small>
               <span><strong>{routine.name || "Sin nombre"}</strong><small>{groups.join(" · ") || "Sin ejercicios"}</small></span>
               <b>{routine.exercises.length} ej.</b>
             </div>
@@ -248,9 +249,11 @@ export function CycleSetupScreen({
   const isActiveEdit = state.workflow === "active_edit";
   const generating = state.suggestionState === "loading";
   const restDays = TRAINING_CYCLE_WEEK_DAYS.filter((day) => !state.draft.selectedDays.includes(day));
+  const flexible = state.draft.scheduleMode === "flexible";
+  const canChangeMode = !isActiveEdit && !state.draft.selectedDays.some((day) => state.draft.routines[day].exercises.length > 0);
   const durationWeeks = validation.datesValid ? Math.max(1, Math.round(validation.durationDays / 7)) : 0;
   const continueLabel = !validation.hasDays
-    ? "Elige al menos un día"
+    ? flexible ? "Elige al menos una rutina" : "Elige al menos un día"
     : !validation.datesValid
       ? "Revisa las fechas"
       : state.origin === "suggested" && !isActiveEdit
@@ -296,6 +299,22 @@ export function CycleSetupScreen({
         {!validation.datesValid ? <p>El término debe ser posterior al inicio</p> : null}
       </div>
       <fieldset className={styles.dayPicker}>
+        <legend>¿CÓMO ORGANIZARÁS TUS ENTRENAMIENTOS?</legend>
+        <div>
+          <button type="button" data-selected={!flexible} aria-pressed={!flexible} disabled={!canChangeMode || generating} onClick={() => dispatch({ type: "set_schedule_mode", mode: "fixed" })}>Días fijos</button>
+          <button type="button" data-selected={flexible} aria-pressed={flexible} disabled={!canChangeMode || generating} onClick={() => dispatch({ type: "set_schedule_mode", mode: "flexible" })}>Horario flexible</button>
+        </div>
+        <p>{flexible ? "Elige tus rutinas cada semana, sin asignarles un día fijo." : "Planifica tus rutinas en días concretos de la semana."}</p>
+      </fieldset>
+      {flexible ? (
+        <label className={styles.goalField}>
+          <span>RUTINAS POR SEMANA</span>
+          <select value={state.draft.selectedDays.length} disabled={generating} onChange={(event) => dispatch({ type: "set_flexible_routine_count", count: Number(event.target.value) })}>
+            {TRAINING_CYCLE_WEEK_DAYS.map((_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}
+          </select>
+          <small>Una rutina cuenta una vez para completar la semana, aunque la repitas.</small>
+        </label>
+      ) : <fieldset className={styles.dayPicker}>
         <legend>DÍAS QUE VAS A ENTRENAR</legend>
         <div>
           {TRAINING_CYCLE_WEEK_DAYS.map((day) => {
@@ -317,16 +336,16 @@ export function CycleSetupScreen({
             );
           })}
         </div>
-      </fieldset>
-      <div className={styles.trainRestGrid}>
+      </fieldset>}
+      {!flexible ? <div className={styles.trainRestGrid}>
         <div><small>ENTRENAMIENTO</small><strong>{state.draft.selectedDays.length}</strong><span>{state.draft.selectedDays.map((day) => TRAINING_CYCLE_DAY_SHORT_LABELS[day]).join(" ") || "—"}</span></div>
         <div><small>DESCANSO</small><strong>{restDays.length}</strong><span>{restDays.map((day) => TRAINING_CYCLE_DAY_SHORT_LABELS[day]).join(" ") || "—"}</span></div>
-      </div>
+      </div> : null}
       {state.origin === "suggested" && !isActiveEdit ? (
         <section className={styles.suggestedDistribution}>
           <small>GENERACIÓN PERSONALIZADA</small>
           <strong>{generating ? "Preparando el borrador…" : "La rutina se creará con estos datos"}</strong>
-          <span>Objetivo, {state.draft.selectedDays.length} días y {validation.datesValid ? `${validation.durationDays} días de duración` : "fechas pendientes"}. El resultado seguirá siendo editable.</span>
+          <span>Objetivo, {state.draft.selectedDays.length} {flexible ? "rutinas por semana" : "días"} y {validation.datesValid ? `${validation.durationDays} días de duración` : "fechas pendientes"}. El resultado seguirá siendo editable.</span>
         </section>
       ) : null}
       {state.suggestionState === "error" ? (

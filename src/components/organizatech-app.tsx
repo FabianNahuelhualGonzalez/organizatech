@@ -21,6 +21,15 @@ import {
 } from "@/lib/dashboard/dashboard-session-selection";
 import { removeAccents } from "@/lib/training/exercise-name-normalization";
 import { getSantiagoDateKey } from "@/lib/training/santiago-training-date";
+import {
+  flexibleCompletionTitle,
+  getFlexibleTrainingStartDate,
+  isFlexibleTrainingPlan,
+} from "@/lib/training/flexible-training-schedule";
+import {
+  countFlexibleCompletedRoutines,
+  selectFlexibleComparisonEntries,
+} from "@/lib/training/flexible-training-progress";
 import { ProfileMenuHeader } from "@/components/profile/ProfileMenuHeader";
 import { ProfileScreen } from "@/components/profile/ProfileScreen";
 import { CycleHistoryProductiveContainer } from "@/components/training/cycle-history";
@@ -700,6 +709,7 @@ export function OrganizatechApp({
   const displayEntries = trainingDataView.entries;
   const displayTrainingSessions = trainingDataView.sessions;
   const isCycleScopedActiveCycle = trainingDataView.isCycleScoped;
+  const flexibleSchedule = isCycleScopedActiveCycle && isFlexibleTrainingPlan(persistedActiveCycle?.planSnapshot);
   const isCycleScopedPlanBlocked = trainingDataView.mode === "blocked";
   const cycleScopedPlanBlockerMessage = trainingDataView.blockerMessage;
   const appShell = useAppShellController();
@@ -1606,12 +1616,21 @@ export function OrganizatechApp({
     : calendarNormalizedTrainingSessions.some((session) => session.status === "completed" && !session.deletedAt && session.entries.length > 0);
   const hasRoutinePlan = displayExercises.length > 0;
   const routineDays = getActiveRoutineDays(displayExercises, displayTrainingPlan);
+  const flexibleComparison = useMemo(() => flexibleSchedule && persistedActiveCycle
+    ? selectFlexibleComparisonEntries({
+        sessions: calendarNormalizedTrainingSessions,
+        entries: calendarNormalizedEntries,
+        exercises: displayExercises,
+        routineDays,
+        cycleId: persistedActiveCycle.id,
+      })
+    : null, [calendarNormalizedEntries, calendarNormalizedTrainingSessions, displayExercises, flexibleSchedule, persistedActiveCycle, routineDays]);
   const progressControllerSource = useMemo(() => ({
       plannedExercises: displayExercises,
-      entries: metrics,
-      routineDays,
+      entries: flexibleComparison ? calculateWeeklyComparison(flexibleComparison.entries) : metrics,
+      routineDays: flexibleComparison?.routineDays ?? routineDays,
       currentWeek,
-    }), [currentWeek, displayExercises, metrics, routineDays]);
+    }), [currentWeek, displayExercises, flexibleComparison, metrics, routineDays]);
   const progressController = useProgressController({
     userId: sessionDataEpochRef.current.userId,
     scope: sessionDataEpochRef.current.scope,
@@ -1676,8 +1695,8 @@ export function OrganizatechApp({
     sessions: calendarNormalizedTrainingSessions,
     referenceDate: new Date(),
     activeCycleId: isCycleScopedActiveCycle ? persistedActiveCycle?.id ?? null : null,
-    plannedDays: routineDays,
-  }), [calendarNormalizedEntries, calendarNormalizedTrainingSessions, isCycleScopedActiveCycle, persistedActiveCycle?.id, routineDays]);
+    plannedDays: flexibleSchedule ? [...TRAINING_DAY_LABELS] : routineDays,
+  }), [calendarNormalizedEntries, calendarNormalizedTrainingSessions, flexibleSchedule, isCycleScopedActiveCycle, persistedActiveCycle?.id, routineDays]);
   const visibleCycleHistoryCount = isTrainingCyclesRepositoryActive ? persistedCycleHistory.length : legacyCycleHistoryCount;
   const visibleCycleNumber = isTrainingCyclesRepositoryActive
     ? persistedActiveCycle?.cycleNumber ?? getNextPersistedCycleNumber(persistedActiveCycle, persistedCycleHistory)
@@ -1698,19 +1717,20 @@ export function OrganizatechApp({
     sessions: calendarNormalizedTrainingSessions,
     usesCycleScopedSessions: isCycleScopedActiveCycle,
   });
-  const todayTrainingNotificationContext = useMemo(() => getTodayTrainingNotificationContext({
+  const todayTrainingNotificationContext = useMemo(() => flexibleSchedule ? null : getTodayTrainingNotificationContext({
     plannedDays: dashboardCarouselDays,
     exercises: displayExercises,
     entries: calendarNormalizedEntries,
     sessions: calendarNormalizedTrainingSessions,
     usesCycleScopedSessions: isCycleScopedActiveCycle,
-  }), [calendarNormalizedEntries, calendarNormalizedTrainingSessions, dashboardCarouselDays, displayExercises, isCycleScopedActiveCycle]);
+  }), [calendarNormalizedEntries, calendarNormalizedTrainingSessions, dashboardCarouselDays, displayExercises, flexibleSchedule, isCycleScopedActiveCycle]);
   const plannedTrainingDays = hasRoutinePlan ? dashboardCarouselDays.length : 0;
   const trainingTopbarMeta = buildTrainingTopbarMeta({
     cycleLabel: getCycleTypeTitle(displayTrainingPlan),
     weekNumber: currentWeek,
     completedDays: completedTrainingDays,
     plannedDays: hasRoutinePlan ? dashboardCarouselDays.length : 0,
+    completionUnit: flexibleSchedule ? "routine" : "day",
   });
   const notificationCatalogInput = useMemo(() => ({
     profile: profileViewModel,
@@ -3858,7 +3878,7 @@ export function OrganizatechApp({
     const cycleDayId = isCycleScopedActiveCycle && persistedActiveCycle && cycleScopedPlan
       ? findCycleScopedDayForTrainingDay(cycleScopedPlan, persistedActiveCycle.id, plannedDay)?.id ?? null
       : null;
-    const plannedDate = isCycleScopedActiveCycle && persistedActiveCycle && cycleScopedPlan
+    const plannedDate = flexibleSchedule ? getFlexibleTrainingStartDate(startedAt) : isCycleScopedActiveCycle && persistedActiveCycle && cycleScopedPlan
       ? (() => {
           const cycleDay = findCycleScopedDayForTrainingDay(cycleScopedPlan, persistedActiveCycle.id, plannedDay);
           if (!cycleDay || !isNonEmptyString(persistedActiveCycle.plannedStartDate)) return null;
@@ -4220,31 +4240,40 @@ export function OrganizatechApp({
     if (historicalResult.kind === "error") throw historicalResult.error;
     const historicalByExerciseId = historicalResult.value;
     const plannedDaysCount = hasRoutinePlan ? dashboardCarouselDays.length : routineDays.length;
-    const completedDaysAfterSave = Math.min(
-      plannedDaysCount,
-      calculateWeeklyCompletedTrainingDays({
-        plannedDays: dashboardCarouselDays,
-        exercises: displayExercises,
-        entries: calendarNormalizedEntries,
-        sessions: calendarNormalizedTrainingSessions,
-        usesCycleScopedSessions: isCycleScopedActiveCycle,
-      }) + 1,
-    );
+    const completionWeek = flexibleSchedule && persistedActiveCycle?.plannedStartDate
+      ? getCycleCalendarWeekNumber(persistedActiveCycle.plannedStartDate, input.trainedDate)
+      : currentWeek;
+    const completedDaysAfterSave = flexibleSchedule && persistedActiveCycle
+      ? countFlexibleCompletedRoutines({
+          sessions: calendarNormalizedTrainingSessions,
+          exercises: displayExercises,
+          cycleId: persistedActiveCycle.id,
+          trainedDate: input.trainedDate,
+          justCompletedSlotId: input.validExercises[0]?.cycleDayId,
+        })
+      : Math.min(plannedDaysCount, calculateWeeklyCompletedTrainingDays({
+          plannedDays: dashboardCarouselDays,
+          exercises: displayExercises,
+          entries: calendarNormalizedEntries,
+          sessions: calendarNormalizedTrainingSessions,
+          usesCycleScopedSessions: isCycleScopedActiveCycle,
+        }) + 1);
     const completionTopbarMeta = buildTrainingTopbarMeta({
       cycleLabel: trainingTopbarMeta?.cycleLabel ?? getCycleTypeTitle(displayTrainingPlan),
-      weekNumber: currentWeek,
+      weekNumber: completionWeek,
       completedDays: completedDaysAfterSave,
       plannedDays: plannedDaysCount,
+      completionUnit: flexibleSchedule ? "routine" : "day",
     });
 
     return buildTrainingCompletionSummary({
       sessionId: input.sessionId,
-      dayLabel: visibleDay,
+      dayLabel: flexibleSchedule ? flexibleCompletionTitle(visibleDay, input.trainedDate) : visibleDay,
       statusLabel: `Completado · ${input.validExercises.length} de ${input.validExercises.length}`,
       workoutName: visibleRoutine,
       cycleLabel: completionTopbarMeta?.cycleLabel ?? trainingTopbarMeta?.cycleLabel ?? getCycleTypeTitle(displayTrainingPlan),
-      weekLabel: completionTopbarMeta?.weekLabel ?? trainingTopbarMeta?.weekLabel ?? `Semana ${currentWeek}`,
-      progressLabel: completionTopbarMeta?.progressLabel ?? trainingTopbarMeta?.progressLabel ?? `${plannedDaysCount} de ${plannedDaysCount} días`,
+      weekLabel: completionTopbarMeta?.weekLabel ?? trainingTopbarMeta?.weekLabel ?? `Semana ${completionWeek}`,
+      progressLabel: completionTopbarMeta?.progressLabel ?? trainingTopbarMeta?.progressLabel ?? `${plannedDaysCount} de ${plannedDaysCount} ${flexibleSchedule ? "rutinas" : "días"}`,
       workoutStartedAt: input.workoutStartedAt,
       savedAt: input.savedAt,
       currentDate: input.trainedDate,
@@ -4311,6 +4340,13 @@ export function OrganizatechApp({
       const readinessContext = runtime.readinessContext;
       const capturedWorkoutAttemptId = runtime.attemptId;
       const plannedDay = getTrainingDayCode(visibleDay);
+      const flexibleStartDate = flexibleSchedule
+        ? getFlexibleTrainingStartDate(activeWorkoutStartedAt ?? readinessContext?.workoutStartedAt)
+        : null;
+      if (flexibleSchedule && !flexibleStartDate) {
+        routineBuilder.publishNotice("No pudimos recuperar la fecha de inicio del entrenamiento. Vuelve a abrir la rutina.");
+        return "error";
+      }
       const preparation = prepareActiveWorkoutCompletion({
         mode: completionMode,
         exercises: dayExercises,
@@ -4324,7 +4360,8 @@ export function OrganizatechApp({
             cycleId: persistedActiveCycle.id,
             plannedStartDate: persistedActiveCycle.plannedStartDate,
             plannedDay,
-            trainedDate: todayKey,
+            trainedDate: flexibleStartDate ?? todayKey,
+            flexibleSchedule,
           }
           : undefined,
       });
@@ -4381,7 +4418,7 @@ export function OrganizatechApp({
             trainedDate: preparation.trainedDate,
             weekNumber: preparation.weekNumber,
             status: "completed",
-            notes: `Entrenamiento ${visibleDay}: ${visibleRoutine}. ${readinessNote}`,
+            notes: `Entrenamiento ${flexibleSchedule ? flexibleCompletionTitle(visibleDay, preparation.trainedDate) : visibleDay}: ${visibleRoutine}. ${readinessNote}`,
             entries: entriesResult.entries,
           }, operationOwner.userId),
         );
@@ -4953,6 +4990,7 @@ export function OrganizatechApp({
             hasTrainingEntries={hasTrainingEntries}
             hasRoutinePlan={hasRoutinePlan}
             usesCycleScopedSessions={isCycleScopedActiveCycle}
+            flexibleSchedule={flexibleSchedule}
             day={dashboardDay}
             weekDays={dashboardCarouselDays}
             dayExercises={dashboardExercises}
@@ -5038,6 +5076,7 @@ export function OrganizatechApp({
       {screen === "entrenamiento" && activeWorkoutVariant === "start" && (
         <TrainingStartScreen
           day={visibleDay}
+          flexibleSchedule={flexibleSchedule}
           routine={visibleRoutine}
           exercises={dayExercises}
           targetSummary={targetSummary}
@@ -5060,6 +5099,7 @@ export function OrganizatechApp({
       {screen === "entrenamiento" && activeWorkoutVariant === "guided" && (
         <GuidedTrainingScreen
           day={visibleDay}
+          flexibleSchedule={flexibleSchedule}
           routine={visibleRoutine}
           exercises={dayExercises}
           targetSummary={targetSummary}
@@ -5095,7 +5135,8 @@ export function OrganizatechApp({
         ) : (
           <ComparisonScreenV2
             model={progressControllerView.comparisonModel}
-            routineDays={routineDays}
+            routineDays={flexibleComparison?.routineDays ?? routineDays}
+            flexibleSchedule={flexibleSchedule}
             onDaySelect={(day) => dispatchProgressController({ type: "day_selected", day })}
             onExerciseSelect={(exerciseId) => dispatchProgressController({ type: "exercise_selected", exerciseId })}
             onWeekSelect={(week) => dispatchProgressController({ type: "week_selected", week })}

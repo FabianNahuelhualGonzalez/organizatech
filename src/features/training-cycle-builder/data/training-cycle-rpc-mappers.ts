@@ -165,15 +165,19 @@ export type TrainingCycleSourceResolver = (
 export function mapBuilderDaysToRpcPlan(
   days: readonly TrainingCyclePlanDayInput[],
   resolveSource: TrainingCycleSourceResolver = (exercise) => exercise.source,
+  scheduleMode?: "flexible",
 ): TrainingCycleRpcPlan {
-  return mapBuilderPlan(days, resolveSource, true);
+  const plan = mapBuilderPlan(days, resolveSource, true);
+  return scheduleMode ? { ...plan, scheduleMode } : plan;
 }
 
 /** Un borrador puede conservar días vacíos; nunca completa series ni fuentes inventadas. */
 export function mapBuilderDraftDaysToRpcPlan(
   days: readonly TrainingCyclePlanDayInput[],
+  scheduleMode?: "flexible",
 ): TrainingCycleRpcPlan {
-  return mapBuilderPlan(days, (exercise) => exercise.source, false);
+  const plan = mapBuilderPlan(days, (exercise) => exercise.source, false);
+  return scheduleMode ? { ...plan, scheduleMode } : plan;
 }
 
 function mapBuilderPlan(

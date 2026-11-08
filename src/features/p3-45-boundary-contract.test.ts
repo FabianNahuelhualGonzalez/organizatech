@@ -28,6 +28,7 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
   ignoredAttributesByElement: {
     // La etiqueta contextual sólo afecta el AppTopbar de Evaluaciones del Alumno.
     AppTopbar: ["contextLabel"],
+    DashboardScreen: ["flexibleSchedule"],
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
       "latestExercisePerformanceStatus",
@@ -35,7 +36,10 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
       "saveCompletedTrainingStatus",
       "retrySaveCompletedTraining",
       "advancedExecution",
+      "flexibleSchedule",
     ],
+    TrainingStartScreen: ["flexibleSchedule"],
+    ComparisonScreenV2: ["flexibleSchedule", "routineDays"],
     TrainingCompletionSummaryScreen: ["advancedExecutionSync"],
     ProfileScreen: [
       "coachLinking",

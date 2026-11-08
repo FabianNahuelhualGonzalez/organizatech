@@ -124,6 +124,8 @@ export interface TrainingCycleRpcDayPlan {
 }
 
 export interface TrainingCycleRpcPlan {
+  /** Absence preserves the pre-existing fixed-weekday contract. */
+  readonly scheduleMode?: "flexible";
   readonly days: readonly TrainingCycleRpcDayPlan[];
 }
 
@@ -214,6 +216,7 @@ export interface TrainingCycleSnapshotDay {
 }
 
 export interface TrainingCycleSnapshotPlan {
+  readonly scheduleMode?: "flexible";
   readonly days: readonly TrainingCycleSnapshotDay[];
 }
 

@@ -23,8 +23,9 @@ export function buildDashboardTrainingCardModel(itemData: DashboardTrainingCardD
   const action = resolveTrainingCarouselAction(itemData.status);
   const plannedRows = itemData.metrics.length > 0 ? itemData.pendingExercises : itemData.exercises;
 
-  return buildTrainingCarouselCardModel({
-    day: itemData.day,
+  return {
+    ...buildTrainingCarouselCardModel({
+    day: itemData.displayDay ?? itemData.day,
     routineName: itemData.exercises[0]?.routine ?? null,
     status: itemData.status,
     isToday: itemData.isToday,
@@ -35,7 +36,9 @@ export function buildDashboardTrainingCardModel(itemData: DashboardTrainingCardD
     actionLabel: action.label,
     maxVisibleExercises: 4,
     formatWeight: formatKg,
-  });
+    }),
+    ...(itemData.completedOn ? { completedOn: itemData.completedOn } : {}),
+  };
 }
 
 /** Igual a `clampScore`. */

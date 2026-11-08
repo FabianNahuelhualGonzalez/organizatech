@@ -4,10 +4,12 @@ import { WeeklyMetricProgressCard } from "@/features/progress/components/weekly-
 import { WeeklyResultsPanel } from "@/features/progress/components/weekly-results-panel";
 import { formatDecimalEs } from "@/lib/progress/weight-format";
 import type { WeeklyExerciseComparisonModel } from "@/lib/progress/weekly-exercise-comparison";
+import { flexibleRoutineLabel } from "@/lib/training/flexible-training-schedule";
 
 export interface ComparisonScreenV2Props {
   model: WeeklyExerciseComparisonModel;
   routineDays: readonly string[];
+  flexibleSchedule?: boolean;
   onDaySelect: (day: string) => void;
   onExerciseSelect: (exerciseId: string) => void;
   onWeekSelect: (week: number) => void;
@@ -16,39 +18,43 @@ export interface ComparisonScreenV2Props {
 export function ComparisonScreenV2({
   model,
   routineDays,
+  flexibleSchedule = false,
   onDaySelect,
   onExerciseSelect,
   onWeekSelect,
 }: ComparisonScreenV2Props) {
+  if (flexibleSchedule && routineDays.length === 0) {
+    return <section className="screen weekly-comparison-screen" data-section="weekly-comparison"><div className="weekly-comparison-shell"><div className="weekly-comparison-empty">Cuando completes una rutina, podrás comparar aquí sus resultados con la planificación.</div></div></section>;
+  }
   return (
     <section className="screen weekly-comparison-screen" data-section="weekly-comparison">
       <div className="weekly-comparison-shell">
         <div className="weekly-comparison-section select-day-section">
           <div>
-            <h3>Selecciona el día</h3>
-            <p>Cambia entre tus días registrados para revisar tu progreso.</p>
+            <h3>{flexibleSchedule ? "Selecciona la rutina" : "Selecciona el día"}</h3>
+            <p>{flexibleSchedule ? "Compara las rutinas que ya entrenaste, según sus fechas reales." : "Cambia entre tus días registrados para revisar tu progreso."}</p>
           </div>
-          <label className="weekly-comparison-select" aria-label="Seleccionar día de entrenamiento">
+          <label className="weekly-comparison-select" aria-label={flexibleSchedule ? "Seleccionar rutina entrenada" : "Seleccionar día de entrenamiento"}>
             <select
               value={model.selectedDay}
               onChange={(event) => onDaySelect(event.target.value)}
             >
               {routineDays.map((day) => (
-                <option key={day} value={day}>{day}</option>
+                <option key={day} value={day}>{flexibleSchedule ? flexibleRoutineLabel(day) : day}</option>
               ))}
             </select>
           </label>
         </div>
 
         <section className="weekly-comparison-section">
-          <h3>Rutina registrada {model.selectedDay}</h3>
+          <h3>Rutina registrada {flexibleSchedule ? flexibleRoutineLabel(model.selectedDay) : model.selectedDay}</h3>
           <p className="weekly-routine-name">{model.plannedRoutine ?? "Sin rutina registrada"}</p>
         </section>
 
         <section className="weekly-comparison-section">
           <h3>Rutina de entrenamiento registrada</h3>
           <p>Selecciona dentro de la tabla el ejercicio para obtener más detalles.</p>
-          <div className="weekly-plan-table" role="table" aria-label="Rutina planificada del día">
+          <div className="weekly-plan-table" role="table" aria-label={flexibleSchedule ? "Rutina planificada" : "Rutina planificada del día"}>
             <div role="rowgroup">
               <div className="weekly-plan-row heading" role="row">
                 <span role="columnheader">Ejercicios</span>
@@ -83,7 +89,7 @@ export function ComparisonScreenV2({
                   <span role="cell">{formatDecimalEs(exercise.baseWeight)}</span>
                 </div>
               )) : (
-                <div className="weekly-comparison-empty">No hay ejercicios configurados para este día.</div>
+                <div className="weekly-comparison-empty">{flexibleSchedule ? "Aún no hay registros de esta rutina." : "No hay ejercicios configurados para este día."}</div>
               )}
             </div>
           </div>

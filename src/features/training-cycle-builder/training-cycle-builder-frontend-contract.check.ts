@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import * as jsxRuntime from "react/jsx-runtime";
 import * as icons from "lucide-react";
 import { JsxEmit, ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import * as builderLabels from "./components/training-cycle-builder-labels";
 import * as cycleContracts from "./components/training-cycle-builder-contracts";
 import * as cycleState from "./hooks/training-cycle-builder-state";
 import * as videoUrl from "./hooks/training-cycle-video-url";
@@ -60,6 +61,7 @@ function loadExerciseModule() {
     "react/jsx-runtime": jsxRuntime,
     react: { useEffect },
     "lucide-react": icons,
+    "@/features/training-cycle-builder/components/training-cycle-builder-labels": builderLabels,
     "@/features/training-cycle-builder/components/training-cycle-builder-contracts": cycleContracts,
     "@/features/training-cycle-builder/hooks/training-cycle-builder-state": cycleState,
     "@/features/training-cycle-builder/hooks/training-cycle-video-url": videoUrl,

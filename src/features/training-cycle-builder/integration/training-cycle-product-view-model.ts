@@ -293,6 +293,7 @@ export function projectTrainingCycleRpcPlan(input: {
   }
   return {
     draftId: input.draftId,
+    ...(input.plan.scheduleMode ? { scheduleMode: input.plan.scheduleMode } : {}),
     goal: input.goal,
     startDate: input.startDate,
     endDate: input.endDate,
@@ -303,6 +304,7 @@ export function projectTrainingCycleRpcPlan(input: {
 
 function snapshotPlanAsRpc(snapshot: TrainingCycleRpcSnapshot): TrainingCycleRpcPlan {
   return {
+    ...(snapshot.plan.scheduleMode ? { scheduleMode: snapshot.plan.scheduleMode } : {}),
     days: snapshot.plan.days.map((day) => ({
       day: day.day,
       name: day.name,
@@ -495,7 +497,7 @@ export function buildTrainingCycleProductViewModel(
       completedSessions: sessionsForCycle.size,
       plannedSessions,
     },
-    nextSessionLabel: draft.selectedDays[0] ?? "Sin día seleccionado",
+    nextSessionLabel: draft.scheduleMode === "flexible" ? "Elige tu primera rutina" : draft.selectedDays[0] ?? "Sin día seleccionado",
     nextSessionDetail: draft.selectedDays[0]
       ? `${draft.routines[draft.selectedDays[0]].name || "Rutina"} · ${draft.routines[draft.selectedDays[0]].exercises.length} ejercicios`
       : "Define tus días y ejercicios",

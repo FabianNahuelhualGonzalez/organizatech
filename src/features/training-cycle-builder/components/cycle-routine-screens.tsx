@@ -16,8 +16,6 @@ import {
 import { useEffect, type Dispatch, type DragEvent } from "react";
 
 import {
-  TRAINING_CYCLE_DAY_LABELS,
-  TRAINING_CYCLE_DAY_SHORT_LABELS,
   TRAINING_CYCLE_MUSCLE_GROUPS,
   TRAINING_CYCLE_TECHNIQUE_LABELS,
   TRAINING_CYCLE_TECHNIQUES,
@@ -28,6 +26,7 @@ import type {
   TrainingCycleBuilderAction,
   TrainingCycleBuilderState,
 } from "@/features/training-cycle-builder/hooks/training-cycle-builder-state";
+import { builderRoutineLabel, builderRoutineShortLabel } from "@/features/training-cycle-builder/components/training-cycle-builder-labels";
 import {
   getMuscleDistribution,
   getTrainingCycleWarnings,
@@ -88,7 +87,7 @@ export function CycleRoutineScreen({
   }
   return (
     <div className={styles.screen}>
-      <div className={styles.dayTabs} role="tablist" aria-label="Días de entrenamiento">
+      <div className={styles.dayTabs} role="tablist" aria-label={state.draft.scheduleMode === "flexible" ? "Rutinas semanales" : "Días de entrenamiento"}>
         {state.draft.selectedDays.map((day) => {
           const selected = day === state.currentDay;
           return (
@@ -100,14 +99,14 @@ export function CycleRoutineScreen({
               data-selected={selected}
               onClick={() => dispatch({ type: "select_day", day })}
             >
-              <strong>{TRAINING_CYCLE_DAY_SHORT_LABELS[day]}</strong>
+              <strong>{builderRoutineShortLabel(state.draft, day)}</strong>
               <small>{state.draft.routines[day].exercises.length} ej.</small>
             </button>
           );
         })}
       </div>
       <label className={styles.routineNameField}>
-        <span>Nombre de la rutina de {TRAINING_CYCLE_DAY_LABELS[state.currentDay]}</span>
+        <span>{state.draft.scheduleMode === "flexible" ? `Nombre de ${builderRoutineLabel(state.draft, state.currentDay)}` : `Nombre de la rutina de ${builderRoutineLabel(state.draft, state.currentDay)}`}</span>
         <input
           value={routine.name}
           placeholder="Ej: Empuje, Jalón, Piernas…"
@@ -125,7 +124,7 @@ export function CycleRoutineScreen({
       {routine.exercises.length === 0 ? (
         <div className={styles.emptyRoutine}>
           <TriangleAlert size={20} aria-hidden="true" />
-          <strong>Este día todavía está vacío</strong>
+          <strong>{state.draft.scheduleMode === "flexible" ? "Esta rutina todavía está vacía" : "Este día todavía está vacío"}</strong>
           <p>Puedes agregar ejercicios o dejarlo así por ahora. Es un aviso y no bloquea el ciclo.</p>
         </div>
       ) : (
@@ -189,9 +188,9 @@ export function CycleRoutineScreen({
           <Plus size={15} aria-hidden="true" />Agregar ejercicio
         </SecondaryAction>
         <div>
-          <SecondaryAction onClick={() => dispatch({ type: "open_copy", mode: "exercises" })}>Copiar ejercicios de otro día</SecondaryAction>
+          <SecondaryAction onClick={() => dispatch({ type: "open_copy", mode: "exercises" })}>{state.draft.scheduleMode === "flexible" ? "Copiar ejercicios de otra rutina" : "Copiar ejercicios de otro día"}</SecondaryAction>
           {state.workflow !== "active_edit" || !routine.exercises.some((exercise) => state.loggedExerciseIds.includes(exercise.id))
-            ? <SecondaryAction onClick={() => dispatch({ type: "open_copy", mode: "day" })}>Copiar día completo</SecondaryAction>
+            ? <SecondaryAction onClick={() => dispatch({ type: "open_copy", mode: "day" })}>{state.draft.scheduleMode === "flexible" ? "Copiar rutina completa" : "Copiar día completo"}</SecondaryAction>
             : null}
         </div>
       </div>
@@ -225,7 +224,7 @@ export function CycleCustomExerciseScreen({
       ? "Elige el grupo muscular"
       : !videoValidation.valid
         ? "Revisa el enlace de YouTube"
-      : `Guardar y agregar a ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}`;
+      : `Guardar y agregar a ${builderRoutineLabel(state.draft, state.currentDay)}`;
   return (
     <div className={styles.screen}>
       <ScreenHeading
@@ -365,7 +364,7 @@ export function CycleExerciseScreen({
   return (
     <div className={styles.screen}>
       <header className={styles.exerciseHeading}>
-        <small>EJERCICIO {exerciseIndex + 1} DE {routine.exercises.length} · {TRAINING_CYCLE_DAY_LABELS[state.currentDay].toLocaleUpperCase("es-CL")}</small>
+        <small>EJERCICIO {exerciseIndex + 1} DE {routine.exercises.length} · {builderRoutineLabel(state.draft, state.currentDay).toLocaleUpperCase("es-CL")}</small>
         <h2>{exercise.name}</h2>
         <span className={styles.groupTag}>{exercise.muscleGroup}</span>
       </header>
@@ -452,7 +451,7 @@ export function CycleExerciseScreen({
       </section>
       <PrimaryAction disabled={!videoValidation.valid} onClick={() => dispatch({ type: "return_to", screen: "routine" })}>
         {videoValidation.valid
-          ? `Guardar en ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}`
+          ? `Guardar en ${builderRoutineLabel(state.draft, state.currentDay)}`
           : "Revisa el enlace de YouTube"}
       </PrimaryAction>
     </div>
@@ -474,7 +473,7 @@ export function CycleMuscleScreen({
   return (
     <div className={styles.screen}>
       <ScreenHeading title="Distribución muscular" description="Contamos cada ejercicio por su grupo principal." />
-      <h3 className={styles.eyebrowTitle}>{TRAINING_CYCLE_DAY_LABELS[state.currentDay]} · {state.draft.routines[state.currentDay].name || "Sin nombre"}</h3>
+      <h3 className={styles.eyebrowTitle}>{builderRoutineLabel(state.draft, state.currentDay)} · {state.draft.routines[state.currentDay].name || "Sin nombre"}</h3>
       <dl className={styles.dayDistribution}>
         {dayEntries.length ? dayEntries.map(([group, count]) => <div key={group}><dt>{group}</dt><dd>{count} {count === 1 ? "ejercicio" : "ejercicios"}</dd></div>) : <div><dt>Sin ejercicios</dt><dd>0</dd></div>}
       </dl>
@@ -519,12 +518,12 @@ export function CycleCopySheet({
         ? "Confirmar ejercicio"
         : "Copiar ejercicios de otro día";
   const description = isDay
-    ? `Reemplaza el nombre y los ejercicios de ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}.`
+    ? `Reemplaza el nombre y los ejercicios de ${builderRoutineLabel(state.draft, state.currentDay)}.`
     : state.copyStep === "exercises"
-      ? `Elige un ejercicio de ${sourceRoutine ? TRAINING_CYCLE_DAY_LABELS[sourceRoutine.day] : "otro día"}.`
+      ? `Elige un ejercicio de ${sourceRoutine ? builderRoutineLabel(state.draft, sourceRoutine.day) : "otro día"}.`
       : state.copyStep === "confirm" && selectedExercise
-        ? `Agregarás un ejercicio al final de ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}.`
-        : `Los ejercicios se agregan al final de ${TRAINING_CYCLE_DAY_LABELS[state.currentDay]}.`;
+        ? `Agregarás un ejercicio al final de ${builderRoutineLabel(state.draft, state.currentDay)}.`
+        : `Los ejercicios se agregan al final de ${builderRoutineLabel(state.draft, state.currentDay)}.`;
   return (
     <>
       <BottomSheet
@@ -535,7 +534,7 @@ export function CycleCopySheet({
     >
         {state.copyStep === "confirm" && selectedExercise ? (
           <div className={styles.copyConfirmation}>
-            <p>¿Quieres agregar <strong>{selectedExercise.name}</strong> a la rutina actual de {TRAINING_CYCLE_DAY_LABELS[state.currentDay]}?</p>
+            <p>¿Quieres agregar <strong>{selectedExercise.name}</strong> a la rutina actual de {builderRoutineLabel(state.draft, state.currentDay)}?</p>
             <div><SecondaryAction onClick={() => dispatch({ type: "close_copy" })}>Cancelar</SecondaryAction><PrimaryAction onClick={() => dispatch({ type: "confirm_copy_exercise" })}>Sí, agregar</PrimaryAction></div>
           </div>
         ) : (
@@ -553,7 +552,7 @@ export function CycleCopySheet({
                   <button type="button" key={day} onClick={() => isDay
                     ? dispatch({ type: "copy_from_day", sourceDay: day })
                     : dispatch({ type: "select_copy_source", sourceDay: day })}>
-                    <span><strong>{TRAINING_CYCLE_DAY_SHORT_LABELS[day]} · {routine.name || "Sin nombre"}</strong><small>{routine.exercises.length} ejercicios · {[...new Set(routine.exercises.map((exercise) => exercise.muscleGroup))].join(", ") || "Sin grupos"}</small></span>
+                    <span><strong>{builderRoutineShortLabel(state.draft, day)} · {routine.name || "Sin nombre"}</strong><small>{routine.exercises.length} ejercicios · {[...new Set(routine.exercises.map((exercise) => exercise.muscleGroup))].join(", ") || "Sin grupos"}</small></span>
                     <span aria-hidden="true">›</span>
                   </button>
                 );

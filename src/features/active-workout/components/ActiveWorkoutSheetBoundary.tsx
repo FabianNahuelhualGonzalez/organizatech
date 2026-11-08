@@ -22,6 +22,7 @@ import type { ActiveWorkoutHistoryPublicationStatus } from "@/features/active-wo
 import type { ActiveWorkoutCompletionStatus } from "@/features/active-workout/model/active-workout-boundary-contract";
 import type { AdvancedWorkoutExecutionIntegration } from "@/lib/training/advanced-workout-execution-contract";
 import type { ExerciseTemplate } from "@/lib/progress/types";
+import { flexibleRoutineLabel } from "@/lib/training/flexible-training-schedule";
 import {
   formatDecimalEs,
   formatKg,
@@ -52,6 +53,7 @@ function readOptionalNumber(value: string): number | "" {
 
 export interface ActiveWorkoutSheetBoundaryProps {
   day: string;
+  flexibleSchedule?: boolean;
   routine: string;
   exercises: ExerciseTemplate[];
   targetSummary: { totalWeight: number; volume: number; reps: number; exerciseCount: number };
@@ -85,6 +87,7 @@ export interface ActiveWorkoutSheetBoundaryProps {
  */
 export function ActiveWorkoutSheetBoundary({
   day,
+  flexibleSchedule = false,
   routine,
   exercises,
   activeIndex,
@@ -263,7 +266,7 @@ export function ActiveWorkoutSheetBoundary({
   if (!selectedExercise || !activeExercise || !draft || !performancePresentation) {
     return (
       <div className={styles.guidedEmpty}>
-        <h2 id="guided-routine-title">No hay ejercicios para {day}</h2>
+        <h2 id="guided-routine-title">No hay ejercicios para {flexibleSchedule ? flexibleRoutineLabel(day) : day}</h2>
       </div>
     );
   }
@@ -293,16 +296,16 @@ export function ActiveWorkoutSheetBoundary({
         <article className={styles.guidedRoutinePanel}>
           <header className={styles.guidedRoutineHeader}>
             <div>
-              <h2 id="guided-routine-title">Rutina registrada {day}</h2>
+              <h2 id="guided-routine-title">Rutina registrada {flexibleSchedule ? flexibleRoutineLabel(day) : day}</h2>
               <p>{routine}</p>
             </div>
 
             <div className={styles.guidedRoutineControls}>
               <label className={styles.guidedDaySelector}>
-                <span className={styles.srOnly}>Día de entrenamiento</span>
+                <span className={styles.srOnly}>{flexibleSchedule ? "Rutina de hoy" : "Día de entrenamiento"}</span>
                 <select value={day} onChange={(event) => switchDay(event.target.value)}>
                   {routineDays.map((item) => (
-                    <option value={item} key={item}>{item}</option>
+                    <option value={item} key={item}>{flexibleSchedule ? flexibleRoutineLabel(item) : item}</option>
                   ))}
                 </select>
               </label>
@@ -337,7 +340,7 @@ export function ActiveWorkoutSheetBoundary({
             <div
               className={styles.guidedExerciseTable}
               role="listbox"
-              aria-label={`Ejercicios de ${routine} para ${day}`}
+              aria-label={`Ejercicios de ${routine} para ${flexibleSchedule ? flexibleRoutineLabel(day) : day}`}
             >
               <div className={styles.guidedTableHeader} aria-hidden="true">
                 <span>Ejercicios</span>

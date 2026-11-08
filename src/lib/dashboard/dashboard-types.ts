@@ -28,6 +28,8 @@ export type { CoachComparisonStatus, TrainingCoachFeedback };
  */
 export interface DashboardTrainingCardData {
   day: string;
+  displayDay?: string;
+  completedOn?: string;
   status: TrainingCarouselStatus;
   registeredCount: number;
   plannedCount: number;

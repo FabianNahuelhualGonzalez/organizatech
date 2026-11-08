@@ -130,6 +130,7 @@ export function prepareActiveWorkoutCompletion(input: {
     plannedStartDate: string | null;
     plannedDay: TrainingDayCode;
     trainedDate: string;
+    flexibleSchedule?: boolean;
   };
 }): PreparedActiveWorkoutCompletion {
   if (input.shouldLinkWorkoutReadiness &&
@@ -196,7 +197,7 @@ export function prepareActiveWorkoutCompletion(input: {
       cycle.plannedStartDate,
       cycle.trainedDate,
     );
-    const plannedDate = getCycleCalendarPlannedDate({
+    const plannedDate = cycle.flexibleSchedule ? cycle.trainedDate : getCycleCalendarPlannedDate({
       plannedStartDate: cycle.plannedStartDate,
       weekNumber,
       plannedDay: cycleDay.dayCode,

@@ -32,6 +32,8 @@ const backendTests = [
 const integrationTests = [
   "src/features/training-cycle-builder/data/training-cycle-rpc-parsers.test.ts",
   "src/features/training-cycle-builder/data/training-cycle-rpc-mappers.test.ts",
+  "src/features/training-cycle-builder/data/flexible-training-migration.test.ts",
+  "src/lib/training/flexible-training-progress.test.ts",
   "src/features/training-cycle-builder/data/supabase-training-cycle-rpc-gateway.test.ts",
   "src/features/training-cycle-builder/integration/training-cycle-product-view-model.test.ts",
   "src/features/training-cycle-builder/integration/training-cycle-product-suggestion.test.ts",

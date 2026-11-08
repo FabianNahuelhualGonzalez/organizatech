@@ -23,6 +23,7 @@ export function DashboardTrainingCardContent({ model }: DashboardTrainingCardCon
         <span>Entrenamiento:</span>
         <strong>{model.routineName}</strong>
       </div>
+      {model.completedOn ? <p>Último entrenamiento: {model.completedOn}</p> : null}
       <div className="dashboard-exercise-table" role="table" aria-label={buildDashboardCarouselTableAriaLabel(model.day)}>
         <div className="dashboard-exercise-table-row heading" role="row">
           <span role="columnheader">Ejercicio</span>

@@ -351,13 +351,16 @@ function parseDayPlan(value: unknown, counters: PlanCounters): TrainingCycleRpcD
 
 export function parseTrainingCycleRpcPlan(value: unknown): TrainingCycleRpcPlan {
   const record = object(value);
-  exactKeys(record, ["days"]);
+  exactKeys(record, ["days"], ["scheduleMode"]);
   assertJsonSize(value);
   const counters: PlanCounters = { exercises: 0, sets: 0, drops: 0 };
   const days = array(record.days, 1, 7).map((candidate) => parseDayPlan(candidate, counters));
   uniqueNumbers(days.map((day) => day.order));
   uniqueStrings(days.map((day) => day.day));
-  return { days };
+  const scheduleMode = record.scheduleMode === undefined
+    ? undefined
+    : enumeration(record.scheduleMode, ["flexible"] as const);
+  return scheduleMode ? { scheduleMode, days } : { days };
 }
 
 export function parseCatalogCursor(value: unknown): TrainingCycleCatalogCursor {
@@ -482,11 +485,14 @@ function parseSnapshotDay(value: unknown): TrainingCycleSnapshotDay {
 
 export function parseSnapshotPlan(value: unknown): TrainingCycleSnapshotPlan {
   const record = object(value);
-  exactKeys(record, ["days"]);
+  exactKeys(record, ["days"], ["scheduleMode"]);
   const days = array(record.days, 1, 7).map(parseSnapshotDay);
   uniqueNumbers(days.map((day) => day.order));
   uniqueStrings(days.map((day) => day.day));
-  return { days };
+  const scheduleMode = record.scheduleMode === undefined
+    ? undefined
+    : enumeration(record.scheduleMode, ["flexible"] as const);
+  return scheduleMode ? { scheduleMode, days } : { days };
 }
 
 export function parseCycleSnapshot(value: unknown): TrainingCycleRpcSnapshot {

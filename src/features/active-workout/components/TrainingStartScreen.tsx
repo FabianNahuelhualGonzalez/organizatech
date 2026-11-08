@@ -3,11 +3,13 @@ import { Pencil } from "lucide-react";
 import styles from "@/features/active-workout/active-workout.module.css";
 import { formatDecimalEs } from "@/lib/progress/weight-format";
 import type { ExerciseTemplate } from "@/lib/progress/types";
+import { flexibleRoutineLabel } from "@/lib/training/flexible-training-schedule";
 import { IconButton } from "@/ui/buttons/icon-button";
 import { RoutineMetricGrid } from "@/ui/data-display/metric-grid";
 
 export interface TrainingStartScreenProps {
   day: string;
+  flexibleSchedule?: boolean;
   routine: string;
   exercises: ExerciseTemplate[];
   targetSummary: { totalWeight: number; volume: number; reps: number; exerciseCount: number };
@@ -21,6 +23,7 @@ export interface TrainingStartScreenProps {
 
 export function TrainingStartScreen({
   day,
+  flexibleSchedule = false,
   routine,
   exercises,
   targetSummary,
@@ -34,22 +37,22 @@ export function TrainingStartScreen({
   return (
     <section className={`screen ${styles.screen}`} aria-labelledby="training-start-title">
       <header className={`wide ${styles.startIntro}`}>
-        <h2 id="training-start-title">Selecciona el día de entrenamiento para comenzar</h2>
+        <h2 id="training-start-title">{flexibleSchedule ? "Elige la rutina de hoy" : "Selecciona el día de entrenamiento para comenzar"}</h2>
       </header>
 
       <article className={`card wide training-start-card ${styles.workoutCard}`}>
         <header className={styles.routineHeader}>
           <div className={styles.routineTitle}>
-            <h3>Rutina registrada {day}</h3>
+            <h3>Rutina registrada {flexibleSchedule ? flexibleRoutineLabel(day) : day}</h3>
             <p>{routine}</p>
           </div>
 
           <div className={styles.routineControls}>
             <label className={styles.daySelector}>
-              <span className={styles.srOnly}>Día de entrenamiento</span>
+              <span className={styles.srOnly}>{flexibleSchedule ? "Rutina de hoy" : "Día de entrenamiento"}</span>
               <select value={day} onChange={(event) => switchDay(event.target.value)}>
                 {routineDays.map((item) => (
-                  <option value={item} key={item}>{item}</option>
+                  <option value={item} key={item}>{flexibleSchedule ? flexibleRoutineLabel(item) : item}</option>
                 ))}
               </select>
             </label>
@@ -73,7 +76,7 @@ export function TrainingStartScreen({
           <div
             className={styles.exerciseTable}
             role="table"
-            aria-label={`Ejercicios de ${routine} para ${day}`}
+            aria-label={`Ejercicios de ${routine} para ${flexibleSchedule ? flexibleRoutineLabel(day) : day}`}
           >
             <div className={styles.tableHeader} role="row">
               <span role="columnheader">Ejercicios</span>
@@ -94,7 +97,7 @@ export function TrainingStartScreen({
           </div>
           {exercises.length === 0 ? (
             <p className={styles.emptyTableMessage} role="status">
-              No hay ejercicios registrados para este día.
+              {flexibleSchedule ? "No hay ejercicios registrados para esta rutina." : "No hay ejercicios registrados para este día."}
             </p>
           ) : null}
         </section>

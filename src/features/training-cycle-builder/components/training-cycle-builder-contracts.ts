@@ -128,6 +128,8 @@ export interface TrainingCycleDayDraft {
 
 export interface TrainingCycleDraftViewModel {
   readonly draftId: string;
+  /** Fixed weekdays remain the default for existing drafts and cycles. */
+  readonly scheduleMode?: "flexible";
   readonly goal: TrainingCycleGoal;
   readonly startDate: string;
   readonly endDate: string;
@@ -230,6 +232,7 @@ export interface TrainingCyclePlanDayInput {
 
 export interface TrainingCycleSaveDraftInput {
   readonly draftId: string;
+  readonly scheduleMode?: "flexible";
   readonly origin: TrainingCycleBuilderOrigin;
   readonly goal: TrainingCycleGoal;
   readonly startDate: string;
@@ -278,6 +281,7 @@ export interface TrainingCycleGenerateSuggestedDraftResult {
  */
 export interface TrainingCycleSaveActiveInput {
   readonly cycleId: string;
+  readonly scheduleMode?: "flexible";
   readonly expectedRevision: string;
   readonly goal: TrainingCycleGoal;
   readonly days: readonly TrainingCyclePlanDayInput[];

@@ -9,6 +9,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import type { Dispatch } from "react";
+import { builderRoutineLabel } from "@/features/training-cycle-builder/components/training-cycle-builder-labels";
 
 import {
   TRAINING_CYCLE_DAY_LABELS,
@@ -71,6 +72,7 @@ export function CycleReviewScreen({
   const validation = getTrainingCycleDraftValidation(state.draft);
   const distribution = getMuscleDistribution(state.draft);
   const restCount = 7 - state.draft.selectedDays.length;
+  const flexible = state.draft.scheduleMode === "flexible";
   const techniques: string[] = [];
   let videos = 0;
   for (const day of state.draft.selectedDays) {
@@ -94,11 +96,11 @@ export function CycleReviewScreen({
     : activating
     ? "Activando…"
     : !validation.hasDays
-      ? "Elige al menos un día"
+      ? flexible ? "Elige al menos una rutina" : "Elige al menos un día"
       : !validation.datesValid
         ? "Revisa las fechas"
         : !validation.hasExercises
-          ? "Agrega ejercicios a cada día"
+          ? flexible ? "Agrega ejercicios a cada rutina" : "Agrega ejercicios a cada día"
         : !validation.seriesValid
           ? "Revisa las series"
           : !validation.videosValid
@@ -132,20 +134,22 @@ export function CycleReviewScreen({
     },
     {
       id: "days",
-      title: "Días de entrenamiento",
-      summary: `${state.draft.selectedDays.length} de entrenamiento · ${restCount} de descanso`,
-      lines: [
-        ["Entrenamiento", state.draft.selectedDays.map((day) => TRAINING_CYCLE_DAY_LABELS[day]).join(", ") || "Ninguno"],
-        ["Descanso", `${restCount} días`],
-      ] as const,
+      title: flexible ? "Horario flexible" : "Días de entrenamiento",
+      summary: flexible ? `${state.draft.selectedDays.length} rutinas por semana` : `${state.draft.selectedDays.length} de entrenamiento · ${restCount} de descanso`,
+      lines: flexible
+        ? [["Rutinas", state.draft.selectedDays.map((day) => builderRoutineLabel(state.draft, day)).join(", ") || "Ninguna"]] as const
+        : [
+            ["Entrenamiento", state.draft.selectedDays.map((day) => TRAINING_CYCLE_DAY_LABELS[day]).join(", ") || "Ninguno"],
+            ["Descanso", `${restCount} días`],
+          ] as const,
       target: "setup" as const,
-      label: "Editar días",
+      label: flexible ? "Editar rutinas semanales" : "Editar días",
     },
     {
       id: "routines",
-      title: "Rutina de cada día",
+      title: flexible ? "Rutinas de la semana" : "Rutina de cada día",
       summary: `${metrics.exercises} ejercicios en total`,
-      lines: state.draft.selectedDays.map((day) => [TRAINING_CYCLE_DAY_LABELS[day], `${state.draft.routines[day].name || "Sin nombre"} · ${state.draft.routines[day].exercises.length} ej.`] as const),
+      lines: state.draft.selectedDays.map((day) => [builderRoutineLabel(state.draft, day), `${state.draft.routines[day].name || "Sin nombre"} · ${state.draft.routines[day].exercises.length} ej.`] as const),
       target: "routine" as const,
       label: "Editar rutinas",
     },
@@ -175,7 +179,7 @@ export function CycleReviewScreen({
           : "Puedes volver a editar cualquier sección desde aquí."}
       />
       <div className={styles.metricGrid}>
-        <div><small>EJERCICIOS</small><strong>{metrics.exercises}</strong><span>En {state.draft.selectedDays.length} días</span></div>
+        <div><small>EJERCICIOS</small><strong>{metrics.exercises}</strong><span>En {state.draft.selectedDays.length} {flexible ? "rutinas" : "días"}</span></div>
         <div><small>SERIES PROGRAMADAS</small><strong>{metrics.sets}</strong></div>
         <div><small>REPETICIONES PROGRAMADAS</small><strong>{Math.round(metrics.repetitions)}</strong></div>
         <div><small>VOLUMEN PROGRAMADO</small><strong>{new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(metrics.volumeKg)} kg</strong><span>carga × reps por serie</span></div>
@@ -248,7 +252,7 @@ export function CycleSuccessScreen({
         <dl>
           <div><dt>INICIO</dt><dd>{formatCycleDate(state.draft.startDate)}</dd></div>
           <div><dt>TÉRMINO</dt><dd>{formatCycleDate(state.draft.endDate)}</dd></div>
-          <div><dt>DÍAS POR SEMANA</dt><dd>{state.draft.selectedDays.length}</dd></div>
+          <div><dt>{state.draft.scheduleMode === "flexible" ? "RUTINAS POR SEMANA" : "DÍAS POR SEMANA"}</dt><dd>{state.draft.selectedDays.length}</dd></div>
           <div><dt>EJERCICIOS</dt><dd>{metrics.exercises}</dd></div>
         </dl>
       </section>
@@ -315,8 +319,8 @@ export function CycleActiveScreen({
         />
       ) : null}
       <div className={styles.activeSectionHeader}>
-        <h3>DÍAS DEL CICLO</h3>
-        <button type="button" disabled={!canEdit || state.draft.selectedDays.length >= 7} onClick={() => dispatch({ type: "begin_active_edit" })}>+ Agregar día</button>
+        <h3>{state.draft.scheduleMode === "flexible" ? "RUTINAS DEL CICLO" : "DÍAS DEL CICLO"}</h3>
+        <button type="button" disabled={!canEdit || state.draft.selectedDays.length >= 7} onClick={() => dispatch({ type: "begin_active_edit" })}>{state.draft.scheduleMode === "flexible" ? "+ Agregar rutina" : "+ Agregar día"}</button>
       </div>
       <div className={styles.activeDays}>
         {state.draft.selectedDays.map((day) => {
@@ -330,7 +334,7 @@ export function CycleActiveScreen({
               dispatch({ type: "navigate", screen: "routine" });
               dispatch({ type: "select_day", day });
             }}>
-              <small>{TRAINING_CYCLE_DAY_LABELS[day].slice(0, 3)}</small>
+              <small>{builderRoutineLabel(state.draft, day).slice(0, state.draft.scheduleMode === "flexible" ? undefined : 3)}</small>
               <span><strong>{routine.name || "Sin nombre"}</strong><small>{count} {count === 1 ? "ejercicio" : "ejercicios"}{withLogs ? ` · ${withLogs} con registros` : ""}</small></span>
               <span className={styles.activeChevron} aria-hidden="true">›</span>
             </button>

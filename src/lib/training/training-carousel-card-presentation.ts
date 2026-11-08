@@ -41,6 +41,7 @@ export interface TrainingCarouselCardRow {
 
 export interface TrainingCarouselCardModel {
   day: string;
+  completedOn?: string;
   routineName: string;
   status: TrainingCarouselStatus;
   statusLabel: string;
@@ -70,6 +71,7 @@ export interface BuildTrainingTopbarMetaInput {
   weekNumber: number | null | undefined;
   completedDays: number | null | undefined;
   plannedDays: number | null | undefined;
+  completionUnit?: "day" | "routine";
 }
 
 export interface TrainingTopbarMeta {
@@ -148,7 +150,9 @@ export function buildTrainingTopbarMeta(input: BuildTrainingTopbarMetaInput): Tr
 
   const normalizedCompletedDays = Math.min(Math.trunc(completedDays), Math.trunc(plannedDays));
   const normalizedPlannedDays = Math.trunc(plannedDays);
-  const dayUnit = normalizedPlannedDays === 1 ? "día" : "días";
+  const dayUnit = input.completionUnit === "routine"
+    ? normalizedPlannedDays === 1 ? "rutina" : "rutinas"
+    : normalizedPlannedDays === 1 ? "día" : "días";
 
   return {
     cycleLabel,
