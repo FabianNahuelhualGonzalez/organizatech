@@ -298,7 +298,7 @@ export function CycleSetupScreen({
         <span><small>DURACIÓN</small><strong>{validation.datesValid ? `${validation.durationDays} días · ~${durationWeeks} semanas` : "Fechas no válidas"}</strong></span>
         {!validation.datesValid ? <p>El término debe ser posterior al inicio</p> : null}
       </div>
-      <fieldset className={styles.dayPicker}>
+      <fieldset className={styles.scheduleModePicker}>
         <legend>¿CÓMO ORGANIZARÁS TUS ENTRENAMIENTOS?</legend>
         <div>
           <button type="button" data-selected={!flexible} aria-pressed={!flexible} disabled={!canChangeMode || generating} onClick={() => dispatch({ type: "set_schedule_mode", mode: "fixed" })}>Días fijos</button>
