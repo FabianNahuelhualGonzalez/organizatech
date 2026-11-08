@@ -22,7 +22,8 @@ export interface TrainingCoachDashboardInput {
   entries: ExerciseEntry[];
   currentWeek: number;
   /** Global weekly context. It must never decide the active-day comparison status. */
-  weeklyEquivalentProgress: Pick<WeeklyEquivalentProgressResult, "status">;
+  weeklyEquivalentProgress: Pick<WeeklyEquivalentProgressResult, "status"> &
+    Partial<Pick<WeeklyEquivalentProgressResult, "comparisonSource">>;
 }
 
 export function buildTrainingCoachDashboardInput(input: TrainingCoachDashboardInput): TrainingCoachFeedbackInput {
@@ -98,6 +99,10 @@ function resolveActiveDayComparison(input: TrainingCoachDashboardInput): ActiveD
   const isPartiallyRegistered = plannedExercises > 0 && registeredExercises < plannedExercises;
   if (isPartiallyRegistered || currentMetrics.length === 0) {
     return { status: "first_reference", referenceWeek: null };
+  }
+
+  if (currentWeek === 1 && input.weeklyEquivalentProgress.comparisonSource === "registered_plan") {
+    return { status: "ready", referenceWeek: null };
   }
 
   const referenceWeek = findLatestCommonReferenceWeek(currentMetrics, input.entries, currentWeek);

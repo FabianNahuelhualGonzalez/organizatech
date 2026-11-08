@@ -196,6 +196,33 @@ assert.deepEqual(resolvePlannedWeekDays([]), ["Lunes"], "mantiene fallback segur
 
 {
   const result = calculateEquivalentWeeklyProgress({
+    referenceDate: "2026-11-08",
+    currentWeek: 1,
+    plannedDays: ["Domingo"],
+    plannedExercises: [{
+      id: "exercise-1",
+      routine: "Jalón",
+      day: "Domingo",
+      name: "Jalón al pecho",
+      targetSets: 4,
+      targetReps: 10,
+      baseWeight: 20,
+    }],
+    entries: [volumeEntry("first-real-training", "2026-11-08", 800)],
+  });
+
+  assert.equal(result.status, "ready", "semana 1 se compara con la rutina registrada");
+  assert.equal(result.comparisonSource, "registered_plan");
+  assert.equal(result.comparisonLabel, "Vs rutina registrada");
+  assert.equal(result.currentLabel, "Semana 1");
+  assert.equal(result.referenceLabel, "Rutina registrada");
+  assert.equal(result.previousEquivalentValue, 800);
+  assert.equal(result.currentEquivalentValue, 800);
+  assert.equal(result.differenceValue, 0);
+}
+
+{
+  const result = calculateEquivalentWeeklyProgress({
     referenceDate: "2026-06-30",
     plannedDays: ["Lunes"],
     entries: [],

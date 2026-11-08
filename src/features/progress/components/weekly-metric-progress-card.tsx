@@ -62,7 +62,7 @@ export function WeeklyMetricProgressCard({
 
       <p className="weekly-chart-copy">
         {firstWeekPlan
-          ? "El gráfico compara tu rutina planificada con lo que registraste en la semana 1."
+          ? "El gráfico compara tu rutina registrada con lo que registraste en la Semana 1."
           : metric === "kg"
           ? "El gráfico muestra cómo cambia la carga registrada para este ejercicio durante el ciclo de entrenamiento."
           : "El gráfico muestra cómo cambian las repeticiones registradas para este ejercicio durante el ciclo de entrenamiento."}

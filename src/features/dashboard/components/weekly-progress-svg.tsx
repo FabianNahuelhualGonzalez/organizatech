@@ -61,15 +61,15 @@ export function WeeklyProgressSvg({ progress }: WeeklyProgressSvgProps) {
       aria-label={progressAriaLabel}
     >
       <div className="weekly-progress-legend" aria-hidden="true">
-        <span><i className="current" /> Semana actual</span>
-        {hasPreviousReference ? <span><i className="previous" /> Semana anterior</span> : null}
+        <span><i className="current" /> {progress.currentLabel}</span>
+        {hasPreviousReference ? <span><i className="previous" /> {progress.referenceLabel}</span> : null}
       </div>
       <div className="weekly-chart-stage">
         {isTooltipVisible ? (
           <div className="weekly-tooltip" style={{ left: tooltipLeft, top: tooltipTop }}>
             <strong>{tooltipDay}</strong>
-            <span>Semana actual: {formatKgNullable(activeCurrentPoint?.value ?? null)}</span>
-            <span>Semana anterior: {formatKgNullable(hasPreviousReference ? activePreviousPoint?.value ?? null : null)}</span>
+            <span>{progress.currentLabel}: {formatKgNullable(activeCurrentPoint?.value ?? null)}</span>
+            <span>{progress.referenceLabel}: {formatKgNullable(hasPreviousReference ? activePreviousPoint?.value ?? null : null)}</span>
           </div>
         ) : null}
         <div className="weekly-axis-values" aria-hidden="true">
@@ -103,7 +103,7 @@ export function WeeklyProgressSvg({ progress }: WeeklyProgressSvgProps) {
               className="weekly-point-hit"
               role="button"
               tabIndex={0}
-              aria-label={`${progress.points[index]?.day ?? point.label}: semana actual ${formatKgNullable(point.value)}, semana anterior ${formatKgNullable(previousPoints[index]?.value ?? null)}`}
+              aria-label={`${progress.points[index]?.day ?? point.label}: ${progress.currentLabel.toLowerCase()} ${formatKgNullable(point.value)}, ${progress.referenceLabel.toLowerCase()} ${formatKgNullable(previousPoints[index]?.value ?? null)}`}
               onClick={() => {
                 setIsTooltipVisible((current) => index !== activeIndex || !current);
                 setActiveIndex(index);

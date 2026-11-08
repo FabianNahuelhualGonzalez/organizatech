@@ -41,7 +41,7 @@ const weekOne = buildWeeklyExerciseComparisonModel({
 const weekOneResults = renderToStaticMarkup(<WeeklyResultsPanel model={weekOne} />);
 const weekOneReps = renderToStaticMarkup(<WeeklyMetricSummaryView summary={weekOne.repsSummary} model={weekOne} metric="reps" />);
 
-assert.match(weekOneResults, /Rutina planificada/);
+assert.match(weekOneResults, /Rutina registrada/);
 assert.match(weekOneResults, /Semana 1/);
 assert.match(weekOneResults, /Realizaste 4 de 4 series y 31 de 32 repeticiones planificadas/);
 assert.doesNotMatch(weekOneResults, /Esta es tu primera referencia registrada/);

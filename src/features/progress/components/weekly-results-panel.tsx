@@ -41,7 +41,7 @@ export function WeeklyResultsPanel({ model }: WeeklyResultsPanelProps) {
         <>
           <div className="weekly-results-grid">
             <div className="weekly-series-column">
-              <span>Rutina planificada</span>
+              <span>Rutina registrada</span>
               <small>{firstWeekPlan.targetSets} series de {firstWeekPlan.targetReps} reps</small>
               {Array.from({ length: firstWeekPlan.targetSets }, (_, index) => (
                 <div className="weekly-series-pill" key={`planned-${index}`}>
@@ -64,7 +64,7 @@ export function WeeklyResultsPanel({ model }: WeeklyResultsPanelProps) {
           <WeeklySeriesColumn title={`Semana ${effective?.week ?? "—"}`} record={effective} />
         </div>
       )}
-      <p className="weekly-results-note">{firstWeekPlan ? "Rutina planificada vs semana 1" : "Primer registro vs semana elegida"}</p>
+      <p className="weekly-results-note">{firstWeekPlan ? "Rutina registrada vs Semana 1" : "Primer registro vs semana elegida"}</p>
     </div>
   );
 }

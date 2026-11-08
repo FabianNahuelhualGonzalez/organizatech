@@ -1,4 +1,4 @@
-import type { ExerciseEntry, TrainingSession } from "@/lib/progress/types";
+import type { ExerciseEntry, ExerciseTemplate, TrainingSession } from "@/lib/progress/types";
 import { formatKg, roundDecimal } from "@/lib/progress/weight-format";
 import { removeAccents } from "@/lib/training/exercise-name-normalization";
 import {
@@ -12,6 +12,7 @@ const plannedDayOrder = ["Lunes", "Martes", "Miercoles", "Miércoles", "Jueves",
 
 export type WeeklyEquivalentProgressTone = "positive" | "danger" | "neutral";
 export type WeeklyEquivalentProgressStatus = "ready" | "no_previous" | "neutral";
+export type WeeklyEquivalentProgressComparisonSource = "previous_week" | "registered_plan" | "none";
 
 export interface EquivalentWeeklyDateRanges {
   currentWeekStart: string;
@@ -47,7 +48,10 @@ export interface WeeklyEquivalentProgressResult {
   previousLabel: string;
   currentVolumeLabel: string;
   previousVolumeLabel: string;
-  comparisonLabel: "Vs semana anterior";
+  comparisonLabel: "Vs semana anterior" | "Vs rutina registrada";
+  comparisonSource: WeeklyEquivalentProgressComparisonSource;
+  currentLabel: string;
+  referenceLabel: string;
   detailLabel: string;
   tone: WeeklyEquivalentProgressTone;
   status: WeeklyEquivalentProgressStatus;
@@ -78,6 +82,8 @@ export function calculateEquivalentWeeklyProgress(input: {
   referenceDate?: Date | string;
   activeCycleId?: string | null;
   plannedDays?: string[];
+  plannedExercises?: ExerciseTemplate[];
+  currentWeek?: number;
 }): WeeklyEquivalentProgressResult {
   const ranges = getEquivalentWeeklyDateRanges(input.referenceDate);
   const plannedDays = resolvePlannedWeekDays(input.plannedDays ?? []);
@@ -86,7 +92,13 @@ export function calculateEquivalentWeeklyProgress(input: {
     sessions: input.sessions ?? [],
     activeCycleId: input.activeCycleId,
   });
-  const points = buildDualWeeklyProgressSeries({ entries, ranges, plannedDays });
+  const actualPoints = buildDualWeeklyProgressSeries({ entries, ranges, plannedDays });
+  const actualPreviousFinal = actualPoints.at(-1)?.previousVolume ?? 0;
+  const useRegisteredPlan = actualPreviousFinal <= 0 && input.currentWeek === 1 &&
+    Boolean(input.plannedExercises?.some(hasComparablePlan));
+  const points = useRegisteredPlan
+    ? replacePreviousSeriesWithRegisteredPlan(actualPoints, input.plannedExercises ?? [])
+    : actualPoints;
   const previousFinalVolume = points.at(-1)?.previousVolume ?? 0;
   const normalizedPoints = normalizeWeeklySeriesAgainstPreviousFinal(points, previousFinalVolume);
   const comparableIndex = getComparablePlannedDayIndex(normalizedPoints);
@@ -97,6 +109,9 @@ export function calculateEquivalentWeeklyProgress(input: {
   const percentage = comparablePoint?.currentPercentage ?? null;
   const previousComparablePercentage = comparablePoint?.previousPercentage ?? null;
   const status = resolveProgressStatus(currentEquivalentValue, previousFinalVolume, percentage);
+  const comparisonSource: WeeklyEquivalentProgressComparisonSource = status !== "ready"
+    ? "none"
+    : useRegisteredPlan ? "registered_plan" : "previous_week";
 
   return {
     ranges,
@@ -111,12 +126,34 @@ export function calculateEquivalentWeeklyProgress(input: {
     previousLabel: status === "ready" ? formatKg(previousEquivalentValue) : "—",
     currentVolumeLabel: formatKg(currentEquivalentValue),
     previousVolumeLabel: status === "ready" ? formatKg(previousEquivalentValue) : "—",
-    comparisonLabel: "Vs semana anterior",
+    comparisonLabel: comparisonSource === "registered_plan" ? "Vs rutina registrada" : "Vs semana anterior",
+    comparisonSource,
+    currentLabel: comparisonSource === "registered_plan" ? "Semana 1" : "Semana actual",
+    referenceLabel: comparisonSource === "registered_plan" ? "Rutina registrada" : "Semana anterior",
     detailLabel: buildDetailLabel(status),
     tone: resolveProgressTone(differenceValue, status),
     status,
     points: normalizedPoints,
   };
+}
+
+function replacePreviousSeriesWithRegisteredPlan(
+  points: WeeklyDualProgressPoint[],
+  plannedExercises: ExerciseTemplate[],
+) {
+  let plannedCumulative = 0;
+  return points.map((point) => {
+    plannedCumulative += plannedExercises
+      .filter(hasComparablePlan)
+      .filter((exercise) => canonicalizePlannedDay(exercise.day ?? "") === point.day)
+      .reduce((total, exercise) => total + exercise.targetSets * exercise.targetReps * exercise.baseWeight, 0);
+    return { ...point, previousVolume: roundDecimal(plannedCumulative) };
+  });
+}
+
+function hasComparablePlan(exercise: ExerciseTemplate) {
+  return exercise.targetSets > 0 && exercise.targetReps > 0 && exercise.baseWeight > 0 &&
+    canonicalizePlannedDay(exercise.day ?? "") !== null;
 }
 
 export function resolvePlannedWeekDays(days: string[]) {
