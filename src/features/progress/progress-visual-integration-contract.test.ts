@@ -122,13 +122,18 @@ assert.match(
 );
 assert.match(
   globalStylesSource,
-  /@media \(max-width:\s*430px\)[\s\S]*?\.weekly-metric-summary\.reps-summary\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/,
-  "en móvil la comparación de repeticiones debe apilar sus métricas",
+  /@media \(max-width:\s*430px\)[\s\S]*?\.weekly-metric-summary\.reps-summary\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+1px\s+minmax\(0,\s*1fr\);/,
+  "en móvil la comparación debe conservar dos columnas alineadas",
 );
 assert.match(
   globalStylesSource,
-  /\.weekly-metric-summary\.reps-summary \.weekly-metric-divider\s*\{[^}]*min-height:\s*1px;[^}]*height:\s*1px;/,
-  "el divisor de la comparación móvil debe cambiar de vertical a horizontal",
+  /\.weekly-metric-summary\.reps-summary \.weekly-metric-divider\s*\{[^}]*width:\s*1px;[^}]*min-height:\s*132px;[^}]*height:\s*auto;/,
+  "el divisor de la comparación móvil debe permanecer vertical",
+);
+assert.match(
+  globalStylesSource,
+  /\.weekly-metric-summary\.reps-summary strong\s*\{[^}]*white-space:\s*nowrap;/,
+  "los totales de repeticiones deben permanecer completos en cada columna",
 );
 
 // -------------------------------------------------------------------------------------------

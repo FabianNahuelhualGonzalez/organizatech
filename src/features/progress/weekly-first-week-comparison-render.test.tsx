@@ -47,6 +47,9 @@ assert.match(weekOneResults, /Realizaste 4 de 4 series y 31 de 32 repeticiones p
 assert.doesNotMatch(weekOneResults, /Esta es tu primera referencia registrada/);
 assert.match(weekOneReps, /32 repeticiones/);
 assert.match(weekOneReps, /31 repeticiones/);
+assert.match(weekOneReps, /Registro realizado/);
+assert.match(weekOneReps, /Registro de entrenamiento/);
+assert.equal((weekOneReps.match(/24-06-2026/g) ?? []).length, 2, "ambas columnas muestran la fecha del registro comparado");
 assert.match(weekOneReps, /Te faltó 1 repetición para cumplir lo planificado/);
 
 const weekTwo = buildWeeklyExerciseComparisonModel({

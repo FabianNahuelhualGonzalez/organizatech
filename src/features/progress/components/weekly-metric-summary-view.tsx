@@ -34,12 +34,14 @@ export function WeeklyMetricSummaryView({
         <div>
           <h4>Planificado</h4>
           <strong>{metric === "kg" ? formatKg(firstWeekPlan.targetWeight) : `${firstWeekPlan.targetTotalReps} repeticiones`}</strong>
+          <span>Registro realizado</span>
+          <small>{formatWeeklyComparisonDate(firstWeekPlan.actual.date)}</small>
         </div>
         <div className="weekly-metric-divider" aria-hidden="true" />
         <div>
           <h4>Semana 1</h4>
           <strong>{metric === "kg" ? formatKg(firstWeekPlan.actual.weight) : `${firstWeekPlan.actual.totalReps} repeticiones`}</strong>
-          <span>Fecha del entrenamiento</span>
+          <span>Registro de entrenamiento</span>
           <small>{formatWeeklyComparisonDate(firstWeekPlan.actual.date)}</small>
         </div>
         <p className={`weekly-metric-difference ${toneClass}`}>

@@ -1937,34 +1937,53 @@ h3 {
   }
 
   .weekly-metric-summary.reps-summary {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
+    grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+    gap: 6px;
   }
 
   .weekly-metric-summary.reps-summary .weekly-metric-divider {
-    width: min(100%, 260px);
-    min-height: 1px;
-    height: 1px;
-    justify-self: center;
+    width: 1px;
+    min-height: 132px;
+    height: auto;
   }
 
   .weekly-metric-summary.reps-summary strong {
-    font-size: clamp(22px, 7vw, 30px);
+    font-size: clamp(12px, 3.55vw, 17px);
     overflow-wrap: normal;
     word-break: normal;
+    white-space: nowrap;
+  }
+
+  .weekly-metric-summary.reps-summary h4 {
+    font-size: clamp(14px, 4vw, 18px);
+    line-height: 1.15;
+  }
+
+  .weekly-metric-summary.reps-summary span {
+    display: grid;
+    min-height: 2.6em;
+    place-items: center;
+    align-content: center;
+    font-size: clamp(9px, 2.8vw, 12px);
+    line-height: 1.25;
+  }
+
+  .weekly-metric-summary.reps-summary small {
+    font-size: clamp(10px, 3vw, 12px);
   }
 
   .weekly-metric-summary.reps-summary .weekly-metric-difference,
   .weekly-metric-summary.reps-summary .weekly-metric-insight {
-    grid-column: 1;
+    grid-column: 1 / -1;
   }
 
   .weekly-metric-summary.reps-summary .weekly-metric-difference {
     margin-top: 8px;
-    font-size: clamp(28px, 9vw, 40px) !important;
+    font-size: clamp(24px, 8.2vw, 36px) !important;
     line-height: 1.08;
     overflow-wrap: normal;
     word-break: normal;
+    white-space: nowrap;
   }
 
 }
