@@ -615,7 +615,6 @@ const protectedFileHashes = {
   "src/lib/training/exercise-current-result-presentation.ts": "03ff9c71b89d4c025536d47818338032389d4131a4fd70bdea20c267da356ad1",
   "src/lib/training/exercise-last-observation-presentation.ts": "69d8d7580b1d9fd151e4cfb327bfcfee5f4f09c1d5a7381c2d245a9945965299",
   "src/lib/training/exercise-last-performance-presentation.ts": "00284459d5ceaf7eff3adb63c0bd10ac6609ea12767d94a756f7d22aeafc88e4",
-  "src/lib/training/training-completion-summary.ts": "60766dcaf47d95680cb93e3f9ad02f832d1f2efeebd02624b0ae315e4ae3a8c1",
   "src/lib/training/training-exercise-draft.ts": "d394157cd8c093071cc9e5d5b52cf6185a1318032be446ba397669675bc70bd1",
   "src/lib/training/workout-registration.ts": "432a2bad50ebd22f39ddb8ad1c3c3b2cf1dadcc059a6051b7a5fb7e5f9e08c60",
   "src/lib/training/workout-draft-storage.ts": "9bc72346cceb27881bd0f5171a63967ebc78663613742bc8156f65dbb20d5c11",
@@ -857,7 +856,8 @@ assert.match(files.readiness, /className="readiness-slider"/);
 assert.match(files.start, /routineDays: string\[\];/);
 assert.match(files.start, /import \{ RoutineMetricGrid \} from "@\/ui\/data-display\/metric-grid";/);
 assert.doesNotMatch(files.start, /^\s*function RoutineMetricGrid\b/m);
-assert.match(files.completion, /className="training-completion-table" role="table"/);
+assert.match(files.completion, /<main className=\{styles\.screen\} aria-labelledby=\{titleId\}>/);
+assert.match(files.completion, /<ul className=\{styles\.exerciseGrid\}>/);
 assert.match(files.performancePanel, /className=\{styles\.sheetObservationField\}/);
 assert.match(files.goals, /className=\{styles\.sheetGoals\}/);
 
@@ -887,14 +887,14 @@ for (const forbiddenShareIntegration of [
 assert.doesNotMatch(files.completion, /^"use client";/);
 assert.doesNotMatch(files.completion, /\buseEffect\b|\buseRef\b|\buseState\b/);
 
-const completionTableIndex = files.completion.indexOf("<div className=\"training-completion-table\"");
+const completionTableIndex = files.completion.indexOf("<section className={styles.summary}");
 const dashboardButtonIndex = files.completion.indexOf(
-  "<button className=\"button training-completion-button\" type=\"button\" onClick={onDashboard}>",
+  "<button className={styles.dashboardButton} type=\"button\" onClick={onDashboard}>",
 );
 assert.ok(completionTableIndex >= 0 && completionTableIndex < dashboardButtonIndex);
 assert.match(
   files.completion,
-  /<button className="button training-completion-button" type="button" onClick=\{onDashboard\}>\s*Ir al panel principal\s*<\/button>/,
+  /<button className=\{styles\.dashboardButton\} type="button" onClick=\{onDashboard\}>\s*Ir al panel principal\s*<\/button>/,
   "el boton Dashboard conserva clase, tipo, handler y texto",
 );
 assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 128);

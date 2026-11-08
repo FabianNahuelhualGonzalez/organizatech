@@ -24,6 +24,8 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
   ],
   ignoredConjunctiveGuardIdentifiers: ["isTrainingCycleProductVisible"],
   ignoredAttributesByElement: {
+    // El resumen aprobado amplía sólo su propio canvas; no altera la composición legacy.
+    AppShellLayout: ["isContentWide"],
     // La etiqueta contextual sólo afecta el AppTopbar de Evaluaciones del Alumno.
     AppTopbar: ["contextLabel"],
     DashboardScreen: ["flexibleSchedule"],

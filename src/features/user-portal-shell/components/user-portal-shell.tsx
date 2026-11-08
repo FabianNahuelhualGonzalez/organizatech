@@ -32,6 +32,7 @@ export interface UserPortalShellProps {
   readonly contextLabel?: string | null;
   readonly notificationOverlay: ReactNode;
   readonly screenHeader: ReactNode;
+  readonly isContentWide?: boolean;
   readonly children: ReactNode;
   readonly avatarResetKey?: number;
   readonly onAvatarImageError?: () => void;
@@ -54,6 +55,7 @@ export function UserPortalShell({
   contextLabel,
   notificationOverlay,
   screenHeader,
+  isContentWide = false,
   children,
   avatarResetKey,
   onAvatarImageError,
@@ -86,7 +88,7 @@ export function UserPortalShell({
 
   return (
     <main
-      className={`app-shell ${styles.shell}`}
+      className={`app-shell ${styles.shell}${isContentWide ? ` ${styles.wideShell}` : ""}`}
       data-user-portal-shell="authorized"
       data-drawer-state={isDrawerOpen ? "open" : "closed"}
     >
