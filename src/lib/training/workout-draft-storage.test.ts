@@ -983,8 +983,8 @@ async function run() {
     const summaryStart = appSource.indexOf("async function buildCompletedTrainingSummarySnapshot");
     const summaryEnd = appSource.indexOf("  async function completeWorkoutCommand", summaryStart);
     const summaryBlock = summaryStart >= 0 && summaryEnd > summaryStart ? appSource.slice(summaryStart, summaryEnd) : "";
-    assert.match(summaryBlock, /operationContext\.settle\([\s\S]*loadTrainingCompletionHistoricalInputs\(/, "summary historico sigue dentro del boundary de owner");
-    assert.doesNotMatch(summaryBlock, /Promise\.allSettled|historicalEntries\.forEach/, "el root delega first-reference y unavailable al helper runtime probado");
+    assert.match(summaryBlock, /buildTrainingCompletionHistoricalInputsFromSessions\([\s\S]*if \(!operationContext\.isCurrent\(\)\) return null/, "summary historico deriva sesiones normalizadas y revalida el owner antes de publicar");
+    assert.doesNotMatch(summaryBlock, /Promise\.allSettled|historicalEntries\.forEach|loadTrainingCompletionHistoricalInputs\(/, "el root delega first-reference y unavailable al helper puro probado");
     assert.match(completionBlock, /if \(ownsBusyState && operationContext\.isCurrent\(\)\)/, "finally solo limpia busy cuando el boundary confirma identidad y ownership");
     const useEffectBlocks = appSource.match(/useEffect\(\(\) => \{[\s\S]*?\n  \}, \[.*?\]\);/g) ?? [];
     assert.equal(useEffectBlocks.some((block) => block.includes("linkTrainingWorkoutReadinessSession")), false, "no existe link automatico en useEffect");

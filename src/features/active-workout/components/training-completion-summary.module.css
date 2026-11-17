@@ -21,7 +21,7 @@
   min-width: 0;
   min-height: calc(100dvh - 64px);
   color: var(--summary-text);
-  background: var(--summary-bg);
+  background: var(--background);
   font-family: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   container-name: resumen;
   container-type: inline-size;

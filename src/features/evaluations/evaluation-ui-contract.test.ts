@@ -124,9 +124,10 @@ test("Nuevo check usa hoja privada y espera fotos publicadas", () => {
   assert.match(sheet, /role="dialog" aria-modal="true"/);
   assert.match(sheet, /¿Descartar este check\?/);
   assert.match(sheet, /"frente", "perfil", "espalda"/);
-  assert.doesNotMatch(sheet, /sin comprimir|Calidad original/);
+  assert.match(sheet, /<strong>Calidad original<\/strong>/);
+  assert.match(sheet, /Guardamos tus fotos sin comprimir para que la comparación sea fiel\./);
   assert.match(photos, /publishedAssetIds\.every[\s\S]*gateway\.createCheck\(checkedOn, publishedAssetIds\)/);
-  assert.match(photos, /setNotice\("Check guardado"\)/);
+  assert.match(photos, /setNotice\("Check guardado · solo tú puedes verlo"\)/);
   assert.match(documents, /Aún no tienes documentos[\s\S]*\+ Subir documento[\s\S]*Tus documentos son privados/);
 });
 
@@ -154,15 +155,16 @@ test("Fotos permanece montada al volver del selector durante la revalidación de
 test("fallas de reserva, staging o cola conservan la hoja y permiten reintentar sin exponer errores crudos", () => {
   const photos = readFileSync("src/features/progress-records/components/student-progress-photos.tsx", "utf8");
   const sheet = readFileSync("src/features/progress-records/components/student-progress-check-sheet.tsx", "utf8");
-  const save = photos.slice(photos.indexOf("async function saveNewCheck("), photos.indexOf("async function loadMore("));
+  const save = photos.slice(photos.indexOf("function saveNewCheck("), photos.indexOf("async function addPoseToCheck("));
 
-  assert.match(save, /queuedPhotosRef\.current\[photo\.pose\] = pending/);
+  assert.match(save, /queued:\s*queuedPhotosRef\.current/);
+  assert.match(save, /draft\[photo\.pose\] = pending/);
   assert.match(save, /if \(!pending\.staged\)/);
   assert.match(save, /if \(!pending\.enqueued\)/);
   assert.match(save, /No pudimos reservar la foto\. Reintenta sin volver a elegirla\./);
   assert.match(save, /No pudimos subir la foto a la zona privada\. Reintenta sin volver a elegirla\./);
   assert.match(save, /No pudimos poner la foto en cola\. Reintenta sin volver a elegirla\./);
   assert.doesNotMatch(save, /error\.message/);
-  assert.ok(save.indexOf("await gateway.createCheck(checkedOn, publishedAssetIds)") < save.indexOf("closeCheckSheet()"));
+  assert.ok(save.indexOf("await gateway.createCheck(checkedOn, publishedAssetIds)") < save.indexOf("finishCheckSheet()"));
   assert.match(sheet, /className=\{styles\.sheetFooter\}[\s\S]*role="alert"[\s\S]*className=\{styles\.sheetSave\}/);
 });

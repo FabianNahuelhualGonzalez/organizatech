@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const sql = readFileSync("supabase/migrations/20261017122521_coach_reports_inbox_v1.sql", "utf8");
+export const POST_PERF_06_MIGRATION_OWNERSHIP = {
+  "20261017122521_coach_reports_inbox_v1.sql": "5b32fa547ad9fcf5cfd21ef0ea83664762a0b917d446f4260ac6ad8548975d47",
+} as const;
+
+const filename = "20261017122521_coach_reports_inbox_v1.sql";
+const sql = readFileSync(`supabase/migrations/${filename}`, "utf8");
+
+assert.equal(createHash("sha256").update(sql).digest("hex"), POST_PERF_06_MIGRATION_OWNERSHIP[filename]);
 
 test("la bandeja Coach conserva ownership activo y usa los reportes privados existentes", () => {
   assert.match(sql, /create or replace function public\.list_own_coach_progress_reports/);

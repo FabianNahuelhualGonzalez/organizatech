@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { AppBackButton } from "@/ui/navigation/app-back-button";
+
 import type { CoachReportItem } from "../data/coach-reports-repository";
 import type { CoachReportsState } from "../hooks/use-coach-reports";
 import styles from "./coach-reports-view.module.css";
@@ -42,7 +44,7 @@ export function CoachReportsView({ state, onBack, onRetry, onOpen, onDownload }:
   if (state.detail) {
     const detail = state.detail;
     return <section className={styles.view} aria-label="Detalle de reporte">
-      <button className={styles.back} type="button" onClick={onBack}>← Reportes de alumnos</button>
+      <AppBackButton onBack={onBack} label="Reportes de alumnos" />
       <div className={styles.heading}><h2>{title(detail.kind)}</h2><p>Recibido el {date(detail.sentAt)} · {detail.reviewedAt ? "Revisado" : "Pendiente"}</p></div>
       {detail.message ? <article className={styles.detailCard}><h3>Mensaje del alumno</h3><p>{detail.message}</p></article> : null}
       <article className={styles.detailCard}><h3>Contenido</h3><div className={styles.files}>
@@ -58,7 +60,7 @@ export function CoachReportsView({ state, onBack, onRetry, onOpen, onDownload }:
   }
 
   return <section className={styles.view} aria-label="Reportes de alumnos">
-    <button className={styles.back} type="button" onClick={onBack}>← Volver al panel</button>
+    <AppBackButton onBack={onBack} label="Volver al panel" />
     <div className={styles.heading}><h2>Reportes de alumnos</h2><p>Fotos de progreso y documentos médicos compartidos contigo.</p></div>
     {state.phase === "loading" ? <p className={styles.state} role="status">Cargando reportes…</p> : null}
     {state.issue ? <><p className={styles.error} role="alert">{state.issue}</p><button className={styles.retry} type="button" onClick={onRetry}>Reintentar</button></> : null}

@@ -170,6 +170,7 @@ assert.ok(
 const expectedProps = [
   "model",
   "routineDays",
+  "flexibleSchedule",
   "onDaySelect",
   "onExerciseSelect",
   "onWeekSelect",

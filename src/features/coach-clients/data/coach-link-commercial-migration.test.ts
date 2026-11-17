@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const sql = readFileSync("supabase/migrations/20261009235959_coach_link_required_commercial_terms_v1.sql", "utf8");
+export const POST_PERF_06_MIGRATION_OWNERSHIP = {
+  "20261009235959_coach_link_required_commercial_terms_v1.sql": "1f1f5fab3935d21bae6f535cbbe66631992c6af5f2c223c58141447d8b973783",
+} as const;
+
+const filename = "20261009235959_coach_link_required_commercial_terms_v1.sql";
+const sql = readFileSync(`supabase/migrations/${filename}`, "utf8");
+
+assert.equal(createHash("sha256").update(sql).digest("hex"), POST_PERF_06_MIGRATION_OWNERSHIP[filename]);
 
 test("new invitation RPC requires owned, allowlisted terms and preserves request payload idempotency", () => {
   assert.match(sql, /add column amount_clp bigint check \(amount_clp between 1 and 1000000000000\)/);

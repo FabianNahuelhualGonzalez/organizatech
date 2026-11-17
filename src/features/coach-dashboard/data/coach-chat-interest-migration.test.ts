@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const source = readFileSync("supabase/migrations/20261009234519_coach_chat_interest_read_v1.sql", "utf8");
+export const POST_PERF_06_MIGRATION_OWNERSHIP = {
+  "20261009234519_coach_chat_interest_read_v1.sql": "1ec1cf5ebd29be9d53a5624efc695ab43ec341b4b6235c25f0a37b85002247f9",
+} as const;
+
+const filename = "20261009234519_coach_chat_interest_read_v1.sql";
+const source = readFileSync(`supabase/migrations/${filename}`, "utf8");
+
+assert.equal(createHash("sha256").update(source).digest("hex"), POST_PERF_06_MIGRATION_OWNERSHIP[filename]);
 
 test("Chat read RPC has one Boolean result and existing Coach ownership", () => {
   assert.match(source, /create function public\.read_own_coach_chat_interest\(\)\s+returns jsonb/i);

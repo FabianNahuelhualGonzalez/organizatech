@@ -26,9 +26,12 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
   ],
   ignoredConjunctiveGuardIdentifiers: ["isTrainingCycleProductVisible"],
   ignoredAttributesByElement: {
+    // El resumen aprobado amplía sólo su propio canvas; su wiring se verifica abajo.
+    AppShellLayout: ["isContentWide"],
     // La etiqueta contextual sólo afecta el AppTopbar de Evaluaciones del Alumno.
     AppTopbar: ["contextLabel"],
-    DashboardScreen: ["flexibleSchedule"],
+    // Semana 1 entrega al dashboard el timeline relativo aprobado; su wiring se verifica abajo.
+    DashboardScreen: ["flexibleSchedule", "entries", "sessions"],
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
       "latestExercisePerformanceStatus",
@@ -275,6 +278,14 @@ function validate(sources: Sources) {
   assert.doesNotMatch(sources.root, /createTrainingCycleSnapshot/);
   assert.doesNotMatch(sources.root, /interface (?:TrainingCycleSnapshot|LegacyCycleHistorySnapshot) \{/);
   assert.doesNotMatch(sources.root, /ShareWorkoutCard|workout-share/);
+  assert.match(
+    sources.root,
+    /<AppShellLayout[\s\S]*?isContentWide=\{screen === "training-summary"\}/,
+  );
+  assert.match(
+    sources.root,
+    /<DashboardScreen[\s\S]*?entries=\{progressEntries\}[\s\S]*?sessions=\{progressSessions\}/,
+  );
   assertTrainingDataPreparedProfileWiringAst(sources.root);
 
   assert.match(sources.profileController, /readRequestIds\[lane\] === owner\.requestId/);

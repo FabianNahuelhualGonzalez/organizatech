@@ -28,7 +28,8 @@ const TRAIN_UI_02_LAYOUT_ALLOWANCE = {
     AppShellLayout: ["isContentWide"],
     // La etiqueta contextual sólo afecta el AppTopbar de Evaluaciones del Alumno.
     AppTopbar: ["contextLabel"],
-    DashboardScreen: ["flexibleSchedule"],
+    // Semana 1 entrega al dashboard el timeline relativo aprobado; su wiring se verifica abajo.
+    DashboardScreen: ["flexibleSchedule", "entries", "sessions"],
     GuidedTrainingScreen: [
       "latestExercisePerformanceLoading",
       "latestExercisePerformanceStatus",
@@ -92,6 +93,10 @@ function validate(sources: Sources) {
     /routineBuilder\.(?:acquire|settle|finalize|runLegacyBatch|runRepositoryWrite|completeSetupContinuation)\b/,
   );
   assert.doesNotMatch(sources.root, /ShareWorkoutCard|workout-share/);
+  assert.match(
+    sources.root,
+    /<DashboardScreen[\s\S]*?entries=\{progressEntries\}[\s\S]*?sessions=\{progressSessions\}/,
+  );
   const refreshReconciliation = sources.root.slice(
     sources.root.indexOf("function applyTrainingDataRefreshResult"),
     sources.root.indexOf("async function refreshTrainingDataForSession"),

@@ -897,7 +897,7 @@ assert.match(
   /<button className=\{styles\.dashboardButton\} type="button" onClick=\{onDashboard\}>\s*Ir al panel principal\s*<\/button>/,
   "el boton Dashboard conserva clase, tipo, handler y texto",
 );
-assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 128);
+assert.equal(JSON.parse(packageSource).scripts.test.split(" && ").length, 129);
 
 // TRAIN-UI-02 reemplaza la composición visual legacy sin mover ownership al root.
 assert.match(
