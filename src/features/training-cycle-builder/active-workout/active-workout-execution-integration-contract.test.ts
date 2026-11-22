@@ -15,6 +15,7 @@ const boundary = source("src/features/active-workout/components/ActiveWorkoutShe
 const sheet = source("src/features/active-workout/components/ExerciseRegistrationSheet.tsx");
 const summary = source("src/features/active-workout/components/TrainingCompletionSummaryScreen.tsx");
 const controller = source("src/features/training-cycle-builder/active-workout/hooks/use-training-cycle-active-workout-controller.tsx");
+const executionHook = source("src/features/training-cycle-builder/active-workout/hooks/use-training-cycle-execution.ts");
 const scopedPayloadOwner = source("src/features/training-cycle-builder/active-workout/model/scoped-training-cycle-execution-payload-owner.ts");
 const sharedContract = source("src/lib/training/advanced-workout-execution-contract.ts");
 const root = source("src/components/organizatech-app.tsx");
@@ -32,27 +33,19 @@ function between(value: string, start: string, end: string) {
   return value.slice(startIndex, endIndex);
 }
 
-test("la resolución avanzada usa exclusivamente IDs legacy y cae al flujo legacy", () => {
+test("la resolución avanzada usa IDs legacy y conserva siempre la captura visual aprobada", () => {
   const resolver = between(model, "export function resolveAdvancedWorkoutPlan", "export function createTrainingCycleExecutionDraft");
   assert.match(resolver, /legacyCycleExerciseId/);
   assert.match(resolver, /currentByLegacyId\.get\(plan\.legacyCycleExerciseId\)/);
   assert.match(resolver, /exerciseLineageId !== plan\.exerciseLineageId/);
   assert.doesNotMatch(resolver, /\.name\b/);
-  assert.match(sheet, /\{advancedExecution \? \(/);
-  assert.match(sheet, /\) : \(\s*<div className=\{styles\.workoutCapture\}/);
+  assert.match(sheet, /<div className=\{styles\.workoutCapture\}/);
+  assert.match(sheet, />KG utilizado</);
+  assert.match(sheet, />Repeticiones por serie</);
+  assert.doesNotMatch(sheet, /advancedExecution|renderRegistrationFields/);
 });
 
-test("la captura incluye series, fallo y drops; el video abre con aislamiento", () => {
-  for (const marker of [
-    "set.completed",
-    "set.reps",
-    "set.kg",
-    "set.reachedFailure",
-    "setPlan.drops.map",
-    "drop.completed",
-    "drop.reps",
-    "drop.kg",
-  ]) assert.match(fields, new RegExp(marker.replace(".", "\\.")));
+test("el video aprobado abre con aislamiento sin reemplazar la captura histórica", () => {
   assert.match(fields, /target="_blank"/);
   assert.match(fields, /rel="noopener noreferrer"/);
   assert.match(fields, /isBackendCompatibleYoutubeUrl\(safeVideoUrl\)/);
@@ -60,19 +53,17 @@ test("la captura incluye series, fallo y drops; el video abre con aislamiento", 
   assert.match(fields, />\s*Ver técnica en YouTube\s*</);
   assert.match(fields, /aria-label=\{`Ver técnica en YouTube: \$\{exerciseName\}`\}/);
   assert.match(sheet, /\{videoReference \?\? null\}/);
-  assert.ok(
-    sheet.indexOf("{videoReference ?? null}") < sheet.indexOf("{advancedExecution ? ("),
-    "la referencia se monta aunque la captura use el fallback legacy",
-  );
+  assert.ok(sheet.indexOf("{videoReference ?? null}") < sheet.indexOf("styles.workoutCapture"));
   assert.match(boundary, /advancedExecution\?\.getExerciseVideoReference\(activeExercise\.id\)/);
   assert.match(boundary, /videoReference=\{activeVideoReference\}/);
   assert.match(controller, /resolveAdvancedWorkoutVideoReferences\(\{\s*enabled: input\.enabled,\s*userId: input\.userId,\s*storageScope: input\.storageScope,\s*snapshot: input\.snapshot,\s*exercises: input\.exercises,\s*\}\)/);
   assert.match(controller, /if \(!execution\.plan \|\| !execution\.draft\) return true;/);
 });
 
-test("cada cambio avanzado se proyecta al draft legacy y el payload precede al write legacy", () => {
-  assert.match(controller, /projectTrainingCycleExecutionToLegacyDraft\(advancedDraft\)/);
-  assert.match(controller, /updateLegacyDraft\(resolved\.legacyExercise, \{/);
+test("la captura histórica sincroniza el payload nuevo y éste precede al write legacy", () => {
+  assert.match(controller, /syncLegacyDrafts\(\)/);
+  assert.match(executionHook, /seedTrainingCycleExecutionDraftFromLegacy\(current, legacyDraftsRef\.current\)/);
+  assert.doesNotMatch(controller, /AdvancedExerciseExecutionFields[\s,}]/);
   const save = between(boundary, "function saveCompletedTraining()", "function retrySaveCompletedTraining()");
   assert.match(save, /if \(publishAdvancedPayload\(\)\) saveLegacyCompletedTraining\(\);/);
   const retry = between(boundary, "function retrySaveCompletedTraining()", "if \(!selectedExercise");
@@ -100,6 +91,7 @@ test("el payload pendiente queda scoped y Active Workout depende sólo del contr
   assert.doesNotMatch(summary, /@\/features\/training-cycle-builder\//);
   assert.match(boundary, /@\/lib\/training\/advanced-workout-execution-contract/);
   assert.match(sharedContract, /publishPendingPayload/);
+  assert.doesNotMatch(sharedContract, /renderRegistrationFields/);
   assert.match(root, /trainingCycleActiveWorkout\.captureLegacyOperationScope\(\)/);
   assert.match(root, /trainingCycleActiveWorkout\.syncAfterLegacyCompletion\(/);
 });

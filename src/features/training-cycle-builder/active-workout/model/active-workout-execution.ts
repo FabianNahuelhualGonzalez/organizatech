@@ -463,32 +463,39 @@ export function seedTrainingCycleExecutionDraftFromLegacy(
   draft: TrainingCycleExecutionDraft,
   legacyDrafts: Readonly<Record<string, ExerciseDraft | undefined>>,
 ): TrainingCycleExecutionDraft {
-  return {
-    ...draft,
-    exercises: draft.exercises.map((exercise) => {
-      const legacy = legacyDrafts[exercise.legacyCycleExerciseId];
-      if (!legacy) return exercise;
-      const parsedWeight = parseCompletedKg(legacy.weight);
+  let didUpdate = false;
+  const exercises = draft.exercises.map((exercise) => {
+    const legacy = legacyDrafts[exercise.legacyCycleExerciseId];
+    if (!legacy) return exercise;
+    const parsedWeight = parseCompletedKg(legacy.weight);
+    let didUpdateExercise = false;
+    const sets = exercise.sets.map((set, index) => {
+      const legacyReps = legacy.reps[index];
+      const parsedReps = legacyReps === "" ? null : Number(legacyReps);
+      const completed = parsedWeight !== null
+        && Number.isSafeInteger(parsedReps)
+        && (parsedReps ?? 0) >= 1
+        && (parsedReps ?? 0) <= 1_000;
+      const reps = legacyReps === "" ? "" : String(legacyReps);
+      if (
+        set.completed === completed
+        && set.reps === reps
+        && set.kg === legacy.weight
+        && set.reachedFailure === false
+      ) return set;
+      didUpdate = true;
+      didUpdateExercise = true;
       return {
-        ...exercise,
-        sets: exercise.sets.map((set, index) => {
-          const legacyReps = legacy.reps[index];
-          const parsedReps = legacyReps === "" ? null : Number(legacyReps);
-          const completed = parsedWeight !== null
-            && Number.isSafeInteger(parsedReps)
-            && (parsedReps ?? 0) >= 1
-            && (parsedReps ?? 0) <= 1_000;
-          return {
-            ...set,
-            completed,
-            reps: legacyReps === "" ? "" : String(legacyReps),
-            kg: legacy.weight,
-            reachedFailure: false,
-          };
-        }),
+        ...set,
+        completed,
+        reps,
+        kg: legacy.weight,
+        reachedFailure: false,
       };
-    }),
-  };
+    });
+    return didUpdateExercise ? { ...exercise, sets } : exercise;
+  });
+  return didUpdate ? { ...draft, exercises } : draft;
 }
 
 function normalizeRepsInput(value: string) {

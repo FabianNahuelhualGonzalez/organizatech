@@ -7,13 +7,9 @@ import {
   useRef,
   useState,
   type ReactNode,
-  type Ref,
 } from "react";
 
-import {
-  AdvancedExerciseExecutionFields,
-  AdvancedExerciseVideoReference,
-} from "@/features/training-cycle-builder/active-workout/components/AdvancedExerciseExecutionFields";
+import { AdvancedExerciseVideoReference } from "@/features/training-cycle-builder/active-workout/components/AdvancedExerciseExecutionFields";
 import { TrainingCycleExecutionSyncStatus } from "@/features/training-cycle-builder/active-workout/components/TrainingCycleExecutionSyncStatus";
 import { useTrainingCycleExecutionDraft, useTrainingCycleExecutionSync } from "@/features/training-cycle-builder/active-workout/hooks/use-training-cycle-execution";
 import {
@@ -21,7 +17,6 @@ import {
   getTrainingCycleExecutionExerciseDraft,
   isTrainingCycleExecutionDraftReady,
   isTrainingCycleExecutionExerciseReady,
-  projectTrainingCycleExecutionToLegacyDraft,
   resolveAdvancedWorkoutVideoReferences,
   type AdvancedWorkoutExecutionContext,
   type RecordOwnTrainingCycleExecutionPayload,
@@ -59,7 +54,7 @@ export interface TrainingCycleActiveWorkoutController {
 export function useTrainingCycleActiveWorkoutController(
   input: TrainingCycleActiveWorkoutControllerInput,
 ): TrainingCycleActiveWorkoutController {
-  const { legacyDrafts, updateLegacyDraft } = input;
+  const { legacyDrafts } = input;
   const payloadOwnerRef = useRef<ScopedTrainingCycleExecutionPayloadOwner | null>(null);
   if (!payloadOwnerRef.current) {
     payloadOwnerRef.current = new ScopedTrainingCycleExecutionPayloadOwner();
@@ -72,7 +67,7 @@ export function useTrainingCycleActiveWorkoutController(
     ? `${identityScopeKey}:${input.workoutAttemptId}`
     : null;
 
-  // Ref fail-closed: el nuevo render invalida antes de que pueda ejecutarse un callback legacy.
+  // Ref fail-closed: el scope activo se invalida antes de ejecutar un callback legacy.
   payloadOwnerRef.current.replaceScope(activeScopeKey);
 
   const onPayloadReady = useCallback((payload: RecordOwnTrainingCycleExecutionPayload) => {
@@ -107,6 +102,7 @@ export function useTrainingCycleActiveWorkoutController(
     exercises: input.exercises,
     legacyDrafts,
   });
+  const { syncLegacyDrafts } = execution;
   const videoReferences = useMemo(
     () => resolveAdvancedWorkoutVideoReferences({
       enabled: input.enabled,
@@ -130,24 +126,8 @@ export function useTrainingCycleActiveWorkoutController(
   }, [execution.draft, execution.plan]);
 
   useEffect(() => {
-    if (!execution.plan || !execution.draft) return;
-    for (const resolved of execution.plan.exercises) {
-      const advancedDraft = getTrainingCycleExecutionExerciseDraft(
-        execution.draft,
-        resolved.plan.snapshotId,
-      );
-      if (!advancedDraft) continue;
-      const projection = projectTrainingCycleExecutionToLegacyDraft(advancedDraft);
-      const current = legacyDrafts[resolved.legacyExercise.id];
-      const sameReps = current?.reps.length === projection.reps.length
-        && current.reps.every((value, index) => value === projection.reps[index]);
-      if (current?.weight === projection.weight && sameReps) continue;
-      updateLegacyDraft(resolved.legacyExercise, {
-        weight: projection.weight,
-        reps: [...projection.reps],
-      });
-    }
-  }, [execution.draft, execution.plan, legacyDrafts, updateLegacyDraft]);
+    syncLegacyDrafts();
+  }, [legacyDrafts, syncLegacyDrafts]);
 
   const integration = useMemo<AdvancedWorkoutExecutionIntegration | undefined>(() => {
     if ((!execution.plan || !execution.draft) && videoReferences.length === 0) return undefined;
@@ -160,25 +140,6 @@ export function useTrainingCycleActiveWorkoutController(
         );
         exerciseByLegacyId.set(resolved.legacyExercise.id, draft ? {
           isReady: isTrainingCycleExecutionExerciseReady(draft),
-          legacyDraftProjection: projectTrainingCycleExecutionToLegacyDraft(draft),
-          renderRegistrationFields: (initialControlRef: Ref<HTMLInputElement>) => (
-            <AdvancedExerciseExecutionFields
-              resolved={resolved}
-              draft={draft}
-              initialControlRef={initialControlRef}
-              onSetChange={(planSetId, patch) => execution.updateSet({
-                planExerciseId: resolved.plan.snapshotId,
-                planSetId,
-                patch,
-              })}
-              onDropChange={(planSetId, planDropId, patch) => execution.updateDrop({
-                planExerciseId: resolved.plan.snapshotId,
-                planSetId,
-                planDropId,
-                patch,
-              })}
-            />
-          ),
         } : null);
       }
     }

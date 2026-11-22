@@ -1,14 +1,7 @@
-import type { ReactNode, Ref } from "react";
-
-export interface AdvancedWorkoutLegacyDraftProjection {
-  readonly weight: string;
-  readonly reps: readonly (number | "")[];
-}
+import type { ReactNode } from "react";
 
 export interface AdvancedWorkoutExerciseIntegration {
   readonly isReady: boolean;
-  readonly legacyDraftProjection: AdvancedWorkoutLegacyDraftProjection;
-  readonly renderRegistrationFields: (initialControlRef: Ref<HTMLInputElement>) => ReactNode;
 }
 
 /** Frontera estable consumida por Active Workout; no expone modelos internos del ciclo. */

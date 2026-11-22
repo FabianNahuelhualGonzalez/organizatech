@@ -129,6 +129,11 @@ export function useTrainingCycleExecutionDraft(input: {
     updatedAt,
   })), [commit]);
 
+  const syncLegacyDrafts = useCallback(() => commit((current, updatedAt) => {
+    const next = seedTrainingCycleExecutionDraftFromLegacy(current, legacyDraftsRef.current);
+    return next === current ? current : { ...next, updatedAt };
+  }), [commit]);
+
   const clear = useCallback(() => {
     const currentPlan = planRef.current;
     if (!currentPlan) return false;
@@ -144,6 +149,7 @@ export function useTrainingCycleExecutionDraft(input: {
     draft: visibleDraft,
     updateSet,
     updateDrop,
+    syncLegacyDrafts,
     clear,
   } as const;
 }

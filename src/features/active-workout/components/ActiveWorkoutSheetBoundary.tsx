@@ -451,7 +451,6 @@ export function ActiveWorkoutSheetBoundary({
           onObservationChange={(value) => updateSelectedExerciseDraft({ observation: value })}
           onCommitRegistration={commitExerciseRegistration}
           onClose={closeExerciseSheet}
-          advancedExecution={activeAdvancedExercise ?? undefined}
           videoReference={activeVideoReference}
         />
       ) : null}

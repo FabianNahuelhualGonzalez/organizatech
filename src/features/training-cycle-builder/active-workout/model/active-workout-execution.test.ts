@@ -7,6 +7,7 @@ import {
   getTrainingCycleExecutionExerciseDraft,
   resolveAdvancedWorkoutPlan,
   resolveAdvancedWorkoutVideoReferences,
+  seedTrainingCycleExecutionDraftFromLegacy,
   TrainingCycleExecutionPayloadError,
   updateTrainingCycleExecutionDrop,
   updateTrainingCycleExecutionSet,
@@ -300,6 +301,56 @@ test("el video desaparece al deshabilitar la identidad aunque sobreviva un snaps
     resolveAdvancedWorkoutVideoReferences(videoInput({ storageScope: "demo" })),
     [],
   );
+});
+
+test("la captura histórica alimenta el draft avanzado sin inventar drops y es idempotente", () => {
+  const draft = createTrainingCycleExecutionDraft(resolvedPlan(), 100);
+  const synced = seedTrainingCycleExecutionDraftFromLegacy(draft, {
+    [LEGACY_EXERCISE_A_ID]: {
+      weight: "72,5",
+      reps: [9],
+      rir: "",
+      registered: true,
+      observation: "",
+    },
+    [LEGACY_EXERCISE_B_ID]: {
+      weight: "80",
+      reps: [8],
+      rir: "",
+      registered: true,
+      observation: "",
+    },
+  });
+  assert.equal(seedTrainingCycleExecutionDraftFromLegacy(synced, {
+    [LEGACY_EXERCISE_A_ID]: { weight: "72,5", reps: [9], rir: "", registered: true, observation: "" },
+    [LEGACY_EXERCISE_B_ID]: { weight: "80", reps: [8], rir: "", registered: true, observation: "" },
+  }), synced);
+  assert.deepEqual(synced.exercises.map((item) => item.sets[0]), [
+    {
+      planSetId: SET_A_ID,
+      order: 0,
+      completed: true,
+      reps: "9",
+      kg: "72,5",
+      reachedFailure: false,
+      drops: [],
+    },
+    {
+      planSetId: SET_B_ID,
+      order: 0,
+      completed: true,
+      reps: "8",
+      kg: "80",
+      reachedFailure: false,
+      drops: [{
+        planDropId: DROP_B_ID,
+        order: 0,
+        completed: false,
+        reps: "",
+        kg: "",
+      }],
+    },
+  ]);
 });
 
 test("borrador y payload conservan todos los IDs; gateway recibe órdenes RPC canónicas", () => {
