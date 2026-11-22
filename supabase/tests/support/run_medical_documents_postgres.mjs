@@ -6,7 +6,6 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDeepStrictEqual } from "node:util";
 import pg from "pg";
 
 if (process.platform !== "darwin" || process.arch !== "arm64") {
@@ -50,14 +49,6 @@ const ids = {
   pendingAssignment: "50000000-0000-4000-8000-000000000003",
   expiredAssignment: "50000000-0000-4000-8000-000000000004",
 };
-const paths = {
-  photo: `${ids.photo}/${randomUUID()}.jpg`,
-  privatePhoto: `${ids.privatePhoto}/${randomUUID()}.png`,
-  pendingPhoto: `${ids.pendingPhoto}/${randomUUID()}.heic`,
-  endedPhoto: `${ids.endedPhoto}/${randomUUID()}.webp`,
-  document: `${ids.document}/${randomUUID()}.pdf`,
-};
-
 const readSql = (path) => readFileSync(join(root, path), "utf8");
 const run = (command, args, options = {}) => execFileSync(command, args, { env: childEnv, ...options });
 const check = (condition, label) => {

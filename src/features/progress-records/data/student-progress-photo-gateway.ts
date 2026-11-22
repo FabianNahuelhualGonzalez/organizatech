@@ -259,8 +259,11 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
               onProgress(Math.min(100, Math.round(event.loaded / event.total * 100)));
             }
           };
-          request.onload = () => { release(); request.status >= 200 && request.status < 300
-            ? resolve() : reject(new StudentProgressPhotoGatewayError("unavailable")); };
+          request.onload = () => {
+            release();
+            if (request.status >= 200 && request.status < 300) resolve();
+            else reject(new StudentProgressPhotoGatewayError("unavailable"));
+          };
           request.onerror = () => { release(); reject(new StudentProgressPhotoGatewayError("unavailable")); };
           request.onabort = () => { release(); reject(new StudentProgressPhotoGatewayError("unavailable")); };
           if (signal?.aborted) { reject(new StudentProgressPhotoGatewayError("unavailable")); return; }

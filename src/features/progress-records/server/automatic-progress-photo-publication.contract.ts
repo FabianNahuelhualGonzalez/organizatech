@@ -142,7 +142,8 @@ test("a server-issued reservation stays bound to the selected File and is abando
   assert.equal(retained, null);
   const ui = readFileSync("src/features/progress-records/components/student-progress-photos.tsx", "utf8");
   const sql = readFileSync("supabase/migrations/20261002014402_progress_photo_automatic_publication.sql", "utf8");
-  assert.match(ui, /await abandonQueuedProgressPhoto\(queued,[\s\S]*delete queuedPhotosRef\.current\[pose\]/);
+  assert.match(ui,
+    /async function abandonQueuedPose\([\s\S]*queuedPhotos = queuedPhotosRef\.current[\s\S]*await abandonQueuedProgressPhoto\(queued,[\s\S]*delete queuedPhotos\[pose\]/);
   assert.doesNotMatch(ui, /Date\.now\(\)/);
   assert.match(ui, /await gateway\.getUpload\(pending\.reservation\.uploadId\)/);
   assert.match(sql, /upload\.id = p_upload_id and upload\.student_user_id = v_student/);

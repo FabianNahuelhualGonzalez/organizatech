@@ -198,7 +198,7 @@ try {
 
   stage = "one-photo check and immediate Coach revocation";
   const single = await photo(admin);
-  const singleCheck = await checkWith(admin, [single]);
+  await checkWith(admin, [single]);
   check((await scalar(student, "select public.list_own_progress_checks()" )).length === 1,
     "one-photo check visible before deletion");
   const report = await scalar(student, `select public.create_own_progress_report(

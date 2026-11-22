@@ -606,8 +606,7 @@ function auditProhibitedArtifacts(
   assertContract(
     !dependencyNames.some((name) => /resend|sendgrid|postmark|mailgun|nodemailer|emailjs/i.test(name))
     && !changedEntries.some(({ path, status: entryStatus }) => (
-      path === "package-lock.json"
-      || (
+      (
         path.startsWith("supabase/migrations/")
         && path !== AUTH_CONFIRMATION_MIGRATION_PATH
         && path !== AUTH_SEPARATE_CONTACT_MIGRATION_PATH

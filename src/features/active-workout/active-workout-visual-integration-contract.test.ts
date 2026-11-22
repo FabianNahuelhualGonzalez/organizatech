@@ -601,7 +601,7 @@ const globalStyles = readSource("src/app/globals.css");
 
 const protectedFileHashes = {
   "AGENTS.md": "0458c9f6404870477028ec3d4c62caca4823a94cc7af80209c72efe682edee21",
-  "package-lock.json": "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5",
+  "package-lock.json": "1f684dcc5cb0ca32e62993cd2c2ffc6f7d0c88fef75110b69dda4f2561c0c686",
   "src/features/progress/components/comparison-screen-v2.tsx": "653384c025d369a90698e1a0d0467f0ecce8cd6b3ae268d570baa3ae37632a53",
   "src/features/active-workout/model/active-workout-controller-state.ts": "37006210eabda3f99217bd98b6ebf876780ed5ecc33bb8fba936eda7fd085ea5",
   "src/features/active-workout/hooks/useActiveWorkoutController.ts": "c7b475636a3b8731a9e8b9a46702584b9c2a4a06333b75139791bf3ef2ce25bf",

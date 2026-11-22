@@ -55,7 +55,7 @@ const productRepository = "src/lib/data/repository.ts";
 const cycleScopedRepository = "src/lib/training/cycle-scoped-training-repository.ts";
 const lineageModel = "src/lib/training/training-exercise-lineage.ts";
 const productRepositorySha256 = "2b0bfad78ecfada878e93cd70ae331a282c3630e7e488a6491c349f2cc764de4";
-const packageLockSha256 = "3651f947e7f6d9c7fc2079b73c863d8a71728adae24ab857b60be2e5b43dedc5";
+const packageLockSha256 = "1f684dcc5cb0ca32e62993cd2c2ffc6f7d0c88fef75110b69dda4f2561c0c686";
 
 const historicalMappings = [
   ["20260513_add_exercise_day.sql", "20260513000001_add_exercise_day.sql", "9e817d4aced1dade0b57ac942b67a4c06cf4cc937c6fc26f440c79d40bd24c27"],

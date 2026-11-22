@@ -51,7 +51,11 @@ export function CoachReportsView({ state, onBack, onRetry, onOpen, onDownload }:
         {detail.items.map((item) => <div className={styles.file} key={item.assetId}>
           <div className={styles.fileCopy}><strong>{item.assetKind === "photo" ? "Foto de progreso" : "Documento médico"}</strong><span>{detailLabel(item)}</span></div>
           <button className={styles.fileButton} type="button" onClick={() => void openFile(item)}>Abrir</button>
-          {preview?.assetId === item.assetId && preview.mimeType === "image/jpeg" ? <img className={styles.preview} src={preview.url} alt="Foto de progreso enviada por el alumno" /> : null}
+          {preview?.assetId === item.assetId && preview.mimeType === "image/jpeg" ? (
+            // La foto privada se descarga como Blob autorizado; next/image no optimiza URLs blob:.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img className={styles.preview} src={preview.url} alt="Foto de progreso enviada por el alumno" />
+          ) : null}
           {preview?.assetId === item.assetId && preview.mimeType === "application/pdf" ? <a className={styles.pdf} href={preview.url} target="_blank" rel="noopener noreferrer">Abrir PDF</a> : null}
         </div>)}
       </div></article>
