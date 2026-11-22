@@ -142,11 +142,14 @@ import type { ExerciseDraft } from "@/lib/training/training-exercise-draft";
       exerciseId: id,
       exerciseName: name,
       targetSets: 3,
+      targetReps: 10,
+      baseWeight: currentKg,
       draft: { reps: [currentReps], weight: currentKg, registered: true },
     })),
   }));
-  assert.equal(firstSession.hasComparison, false);
-  assert.equal(firstSession.exercises.every((item) => item.state === "new"), true);
+  assert.equal(firstSession.hasComparison, true);
+  assert.equal(firstSession.referenceSource, "registered_plan");
+  assert.equal(firstSession.exercises.every((item) => item.comparisonReference === "registered_plan"), true);
 
   const incomplete = compareTrainingCompletionSummary(buildTrainingCompletionSummary({
     ...baseInput(),
@@ -718,6 +721,8 @@ async function runCompletionDecompositionTests() {
     exerciseLineageId: "lineage-1",
     exerciseName: "Press",
     targetSets: 2,
+    targetReps: 10,
+    baseWeight: 40,
     draft: { weight: "42,5", reps: [10, 9], registered: true },
   });
   assert.notEqual(summaryInputs[0].draft?.reps, drafts["exercise-1"].reps);

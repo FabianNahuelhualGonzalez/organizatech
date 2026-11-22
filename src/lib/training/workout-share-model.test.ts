@@ -401,6 +401,7 @@ function createExercise(
     weightTone: "positive",
     resultLines: [{ label: "+2 reps", tone: "positive" }],
     ...overrides,
+    comparisonReference: overrides.comparisonReference ?? "previous_session",
   };
 }
 

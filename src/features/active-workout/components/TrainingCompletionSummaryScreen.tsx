@@ -20,9 +20,10 @@ export function TrainingCompletionSummaryScreen({
 }: TrainingCompletionSummaryScreenProps) {
   const comparison = compareTrainingCompletionSummary(summary);
   const completed = comparison.registered === comparison.total;
+  const comparesRegisteredPlan = comparison.referenceSource === "registered_plan";
   const titleId = "training-completion-title";
   const summaryLabel = comparison.hasComparison
-    ? `Comparado con el ${comparison.previousDateLabel}: ${comparison.increased} subieron, ${comparison.equal} iguales, ${comparison.decreased} bajaron. Repeticiones totales ${comparison.previousTotalReps} a ${comparison.currentTotalReps}.`
+    ? `${comparesRegisteredPlan ? "Comparado con la rutina registrada" : `Comparado con el ${comparison.previousDateLabel}`}: ${comparison.increased} subieron, ${comparison.equal} iguales, ${comparison.decreased} bajaron. Repeticiones totales ${comparison.previousTotalReps} a ${comparison.currentTotalReps}.`
     : "Primera sesión de este día, todavía no hay una sesión anterior para comparar.";
 
   return (
@@ -54,7 +55,11 @@ export function TrainingCompletionSummaryScreen({
               {comparison.hasComparison ? (
                 <>
                   <div className={styles.summaryLabel}>
-                    <span className={styles.eyebrow}>VS. SESIÓN ANTERIOR · {comparison.previousDateLabel}</span>
+                    <span className={styles.eyebrow}>
+                      {comparesRegisteredPlan
+                        ? "VS. RUTINA REGISTRADA"
+                        : `VS. SESIÓN ANTERIOR · ${comparison.previousDateLabel}`}
+                    </span>
                     <Legend className={styles.inlineLegend} />
                   </div>
                   <div className={styles.summaryGrid}>

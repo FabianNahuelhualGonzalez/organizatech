@@ -576,6 +576,7 @@ function cloneTrainingCompletionSummary(
       repsDifference: exercise.repsDifference,
       weightDifference: exercise.weightDifference,
       comparisonStatus: exercise.comparisonStatus,
+      comparisonReference: exercise.comparisonReference,
       repsTone: exercise.repsTone,
       weightTone: exercise.weightTone,
       resultLines: exercise.resultLines.map((line) => ({

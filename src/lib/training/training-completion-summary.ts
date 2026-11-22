@@ -7,6 +7,7 @@ import {
 } from "@/lib/training/training-exercise-draft";
 
 export type TrainingCompletionComparisonStatus = "ready" | "first_reference" | "unavailable" | "pending";
+export type TrainingCompletionComparisonReference = "previous_session" | "registered_plan" | null;
 export type TrainingCompletionTone = "positive" | "danger" | "neutral";
 export type TrainingCompletionExerciseState = "up" | "down" | "eq" | "new" | "pending";
 
@@ -21,12 +22,15 @@ export interface TrainingCompletionExerciseInput {
   exerciseLineageId?: string | null;
   exerciseName: string;
   targetSets?: number | null;
+  targetReps?: number | null;
+  baseWeight?: number | null;
   draft?: TrainingCompletionExerciseDraftInput;
 }
 
 export interface TrainingCompletionHistoricalInput {
   status: TrainingCompletionComparisonStatus;
   latest?: LatestExercisePerformance | null;
+  fallbackReference?: "registered_plan";
 }
 
 export interface BuildTrainingCompletionSummaryInput {
@@ -75,6 +79,7 @@ export interface TrainingCompletionExerciseSummary {
   repsDifference: number | null;
   weightDifference: number | null;
   comparisonStatus: TrainingCompletionComparisonStatus;
+  comparisonReference: TrainingCompletionComparisonReference;
   repsTone: TrainingCompletionTone;
   weightTone: TrainingCompletionTone;
   resultLines: TrainingCompletionResultLine[];
@@ -96,6 +101,7 @@ export interface TrainingCompletionComparison {
   previousTotalReps: number;
   currentTotalReps: number;
   totalRepsDifference: number;
+  referenceSource: TrainingCompletionComparisonReference;
 }
 
 export interface TrainingCompletionResultLine {
@@ -117,7 +123,11 @@ export function buildTrainingCompletionHistoricalInputsFromSessions(input: {
 
   return Object.fromEntries(input.exercises.map((exercise) => {
     if (!previousSession) {
-      return [exercise.id, { status: "first_reference", latest: null } satisfies TrainingCompletionHistoricalInput];
+      return [exercise.id, {
+        status: "first_reference",
+        latest: null,
+        fallbackReference: "registered_plan",
+      } satisfies TrainingCompletionHistoricalInput];
     }
 
     const exerciseIds = new Set([exercise.id, exercise.trainingCycleExerciseId].filter(isNonEmptyString));
@@ -163,6 +173,8 @@ export function buildTrainingCompletionExerciseInputs(input: {
       exerciseLineageId: exercise.exerciseLineageId ?? null,
       exerciseName: exercise.name,
       targetSets: exercise.targetSets,
+      targetReps: exercise.targetReps,
+      baseWeight: exercise.baseWeight,
       draft: {
         weight: draft.weight,
         reps: [...draft.reps],
@@ -220,6 +232,12 @@ export function compareTrainingCompletionSummary(
     (total, exercise) => total + exercise.currentTotalReps,
     0,
   );
+  const referenceSource: TrainingCompletionComparisonReference = comparables.length > 0
+    && comparables.every((exercise) => exercise.comparisonReference === "registered_plan")
+    ? "registered_plan"
+    : comparables.length > 0
+      ? "previous_session"
+      : null;
 
   return {
     exercises,
@@ -233,6 +251,7 @@ export function compareTrainingCompletionSummary(
     previousTotalReps,
     currentTotalReps,
     totalRepsDifference: currentTotalReps - previousTotalReps,
+    referenceSource,
   };
 }
 
@@ -265,11 +284,29 @@ function buildExerciseSummary(input: {
     : currentReps.length;
   const currentTotalReps = currentReps.reduce((total, item) => total + item, 0);
   const currentWeight = readNonNegativeNumber(draft.weight);
-  const historical = input.historical ?? { status: "first_reference" as const, latest: null };
-  const comparisonStatus = draft.registered === false ? "pending" : historical.status;
-  const previous = historical.status === "ready" && historical.latest
+  const historical = input.historical ?? {
+    status: "first_reference" as const,
+    latest: null,
+    fallbackReference: "registered_plan" as const,
+  };
+  const previousSession = historical.status === "ready" && historical.latest
     ? summarizeHistoricalPerformance(historical.latest)
     : null;
+  const registeredPlan = historical.status === "first_reference"
+    && historical.fallbackReference === "registered_plan"
+    ? summarizeRegisteredPlan(input.exercise)
+    : null;
+  const previous = previousSession ?? registeredPlan;
+  const comparisonReference: TrainingCompletionComparisonReference = previousSession
+    ? "previous_session"
+    : registeredPlan
+      ? "registered_plan"
+      : null;
+  const comparisonStatus = draft.registered === false
+    ? "pending"
+    : comparisonReference
+      ? "ready"
+      : historical.status;
   const previousWeight = previous?.weight.value ?? null;
   const repsDifference = previous?.totalReps !== null && previous?.totalReps !== undefined
     ? sanitizeDifference(currentTotalReps - previous.totalReps)
@@ -298,6 +335,7 @@ function buildExerciseSummary(input: {
     repsDifference,
     weightDifference,
     comparisonStatus,
+    comparisonReference,
     repsTone,
     weightTone,
     resultLines: buildResultLines({
@@ -305,6 +343,18 @@ function buildExerciseSummary(input: {
       repsDifference,
       weightDifference,
     }),
+  };
+}
+
+function summarizeRegisteredPlan(exercise: TrainingCompletionExerciseInput) {
+  const targetSets = readPositiveInteger(exercise.targetSets);
+  const targetReps = readPositiveInteger(exercise.targetReps);
+  const baseWeight = readNonNegativeNumber(exercise.baseWeight);
+  if (targetSets === null || targetReps === null || baseWeight === null) return null;
+  return {
+    seriesCount: targetSets,
+    totalReps: targetSets * targetReps,
+    weight: { value: baseWeight, label: formatKg(baseWeight) },
   };
 }
 
@@ -427,6 +477,11 @@ function readNonNegativeNumber(value: unknown) {
   const parsed = typeof value === "string" ? Number(value.replace(",", ".")) : Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return null;
   return roundDecimal(parsed);
+}
+
+function readPositiveInteger(value: unknown) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function normalizeDate(value: string | null | undefined) {

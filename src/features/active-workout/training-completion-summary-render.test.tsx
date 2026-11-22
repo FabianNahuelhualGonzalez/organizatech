@@ -53,11 +53,10 @@ test("renders the approved seven-exercise comparison with accessible symbols and
   assert.doesNotMatch(markup, /Ancho|Estado.*Completa|ShareWorkoutCard/);
 });
 
-test("renders first-session and incomplete states without treating pending as regression", () => {
+test("renders first-session against the registered routine and keeps pending neutral", () => {
   const first = render(summaryWithComparison({ withoutHistory: true }));
-  assert.match(first, /PRIMERA SESIÓN DE ESTE DÍA/);
-  assert.match(first, /aria-label="Primera vez para este ejercicio"/);
-  assert.equal((first.match(/>Primera vez<\/span>/g) ?? []).length, 7);
+  assert.match(first, /VS. RUTINA REGISTRADA/);
+  assert.doesNotMatch(first, /PRIMERA SESIÓN DE ESTE DÍA|Primera vez/);
 
   const incomplete = render(summaryWithComparison({ pendingFrom: 5 }));
   assert.match(incomplete, /Registrado · 5 de 7/);
@@ -110,11 +109,13 @@ function summaryWithComparison(options: { withoutHistory?: boolean; pendingFrom?
     workoutStartedAt: "2026-10-21T10:00:00.000Z",
     savedAt: "2026-10-21T12:11:00.000Z",
     currentDate: "2026-10-21",
-    exercises: sample.map(([id, name, currentReps, currentKg], index) => ({
+    exercises: sample.map(([id, name, currentReps, currentKg, , plannedKg], index) => ({
       exerciseId: id,
       exerciseLineageId: `${id}-lineage`,
       exerciseName: name,
       targetSets: seriesCountForIndex(index),
+      targetReps: 10,
+      baseWeight: plannedKg,
       draft: {
         reps: splitReps(currentReps, seriesCountForIndex(index)),
         weight: currentKg,
