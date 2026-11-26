@@ -41,6 +41,20 @@ test("abrir un reporte lo marca revisado en el mismo RPC autorizado", async () =
   await assert.rejects(repository.open("invalid"), CoachReportsError);
 });
 
+test("un reporte conserva su texto cuando se revocan todas sus fotos", async () => {
+  const { repository, responses } = fixture();
+  responses.list_own_coach_progress_reports = [{
+    id: reportId, studentName: "Alumno QA", kind: "photos", sentAt: now,
+    reviewedAt: null, itemCount: 0,
+  }];
+  responses.review_own_coach_progress_report = {
+    id: reportId, kind: "photos", message: "Registro conservado",
+    sentAt: now, reviewedAt: null, items: [],
+  };
+  assert.equal((await repository.list())[0]?.itemCount, 0);
+  assert.deepEqual((await repository.open(reportId)).items, []);
+});
+
 test("la descarga usa solamente el bucket y objectName entregados por el servidor", async () => {
   const { repository } = fixture();
   const item = (await repository.open(reportId)).items[0]!;

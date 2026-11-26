@@ -73,7 +73,7 @@ function parseSummary(value: unknown): CoachReportSummary {
   return {
     id: uuid(row.id), studentName: text(row.studentName, 201), kind: parseKind(row.kind),
     sentAt: timestamp(row.sentAt), reviewedAt: row.reviewedAt === null ? null : timestamp(row.reviewedAt),
-    itemCount: integer(row.itemCount, 1, 30),
+    itemCount: integer(row.itemCount, 0, 30),
   };
 }
 function parseItem(value: unknown): CoachReportItem {
@@ -107,7 +107,7 @@ function parseItem(value: unknown): CoachReportItem {
 }
 function parseDetail(value: unknown): CoachReportDetail {
   const row = record(value);
-  if (!Array.isArray(row.items) || row.items.length < 1 || row.items.length > 30) throw new CoachReportsError("unavailable");
+  if (!Array.isArray(row.items) || row.items.length > 30) throw new CoachReportsError("unavailable");
   if (row.message !== null && (typeof row.message !== "string" || row.message.length > 2000)) {
     throw new CoachReportsError("unavailable");
   }
