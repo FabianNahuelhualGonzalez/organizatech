@@ -503,7 +503,7 @@ function CoachAssignmentGroups({ assignments, busy, onView, onExtend, onRemind, 
   );
 }
 
-function CoachEvaluationDetail({ assignment, onCloseDetail }: { readonly assignment: CoachEvaluationAssignment; readonly onCloseDetail: () => void }) {
+export function CoachEvaluationDetail({ assignment, onCloseDetail }: { readonly assignment: CoachEvaluationAssignment; readonly onCloseDetail: () => void }) {
   return <div className={styles.stack}><div className={`${styles.card} ${styles.stack}`}><h2 id="coach-evaluations-title" className={styles.title}>{assignment.snapshot.name}</h2><p className={styles.meta}>Alumno: {assignment.studentName}</p><p className={styles.meta}>Enviada: {formatEvaluationDate(assignment.sentAt)} · Respondida: {formatEvaluationDate(assignment.completedAt)}</p>{assignment.snapshot.sensitive && assignment.consentConfirmed ? <p style={{ color: "#4ade80", fontSize: 11 }}>✓ Alumno confirmó el consentimiento de datos sensibles</p> : null}</div>{assignment.snapshot.questions.map((question) => <article className={`${styles.questionCard} ${styles.stack}`} key={question.id}><strong>{question.text}</strong>{question.mode === "text" ? <TextAnswer answer={assignment.answers[question.id]} /> : <AnswerRows question={question} answer={assignment.answers[question.id]} />}</article>)}<button className={styles.button} type="button" onClick={onCloseDetail}>Volver al estado de envío</button></div>;
 }
 

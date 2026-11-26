@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
 import { CoachAddClientSheet } from "@/features/coach-clients/components/coach-add-client-sheet";
 import { CoachClientDetailSheet } from "@/features/coach-clients/components/coach-client-detail-sheet";
@@ -9,6 +9,7 @@ import { CoachChatComingSoonSheet } from "@/features/coach-dashboard/components/
 import { CoachDashboardView } from "@/features/coach-dashboard/components/coach-dashboard";
 import { CoachCommercialStudent } from "@/features/coach-dashboard/commercial/components/coach-commercial-student";
 import { CoachReportsView } from "@/features/coach-reports/components/coach-reports-view";
+import { CoachStudentRecord } from "@/features/coach-student-record/components/coach-student-record";
 import { useCoachWorkspaceController } from "../hooks/use-coach-workspace-controller";
 
 import styles from "./coach-workspace-boundary.module.css";
@@ -23,6 +24,7 @@ export function CoachWorkspaceBoundary({
   coachName,
   identityGeneration,
   onOpenCalendar,
+  onOpenEvaluations,
   clientOpenRequest,
   onClientOpenRequestConsumed,
 }: {
@@ -30,6 +32,7 @@ export function CoachWorkspaceBoundary({
   readonly coachName: string;
   readonly identityGeneration: number | null;
   readonly onOpenCalendar: () => void;
+  readonly onOpenEvaluations: () => void;
   readonly clientOpenRequest: {
     readonly ownerUserId: string;
     readonly episodeId: string;
@@ -42,6 +45,7 @@ export function CoachWorkspaceBoundary({
   }) => void;
 }) {
   const controller = useCoachWorkspaceController({ userId, coachName, identityGeneration });
+  const [recordEpisodeId, setRecordEpisodeId] = useState<string | null>(null);
   const backgroundRef = useRef<HTMLDivElement>(null);
   const chatTriggerRef = useRef<HTMLElement>(null);
   const addTriggerRef = useRef<HTMLElement>(null);
@@ -92,12 +96,15 @@ export function CoachWorkspaceBoundary({
   return (
     <div className={styles.workspace}>
       <div className={styles.content} ref={backgroundRef}>
-        {!controller.available ? (
+        {recordEpisodeId ? <CoachStudentRecord key={recordEpisodeId} coachId={userId}
+          episodeId={recordEpisodeId} onSendEvaluation={onOpenEvaluations}
+          onBack={() => { setRecordEpisodeId(null); controller.actions.openClient(recordEpisodeId); }} /> : null}
+        {!recordEpisodeId && !controller.available ? (
           <p className={styles.unavailable} role="status">
             Los datos del Panel Coach no están disponibles en esta sesión.
           </p>
         ) : null}
-        {controller.screen === "dashboard" ? (
+        {!recordEpisodeId && (controller.screen === "dashboard" ? (
           <CoachDashboardView
             view={controller.dashboardView}
             actions={{
@@ -141,7 +148,7 @@ export function CoachWorkspaceBoundary({
             onOpen={(reportId) => { void controller.reports.open(reportId); }}
             onDownload={controller.reports.download}
           />
-        )}
+        ))}
       </div>
 
       <CoachChatComingSoonSheet
@@ -169,7 +176,7 @@ export function CoachWorkspaceBoundary({
           },
         }}
       />
-      {controller.detail ? (
+      {!recordEpisodeId && controller.detail ? (
         <CoachClientDetailSheet
           view={controller.detail}
           confirmation={controller.confirmation}
@@ -202,6 +209,10 @@ export function CoachWorkspaceBoundary({
           ) : <p role="status">Ficha comercial no disponible.</p> : undefined}
           actions={{
             onCancelDetail: controller.actions.closeClient,
+            onOpenRecord: (id) => {
+              controller.actions.closeClient();
+              setRecordEpisodeId(id);
+            },
             onCopyCode: controller.actions.copyInvitationCode,
             onShareCode: controller.actions.shareInvitationCode,
             onResend: controller.actions.resendOrRegenerate,

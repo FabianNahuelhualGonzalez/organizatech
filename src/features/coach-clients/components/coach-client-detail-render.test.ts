@@ -101,6 +101,16 @@ test("active cycle requires both an explicit capability and callback then forwar
   assert.equal(buttons(noRoute.tree)[0].props.disabled, true);
 });
 
+test("active student opens the authorized record through the existing single button", () => {
+  const opened: string[] = [];
+  const { tree, markup } = capture(CoachClientDetailContent, { view: active(), disabled: false,
+    actions: { onOpenRecord: (id) => opened.push(id) } });
+  assert.equal((markup.match(/Abrir ficha del alumno/g) ?? []).length, 1);
+  assert.equal(buttons(tree).filter((button) => button.props.onClick).length, 1);
+  buttons(tree)[0].props.onClick?.(click);
+  assert.deepEqual(opened, ["client-active"]);
+});
+
 test("inactive uses only authorized historical facts and relink emits the exact email, not a mutation", () => {
   const emails: string[] = []; const view = inactive();
   const { tree, markup } = capture(CoachClientDetailSheet, { ...focus, view, confirmation: null, actions: { onRelink: (email) => emails.push(email) } });

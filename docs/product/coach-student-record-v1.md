@@ -16,11 +16,11 @@ pendiente o desvinculado no puede abrirla. No se agregan accesos al menú global
 | --- | --- |
 | Button | Reutilizar el acceso existente `Ver su ciclo y rutinas` del detalle activo como `Abrir ficha del alumno`; habilitarlo para abrir la ficha. |
 | Section | Nueva pantalla `Ficha del alumno`, con nombre autorizado, estado del vínculo y las secciones `Entrenamiento`, `Evaluaciones`, `Documentos compartidos` y `Fotos de check compartidas`. |
-| Button | `Crear rutina`, `Modificar rutina` y `Quitar rutina del ciclo` dentro de Entrenamiento; deshabilitar escrituras cuando el ciclo esté cerrado o haya cambiado. |
+| Button | `Crear primera rutina y ciclo`, `Crear rutina`, `Modificar rutina`, `Quitar rutina del ciclo` y `Volver al ciclo vigente` dentro de Entrenamiento; deshabilitar escrituras cuando el ciclo esté cerrado o haya cambiado. |
 | Button | `Enviar evaluación` reutiliza la selección de plantilla y envío manual existentes; `Ver respuesta` abre una evaluación completada del alumno seleccionado. |
-| Button | `Abrir PDF` sólo en documentos compartidos y PDF de entrenamiento permitidos. `Ver foto` sólo en fotos autorizadas. |
+| Button | `Abrir PDF` sólo en documentos médicos compartidos. `Ver foto` sólo en fotos autorizadas. El PDF completo del historial de entrenamiento queda pendiente de su fuente de sesiones y métricas. |
 | Checkbox | En cada foto del check del alumno: `Compartir con mi coach`, inicialmente desmarcado. El alumno puede marcarlo o desmarcarlo individualmente. |
-| Modal | Confirmación para `Quitar rutina del ciclo`, con indicación de que el historial permanece. |
+| Modal | Confirmación para `Quitar rutina del ciclo`, con indicación de que el historial permanece; visor de una foto compartida. |
 | Card/Drawer | Ninguno nuevo en esta propuesta. |
 | Eliminaciones | Ninguna. |
 
@@ -34,11 +34,11 @@ Ficha del alumno                                [Volver]
   [Nombre autorizado] · [Vínculo activo]
   Entrenamiento
     [Ciclo actual] [Crear rutina] [Modificar rutina] [Quitar rutina del ciclo]
-    [Historial de ciclos] [Abrir PDF]
+    [Historial de ciclos] [Volver al ciclo vigente]
   Evaluaciones
     [Enviar evaluación] [Enviada / Respondida] [Ver respuesta]
   Documentos compartidos
-    [PDF autorizado] [Abrir PDF]
+    [PDF médico autorizado] [Abrir PDF]
   Fotos de check compartidas
     [Fecha del check] [Foto autorizada] [Ver foto]
 
@@ -52,6 +52,13 @@ Alumno > Fotos de progreso > Mis checks
 El control de regreso usa `AppBackButton`. Los estados vacío, carga, fallo y
 vínculo terminado no muestran datos previos de otra selección o sesión. El texto
 final, geometría y estados visuales se revisan antes de conectar la pantalla.
+
+Aprobación previa de producto para la conexión visual: dueño de Organizatech,
+2026-11-26, respuesta «avanza» en este hilo a la solicitud explícita de aprobar
+el alcance y el wireframe documentado de esta ficha para el segundo PR hacia QA.
+La aprobación final después de revisar Preview, capturas y QA mobile continúa
+pendiente. El PDF completo del historial de entrenamiento y el alta de ejercicios
+personalizados no forman parte de este segundo PR.
 
 ## Datos y comportamiento
 
@@ -252,7 +259,8 @@ pero reintentar un mismo envío nunca restaura un permiso revocado.
   funcionales con cuentas de prueba, incluyendo revocación de fotos, PDFs y
   conflictos de versión. Esto no equivale a QA visual aprobada.
 - El alias `qa.organizatech.cl` apunta todavía al despliegue de `qa` en
-  `a3520d4`. Los cambios de interfaz permanecen sin commit en el worktree;
+  `f99e0b5` tras integrar el PR #98 de infraestructura; Vercel lo reporta
+  `READY`. Los cambios de interfaz permanecen sin commit en el worktree;
   la BBDD QA ya está preparada, pero la pantalla nueva aún no está publicada.
 
 ## Conexión visual local en preparación
@@ -274,6 +282,9 @@ pero reintentar un mismo envío nunca restaura un permiso revocado.
   técnica, series, repeticiones, carga y descargas. Conserva las otras rutinas
   del snapshot al editar. Los ejercicios personalizados existentes se conservan
   al modificar una rutina; el editor todavía no permite crear uno personalizado.
+- Al consultar un ciclo histórico, el Button `Volver al ciclo vigente` restaura
+  la vista editable del ciclo activo. Las cargas tardías anteriores no reemplazan
+  los datos de una revalidación más reciente.
 - `Enviar evaluación` abre el flujo manual existente; `Ver respuesta` reutiliza
   el componente de respuestas. PDF médicos y fotos se descargan mediante
   Storage privado con revalidación. El PDF completo del historial de

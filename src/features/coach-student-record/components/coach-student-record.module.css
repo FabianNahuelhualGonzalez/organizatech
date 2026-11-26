@@ -1,0 +1,37 @@
+.record { min-height: 100%; padding: 24px 18px 56px; color: #f5f7fb; background: #07101a; }
+.record > h1 { margin: 18px 0; font-size: 24px; }
+.header, .section, .detail { border: 1px solid #294057; border-radius: 16px; padding: 18px; background: #102031; }
+.header h2, .section h2 { margin: 0 0 8px; font-size: 18px; }
+.header p, .section p { color: #b9c9da; }
+.section { margin-top: 16px; }
+.section ul { display: grid; gap: 12px; padding-left: 20px; }
+.section li { line-height: 1.5; }
+.section button, .alert button, .viewer button, .detail button {
+  min-height: 44px; margin-left: 8px; border: 1px solid #6e92bd;
+  border-radius: 10px; padding: 8px 12px; color: #f5f7fb;
+  background: #183451; font: inherit; cursor: pointer;
+}
+.section button:disabled { opacity: .55; cursor: wait; }
+.detail { margin-top: 16px; background: #14283d; }
+.alert { padding: 16px; border: 1px solid #bd7f7f; border-radius: 12px; }
+.viewer { position: fixed; inset: 0; z-index: 100; display: grid; place-content: center;
+  gap: 16px; padding: 20px; background: #07101aef; }
+.viewer img { display: block; max-width: min(92vw, 800px); max-height: 75vh; object-fit: contain; }
+.editor { display: grid; gap: 12px; margin: 12px 0; }
+.editor > button, .editor button, .routineAction button {
+  min-height: 44px; border: 1px solid #6e92bd; border-radius: 10px; padding: 8px 12px;
+  color: #f5f7fb; background: #183451; font: inherit; cursor: pointer;
+}
+.editor button:disabled { opacity: .55; cursor: not-allowed; }
+.editor label { display: grid; gap: 5px; color: #d5e0ec; font-size: 13px; }
+.editor input, .editor select { min-height: 42px; max-width: 100%; border: 1px solid #6e92bd;
+  border-radius: 8px; padding: 6px 10px; color: #fff; background: #07101a; font: inherit; }
+.routineAction { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  border-top: 1px solid #294057; padding-top: 10px; }
+.routineAction > span { min-width: 120px; }
+.routineAction label { max-width: 115px; }
+.setAction { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  width: 100%; border-left: 2px solid #446786; padding: 8px 10px; }
+.setAction label { max-width: 115px; }
+.inlineCheck { display: flex !important; align-items: center; gap: 6px; min-height: 44px; }
+.inlineCheck input { min-height: 16px; width: 16px; }
