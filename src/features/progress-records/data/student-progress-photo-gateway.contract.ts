@@ -40,6 +40,8 @@ function fixture() {
     get_own_progress_report_delivery_status: { emailStatus: "sent", notificationAccepted: true,
       sentAt: now, coachName: "Coach QA", coachEmail: "coach@example.com" },
     list_own_progress_photo_report_statuses: [{ assetId, sentAt: now, coachName: "Coach QA" }],
+    list_own_progress_photo_shares: [{ assetId }],
+    set_own_progress_photo_shared: true,
   };
   const client = {
     rpc: async (name: string, args: unknown) => {
@@ -65,6 +67,20 @@ function fixture() {
   } as unknown as SupabaseClient;
   return { gateway: createStudentProgressPhotoGateway(client), calls, storage, outputs };
 }
+
+test("compartir una foto exige ID válido y confirma el permiso del servidor", async () => {
+  const { gateway, calls, outputs } = fixture();
+  await assert.rejects(gateway.setOwnPhotoShared("invalid", true), StudentProgressPhotoGatewayError);
+  await assert.rejects(gateway.setOwnPhotoShared(assetId, "yes" as never), StudentProgressPhotoGatewayError);
+  assert.deepEqual(await gateway.listOwnPhotoShares([assetId]), [assetId]);
+  await gateway.setOwnPhotoShared(assetId, true);
+  assert.deepEqual(calls.slice(-2), [
+    { name: "list_own_progress_photo_shares", args: { p_asset_ids: [assetId] } },
+    { name: "set_own_progress_photo_shared", args: { p_asset_id: assetId, p_shared: true } },
+  ]);
+  outputs.set_own_progress_photo_shared = true;
+  await assert.rejects(gateway.setOwnPhotoShared(assetId, false), StudentProgressPhotoGatewayError);
+});
 
 test("reserva, staging y cola usan sólo la ruta entregada por SQL", async () => {
   const { gateway, calls, storage } = fixture();

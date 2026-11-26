@@ -371,6 +371,21 @@ export function createStudentProgressPhotoGateway(client: SupabaseClient) {
       return parseArray(await rpc("list_own_progress_photo_report_statuses", { p_asset_ids: [...assetIds] }),
         parseShareStatus, 150);
     },
+    async listOwnPhotoShares(assetIds: readonly string[]): Promise<readonly string[]> {
+      if (assetIds.length === 0) return [];
+      if (assetIds.length > 150 || assetIds.some((id) => !UUID.test(id))
+        || new Set(assetIds).size !== assetIds.length) throw new StudentProgressPhotoGatewayError("invalid_input");
+      return parseArray(await rpc("list_own_progress_photo_shares", { p_asset_ids: [...assetIds] }),
+        (candidate) => uuid(row(candidate).assetId), 150);
+    },
+    async setOwnPhotoShared(assetId: string, shared: boolean): Promise<void> {
+      if (!UUID.test(assetId) || typeof shared !== "boolean") {
+        throw new StudentProgressPhotoGatewayError("invalid_input");
+      }
+      if (await rpc("set_own_progress_photo_shared", {
+        p_asset_id: assetId, p_shared: shared,
+      }) !== shared) throw new StudentProgressPhotoGatewayError("unavailable");
+    },
     async createPhotoReport(assetIds: readonly string[], message: string, requestId: string,
       expectedEpisodeId: string): Promise<string> {
       if (!UUID.test(requestId) || !UUID.test(expectedEpisodeId) || assetIds.length < 1 || assetIds.length > 30

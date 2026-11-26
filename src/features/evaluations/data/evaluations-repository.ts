@@ -19,6 +19,7 @@ type EvaluationRpcName =
   | "list_own_evaluation_students"
   | "send_own_evaluation_template"
   | "list_own_coach_evaluation_assignments"
+  | "list_own_coach_student_evaluations"
   | "extend_own_evaluation_assignment"
   | "remind_own_evaluation_assignment"
   | "remind_own_evaluation_batch"
@@ -346,6 +347,19 @@ export async function sendOwnEvaluationTemplate(expectedUserId: string, input: {
 
 export async function listOwnCoachEvaluationAssignments(expectedUserId: string) {
   return coachAssignments(await rpc(expectedUserId, "list_own_coach_evaluation_assignments", {}));
+}
+
+/** Scoped reader for the selected active relationship; the server checks ownership. */
+export async function listOwnCoachStudentEvaluations(
+  expectedUserId: string, episodeId: string, limit = 50, offset = 0,
+) {
+  if (!UUID.test(episodeId) || !Number.isInteger(limit) || limit < 1 || limit > 100
+    || !Number.isInteger(offset) || offset < 0 || offset > 100000) {
+    throw new EvaluationRepositoryError("invalid");
+  }
+  return coachAssignments(await rpc(expectedUserId, "list_own_coach_student_evaluations", {
+    p_episode_id: episodeId, p_limit: limit, p_offset: offset,
+  }));
 }
 
 export async function extendOwnEvaluationAssignment(expectedUserId: string, assignmentId: string, dueDate: string, requestId: string) {
