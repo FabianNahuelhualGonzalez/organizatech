@@ -500,6 +500,12 @@
 .selectCircleActive { border-color: #3c7aff; background: #3c7aff; }
 .tilePoseLabel { color: rgba(255, 255, 255, .45); font-size: 10px; text-align: center; }
 .tilePosePresent { color: #fff; font-weight: 700; }
+.photoShareControl {
+  display: flex; align-items: center; gap: 5px; min-height: 44px;
+  color: #e2e9f5; font-size: 10px; line-height: 1.25; cursor: pointer;
+}
+.photoShareControl input { flex: none; width: 16px; height: 16px; accent-color: #3c7aff; }
+.photoShareControl:has(input:disabled) { opacity: .55; cursor: wait; }
 .missingTile {
   box-sizing: border-box; width: 100%; display: grid; place-items: center;
   border-color: rgba(255, 255, 255, .16); color: rgba(255, 255, 255, .45);

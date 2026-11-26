@@ -281,6 +281,10 @@ export function CoachPortalBoundary({
           coachName={profile.fullName}
           identityGeneration={coachDataIdentityGeneration}
           onOpenCalendar={() => setIsCalendarOpen(true)}
+          onOpenEvaluations={() => {
+            setEvaluationRestorableView("send");
+            dispatch({ type: "evaluations_opened" });
+          }}
           clientOpenRequest={clientOpenRequest}
           onClientOpenRequestConsumed={onClientOpenRequestConsumed}
         />

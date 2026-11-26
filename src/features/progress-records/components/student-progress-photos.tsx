@@ -84,6 +84,8 @@ export function StudentProgressPhotos() {
   const [photos, setPhotos] = useState<readonly StudentPublishedPhoto[]>([]);
   const [checks, setChecks] = useState<readonly StudentPhotoCheck[]>([]);
   const [shareStatuses, setShareStatuses] = useState<readonly StudentPhotoShareStatus[]>([]);
+  const [sharedPhotoIds, setSharedPhotoIds] = useState<readonly string[]>([]);
+  const [sharingPhotoId, setSharingPhotoId] = useState<string | null>(null);
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
   const [coachAccess, setCoachAccess] = useState<StudentProgressCoachAccess | null>(null);
@@ -146,10 +148,13 @@ export function StudentProgressPhotos() {
         return gateway.listPhotoReportStatuses(assetIds);
       }));
       const nextShares = sharePages.flat();
+      const permissions = await Promise.all(checkPages.map((page) => gateway.listOwnPhotoShares(
+        page.flatMap((check) => check.photos.map((photo) => photo.assetId)))));
       setPhotos(nextPhotos);
       setChecks(nextChecks);
       setUploads(nextUploads);
       setShareStatuses(nextShares);
+      setSharedPhotoIds(permissions.flat());
       if (!guideInitializedRef.current) {
         guideInitializedRef.current = true;
         setGuideOpen(nextChecks.length === 0);
@@ -708,13 +713,29 @@ export function StudentProgressPhotos() {
         const next = await gateway.listChecks(PAGE_SIZE, checkPagesRef.current * PAGE_SIZE);
         const nextShares = await gateway.listPhotoReportStatuses(next.flatMap((check) =>
           check.photos.map((photo) => photo.assetId)));
+        const nextPermissions = await gateway.listOwnPhotoShares(next.flatMap((check) =>
+          check.photos.map((photo) => photo.assetId)));
         setChecks((current) => [...current, ...next]);
         setShareStatuses((current) => [...current, ...nextShares]);
+        setSharedPhotoIds((current) => [...current, ...nextPermissions]);
         setChecksMore(next.length === PAGE_SIZE);
         checkPagesRef.current += 1;
       }
     } catch (error) { setActionError(message(error)); }
     finally { busyRef.current = false; setBusy(false); }
+  }
+
+  async function changePhotoShare(assetId: string, shared: boolean) {
+    if (sharingPhotoId) return;
+    setSharingPhotoId(assetId);
+    setActionError("");
+    try {
+      await getStudentProgressPhotoGateway().setOwnPhotoShared(assetId, shared);
+      setSharedPhotoIds((current) => shared
+        ? [...current.filter((id) => id !== assetId), assetId]
+        : current.filter((id) => id !== assetId));
+    } catch (error) { setActionError(message(error)); }
+    finally { setSharingPhotoId(null); }
   }
 
   async function openPhoto(assetId: string) {
@@ -842,6 +863,12 @@ export function StudentProgressPhotos() {
                           <img className={styles.uploadDimmed} src={upload.previewUrl} alt="" />
                         ) : <span>+</span>}{upload?.state === "uploading" ? <span className={styles.uploadProgress} style={{ width: `${upload.progress}%` }} /> : null}</label>}
                       <span className={`${styles.tilePoseLabel} ${photo ? styles.tilePosePresent : ""}`}>{pose.charAt(0).toUpperCase()}{pose.slice(1)}</span>
+                      {photo && !selecting && coachAvailability === "linked" ? <label className={styles.photoShareControl}>
+                        <input type="checkbox" checked={sharedPhotoIds.includes(photo.assetId)}
+                          disabled={sharingPhotoId !== null || busy}
+                          onChange={(event) => { void changePhotoShare(photo.assetId, event.target.checked); }} />
+                        Compartir con mi coach
+                      </label> : null}
                       {photo && !selecting ? <button className={styles.deletePhotoButton} type="button" disabled={busy} aria-label={`Eliminar foto de ${pose}`} onClick={(event) => { void requestDeletion(photo.assetId, event.currentTarget); }}>Eliminar</button> : null}
                     </div>;
                   })}</div>

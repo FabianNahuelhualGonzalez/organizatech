@@ -74,6 +74,7 @@ export type CoachClientUnlinkConfirmationView =
 export interface CoachClientDetailActions {
   readonly onCancelDetail?: () => void;
   readonly onOpenCycle?: (id: string) => void;
+  readonly onOpenRecord?: (id: string) => void;
   readonly onCopyCode?: (id: string) => void;
   readonly onShareCode?: (id: string) => void;
   readonly onResend?: (id: string) => void;

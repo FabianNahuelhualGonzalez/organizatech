@@ -11,7 +11,7 @@ const STATE_LABELS = { active: "ACTIVO", pending: "PENDIENTE", inactive: "BAJA" 
 export function CoachClientDetailContent({ view, disabled, actions, commercialContent }: {
   readonly view: CoachClientDetailView;
   readonly disabled: boolean;
-  readonly actions: Pick<CoachClientDetailActions, "onCopyCode" | "onShareCode" | "onResend" | "onRetryDelivery" | "onOpenCycle">;
+  readonly actions: Pick<CoachClientDetailActions, "onCopyCode" | "onShareCode" | "onResend" | "onRetryDelivery" | "onOpenCycle" | "onOpenRecord">;
   readonly commercialContent?: ReactNode;
 }) {
   const facts = view.state === "active"
@@ -20,6 +20,7 @@ export function CoachClientDetailContent({ view, disabled, actions, commercialCo
       ? [{ label: "Solicitud registrada", value: view.facts.requestedOnLabel }, { label: "Correo", value: view.email }, { label: "Espera", value: view.facts.waitingLabel }]
       : [{ label: "Vinculado desde", value: view.facts.linkedOnLabel }, { label: "Desvinculado el", value: view.facts.unlinkedOnLabel }];
   const canOpenCycle = !disabled && view.state === "active" && view.cycle?.canOpen === true && Boolean(actions.onOpenCycle);
+  const canOpenRecord = !disabled && view.state === "active" && Boolean(actions.onOpenRecord);
   return <div className={styles.body}>
     <div className={styles.statusLine}>
       <span className={styles.chip} data-state={view.state}><span aria-hidden="true" />{STATE_LABELS[view.state]}</span>
@@ -33,10 +34,13 @@ export function CoachClientDetailContent({ view, disabled, actions, commercialCo
       onShare={actions.onShareCode ? () => actions.onShareCode?.(view.id) : undefined}
       onResend={actions.onResend ? () => actions.onResend?.(view.id) : undefined}
       onRetryDelivery={actions.onRetryDelivery ? () => actions.onRetryDelivery?.(view.id) : undefined} /> : null}
-    {view.state === "active" ? <button className={styles.cycle} type="button" disabled={!canOpenCycle}
-      onClick={canOpenCycle ? () => actions.onOpenCycle?.(view.id) : undefined}>
+    {view.state === "active" ? <button className={styles.cycle} type="button" disabled={!canOpenRecord && !canOpenCycle}
+      onClick={canOpenRecord ? () => actions.onOpenRecord?.(view.id)
+        : canOpenCycle ? () => actions.onOpenCycle?.(view.id) : undefined}>
       <CalendarDays size={16} aria-hidden="true" /><span className={styles.cycleCopy}>
-        <span className={styles.cycleTitle}>Ver su ciclo y rutinas</span><span className={styles.cycleLabel} data-known={view.cycle?.label != null}>{view.cycle?.label ?? "—"}</span>
+        <span className={styles.cycleTitle}>{actions.onOpenRecord ? "Abrir ficha del alumno" : "Ver su ciclo y rutinas"}</span>
+        <span className={styles.cycleLabel} data-known={actions.onOpenRecord ? true : view.cycle?.label != null}>
+          {actions.onOpenRecord ? "Entrenamiento, evaluaciones y archivos compartidos" : view.cycle?.label ?? "—"}</span>
       </span><ChevronRight size={13} aria-hidden="true" />
     </button> : null}
     {view.state === "active" ? commercialContent : null}
