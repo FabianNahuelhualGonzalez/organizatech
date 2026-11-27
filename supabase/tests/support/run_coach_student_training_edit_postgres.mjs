@@ -103,6 +103,10 @@ try {
   await client.query(migration("20261126200911_coach_student_training_edit_v1.sql"));
   await client.query(migration("20261126200922_coach_student_training_cycle_edges_v1.sql"));
   await client.query(migration("20261126210619_coach_student_cycle_replacement_close_v1.sql"));
+  await client.query(migration("20261126200900_coach_student_training_read_v1.sql"));
+  stage = "apply Coach activity read";
+  await client.query(migration("20261127142942_coach_student_cycle_executions_read_v1.sql"));
+  await client.query(migration("20261127143334_coach_student_legacy_cycle_activity_v1.sql"));
   check((await one(`select has_function_privilege('authenticated',
     'public.edit_own_coach_student_active_training_cycle(uuid,uuid,uuid,integer,text,text,jsonb)',
     'EXECUTE') as allowed`)).allowed, "Coach RPC executable by authenticated");
@@ -135,6 +139,18 @@ try {
   const cycle = activated.aggregateId;
   stage = "delegated edits";
   await actor(ids.coach);
+  stage = "Coach activity access";
+  const activity = (await one(`select public.get_own_coach_student_cycle_activity($1,$2) value`,
+    [ids.episode, cycle])).value;
+  check(activity.cycleId === cycle && activity.sessionCount === 0 && activity.records.length === 0,
+    "linked Coach can read an empty cycle without fabricated results");
+  check((await one(`select public.list_own_coach_student_cycle_sessions($1,$2) value`,
+    [ids.episode, cycle])).value.length === 0, "empty session page");
+  await actor(ids.other);
+  await reject(`select public.get_own_coach_student_cycle_activity($1,$2)`,
+    [ids.episode, cycle], "42501", "unrelated Coach denied execution history");
+  await actor(ids.coach);
+  stage = "delegated edits";
   const request = "30000000-0000-4000-8000-000000000001";
   const edit = `select public.edit_own_coach_student_active_training_cycle(
     $1,$2,$3,$4,$5,'strength',$6::jsonb) value`;
@@ -221,6 +237,8 @@ try {
   await client.query("set role authenticated");
   await reject(edit, args("30000000-0000-4000-8000-000000000006", 4,
     "modify_routine", changed), "42501", "former Coach denied");
+  await reject(`select public.list_own_coach_student_cycle_sessions($1,$2)`,
+    [ids.episode, cycle], "42501", "former Coach denied session page");
   console.log(`COACH_STUDENT_TRAINING_EDIT_LOCAL_POSTGRES=PASS (${checks} checks; Unix socket only)`);
 } catch (error) {
   console.error(`COACH_STUDENT_TRAINING_EDIT_LOCAL_POSTGRES=FAIL stage=${stage} code=${error.code ?? "assertion"}: ${error.message}`);
