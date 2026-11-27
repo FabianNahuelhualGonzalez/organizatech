@@ -159,6 +159,21 @@ test("lista fija portal Usuario, limita 50 y usa cursor keyset pareado", async (
   });
 });
 
+test("la rutina creada por el coach aparece en la bandeja del alumno y abre entrenamiento", async () => {
+  const result = await listTrainingCycleNotificationsWithOperation({
+    operation: {
+      dataClient: { rpc: async () => ({ data: { items: [{ ...notificationRow(),
+        eventKind: "coach_updated", title: "Tu coach actualizó tu rutina" }], nextCursor: null }, error: null }) },
+      verifyExpectedUser: async () => undefined,
+    },
+    cursor: null,
+    isCurrent: () => true,
+  });
+  assert.equal(result.notifications[0]?.title, "Tu coach actualizó tu rutina");
+  assert.equal(result.notifications[0]?.tone, "success");
+  assert.equal(result.notifications[0]?.target, "registro-entrenamiento");
+});
+
 test("lista fail-closed ante shapes desconocidos, más de 50 filas o cursor inconsistente", async () => {
   const invalidResults: unknown[] = [
     { items: [], nextCursor: null, unexpected: true },

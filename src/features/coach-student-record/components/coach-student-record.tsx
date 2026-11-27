@@ -13,12 +13,15 @@ import { TRAINING_CYCLE_DAY_LABELS, TRAINING_CYCLE_TECHNIQUE_LABELS } from
 import type { TrainingCycleListCursor, TrainingCycleListItem, TrainingCycleRpcSnapshot } from
   "@/features/training-cycle-builder/data/training-cycle-rpc-types";
 import { AppBackButton } from "@/ui/navigation/app-back-button";
+import { CycleHistoryCompactCycle } from "@/components/training/cycle-history/CycleHistoryCompactCycle";
+import { buildCycleHistoryDetailDomId, buildCycleHistoryHeadingDomId } from "@/lib/training/cycle-history/cycle-history-view-model";
 import { ConfirmDialog } from "@/ui/modals/confirm-dialog";
 import { CoachCycleBuilder } from "./coach-cycle-builder";
 import { getCoachStudentRecordGateway, type CoachStudentRecordSubject,
   type SharedStudentDocument, type SharedStudentPhoto } from "../data/coach-student-record-gateway";
 
 import styles from "./coach-student-record.module.css";
+import historyStyles from "@/components/training/cycle-history/cycle-history.module.css";
 
 type Data = {
   readonly subject: CoachStudentRecordSubject;
@@ -31,6 +34,11 @@ type Data = {
   readonly photos: readonly SharedStudentPhoto[];
   readonly morePhotos: boolean;
 };
+
+function cycleDates(start: string, end: string) {
+  const civil = (date: string) => `${date.slice(8, 10)}-${date.slice(5, 7)}-${date.slice(0, 4)}`;
+  return `${civil(start)} | ${civil(end)}`;
+}
 
 export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluation }: {
   readonly coachId: string;
@@ -58,12 +66,14 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const photoUrlRef = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (preserveView = false) => {
     const generation = ++loadGenerationRef.current;
     setError("");
-    setData(null); setCycle(null); setActiveCycle(null); setEvaluation(null);
-    if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
-    photoUrlRef.current = null; setPhotoUrl(null);
+    if (!preserveView) {
+      setData(null); setCycle(null); setActiveCycle(null); setEvaluation(null);
+      if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
+      photoUrlRef.current = null; setPhotoUrl(null);
+    }
     try {
       const access = getCoachStudentRecordGateway(coachId, episodeId, () => currentRef.current);
       const subject = await access.getSubject();
@@ -80,7 +90,8 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
           evaluations, moreEvaluations: evaluations.length === 50,
           documents, moreDocuments: documents.length === 50,
           photos, morePhotos: photos.length === 50 });
-        setCycle(activeCycle);
+        setCycle((selected) => preserveView && selected && cycles.items.some((item) => item.cycleId === selected.cycleId)
+          ? selected.cycleId === activeCycle?.cycleId ? activeCycle : selected : activeCycle);
         setActiveCycle(activeCycle);
       }
     } catch {
@@ -93,7 +104,7 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
   useEffect(() => {
     currentRef.current = true;
     void load();
-    const onFocus = () => { if (!builderOpenRef.current) void load(); };
+    const onFocus = () => { if (!builderOpenRef.current) void load(true); };
     window.addEventListener("focus", onFocus);
     return () => { currentRef.current = false;
       window.removeEventListener("focus", onFocus);
@@ -203,7 +214,7 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
       <header className={styles.header}><h2>{data.subject.studentName}</h2>
         <p>{data.subject.studentEmail} · Vínculo activo</p></header>
       <section className={styles.section} aria-labelledby="record-training"><h2 id="record-training">Entrenamiento</h2>
-        <button type="button" onClick={() => {
+        <button className={styles.action} type="button" onClick={() => {
           if (activeCycle) { setCloseError(""); setConfirmNewCycle(true); }
           else { setPreviousCycle(null); loadGenerationRef.current += 1; setBuilderOpen(true); }
         }}>
@@ -211,18 +222,23 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
         </button>
         {activeCycle ? <p>Antes de crear el nuevo ciclo confirmaremos el cierre del actual.
           Sus resultados quedarán en el historial.</p> : null}
-        {activeCycle && cycle?.cycleId !== activeCycle.cycleId ? <button type="button"
+        {activeCycle && cycle?.cycleId !== activeCycle.cycleId ? <button className={styles.action} type="button"
           onClick={() => setCycle(activeCycle)}>Volver al ciclo vigente</button> : null}
         {data.cycles.length === 0 ? <p>Aún no tiene ciclos de entrenamiento.</p> :
-          <ul>{data.cycles.map((item) => <li key={item.cycleId}>
-            <button type="button" disabled={busy} onClick={() => void openCycle(item)}>
-              Ciclo {item.cycleNumber} · {item.status} · {item.startDate} a {item.endDate}
-            </button></li>)}</ul>}
-        {data.cycleCursor ? <button type="button" disabled={moreBusy} onClick={() => void loadMore("cycles")}>Ver más ciclos</button> : null}
-        {cycle ? <div className={styles.cycleDetail} aria-label="Ciclo completo del alumno">
+          <ul className={historyStyles.historyLayout}>{data.cycles.map((item) => {
+            const selected = cycle?.cycleId === item.cycleId;
+            const label = `Ciclo de entrenamiento ${item.cycleNumber}`;
+            return <li className={historyStyles.historyListItem} key={item.cycleId}>
+              {selected ? <div className={historyStyles.selectedSection}>
+                <button type="button" id={buildCycleHistoryHeadingDomId(item.cycleId)}
+                  aria-expanded="true" aria-controls={buildCycleHistoryDetailDomId(item.cycleId)}
+                  className={historyStyles.selectedBar} onClick={() => setCycle(null)}>{label}</button>
+                <div id={buildCycleHistoryDetailDomId(item.cycleId)} className={historyStyles.selectedDetail}>
+                  <p className={historyStyles.dateLabel}>{cycleDates(item.startDate, item.endDate)} · {item.status === "active" || item.status === "expiring" ? "Vigente" : "Finalizado"}</p>
+                  {cycle ? <div className={styles.cycleDetail} aria-label="Ciclo completo del alumno">
           <header><div><span>CICLO {cycle.cycleNumber} · VERSIÓN {cycle.version}</span>
             <h3>Plan de entrenamiento</h3><p>{cycle.startDate} → {cycle.endDate}</p></div>
-            <button type="button" onClick={() => setCycle(null)}>Cerrar detalle</button></header>
+            </header>
           <div className={styles.cycleDays}>{cycle.plan.days.map((day) =>
             <section className={styles.cycleDay} key={day.snapshotId}>
               <h4>{day.name} <span>{TRAINING_CYCLE_DAY_LABELS[day.day]}</span></h4>
@@ -241,7 +257,13 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
                 </li>)}</ol>
               </article>)}
             </section>)}</div>
-        </div> : null}
+                  </div> : null}
+                </div>
+              </div> : <CycleHistoryCompactCycle cycle={{ cycleId: item.cycleId, barLabel: label,
+                dateRowLabel: cycleDates(item.startDate, item.endDate) }} onToggle={() => void openCycle(item)} />}
+            </li>;
+          })}</ul>}
+        {data.cycleCursor ? <button className={styles.action} type="button" disabled={moreBusy} onClick={() => void loadMore("cycles")}>Ver más ciclos</button> : null}
       </section>
       {confirmNewCycle && activeCycle ? <ConfirmDialog
         ariaLabel="Confirmar nuevo ciclo de entrenamiento"
@@ -257,27 +279,27 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
         {closeError ? <p role="alert">{closeError}</p> : null}
       </ConfirmDialog> : null}
       <section className={styles.section} aria-labelledby="record-evaluations"><h2 id="record-evaluations">Evaluaciones y anamnesis</h2>
-        <button type="button" onClick={onSendEvaluation}>Enviar evaluación</button>
+        <button className={styles.action} type="button" onClick={onSendEvaluation}>Enviar evaluación</button>
         {data.evaluations.length === 0 ? <p>Aún no hay evaluaciones para este vínculo.</p> :
           <ul>{data.evaluations.map((item) => <li key={item.id}>{item.snapshot.name} · {item.status}
-            {item.status === "completed" ? <button type="button" onClick={() => setEvaluation(item)}>Ver respuesta</button> : null}
+            {item.status === "completed" ? <button className={styles.action} type="button" onClick={() => setEvaluation(item)}>Ver respuesta</button> : null}
           </li>)}</ul>}
-        {data.moreEvaluations ? <button type="button" disabled={moreBusy}
+        {data.moreEvaluations ? <button className={styles.action} type="button" disabled={moreBusy}
           onClick={() => void loadMore("evaluations")}>Ver más evaluaciones</button> : null}
         {evaluation ? <CoachEvaluationDetail assignment={evaluation} onCloseDetail={() => setEvaluation(null)} /> : null}
       </section>
       <section className={styles.section} aria-labelledby="record-documents"><h2 id="record-documents">Documentos compartidos</h2>
         {data.documents.length === 0 ? <p>El alumno no ha compartido documentos.</p> :
           <ul>{data.documents.map((item) => <li key={item.assetId}>{item.displayName}
-            <button type="button" disabled={busy} onClick={() => void openAsset(item)}>Abrir PDF</button></li>)}</ul>}
-        {data.moreDocuments ? <button type="button" disabled={moreBusy}
+            <button className={styles.action} type="button" disabled={busy} onClick={() => void openAsset(item)}>Abrir PDF</button></li>)}</ul>}
+        {data.moreDocuments ? <button className={styles.action} type="button" disabled={moreBusy}
           onClick={() => void loadMore("documents")}>Ver más documentos</button> : null}
       </section>
       <section className={styles.section} aria-labelledby="record-photos"><h2 id="record-photos">Fotos de check compartidas</h2>
         {data.photos.length === 0 ? <p>El alumno no ha compartido fotos de check.</p> :
           <ul>{data.photos.map((item) => <li key={item.assetId}>{item.checkedOn} · {item.pose}
-            <button type="button" disabled={busy} onClick={() => void openAsset(item)}>Ver foto</button></li>)}</ul>}
-        {data.morePhotos ? <button type="button" disabled={moreBusy}
+            <button className={styles.action} type="button" disabled={busy} onClick={() => void openAsset(item)}>Ver foto</button></li>)}</ul>}
+        {data.morePhotos ? <button className={styles.action} type="button" disabled={moreBusy}
           onClick={() => void loadMore("photos")}>Ver más fotos</button> : null}
         {photoUrl ? <div role="dialog" aria-modal="true" aria-label="Foto de check" className={styles.viewer}>
           <button type="button" onClick={closePhoto}>Cerrar foto</button>

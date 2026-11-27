@@ -6,10 +6,11 @@ import { CoachOverlay } from "@/ui/coach-overlays/coach-overlay";
 import type { CoachClientDetailSheetProps } from "./coach-client-detail-view";
 import { CoachClientDetailContent } from "./coach-client-detail-content";
 import { CoachClientUnlinkConfirmation } from "./coach-client-unlink-confirmation";
+import { CoachStudentRoutineSummary } from "./coach-student-routine-summary";
 import shared from "@/ui/coach-overlays/coach-overlay.module.css";
 import styles from "./coach-client-detail-sheet.module.css";
 
-export function CoachClientDetailSheet({ view, confirmation, actions, commercialContent, backgroundRef, restoreFocusRef }: CoachClientDetailSheetProps) {
+export function CoachClientDetailSheet({ view, confirmation, actions, commercialContent, coachId, backgroundRef, restoreFocusRef }: CoachClientDetailSheetProps) {
   const id = useId();
   const detailBackgroundRef = useRef<HTMLDivElement>(null);
   const unlinkTriggerRef = useRef<HTMLElement>(null);
@@ -36,11 +37,15 @@ export function CoachClientDetailSheet({ view, confirmation, actions, commercial
           <button className={styles.close} type="button" aria-label="Cerrar" disabled={disabled || !view.canClose || !actions.onCancelDetail}
             onClick={!disabled && view.canClose ? actions.onCancelDetail : undefined}><span><X size={13} aria-hidden="true" /></span></button>
         </div>
-        <CoachClientDetailContent view={view} disabled={disabled} actions={actions} commercialContent={commercialContent} />
+        <CoachClientDetailContent view={view} disabled={disabled} actions={actions} commercialContent={<>
+          {view.state === "active" && coachId && actions.onOpenRecord ? <CoachStudentRoutineSummary
+            coachId={coachId} episodeId={view.id} onOpenRecord={() => actions.onOpenRecord?.(view.id)} /> : null}
+          {commercialContent}
+        </>} />
       </CoachOverlay>
     </div>
-    {confirmationMatches && confirmation ? <CoachClientUnlinkConfirmation view={{ ...confirmation, isBusy: view.isBusy || confirmation.isBusy }}
+    {confirmationMatches && confirmation ? <div className={styles.confirmationLayer}><CoachClientUnlinkConfirmation view={{ ...confirmation, isBusy: view.isBusy || confirmation.isBusy }}
       backgroundRef={detailBackgroundRef} restoreFocusRef={unlinkTriggerRef}
-      onConfirm={actions.onConfirmUnlink} onCancel={actions.onCancelUnlink} /> : null}
+      onConfirm={actions.onConfirmUnlink} onCancel={actions.onCancelUnlink} /></div> : null}
   </>;
 }

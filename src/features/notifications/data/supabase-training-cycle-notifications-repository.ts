@@ -11,7 +11,8 @@ export type TrainingCycleNotificationEventKind =
   | "expires_t2"
   | "expires_t1"
   | "expires_t0"
-  | "closed_t1";
+  | "closed_t1"
+  | "coach_updated";
 
 interface TrainingCycleNotificationRow {
   readonly notificationId: string;
@@ -65,6 +66,7 @@ const EVENT_KINDS = new Set<TrainingCycleNotificationEventKind>([
   "expires_t1",
   "expires_t0",
   "closed_t1",
+  "coach_updated",
 ]);
 
 function fail(code: string): never {
@@ -291,7 +293,7 @@ export async function listTrainingCycleNotificationsWithOperation(input: {
       title: row.title,
       summary: row.body,
       category: "Entrenamiento",
-      tone: row.eventKind === "closed_t1" ? "success" : "warning",
+      tone: row.eventKind === "closed_t1" || row.eventKind === "coach_updated" ? "success" : "warning",
       priority: "high",
       dedupeKey: `training-cycle:${row.notificationId}`,
       target: "registro-entrenamiento",

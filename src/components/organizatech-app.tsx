@@ -108,6 +108,7 @@ import {
   shouldPreserveUserPortalAfterRetryableRevalidation,
   type UserPortalSessionRevalidation,
 } from "@/features/auth/model/user-portal-session-revalidation";
+import { canRetainAuthorizedCoachSession } from "@/features/auth/model/coach-portal-session-revalidation";
 import { CoachPortalBoundary } from "@/features/coach-portal/components/coach-portal";
 import { CalendarRemindersProductiveBoundary } from "@/features/calendar-reminders";
 import {
@@ -1426,6 +1427,7 @@ export function OrganizatechApp({
         }
 
         const requestedPortal = portalEventDecision === "authorize_coach" ? "coach" : "usuario";
+        if (retainAuthorizedCoachSession(event, requestedPortal, nextState)) return;
         const userPortalSessionRevalidation = resolveUserPortalSessionRevalidation({
           event,
           authorizationProof: userPortalAuthorizationProofRef.current,
@@ -1916,6 +1918,22 @@ export function OrganizatechApp({
     if (session) replaceUserPortalAuthorizationProof(null);
     coachPortalSessionRef.current = session;
     setCoachPortalSession(session);
+  }
+
+  function retainAuthorizedCoachSession(
+    event: string, requestedPortal: AuthAccountType, authState: SupabaseSessionState,
+  ): boolean {
+    if (!canRetainAuthorizedCoachSession({
+      event, requestedPortal,
+      authorizedUserId: coachPortalSessionRef.current?.userId,
+      sessionUserId: authState.session?.user.id,
+      authenticatedUserId: authState.user?.id,
+      interactiveAttempt: interactiveAuthAttemptRef.current,
+      logoutInFlight: logoutInFlightRef.current,
+      passwordRecoveryBlocked: multiportalAuth.isPasswordRecoveryPortalBlocked(),
+    })) return false;
+    applySessionState(authState);
+    return true;
   }
 
   function replaceUserPortalAuthorizationProof(proof: UserPortalAuthorizationProof | null) {
