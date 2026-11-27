@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { CoachAddClientSheet } from "@/features/coach-clients/components/coach-add-client-sheet";
 import { CoachClientDetailSheet } from "@/features/coach-clients/components/coach-client-detail-sheet";
 import { CoachClientsView } from "@/features/coach-clients/components/coach-clients";
+import { loadCoachLinkedStudentAvatar } from "../data/coach-linked-student-avatar";
 import { CoachChatComingSoonSheet } from "@/features/coach-dashboard/components/coach-chat-coming-soon-sheet";
 import { CoachDashboardView } from "@/features/coach-dashboard/components/coach-dashboard";
 import { CoachCommercialStudent } from "@/features/coach-dashboard/commercial/components/coach-commercial-student";
@@ -130,6 +131,8 @@ export function CoachWorkspaceBoundary({
           />
         ) : controller.screen === "clients" ? (
           <CoachClientsView
+            coachId={userId}
+            loadStudentAvatar={loadCoachLinkedStudentAvatar}
             view={controller.clientsView}
             actions={{
               onBack: controller.actions.openDashboard,
@@ -179,6 +182,7 @@ export function CoachWorkspaceBoundary({
       {!recordEpisodeId && controller.detail ? (
         <CoachClientDetailSheet
           coachId={userId}
+          loadStudentAvatar={loadCoachLinkedStudentAvatar}
           view={controller.detail}
           confirmation={controller.confirmation}
           backgroundRef={backgroundRef}

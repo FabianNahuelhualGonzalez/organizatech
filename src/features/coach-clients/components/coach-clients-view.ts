@@ -1,3 +1,5 @@
+import type { CoachLinkedStudentAvatarLoader } from "./coach-linked-student-avatar";
+
 /** Presentation only: the mapper supplies authorized rows, counts and labels. */
 export type CoachClientTab = "active" | "pending" | "inactive";
 
@@ -64,6 +66,8 @@ export interface CoachClientsActions {
 }
 
 export interface CoachClientsViewProps {
+  readonly coachId?: string;
+  readonly loadStudentAvatar?: CoachLinkedStudentAvatarLoader;
   readonly view: CoachClientsViewModel;
   readonly actions: CoachClientsActions;
 }

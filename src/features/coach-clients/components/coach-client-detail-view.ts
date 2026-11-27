@@ -87,6 +87,7 @@ export interface CoachClientDetailActions {
 
 export interface CoachClientDetailSheetProps extends CoachOverlayFocusProps {
   readonly coachId?: string;
+  readonly loadStudentAvatar?: import("./coach-linked-student-avatar").CoachLinkedStudentAvatarLoader;
   readonly view: CoachClientDetailView;
   readonly confirmation: CoachClientUnlinkConfirmationView | null;
   readonly actions: CoachClientDetailActions;

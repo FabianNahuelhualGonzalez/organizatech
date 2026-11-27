@@ -9,7 +9,7 @@ import { CoachClientsList } from "./coach-clients-list";
 import styles from "./coach-clients.module.css";
 
 /** Controlled view. No fetching, persistence or portfolio filtering. */
-export function CoachClientsView({ view, actions }: CoachClientsViewProps) {
+export function CoachClientsView({ view, actions, coachId, loadStudentAvatar }: CoachClientsViewProps) {
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   function clearSearch() {
@@ -23,7 +23,7 @@ export function CoachClientsView({ view, actions }: CoachClientsViewProps) {
       <CoachClientsSearch query={view.query} inputRef={inputRef} onQueryChange={actions.onQueryChange} />
       <CoachClientsTabs selectedTab={view.selectedTab} counts={view.counts} idPrefix={`${id}-tab`}
         panelId={`${id}-panel`} onSelectTab={actions.onSelectTab} />
-      <CoachClientsList content={view.content} panelId={`${id}-panel`} tabId={`${id}-tab-${view.selectedTab}`}
+      <CoachClientsList content={view.content} panelId={`${id}-panel`} tabId={`${id}-tab-${view.selectedTab}`} coachId={coachId} loadStudentAvatar={loadStudentAvatar}
         onOpenClient={actions.onOpenClient} onLoadMore={actions.onLoadMore} onLink={actions.onLink}
         onShowActive={actions.onSelectTab ? () => actions.onSelectTab?.("active") : undefined}
         onClearSearch={actions.onQueryChange ? clearSearch : undefined} />

@@ -1,13 +1,16 @@
 import { StatusMessage } from "@/ui/feedback/status-message";
 import type { CoachClientsContentView } from "./coach-clients-view";
 import { CoachClientRow } from "./coach-client-row";
+import type { CoachLinkedStudentAvatarLoader } from "./coach-linked-student-avatar";
 import { CoachClientsEmpty } from "./coach-clients-empty";
 import styles from "./coach-clients-list.module.css";
 
-export function CoachClientsList({ content, panelId, tabId, onOpenClient, onLoadMore, onLink, onShowActive, onClearSearch }: {
+export function CoachClientsList({ content, panelId, tabId, coachId, loadStudentAvatar, onOpenClient, onLoadMore, onLink, onShowActive, onClearSearch }: {
   readonly content: CoachClientsContentView;
   readonly panelId: string;
   readonly tabId: string;
+  readonly coachId?: string;
+  readonly loadStudentAvatar?: CoachLinkedStudentAvatarLoader;
   readonly onOpenClient?: (id: string) => void;
   readonly onLoadMore?: () => void;
   readonly onLink?: () => void;
@@ -19,7 +22,7 @@ export function CoachClientsList({ content, panelId, tabId, onOpenClient, onLoad
       {content.kind === "rows" ? <>
         {content.resultLabel !== null ? <StatusMessage className={styles.result}>{content.resultLabel}</StatusMessage> : null}
         <ul className={styles.rows}>
-          {content.rows.map((row) => <li key={row.id}><CoachClientRow view={row} onOpen={onOpenClient} /></li>)}
+          {content.rows.map((row) => <li key={row.id}><CoachClientRow view={row} coachId={coachId} loadStudentAvatar={loadStudentAvatar} onOpen={onOpenClient} /></li>)}
         </ul>
         {content.canLoadMore || content.isLoadingMore ? (
           <button className={styles.loadMore} type="button" disabled={content.isLoadingMore || !onLoadMore}
