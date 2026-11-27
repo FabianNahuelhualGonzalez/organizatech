@@ -72,9 +72,11 @@ export function CycleStartScreen({
   state,
   viewModel,
   onChooseOrigin,
+  studentName,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly viewModel: TrainingCycleBuilderInitialViewModel;
+  readonly studentName?: string;
   readonly onChooseOrigin: (
     origin: "duplicate" | "manual" | "suggested" | "resume",
     screen: "duplicate" | "setup",
@@ -89,15 +91,17 @@ export function CycleStartScreen({
   return (
     <div className={styles.screen}>
       <ScreenHeading
-        title="Vamos a armar tu próximo ciclo"
-        description="Un ciclo es tu plan de entrenamiento entre dos fechas. Elige por dónde empezar; todo se puede editar antes de activarlo."
+        title={studentName ? `Vamos a crear el ciclo de ${studentName}` : "Vamos a armar tu próximo ciclo"}
+        description={studentName
+          ? "Un ciclo es el plan de entrenamiento entre dos fechas. Elige por dónde empezar; todo se puede editar antes de activarlo."
+          : "Un ciclo es tu plan de entrenamiento entre dos fechas. Elige por dónde empezar; todo se puede editar antes de activarlo."}
       />
       <div className={styles.startOptions}>
         {hasDuplicateSource ? (
           <StartOption
             recommended
             time="~2 MIN"
-            title="Duplicar mi último ciclo"
+            title={studentName ? "Duplicar el último ciclo" : "Duplicar mi último ciclo"}
             description="Copia días, rutinas, ejercicios, series, cargas, técnicas y videos. Ajustas lo que quieras antes de activar."
             onClick={() => onChooseOrigin("duplicate", "duplicate")}
           >
@@ -111,8 +115,9 @@ export function CycleStartScreen({
         <StartOption
           recommended={!hasDuplicateSource}
           time="~15 MIN"
-          title="Crear mi propia rutina"
-          description="Eliges día por día desde el catálogo o escribes tus propios ejercicios."
+          title={studentName ? "Crear rutina para el alumno" : "Crear mi propia rutina"}
+          description={studentName ? "Elige días y ejercicios del catálogo, y configura series, cargas y videos."
+            : "Eliges día por día desde el catálogo o escribes tus propios ejercicios."}
           onClick={() => onChooseOrigin("manual", "setup")}
         />
         <StartOption
@@ -169,16 +174,20 @@ export function CycleDuplicateScreen({
   state,
   viewModel,
   dispatch,
+  studentName,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly viewModel: TrainingCycleBuilderInitialViewModel;
   readonly dispatch: BuilderDispatch;
+  readonly studentName?: string;
 }) {
   return (
     <div className={styles.screen}>
       <ScreenHeading
         title="Esto es lo que vamos a copiar"
-        description={`De tu ciclo ${TRAINING_CYCLE_GOAL_LABELS[state.draft.goal]} · ${formatCycleDate(state.draft.startDate)} – ${formatCycleDate(state.draft.endDate)}. Nada se activa todavía.`}
+        description={studentName
+          ? `Del ciclo de ${studentName} ${TRAINING_CYCLE_GOAL_LABELS[state.draft.goal]}. Nada se activa todavía.`
+          : `De tu ciclo ${TRAINING_CYCLE_GOAL_LABELS[state.draft.goal]} · ${formatCycleDate(state.draft.startDate)} – ${formatCycleDate(state.draft.endDate)}. Nada se activa todavía.`}
       />
       <section className={styles.summaryCard}>
         <small>SE COPIA COMPLETO</small>
@@ -202,7 +211,7 @@ export function CycleDuplicateScreen({
           );
         })}
       </section>
-      <section className={styles.compareCard}>
+      {!studentName ? <section className={styles.compareCard}>
         <button
           type="button"
           aria-expanded={state.comparisonOpen}
@@ -218,7 +227,7 @@ export function CycleDuplicateScreen({
             <ComparisonTable rows={viewModel.duplicateComparison} />
           </div>
         ) : null}
-      </section>
+      </section> : null}
       <PrimaryAction onClick={() => dispatch({ type: "navigate", screen: "setup" })}>
         Continuar con la copia
       </PrimaryAction>

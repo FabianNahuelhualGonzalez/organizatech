@@ -304,3 +304,32 @@ pero reintentar un mismo envío nunca restaura un permiso revocado.
 
 El worktree contiene ambos grupos sin commit. La escritura del índice Git está
 bloqueada en este entorno; el dueño prepara los commits selectivos y push.
+
+## Corrección de UX solicitada en QA — 2026-11-26
+
+El dueño rechazó el editor Coach anterior y pidió reutilizar la pantalla y el
+flujo productivos de creación de ciclos del Usuario. Esta instrucción sustituye
+la propuesta visual anterior para la edición de rutinas. En el detalle de la
+ficha, el Button `Crear o modificar rutina en un ciclo nuevo` abre el mismo
+constructor de ciclos. Si existe un ciclo activo, el Button primero muestra el
+modal compartido de confirmación. Al elegir `Sí` se finaliza el ciclo actual;
+sus sesiones/resultados permanecen en el historial y entonces se abre el
+constructor. Al elegir `No`, no cambia ningún ciclo. El Coach
+puede duplicar el ciclo anterior, crear desde el catálogo o generar una
+sugerencia; las pantallas de fechas, días, ejercicios, series, repeticiones,
+cargas, técnica, video de YouTube y revisión son las mismas del Usuario.
+
+Al activar, la pantalla de éxito dice `La rutina para [nombre y apellido] fue
+creada exitosamente` y ofrece `Ver ciclo completo`. Ese detalle muestra las
+rutinas, ejercicios, series, repeticiones, kg, descargas y enlace de YouTube.
+La creación de ejercicios personalizados sigue fuera de alcance en la cuenta
+delegada y el borrador Coach es temporal; la UI lo informa expresamente antes
+de que el Coach salga del flujo. La comparación con rendimiento real en la
+pantalla de duplicación se oculta para el Coach hasta disponer de una lectura
+delegada de las sesiones del alumno; no se presentan métricas inventadas.
+
+La migración `20261126210619_coach_student_cycle_replacement_close_v1` ya está
+aplicada en BBDD QA y agrega un cierre delegado versionado, auditable e
+idempotente de un ciclo con varias rutinas. El PR de la interfaz corregida sigue
+pendiente; `qa.organizatech.cl` aún muestra el editor anterior hasta desplegar
+esa nueva versión. Producción permanece sin cambios.
