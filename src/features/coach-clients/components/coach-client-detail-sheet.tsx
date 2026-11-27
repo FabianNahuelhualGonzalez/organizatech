@@ -7,10 +7,11 @@ import type { CoachClientDetailSheetProps } from "./coach-client-detail-view";
 import { CoachClientDetailContent } from "./coach-client-detail-content";
 import { CoachClientUnlinkConfirmation } from "./coach-client-unlink-confirmation";
 import { CoachStudentRoutineSummary } from "./coach-student-routine-summary";
+import { CoachLinkedStudentAvatar } from "./coach-linked-student-avatar";
 import shared from "@/ui/coach-overlays/coach-overlay.module.css";
 import styles from "./coach-client-detail-sheet.module.css";
 
-export function CoachClientDetailSheet({ view, confirmation, actions, commercialContent, coachId, backgroundRef, restoreFocusRef }: CoachClientDetailSheetProps) {
+export function CoachClientDetailSheet({ view, confirmation, actions, commercialContent, coachId, loadStudentAvatar, backgroundRef, restoreFocusRef }: CoachClientDetailSheetProps) {
   const id = useId();
   const detailBackgroundRef = useRef<HTMLDivElement>(null);
   const unlinkTriggerRef = useRef<HTMLElement>(null);
@@ -31,7 +32,9 @@ export function CoachClientDetailSheet({ view, confirmation, actions, commercial
             actions.onOpenUnlink?.(view.id, view.state);
           } : undefined}>{view.actionLabel}</button>}>
         <div className={styles.header}>
-          <span className={styles.avatar} data-state={view.state} aria-hidden="true">{view.state === "pending" ? <Mail size={19} /> : view.identity.initials ?? <UserRound size={20} />}</span>
+          {view.state === "active" && coachId && loadStudentAvatar
+            ? <CoachLinkedStudentAvatar key={view.id} coachId={coachId} episodeId={view.id} className={styles.avatar} loadAvatar={loadStudentAvatar}>{view.identity.initials ?? <UserRound size={20} />}</CoachLinkedStudentAvatar>
+            : <span className={styles.avatar} data-state={view.state} aria-hidden="true">{view.state === "pending" ? <Mail size={19} /> : view.identity.initials ?? <UserRound size={20} />}</span>}
           <div className={styles.heading}><h2 id={`${id}-title`}>{name}</h2>
             {view.state !== "pending" ? <p>{view.email}</p> : null}</div>
           <button className={styles.close} type="button" aria-label="Cerrar" disabled={disabled || !view.canClose || !actions.onCancelDetail}

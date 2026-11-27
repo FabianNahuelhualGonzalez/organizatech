@@ -1,12 +1,15 @@
 import { ChevronRight, Mail } from "lucide-react";
 import type { CoachClientRowView } from "./coach-clients-view";
+import { CoachLinkedStudentAvatar, type CoachLinkedStudentAvatarLoader } from "./coach-linked-student-avatar";
 import styles from "./coach-client-row.module.css";
 
 const STATE_LABELS = { active: "ACTIVO", pending: "PENDIENTE", inactive: "BAJA" } as const;
 
-export function CoachClientRow({ view, onOpen }: {
+export function CoachClientRow({ view, onOpen, coachId, loadStudentAvatar }: {
   readonly view: CoachClientRowView;
   readonly onOpen?: (id: string) => void;
+  readonly coachId?: string;
+  readonly loadStudentAvatar?: CoachLinkedStudentAvatarLoader;
 }) {
   // Pending identity is email only, even if untyped input carries extra fields.
   const title = view.state === "pending" ? view.email : (view.name ?? view.email);
@@ -16,7 +19,9 @@ export function CoachClientRow({ view, onOpen }: {
   return (
     <button className={styles.row} type="button" data-client={view.id} data-state={view.state}
       onClick={onOpen ? () => onOpen(view.id) : undefined} disabled={!onOpen}>
-      <span className={styles.avatar} aria-hidden="true">{initials ?? <Mail size={16} />}</span>
+      {view.state === "active" && coachId && loadStudentAvatar
+        ? <CoachLinkedStudentAvatar coachId={coachId} episodeId={view.id} className={styles.avatar} loadAvatar={loadStudentAvatar}>{initials ?? <Mail size={16} />}</CoachLinkedStudentAvatar>
+        : <span className={styles.avatar} aria-hidden="true">{initials ?? <Mail size={16} />}</span>}
       <span className={styles.content}>
         <span className={styles.top}>
           <span className={styles.name}>{title}</span>

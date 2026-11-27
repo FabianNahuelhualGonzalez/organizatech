@@ -12,6 +12,7 @@ requireComponent.extensions[".css"] = (module, filename) => {
   module.exports = Object.fromEntries([...readFileSync(filename, "utf8").matchAll(/\.([a-zA-Z][\w-]*)/g)].map((match) => [match[1], match[1]]));
 };
 const { CoachClientDetailSheet } = requireComponent("./coach-client-detail-sheet.tsx") as typeof import("./coach-client-detail-sheet");
+const { CoachLinkedStudentAvatar } = requireComponent("./coach-linked-student-avatar.tsx") as typeof import("./coach-linked-student-avatar");
 const { CoachClientDetailContent } = requireComponent("./coach-client-detail-content.tsx") as typeof import("./coach-client-detail-content");
 const { CoachClientCodeCard } = requireComponent("./coach-client-code-card.tsx") as typeof import("./coach-client-code-card");
 const { CoachClientCodeButton } = requireComponent("./coach-client-code-button.tsx") as typeof import("./coach-client-code-button");
@@ -56,6 +57,15 @@ function inactive(): Extract<CoachClientDetailView, { state: "inactive" }> {
     statusDescription: "Ya no entrena contigo", actionLabel: "Volver a vincular", canAct: true, message: null,
     facts: { linkedOnLabel: "Vínculo histórico provisto", unlinkedOnLabel: "Baja provista" }, historyNote: "Nota histórica autorizada" };
 }
+
+test("detail header uses the avatar only for the active linked episode", () => {
+  for (const view of [active(), pending(), inactive()]) {
+    const { tree } = capture(CoachClientDetailSheet, { ...focus, coachId: "coach-id", loadStudentAvatar: async () => null, view, confirmation: null, actions: {} });
+    const avatars = elements(tree).filter((element) => element.type === CoachLinkedStudentAvatar);
+    assert.equal(avatars.length, view.state === "active" ? 1 : 0);
+    if (view.state === "active") assert.equal(avatars[0].props.episodeId, view.id);
+  }
+});
 function confirmation(state: "active" | "pending" = "active"): CoachClientUnlinkConfirmationView {
   const base = { id: `client-${state}`, isOpen: true, isBusy: false, canConfirm: true, message: null };
   return state === "active" ? { ...base, state, subjectLabel: "Nombre consentido" } : { ...base, state };

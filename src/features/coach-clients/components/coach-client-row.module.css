@@ -17,6 +17,7 @@
 }
 .row[data-state="pending"] { border-color: rgba(251, 191, 36, .3); background: rgba(251, 191, 36, .04); }
 .avatar { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 50%; background: rgba(255, 255, 255, .08); color: rgba(255, 255, 255, .7); font-size: 12px; font-weight: 700; }
+.avatar img { display: block; width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
 .row[data-state="inactive"] .avatar { background: rgba(255, 255, 255, .05); color: rgba(255, 255, 255, .55); }
 .content { flex: 1; min-width: 0; }
 .top { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }

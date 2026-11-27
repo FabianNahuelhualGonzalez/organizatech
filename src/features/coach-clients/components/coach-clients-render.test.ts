@@ -18,6 +18,7 @@ const { CoachClientsHeader } = requireComponent("./coach-clients-header.tsx") as
 const { CoachClientsSearch } = requireComponent("./coach-clients-search.tsx") as typeof import("./coach-clients-search");
 const { CoachClientsTabs } = requireComponent("./coach-clients-tabs.tsx") as typeof import("./coach-clients-tabs");
 const { CoachClientRow } = requireComponent("./coach-client-row.tsx") as typeof import("./coach-client-row");
+const { CoachLinkedStudentAvatar } = requireComponent("./coach-linked-student-avatar.tsx") as typeof import("./coach-linked-student-avatar");
 const { CoachClientsEmpty } = requireComponent("./coach-clients-empty.tsx") as typeof import("./coach-clients-empty");
 const { CoachClientsList } = requireComponent("./coach-clients-list.tsx") as typeof import("./coach-clients-list");
 if (previousCssLoader) requireComponent.extensions[".css"] = previousCssLoader;
@@ -51,6 +52,18 @@ const active: CoachClientRowView = { id: "accepted-one", state: "active", name: 
 const pending: CoachClientRowView = { id: "invitation-one", state: "pending", email: "invited@example.test", metaLabel: "Enviado hace 1 día" };
 const inactive: CoachClientRowView = { id: "former-one", state: "inactive", name: null, initials: null,
   email: "former@example.test", metaLabel: "Hasta fecha civil provista" };
+
+test("only active rows request a linked student avatar for their own episode", () => {
+  for (const row of [active, pending, inactive]) {
+    const { tree } = capture(CoachClientRow, { view: row, coachId: "coach-id", loadStudentAvatar: async () => null });
+    const avatars = elements(tree).filter((element) => element.type === CoachLinkedStudentAvatar);
+    assert.equal(avatars.length, row.state === "active" ? 1 : 0);
+    if (row.state === "active") {
+      assert.equal(avatars[0].props.episodeId, row.id);
+      assert.equal(avatars[0].props.coachId, "coach-id");
+    }
+  }
+});
 function clients(): CoachClientsViewModel {
   return { selectedTab: "active", query: "", counts, content: {
     kind: "rows", rows: [active], resultLabel: "1 cliente", canLoadMore: false, isLoadingMore: false,
