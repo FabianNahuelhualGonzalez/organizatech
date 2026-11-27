@@ -178,6 +178,7 @@ export function CoachWorkspaceBoundary({
       />
       {!recordEpisodeId && controller.detail ? (
         <CoachClientDetailSheet
+          coachId={userId}
           view={controller.detail}
           confirmation={controller.confirmation}
           backgroundRef={backgroundRef}

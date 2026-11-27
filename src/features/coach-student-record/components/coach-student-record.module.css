@@ -4,9 +4,9 @@
 .header h2, .section h2 { margin: 0 0 8px; font-size: 18px; }
 .header p, .section p { color: #b9c9da; }
 .section { margin-top: 16px; }
-.section ul { display: grid; gap: 12px; padding-left: 20px; }
+.section ul:not([class]) { display: grid; gap: 12px; padding-left: 20px; }
 .section li { line-height: 1.5; }
-.section button, .alert button, .viewer button, .detail button {
+.section .action, .alert button, .viewer button, .detail button {
   min-height: 44px; margin-left: 8px; border: 1px solid #6e92bd;
   border-radius: 10px; padding: 8px 12px; color: #f5f7fb;
   background: #183451; font: inherit; cursor: pointer;

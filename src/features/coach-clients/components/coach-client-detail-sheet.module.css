@@ -1,4 +1,5 @@
-.detailLayer { position: fixed; inset: 0; z-index: 20; min-width: 0; overflow: hidden; }
+.detailLayer { position: fixed; inset: 0; z-index: 100; min-width: 0; overflow: hidden; }
+.confirmationLayer { position: fixed; inset: 0; z-index: 110; }
 .header { flex: none; display: flex; align-items: center; gap: 12px; padding: 13px 16px 14px; border-bottom: 1px solid rgba(255, 255, 255, .12); }
 .avatar { flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: rgba(255, 255, 255, .08); font-size: 15px; font-weight: 700; }
 .avatar[data-state="inactive"] { background: rgba(255, 255, 255, .04); color: rgba(255, 255, 255, .55); }
@@ -26,6 +27,9 @@
 .cycleCopy { flex: 1; min-width: 0; }
 .cycleTitle { display: block; font-size: 12.5px; font-weight: 700; }
 .cycleLabel { display: block; margin-top: 3px; font-size: 10px; color: rgba(255, 255, 255, .55); overflow-wrap: anywhere; }
+.routineSummary { display: grid; gap: 7px; margin: 0 0 16px; padding: 14px; border: 1px solid rgba(143, 178, 255, .26); border-radius: 13px; color: #fff; font-size: 12px; }
+.routineSummary > span { color: rgba(255, 255, 255, .67); line-height: 1.4; }
+.routineSummary > button { min-height: 44px; padding: 8px 12px; margin-top: 4px; border: 1px solid rgba(143, 178, 255, .65); border-radius: 9px; color: #fff; background: #183451; font: inherit; cursor: pointer; }
 .note { margin: 0 0 14px; padding: 14px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 13px; color: rgba(255, 255, 255, .6); font-size: 10.5px; line-height: 1.55; }
 .danger { width: 100%; min-width: 44px; min-height: 50px; padding: 8px 12px; border: 1px solid rgba(248, 113, 113, .4); border-radius: 12px; background: transparent; color: #f87171; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
 .cycle:disabled, .close:disabled, .danger:disabled { cursor: default; }

@@ -80,6 +80,7 @@ test("pending mobile actions stack full-width and detail scroll remains viewport
   const detailCss = readFileSync("src/features/coach-clients/components/coach-client-detail-sheet.module.css", "utf8");
   assert.match(codeCss, /@container \(max-width: 430px\)[\s\S]*grid-template-columns: minmax\(0, 1fr\)[\s\S]*width: 100%;[\s\S]*white-space: normal/);
   assert.match(detailCss, /\.detailLayer \{[^}]*position: fixed;[^}]*overflow: hidden;/);
+  assert.match(detailCss, /\.detailLayer \{[^}]*z-index: 100;/);
   assert.match(detailCss, /\.body \{[^}]*overflow-x: hidden;[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/);
 });
 
