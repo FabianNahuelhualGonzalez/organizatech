@@ -236,19 +236,30 @@ export function CycleSuccessScreen({
   viewModel,
   onStartTraining,
   onExit,
+  coachStudent,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly viewModel: TrainingCycleBuilderInitialViewModel;
   readonly onStartTraining: () => void;
   readonly onExit: () => void;
+  readonly coachStudent?: { readonly name: string; readonly closedPreviousCycle: boolean;
+    readonly onViewCycle: (cycleId: string) => void };
 }) {
   const metrics = getTrainingCycleMetrics(state.draft);
   return (
     <div className={`${styles.screen} ${styles.successScreen}`}>
       <div className={styles.successMark}><Check size={31} aria-hidden="true" /></div>
-      <ScreenHeading title="Tu ciclo está activo" description="Ya puedes entrenar. Todo sigue siendo editable mientras el ciclo esté en curso." />
+      <ScreenHeading title={coachStudent
+        ? `La rutina para ${coachStudent.name} fue creada exitosamente`
+        : "Tu ciclo está activo"} description={coachStudent
+        ? "Revisa el ciclo completo y comprueba ejercicios, series, repeticiones, kilos y enlaces de YouTube."
+        : "Ya puedes entrenar. Todo sigue siendo editable mientras el ciclo esté en curso."} />
       <section className={styles.successSummary}>
-        <div><small>TU PRÓXIMO ENTRENAMIENTO</small><strong>{viewModel.nextSessionLabel}</strong><span>{viewModel.nextSessionDetail}</span></div>
+        <div><small>{coachStudent ? "PRIMERA RUTINA DEL ALUMNO" : "TU PRÓXIMO ENTRENAMIENTO"}</small>
+          <strong>{coachStudent ? state.draft.routines[state.draft.selectedDays[0]]?.name ?? "Rutina"
+            : viewModel.nextSessionLabel}</strong>
+          <span>{coachStudent ? `${state.draft.routines[state.draft.selectedDays[0]]?.exercises.length ?? 0} ejercicios`
+            : viewModel.nextSessionDetail}</span></div>
         <dl>
           <div><dt>INICIO</dt><dd>{formatCycleDate(state.draft.startDate)}</dd></div>
           <div><dt>TÉRMINO</dt><dd>{formatCycleDate(state.draft.endDate)}</dd></div>
@@ -256,8 +267,12 @@ export function CycleSuccessScreen({
           <div><dt>EJERCICIOS</dt><dd>{metrics.exercises}</dd></div>
         </dl>
       </section>
-      <PrimaryAction onClick={onExit}>{SUCCESS_HOME_ACTION_LABEL}</PrimaryAction>
-      <SecondaryAction onClick={onStartTraining}>Comenzar a entrenar</SecondaryAction>
+      {coachStudent ? <PrimaryAction onClick={() => {
+        if (state.activeCycleId) coachStudent.onViewCycle(state.activeCycleId);
+      }}>Ver ciclo completo</PrimaryAction> : <>
+        <PrimaryAction onClick={onExit}>{SUCCESS_HOME_ACTION_LABEL}</PrimaryAction>
+        <SecondaryAction onClick={onStartTraining}>Comenzar a entrenar</SecondaryAction>
+      </>}
     </div>
   );
 }

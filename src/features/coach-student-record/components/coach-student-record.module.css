@@ -17,21 +17,31 @@
 .viewer { position: fixed; inset: 0; z-index: 100; display: grid; place-content: center;
   gap: 16px; padding: 20px; background: #07101aef; }
 .viewer img { display: block; max-width: min(92vw, 800px); max-height: 75vh; object-fit: contain; }
-.editor { display: grid; gap: 12px; margin: 12px 0; }
-.editor > button, .editor button, .routineAction button {
-  min-height: 44px; border: 1px solid #6e92bd; border-radius: 10px; padding: 8px 12px;
-  color: #f5f7fb; background: #183451; font: inherit; cursor: pointer;
-}
-.editor button:disabled { opacity: .55; cursor: not-allowed; }
-.editor label { display: grid; gap: 5px; color: #d5e0ec; font-size: 13px; }
-.editor input, .editor select { min-height: 42px; max-width: 100%; border: 1px solid #6e92bd;
-  border-radius: 8px; padding: 6px 10px; color: #fff; background: #07101a; font: inherit; }
-.routineAction { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-  border-top: 1px solid #294057; padding-top: 10px; }
-.routineAction > span { min-width: 120px; }
-.routineAction label { max-width: 115px; }
-.setAction { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-  width: 100%; border-left: 2px solid #446786; padding: 8px 10px; }
-.setAction label { max-width: 115px; }
-.inlineCheck { display: flex !important; align-items: center; gap: 6px; min-height: 44px; }
-.inlineCheck input { min-height: 16px; width: 16px; }
+.cycleDetail { display: grid; gap: 18px; margin-top: 20px; padding: 18px;
+  border: 1px solid #3b5d7c; border-radius: 18px; background: #0b1b2b; }
+.cycleDetail > header { display: flex; flex-wrap: wrap; align-items: flex-start;
+  justify-content: space-between; gap: 12px; }
+.cycleDetail > header span { color: #8dbce8; font-size: 11px; font-weight: 800; letter-spacing: .09em; }
+.cycleDetail h3 { margin: 5px 0; font-size: 20px; }
+.cycleDetail p { margin: 0; color: #b9c9da; }
+.cycleDays { display: grid; gap: 16px; }
+.cycleDay { display: grid; gap: 12px; padding: 16px; border: 1px solid #294057;
+  border-radius: 14px; background: #10283c; }
+.cycleDay h4 { display: flex; flex-wrap: wrap; justify-content: space-between;
+  gap: 8px; margin: 0; font-size: 16px; }
+.cycleDay h4 span { color: #9abbd8; font-size: 13px; font-weight: 500; }
+.cycleExercise { padding: 14px; border: 1px solid #31516d; border-radius: 12px;
+  background: #0a1d2e; }
+.exerciseHeading { display: flex; flex-wrap: wrap; align-items: flex-start;
+  justify-content: space-between; gap: 10px; }
+.exerciseHeading > div { display: grid; gap: 4px; }
+.exerciseHeading small { color: #9abbd8; }
+.exerciseHeading a { color: #9bd1ff; min-height: 44px; display: inline-flex; align-items: center; }
+.cycleExercise ol { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+.cycleExercise li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  padding: 9px 11px; border-radius: 8px; background: #18334a; }
+.cycleExercise li > span { color: #aac6db; min-width: 70px; }
+.cycleExercise li small { color: #b9c9da; }
+.drop { flex-basis: 100%; padding-left: 12px; border-left: 2px solid #6e92bd;
+  color: #b9c9da; font-size: 13px; }
+@media (min-width: 760px) { .cycleDays { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

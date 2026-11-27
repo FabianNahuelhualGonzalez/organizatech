@@ -5,12 +5,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CoachEvaluationDetail } from "@/features/evaluations/components/coach-evaluations";
 import { listOwnCoachStudentEvaluations } from "@/features/evaluations/data/evaluations-repository";
 import type { CoachEvaluationAssignment } from "@/features/evaluations/model/evaluation-types";
-import { getOwnCoachStudentTrainingCycle, listOwnCoachStudentTrainingCycles } from
+import { closeOwnCoachStudentCycleForReplacement, getOwnCoachStudentTrainingCycle,
+  listOwnCoachStudentTrainingCycles } from
   "@/features/training-cycle-builder/data/coach-student-training-gateway";
+import { TRAINING_CYCLE_DAY_LABELS, TRAINING_CYCLE_TECHNIQUE_LABELS } from
+  "@/features/training-cycle-builder/components/training-cycle-builder-contracts";
 import type { TrainingCycleListCursor, TrainingCycleListItem, TrainingCycleRpcSnapshot } from
   "@/features/training-cycle-builder/data/training-cycle-rpc-types";
 import { AppBackButton } from "@/ui/navigation/app-back-button";
-import { CoachRoutineEditor } from "./coach-routine-editor";
+import { ConfirmDialog } from "@/ui/modals/confirm-dialog";
+import { CoachCycleBuilder } from "./coach-cycle-builder";
 import { getCoachStudentRecordGateway, type CoachStudentRecordSubject,
   type SharedStudentDocument, type SharedStudentPhoto } from "../data/coach-student-record-gateway";
 
@@ -43,6 +47,14 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
   const [cycle, setCycle] = useState<TrainingCycleRpcSnapshot | null>(null);
   const [activeCycle, setActiveCycle] = useState<TrainingCycleRpcSnapshot | null>(null);
   const [evaluation, setEvaluation] = useState<CoachEvaluationAssignment | null>(null);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [confirmNewCycle, setConfirmNewCycle] = useState(false);
+  const [closingCycle, setClosingCycle] = useState(false);
+  const [closeError, setCloseError] = useState("");
+  const [previousCycle, setPreviousCycle] = useState<TrainingCycleRpcSnapshot | null>(null);
+  const closeRequestRef = useRef<string | null>(null);
+  const builderOpenRef = useRef(false);
+  builderOpenRef.current = builderOpen || confirmNewCycle;
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const photoUrlRef = useRef<string | null>(null);
 
@@ -81,7 +93,7 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
   useEffect(() => {
     currentRef.current = true;
     void load();
-    const onFocus = () => { void load(); };
+    const onFocus = () => { if (!builderOpenRef.current) void load(); };
     window.addEventListener("focus", onFocus);
     return () => { currentRef.current = false;
       window.removeEventListener("focus", onFocus);
@@ -154,6 +166,34 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
     photoUrlRef.current = null; setPhotoUrl(null);
   }
 
+  async function confirmCycleReplacement() {
+    if (!activeCycle || closingCycle) return;
+    setClosingCycle(true); setCloseError("");
+    closeRequestRef.current ??= crypto.randomUUID();
+    try {
+      await closeOwnCoachStudentCycleForReplacement({ expectedCoachId: coachId,
+        episodeId, requestId: closeRequestRef.current,
+        cycleId: activeCycle.cycleId, expectedVersion: activeCycle.version });
+      setPreviousCycle(activeCycle);
+      setConfirmNewCycle(false);
+      loadGenerationRef.current += 1;
+      setBuilderOpen(true);
+      closeRequestRef.current = null;
+    } catch {
+      setCloseError("No pudimos confirmar el cierre. Reintenta o vuelve a cargar la ficha para comprobar el estado actual.");
+    } finally { setClosingCycle(false); }
+  }
+
+  if (builderOpen && data) return <CoachCycleBuilder coachId={coachId}
+    episodeId={episodeId} studentName={data.subject.studentName}
+    previousCycle={previousCycle} onExit={() => { setBuilderOpen(false); void load(); }}
+    onViewCycle={(cycleId) => {
+      setBuilderOpen(false);
+      void load().then(() => getOwnCoachStudentTrainingCycle(coachId, episodeId, cycleId))
+        .then((selected) => { if (currentRef.current) setCycle(selected); })
+        .catch(() => setError("El ciclo fue guardado. Actualiza la ficha para revisar sus datos."));
+    }} />;
+
   return <main className={styles.record}>
     <AppBackButton onBack={onBack} label="Volver al alumno" />
     <h1>Ficha del alumno</h1>
@@ -163,9 +203,14 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
       <header className={styles.header}><h2>{data.subject.studentName}</h2>
         <p>{data.subject.studentEmail} · Vínculo activo</p></header>
       <section className={styles.section} aria-labelledby="record-training"><h2 id="record-training">Entrenamiento</h2>
-        <CoachRoutineEditor coachId={coachId} episodeId={episodeId} cycle={cycle}
-          hasActiveCycle={data.cycles.some((item) => item.status === "active" || item.status === "expiring")}
-          onSaved={load} />
+        <button type="button" onClick={() => {
+          if (activeCycle) { setCloseError(""); setConfirmNewCycle(true); }
+          else { setPreviousCycle(null); loadGenerationRef.current += 1; setBuilderOpen(true); }
+        }}>
+          {activeCycle ? "Crear o modificar rutina en un ciclo nuevo" : "Crear ciclo y rutina para el alumno"}
+        </button>
+        {activeCycle ? <p>Antes de crear el nuevo ciclo confirmaremos el cierre del actual.
+          Sus resultados quedarán en el historial.</p> : null}
         {activeCycle && cycle?.cycleId !== activeCycle.cycleId ? <button type="button"
           onClick={() => setCycle(activeCycle)}>Volver al ciclo vigente</button> : null}
         {data.cycles.length === 0 ? <p>Aún no tiene ciclos de entrenamiento.</p> :
@@ -174,14 +219,43 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
               Ciclo {item.cycleNumber} · {item.status} · {item.startDate} a {item.endDate}
             </button></li>)}</ul>}
         {data.cycleCursor ? <button type="button" disabled={moreBusy} onClick={() => void loadMore("cycles")}>Ver más ciclos</button> : null}
-        {cycle ? <div className={styles.detail}><h3>Ciclo {cycle.cycleNumber} · versión {cycle.version}</h3>
-          <ul>{cycle.plan.days.map((day) => <li key={day.snapshotId}>
-            <strong>{day.name}</strong> · {day.day}
-            <ul>{day.exercises.map((exercise) => <li key={exercise.snapshotId}>{exercise.name}</li>)}</ul>
-          </li>)}</ul>
-          <button type="button" onClick={() => setCycle(null)}>Cerrar detalle</button>
+        {cycle ? <div className={styles.cycleDetail} aria-label="Ciclo completo del alumno">
+          <header><div><span>CICLO {cycle.cycleNumber} · VERSIÓN {cycle.version}</span>
+            <h3>Plan de entrenamiento</h3><p>{cycle.startDate} → {cycle.endDate}</p></div>
+            <button type="button" onClick={() => setCycle(null)}>Cerrar detalle</button></header>
+          <div className={styles.cycleDays}>{cycle.plan.days.map((day) =>
+            <section className={styles.cycleDay} key={day.snapshotId}>
+              <h4>{day.name} <span>{TRAINING_CYCLE_DAY_LABELS[day.day]}</span></h4>
+              {day.exercises.map((exercise) => <article className={styles.cycleExercise}
+                key={exercise.snapshotId}>
+                <div className={styles.exerciseHeading}><div><strong>{exercise.name}</strong>
+                  <small>{TRAINING_CYCLE_TECHNIQUE_LABELS[exercise.technique]}</small></div>
+                  {exercise.videoUrl ? <a href={exercise.videoUrl} target="_blank"
+                    rel="noopener noreferrer">Ver video de YouTube</a> : null}</div>
+                <ol>{exercise.sets.map((set) => <li key={set.snapshotId}>
+                  <span>Serie {set.order + 1}</span><strong>{set.targetReps} rep · {set.targetKg} kg</strong>
+                  {set.toFailure ? <small>Al fallo</small> : null}
+                  {set.drops.map((drop) => <div className={styles.drop} key={drop.snapshotId}>
+                    Descarga {drop.order + 1}: {drop.reps} rep · {drop.kg} kg
+                  </div>)}
+                </li>)}</ol>
+              </article>)}
+            </section>)}</div>
         </div> : null}
       </section>
+      {confirmNewCycle && activeCycle ? <ConfirmDialog
+        ariaLabel="Confirmar nuevo ciclo de entrenamiento"
+        title="¿Estás seguro de que quieres crear un ciclo de entrenamiento nuevo?"
+        cancelLabel="No" confirmLabel="Sí" confirmBusyLabel="Finalizando…"
+        cancelVariant="primary" confirmVariant="danger"
+        onCancel={() => { setConfirmNewCycle(false); closeRequestRef.current = null;
+          if (closeError) void load(); }}
+        onConfirm={() => void confirmCycleReplacement()} isBusy={closingCycle}>
+        <p>El ciclo actual de {data.subject.studentName} se dará por finalizado.
+          Sus sesiones y resultados quedarán guardados en el historial.
+          Después podrás crear la nueva rutina.</p>
+        {closeError ? <p role="alert">{closeError}</p> : null}
+      </ConfirmDialog> : null}
       <section className={styles.section} aria-labelledby="record-evaluations"><h2 id="record-evaluations">Evaluaciones y anamnesis</h2>
         <button type="button" onClick={onSendEvaluation}>Enviar evaluación</button>
         {data.evaluations.length === 0 ? <p>Aún no hay evaluaciones para este vínculo.</p> :

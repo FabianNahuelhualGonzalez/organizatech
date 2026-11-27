@@ -96,6 +96,7 @@ export function TrainingCycleBuilder({
   chromeMode = "standalone",
   onExit,
   onStartTraining,
+  coachStudent,
 }: TrainingCycleBuilderProps) {
   if (!hasTrainingCycleViewModel(initialViewModel) || !hasTrainingCycleGateway(gateway)) {
     return (
@@ -122,6 +123,7 @@ export function TrainingCycleBuilder({
       chromeMode={chromeMode}
       onExit={onExit}
       onStartTraining={onStartTraining}
+      coachStudent={coachStudent}
     />
   );
 }
@@ -133,6 +135,7 @@ function ConnectedTrainingCycleBuilder({
   chromeMode,
   onExit,
   onStartTraining,
+  coachStudent,
 }: {
   readonly initialViewModel: TrainingCycleBuilderInitialViewModel;
   readonly gateway: TrainingCycleBuilderGateway;
@@ -140,6 +143,7 @@ function ConnectedTrainingCycleBuilder({
   readonly chromeMode: "standalone" | "embedded";
   readonly onExit: () => void;
   readonly onStartTraining?: TrainingCycleStartTrainingHandler;
+  readonly coachStudent?: TrainingCycleBuilderProps["coachStudent"];
 }) {
   const controller = useTrainingCycleBuilderController({ initialViewModel: viewModel, gateway });
   const { state, dispatch } = controller;
@@ -155,6 +159,7 @@ function ConnectedTrainingCycleBuilder({
 
   function handleBack() {
     if (state.screen === "success") {
+      if (coachStudent) { onExit(); return; }
       dispatch({ type: "show_active" });
       return;
     }
@@ -189,12 +194,14 @@ function ConnectedTrainingCycleBuilder({
         <CycleStartScreen
           state={state}
           viewModel={viewModel}
+          studentName={coachStudent?.name}
           onChooseOrigin={(origin, screen) => void controller.requestNewCycle(origin, screen)}
         />
       );
       break;
     case "duplicate":
-      screenContent = <CycleDuplicateScreen state={state} viewModel={viewModel} dispatch={dispatch} />;
+      screenContent = <CycleDuplicateScreen state={state} viewModel={viewModel}
+        dispatch={dispatch} studentName={coachStudent?.name} />;
       break;
     case "setup":
       screenContent = (
@@ -209,7 +216,8 @@ function ConnectedTrainingCycleBuilder({
       screenContent = <CycleRoutineScreen state={state} dispatch={dispatch} />;
       break;
     case "catalog":
-      screenContent = <CycleCatalogScreen state={state} viewModel={viewModel} dispatch={dispatch} />;
+      screenContent = <CycleCatalogScreen state={state} viewModel={viewModel} dispatch={dispatch}
+        allowCustom={!coachStudent} />;
       break;
     case "custom":
       screenContent = (
@@ -244,6 +252,7 @@ function ConnectedTrainingCycleBuilder({
           viewModel={viewModel}
           onStartTraining={() => void handleStartTraining()}
           onExit={onExit}
+          coachStudent={coachStudent}
         />
       );
       break;
@@ -293,12 +302,15 @@ function ConnectedTrainingCycleBuilder({
           onBack={handleBack}
           label={state.screen === "active" ? "Volver al menú principal" : undefined}
         />
-        {state.workflow === "draft" ? (
+        {state.workflow === "draft" && !coachStudent ? (
           <SaveChip state={state.saveState} savedAtLabel={state.savedAtLabel} />
         ) : null}
       </div>
       <StepBar screen={state.screen} />
       <div className={styles.bannerStack}>
+        {coachStudent && state.workflow === "draft" && (state.screen === "start" || state.screen === "review") ? <StatusBanner tone="warning"
+          title="Borrador temporal"
+          body={`${coachStudent.closedPreviousCycle ? "El ciclo anterior ya se finalizó. " : ""}El nuevo ciclo se guardará para el alumno al finalizar este flujo. Si sales antes, estos cambios no quedarán registrados.`} /> : null}
         {state.activeCycleCloseState === "error" && !state.pendingNewCycleIntent ? (
           <StatusBanner
             tone="error"
@@ -340,7 +352,8 @@ function ConnectedTrainingCycleBuilder({
       {state.pendingNewCycleIntent && state.activeCycleCloseId ? (
         <ConfirmDialog
           ariaLabel="Confirmar nuevo ciclo de entrenamiento"
-          title="¿Estás seguro de que quieres crear uno nuevo?"
+          title={coachStudent ? "¿Estás seguro de que quieres crear un ciclo de entrenamiento nuevo?"
+            : "¿Estás seguro de que quieres crear uno nuevo?"}
           cancelLabel="No"
           cancelVariant="primary"
           onCancel={() => dispatch({ type: "cancel_active_cycle_close" })}
@@ -350,7 +363,9 @@ function ConnectedTrainingCycleBuilder({
           onConfirm={() => void controller.confirmActiveCycleClose()}
           isBusy={state.activeCycleCloseState === "closing"}
         >
-          <p>Cerraremos el ciclo que tienes actualmente en curso.</p>
+          <p>{coachStudent
+            ? `Finalizaremos el ciclo actual de ${coachStudent.name}. Sus sesiones y resultados permanecerán en el historial.`
+            : "Cerraremos el ciclo que tienes actualmente en curso."}</p>
           {state.activeCycleCloseState === "error" ? (
             <StatusBanner
               tone="error"

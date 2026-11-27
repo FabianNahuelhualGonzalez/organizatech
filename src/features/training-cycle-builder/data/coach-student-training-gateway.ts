@@ -12,7 +12,8 @@ type CoachTrainingRpc = "list_own_coach_student_training_cycles"
   | "get_own_coach_student_training_cycle_version"
   | "edit_own_coach_student_active_training_cycle"
   | "create_own_coach_student_training_cycle"
-  | "close_own_coach_student_last_routine";
+  | "close_own_coach_student_last_routine"
+  | "close_own_coach_student_cycle_for_replacement";
 
 interface CoachTrainingClient {
   readonly auth: {
@@ -185,6 +186,30 @@ export async function closeOwnCoachStudentLastRoutine(input: {
   }
   const result = parseAcceptedOperation(await call(input.expectedCoachId,
     "close_own_coach_student_last_routine", {
+      p_episode_id: episode(input.episodeId), p_request_id: input.requestId,
+      p_cycle_id: input.cycleId, p_expected_version: input.expectedVersion,
+    }));
+  if (result.operationKind !== "cycle_close" || result.aggregateId !== input.cycleId
+    || result.requestId !== input.requestId || result.resultVersion !== null) {
+    throw new CoachStudentTrainingReadError("unavailable");
+  }
+  return result;
+}
+
+export async function closeOwnCoachStudentCycleForReplacement(input: {
+  readonly expectedCoachId: string;
+  readonly episodeId: string;
+  readonly requestId: string;
+  readonly cycleId: string;
+  readonly expectedVersion: number;
+}) {
+  if (!isUuid(input.requestId) || !isUuid(input.cycleId)
+    || !Number.isInteger(input.expectedVersion)
+    || input.expectedVersion < 1 || input.expectedVersion > 256) {
+    throw new CoachStudentTrainingReadError("invalid");
+  }
+  const result = parseAcceptedOperation(await call(input.expectedCoachId,
+    "close_own_coach_student_cycle_for_replacement", {
       p_episode_id: episode(input.episodeId), p_request_id: input.requestId,
       p_cycle_id: input.cycleId, p_expected_version: input.expectedVersion,
     }));

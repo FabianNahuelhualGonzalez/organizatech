@@ -25,10 +25,12 @@ export function CycleCatalogScreen({
   state,
   viewModel,
   dispatch,
+  allowCustom = true,
 }: {
   readonly state: TrainingCycleBuilderState;
   readonly viewModel: TrainingCycleBuilderInitialViewModel;
   readonly dispatch: Dispatch<TrainingCycleBuilderAction>;
+  readonly allowCustom?: boolean;
 }) {
   const results = filterCycleCatalog(viewModel.catalog, state.catalogQuery, state.catalogScope);
   const emptyState = getCycleCatalogEmptyState(state.catalogQuery, state.catalogScope);
@@ -110,11 +112,11 @@ export function CycleCatalogScreen({
                 Ver ejercicios
               </SecondaryAction>
             ) : null}
-            <SecondaryAction onClick={createCustomExercise}>{emptyState.createLabel}</SecondaryAction>
+            {allowCustom ? <SecondaryAction onClick={createCustomExercise}>{emptyState.createLabel}</SecondaryAction> : null}
           </div>
         </div>
       )}
-      {results.length ? (
+      {results.length && allowCustom ? (
         <SecondaryAction onClick={createCustomExercise}>
           <Plus size={15} aria-hidden="true" />Crear un ejercicio personalizado
         </SecondaryAction>

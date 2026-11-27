@@ -337,6 +337,9 @@ export interface TrainingCycleBuilderProps {
   readonly chromeMode?: TrainingCycleBuilderChromeMode;
   readonly onExit: () => void;
   readonly onStartTraining?: TrainingCycleStartTrainingHandler;
+  /** Reuses the productive creation flow for a linked student's Coach. */
+  readonly coachStudent?: { readonly name: string; readonly closedPreviousCycle: boolean;
+    readonly onViewCycle: (cycleId: string) => void };
 }
 
 export const TRAINING_CYCLE_DAY_LABELS: Record<TrainingCycleWeekDay, string> = {

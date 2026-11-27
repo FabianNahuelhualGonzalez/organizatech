@@ -102,6 +102,7 @@ try {
   `);
   await client.query(migration("20261126200911_coach_student_training_edit_v1.sql"));
   await client.query(migration("20261126200922_coach_student_training_cycle_edges_v1.sql"));
+  await client.query(migration("20261126210619_coach_student_cycle_replacement_close_v1.sql"));
   check((await one(`select has_function_privilege('authenticated',
     'public.edit_own_coach_student_active_training_cycle(uuid,uuid,uuid,integer,text,text,jsonb)',
     'EXECUTE') as allowed`)).allowed, "Coach RPC executable by authenticated");
@@ -180,12 +181,30 @@ try {
   [ids.episode, "30000000-0000-4000-8000-000000000009", JSON.stringify(initial)])).value;
   check(created.aggregateId !== cycle && created.resultVersion === 1,
     "Coach creates first routine in a new cycle");
+  stage = "Coach replaces an active multi-routine cycle";
+  check((await one(edit, [ids.episode, "30000000-0000-4000-8000-000000000012",
+    created.aggregateId, 1, "create_routine", JSON.stringify(added)])).value.resultVersion === 2,
+  "Coach prepares an active cycle with two routines");
+  const replace = `select public.close_own_coach_student_cycle_for_replacement($1,$2,$3,$4) value`;
+  await reject(replace, [ids.episode, "30000000-0000-4000-8000-000000000013",
+    created.aggregateId, 1], "40001", "replacement rejects a stale version");
+  const replacementRequest = "30000000-0000-4000-8000-000000000014";
+  check((await one(replace, [ids.episode, replacementRequest, created.aggregateId, 2])).value
+    .operationKind === "cycle_close", "Coach closes multi-routine cycle after confirmation");
+  check((await one(replace, [ids.episode, replacementRequest, created.aggregateId, 2])).value
+    .aggregateId === created.aggregateId, "replacement close retry is idempotent");
+  const next = (await one(`select public.create_own_coach_student_training_cycle(
+    $1,$2,'strength',current_date,current_date+30,$3::jsonb) value`,
+  [ids.episode, "30000000-0000-4000-8000-000000000015", JSON.stringify(initial)])).value;
+  check(next.aggregateId !== created.aggregateId, "replacement activates a distinct cycle");
   await client.query("reset role");
   check((await one("select status from public.training_cycles where id=$1", [cycle])).status === "completed",
     "old cycle remains in history");
   check((await one(`select count(*)::integer count from private.coach_student_training_cycle_actions
-    where actor_user_id=$1 and relationship_episode_id=$2`, [ids.coach, ids.episode])).count === 2,
-  "both boundary operations attribute the Coach and episode");
+    where actor_user_id=$1 and relationship_episode_id=$2`, [ids.coach, ids.episode])).count === 4,
+  "all boundary operations attribute the Coach and episode");
+  check((await one("select status from public.training_cycles where id=$1",
+    [created.aggregateId])).status === "completed", "replaced cycle remains in history");
   await client.query("set role authenticated");
   stage = "authorization and unlink";
   await actor(ids.other);
