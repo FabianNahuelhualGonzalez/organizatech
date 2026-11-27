@@ -15,6 +15,7 @@ export interface CoachLinkEmailEnvironment {
   readonly supabaseUrl: string;
   readonly supabaseAnonKey: string;
   readonly emailLedgerRpcSecret: string;
+  readonly schedulerSecret?: string;
   readonly brevoApiKey: string;
   readonly senderEmail: string;
   readonly senderName: string;
@@ -37,6 +38,13 @@ interface InvitationDelivery {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL = /^[^\s@\u0000-\u001F\u007F]+@[^\s@\u0000-\u001F\u007F]+\.[^\s@\u0000-\u001F\u007F]+$/;
+
+function constantTimeEqual(left: string, right: string) {
+  const a = new TextEncoder().encode(left); const b = new TextEncoder().encode(right);
+  let difference = a.length ^ b.length;
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) difference |= (a[index] ?? 0) ^ (b[index] ?? 0);
+  return difference === 0;
+}
 
 function cors(request: Request, appUrl: string): Record<string, string> {
   try {
@@ -137,6 +145,21 @@ function parseInvitationDeliveries(
   });
 }
 
+function parseScheduledInvitationDeliveries(value: unknown): InvitationDelivery[] {
+  if (!Array.isArray(value) || value.length > 5) throw new TypeError("invalid scheduled claim");
+  const seen = new Set<string>();
+  return value.map((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new TypeError("invalid scheduled claim");
+    const row = candidate as Record<string, unknown>;
+    const coachEmail = String(row.coach_email ?? "");
+    if (!EMAIL.test(coachEmail)) throw new TypeError("invalid scheduled claim");
+    const [delivery] = parseInvitationDeliveries([row], String(row.coach_user_id ?? ""), null, null, coachEmail);
+    if (seen.has(delivery.deliveryId)) throw new TypeError("invalid scheduled claim");
+    seen.add(delivery.deliveryId);
+    return delivery;
+  });
+}
+
 function actionUrl(appUrl: string, delivery: Delivery) {
   const url = new URL("/login", appUrl);
   if (url.protocol !== "https:" || url.username || url.password) throw new TypeError("invalid app url");
@@ -199,19 +222,32 @@ async function processDelivery(environment: CoachLinkEmailEnvironment, authoriza
 
 async function completeInvitation(environment: CoachLinkEmailEnvironment, authorization: string,
   delivery: InvitationDelivery, outcome: "sent" | "failed" | "ambiguous", value: string,
-  fetchImpl?: typeof fetch) {
-  await invokeEmailRpc({
+  fetchImpl?: typeof fetch, scheduled = false) {
+  const completed = await invokeEmailRpc({
     supabaseUrl: environment.supabaseUrl, anonKey: environment.supabaseAnonKey, authorization,
-    functionName: "complete_own_coach_invitation_email",
+    functionName: scheduled ? "complete_due_coach_invitation_email" : "complete_own_coach_invitation_email",
     body: { p_capability: environment.emailLedgerRpcSecret, p_delivery_id: delivery.deliveryId,
       p_attempt_token: delivery.attemptToken, p_outcome: outcome,
       p_provider_message_id: outcome === "sent" ? value : null,
       p_provider_error_code: outcome === "sent" ? null : value }, fetchImpl,
   });
+  if (scheduled && completed !== true) throw new TypeError("completion unavailable");
 }
 
 async function processInvitationDelivery(environment: CoachLinkEmailEnvironment, authorization: string,
-  delivery: InvitationDelivery, fetchImpl?: typeof fetch): Promise<"sent" | "failed" | "ambiguous"> {
+  delivery: InvitationDelivery, fetchImpl?: typeof fetch, scheduled = false): Promise<"sent" | "failed" | "ambiguous"> {
+  if (scheduled) {
+    const authorized = await invokeEmailRpc({ supabaseUrl: environment.supabaseUrl,
+      anonKey: environment.supabaseAnonKey, authorization,
+      functionName: "authorize_due_coach_invitation_email",
+      body: { p_capability: environment.emailLedgerRpcSecret,
+        p_delivery_id: delivery.deliveryId, p_attempt_token: delivery.attemptToken }, fetchImpl });
+    if (authorized !== true) {
+      await completeInvitation(environment, authorization, delivery, "failed", "invitation_unavailable", fetchImpl, true);
+      return "failed";
+    }
+  }
+  let messageId: string;
   try {
     const rendered = renderCoachInvitationEmail({
       audience: delivery.audience, recipientFirstName: delivery.recipientFirstName,
@@ -224,17 +260,20 @@ async function processInvitationDelivery(environment: CoachLinkEmailEnvironment,
       senderEmail: environment.senderEmail, senderName: environment.senderName,
       recipientEmail: delivery.recipientEmail, ...rendered,
       idempotencyKey: delivery.idempotencyKey, fetchImpl });
-    await completeInvitation(environment, authorization, delivery, "sent", sent.messageId, fetchImpl)
-      .catch(() => undefined);
-    return "sent";
+    messageId = sent.messageId;
   } catch (error) {
     const ambiguous = error instanceof BrevoEmailError && error.ambiguous;
     const code = error instanceof BrevoEmailError ? error.code : "invalid_configuration";
     const outcome = ambiguous ? "ambiguous" : "failed";
-    await completeInvitation(environment, authorization, delivery, outcome, code, fetchImpl)
+    await completeInvitation(environment, authorization, delivery, outcome, code, fetchImpl, scheduled)
       .catch(() => undefined);
     return outcome;
   }
+  const completion = completeInvitation(environment, authorization, delivery, "sent", messageId, fetchImpl, scheduled);
+  if (scheduled) {
+    try { await completion; } catch { return "ambiguous"; }
+  } else await completion.catch(() => undefined);
+  return "sent";
 }
 
 export function createCoachLinkEmailHandler(environment: CoachLinkEmailEnvironment, fetchImpl?: typeof fetch) {
@@ -255,6 +294,31 @@ export function createCoachLinkEmailHandler(environment: CoachLinkEmailEnvironme
       return response(request, environment.appUrl, 400, { error: "invalid_request" });
     }
     const requestBody = body as Record<string, unknown>;
+    const scheduled = Object.keys(requestBody).length === 1 && requestBody.kind === "retry_pending";
+    const bearer = authorization.replace(/^Bearer /, "");
+    const schedulerSecret = environment.schedulerSecret ?? "";
+    const scheduler = schedulerSecret.length >= 32
+      && schedulerSecret !== environment.supabaseAnonKey
+      && schedulerSecret !== environment.emailLedgerRpcSecret
+      && constantTimeEqual(bearer, schedulerSecret);
+    if (scheduled) {
+      if (!scheduler) return response(request, environment.appUrl, 401, { error: "unauthorized" });
+      try {
+        const anonAuthorization = `Bearer ${environment.supabaseAnonKey}`;
+        const payload = await invokeEmailRpc({ supabaseUrl: environment.supabaseUrl,
+          anonKey: environment.supabaseAnonKey, authorization: anonAuthorization,
+          functionName: "claim_due_coach_invitation_emails",
+          body: { p_capability: environment.emailLedgerRpcSecret, p_limit: 5 }, fetchImpl });
+        const deliveries = parseScheduledInvitationDeliveries(payload);
+        let sent = 0;
+        for (const delivery of deliveries) {
+          if (await processInvitationDelivery(environment, anonAuthorization, delivery, fetchImpl, true) === "sent") sent += 1;
+        }
+        return response(request, environment.appUrl, 202, { accepted: true,
+          claimed: deliveries.length, sent, pending: deliveries.length - sent });
+      } catch { return response(request, environment.appUrl, 503, { error: "delivery_unavailable" }); }
+    }
+    if (scheduler) return response(request, environment.appUrl, 400, { error: "invalid_request" });
     const invitationRequestId = Object.keys(requestBody).length === 1
       && typeof requestBody.requestId === "string" && UUID.test(requestBody.requestId)
       ? requestBody.requestId

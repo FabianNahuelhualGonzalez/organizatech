@@ -40,6 +40,23 @@ function request(secret = environment.schedulerSecret) {
   });
 }
 
+test("el scheduler envía al alumno el aviso de ciclo creado por su coach", async () => {
+  let sent = 0;
+  const worker = createTrainingCycleLifecycleWorker(environment, async (input) => {
+    const url = String(input);
+    if (url.endsWith("/rpc/claim_due_training_cycle_lifecycle_deliveries")) return Response.json([{ ...delivery,
+      portal_scope: "usuario", event_kind: "coach_updated", title: "Tu coach actualizó tu rutina",
+      body: "Tu coach creó un nuevo ciclo de entrenamiento. Revisa la rutina antes de entrenar.",
+    }]);
+    if (url.endsWith("/rpc/authorize_training_cycle_lifecycle_delivery")) return Response.json(true);
+    if (url === BREVO_TRANSACTIONAL_EMAIL_ENDPOINT) { sent++; return Response.json({ messageId: "coach-change" }, { status: 201 }); }
+    if (url.endsWith("/rpc/complete_training_cycle_lifecycle_delivery")) return Response.json(true);
+    throw new Error("unexpected URL");
+  });
+  assert.equal((await worker(request())).status, 202);
+  assert.equal(sent, 1);
+});
+
 test("autorización negada, incierta o inválida impide cualquier envío/completion", async () => {
   for (const authorization of [false, null, "true", { allowed: true }, new Error("offline")]) {
     let providerCalls = 0;

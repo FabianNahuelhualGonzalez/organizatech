@@ -16,7 +16,8 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.send-coach-link-emails]
-verify_jwt = true
+# El handler distingue JWT de coach y secreto dedicado de reintentos.
+verify_jwt = false
 
 [functions.send-evaluation-emails]
 # El handler valida JWT de usuario vía RPC u operación scheduler mediante secreto dedicado.
