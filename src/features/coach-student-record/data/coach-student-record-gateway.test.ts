@@ -14,6 +14,7 @@ const path = `${student}/${asset}.pdf`;
 const subject = {
   episodeId: episode, studentUserId: student, studentName: "Alumno",
   studentEmail: "alumno@example.test", linkedAt: "2026-11-01T10:00:00Z",
+  avatarPath: null, avatarUpdatedAt: null,
 };
 const document = {
   assetId: asset, bucketId: "progress-medical-documents", objectName: path,
@@ -23,9 +24,10 @@ const document = {
 const photo = {
   assetId: asset, bucketId: "progress-check-photos", objectName: `${student}/${asset}.jpg`,
   mimeType: "image/jpeg", bytes: 100, checkId: check, checkedOn: "2026-11-01", pose: "front",
-};
+} as const;
 
-function fixture(options: { staleAfter?: number; revokeDocument?: boolean; invalidPhoto?: boolean } = {}) {
+function fixture(options: { staleAfter?: number; revokeDocument?: boolean;
+  revokeAvatar?: boolean; invalidPhoto?: boolean; invalidAvatar?: boolean } = {}) {
   const calls: { name: string; args: Record<string, unknown> }[] = [];
   let verifications = 0;
   const client = {
@@ -39,9 +41,12 @@ function fixture(options: { staleAfter?: number; revokeDocument?: boolean; inval
     async rpc(name: string, args: Record<string, unknown>) {
       calls.push({ name, args });
       if (name === "get_own_coach_student_record_subject") {
-        return options.revokeDocument && calls.length > 2
+        return (options.revokeDocument && calls.length > 2)
+          || (options.revokeAvatar && calls.length > 2)
           ? { data: null, error: { code: "42501" } }
-          : { data: subject, error: null };
+          : { data: { ...subject,
+            avatarPath: options.invalidAvatar ? `${coach}/avatar` : `${student}/avatar`,
+            avatarUpdatedAt: "2026-11-01T10:00:00Z" }, error: null };
       }
       if (name === "list_shared_student_medical_documents") {
         return { data: [document], error: null };
@@ -50,10 +55,13 @@ function fixture(options: { staleAfter?: number; revokeDocument?: boolean; inval
     },
     storage: {
       from(bucket: string) {
-        assert.equal(bucket, "progress-medical-documents");
+        assert.ok(["progress-medical-documents", "profile-avatars", "progress-check-photos"].includes(bucket));
         return { async download(objectName: string) {
-          assert.equal(objectName, path);
-          return { data: null, error: { code: "42501" } };
+          assert.equal(objectName, bucket === "profile-avatars" ? `${student}/avatar`
+            : bucket === "progress-check-photos" ? photo.objectName : path);
+          return bucket === "progress-medical-documents"
+            ? { data: null, error: { code: "42501" } }
+            : { data: new Blob(["image"], { type: "image/jpeg" }), error: null };
         } };
       },
     },
@@ -87,4 +95,16 @@ test("Storage revalida el PDF y una foto con ruta inválida nunca llega a pantal
   await assert.rejects(gateway.download(document),
     (error: unknown) => error instanceof CoachStudentRecordError && error.code === "unavailable");
   await assert.rejects(fixture({ invalidPhoto: true }).gateway.listPhotos(), CoachStudentRecordError);
+});
+
+test("avatar y miniatura requieren el episodio activo antes y después del archivo", async () => {
+  const { gateway, calls } = fixture();
+  const selected = await gateway.getSubject();
+  assert.equal((await gateway.downloadAvatar(selected)).type, "image/jpeg");
+  assert.equal((await gateway.download(photo)).type, "image/jpeg");
+  assert.ok(calls.filter((call) => call.name === "get_own_coach_student_record_subject").length >= 5);
+  await assert.rejects(fixture({ invalidAvatar: true }).gateway.getSubject(), CoachStudentRecordError);
+  const revoked = fixture({ revokeAvatar: true });
+  await assert.rejects(revoked.gateway.downloadAvatar(await revoked.gateway.getSubject()),
+    (error: unknown) => error instanceof CoachStudentRecordError && error.code === "forbidden");
 });

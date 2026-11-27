@@ -18,6 +18,7 @@ import { getCoachStudentRecordGateway, type CoachStudentRecordSubject,
 
 import styles from "./coach-student-record.module.css";
 import { CoachCycleDetail } from "./coach-cycle-detail";
+import { CoachStudentAvatar, SharedPhotoThumbnail } from "./coach-student-images";
 
 type Data = {
   readonly subject: CoachStudentRecordSubject;
@@ -222,14 +223,15 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
     .map((part) => part[0] ?? "").join("").toUpperCase();
   return <main className={styles.record}>
     <div className={styles.wrap}>
-      <AppBackButton onBack={onBack} label="Volver al alumno" />
+      <div className={styles.backRow}><AppBackButton onBack={onBack} label="Volver al alumno" /></div>
       <h1>Ficha del alumno</h1>
       {error ? <div role="alert" className={styles.alert}>{error}<button type="button" className={styles.button}
         onClick={() => void load()}>Reintentar</button></div> : null}
       {!data && !error ? <p role="status">Cargando ficha…</p> : null}
       {data ? <>
         <header className={styles.profile}>
-          <div className={styles.who}><div className={styles.avatar} aria-hidden>{initials}</div><div>
+          <div className={styles.who}><CoachStudentAvatar coachId={coachId} episodeId={episodeId}
+            subject={data.subject} initials={initials ?? ""} /><div>
             <h2>{data.subject.studentName}</h2><p>{data.subject.studentEmail}</p>
             <span className={`${styles.chip} ${styles.ok}`}>Activo</span></div></div>
           <div className={styles.stats}>
@@ -323,7 +325,8 @@ export function CoachStudentRecord({ coachId, episodeId, onBack, onSendEvaluatio
                 key={item.assetId} type="button" disabled={busy} onClick={(event) => {
                   overlayTriggerRef.current = event.currentTarget; void openAsset(item); }}
                 aria-label={`Ver foto ${item.pose} del ${date(item.checkedOn)}`}>
-                <span className={styles.photoPlaceholder} aria-hidden>◇</span><span>{date(item.checkedOn)} · {item.pose}</span></button>)}</div>}
+                <SharedPhotoThumbnail coachId={coachId} episodeId={episodeId} photo={item} />
+                <span>{date(item.checkedOn)} · {item.pose}</span></button>)}</div>}
             {data.morePhotos ? <button className={styles.button} type="button" disabled={moreBusy}
               onClick={() => void loadMore("photos")}>Ver más fotos</button> : null}
             {photoUrl ? <div role="dialog" aria-modal="true" aria-label={`Foto de check · ${photoLabel}`} className={styles.viewer}
