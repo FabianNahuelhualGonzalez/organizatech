@@ -99,9 +99,13 @@ export async function invokeEmailRpc(input: {
     | "claim_own_coach_link_emails"
     | "complete_own_coach_link_email"
     | "claim_own_coach_invitation_emails"
+    | "claim_due_coach_invitation_emails"
+    | "authorize_due_coach_invitation_email"
+    | "complete_due_coach_invitation_email"
     | "complete_own_coach_invitation_email"
     | "own_coach_invitation_email_delivery_complete"
     | "claim_evaluation_email_deliveries"
+    | "claim_due_evaluation_email_retries"
     | "complete_evaluation_email_delivery"
     | "claim_progress_report_email_deliveries"
     | "complete_progress_report_email_delivery";

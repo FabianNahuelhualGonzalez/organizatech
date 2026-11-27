@@ -135,13 +135,39 @@ test("el scheduler reclama con capacidad aislada y no usa service_role", async (
   });
   const response = await handler(new Request("https://function.example.com", {
     method: "POST", headers: { authorization: `Bearer ${environment.schedulerSecret}` },
+    body: JSON.stringify({ kind: "retry_pending" }),
   }));
   assert.equal(response.status, 202);
   assert.equal(requests.length, 1);
-  assert.match(requests[0]!.url, /claim_evaluation_email_deliveries$/);
+  assert.match(requests[0]!.url, /claim_due_evaluation_email_retries$/);
   assert.equal(requests[0]!.authorization, `Bearer ${environment.supabaseAnonKey}`);
   assert.equal(requests[0]!.body.p_capability, environment.evaluationRpcSecret);
   assert.doesNotMatch(JSON.stringify(requests), /service_role/i);
+});
+
+test("reintento programado no usa el claim que genera recordatorios automáticos", async () => {
+  const requests: string[] = [];
+  const handler = createEvaluationEmailHandler(environment, async (input) => {
+    requests.push(String(input));
+    return Response.json([]);
+  });
+  const scheduler = await handler(new Request("https://function.example.com", { method: "POST",
+    headers: { authorization: `Bearer ${environment.schedulerSecret}` },
+    body: JSON.stringify({ kind: "retry_pending" }),
+  }));
+  assert.equal(scheduler.status, 202);
+  assert.deepEqual(requests.map((url) => url.split("/").pop()), ["claim_due_evaluation_email_retries"]);
+  const user = await handler(new Request("https://function.example.com", { method: "POST",
+    headers: { origin: environment.appUrl, authorization: "Bearer user-jwt" },
+    body: JSON.stringify({ kind: "retry_pending" }),
+  }));
+  assert.equal(user.status, 401);
+  assert.equal(requests.length, 1);
+  const legacy = await handler(new Request("https://function.example.com", { method: "POST",
+    headers: { authorization: `Bearer ${environment.schedulerSecret}` }, body: "{}",
+  }));
+  assert.equal(legacy.status, 401);
+  assert.equal(requests.length, 1);
 });
 
 test("la invocación del usuario conserva su JWT y agrega la capacidad sólo en servidor", async () => {

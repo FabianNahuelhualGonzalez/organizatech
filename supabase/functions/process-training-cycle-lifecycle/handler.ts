@@ -44,6 +44,7 @@ const EVENTS = new Set<TrainingCycleLifecycleEvent>([
   "expires_t1",
   "expires_t0",
   "closed_t1",
+  "coach_updated",
 ]);
 const CLAIM_LIMIT = 25;
 const MAX_PARALLEL_DELIVERIES = 5;

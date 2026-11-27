@@ -270,6 +270,7 @@ export function createEvaluationEmailHandler(environment: EvaluationEmailEnviron
     }
     if (request.method !== "POST") return response(405, { error: "method_not_allowed" }, origin);
     let progressOnly = false;
+    let retryOnly = false;
     try {
       const raw = await request.text();
       if (raw.length > 256) throw new TypeError("invalid request body");
@@ -278,12 +279,18 @@ export function createEvaluationEmailHandler(environment: EvaluationEmailEnviron
       const keys = Object.keys(body);
       if (keys.length === 1 && keys[0] === "kind" && (body as { kind?: unknown }).kind === "progress_report") {
         progressOnly = true;
+      } else if (keys.length === 1 && keys[0] === "kind" && (body as { kind?: unknown }).kind === "retry_pending") {
+        retryOnly = true;
       } else if (keys.length !== 0) throw new TypeError("invalid request body");
     } catch { return response(400, { error: "invalid_request" }, origin); }
     const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-    const scheduler = Boolean(environment.schedulerSecret) && constantTimeEqual(bearer, environment.schedulerSecret);
+    const scheduler = environment.schedulerSecret.length >= 32
+      && environment.schedulerSecret !== environment.supabaseAnonKey
+      && environment.schedulerSecret !== environment.evaluationRpcSecret
+      && constantTimeEqual(bearer, environment.schedulerSecret);
     if (!scheduler && (!origin || !bearer)) return response(401, { error: "unauthorized" }, origin);
-    if (scheduler && progressOnly) return response(401, { error: "unauthorized" }, origin);
+    if (scheduler && !retryOnly) return response(401, { error: "unauthorized" }, origin);
+    if (!scheduler && retryOnly) return response(401, { error: "unauthorized" }, origin);
     const authorization = scheduler ? `Bearer ${environment.supabaseAnonKey}` : `Bearer ${bearer}`;
     const capability = environment.evaluationRpcSecret;
     try {
@@ -292,7 +299,7 @@ export function createEvaluationEmailHandler(environment: EvaluationEmailEnviron
       if (!progressOnly) for (let batch = 0; batch < MAX_CLAIM_BATCHES; batch += 1) {
         const claimed = await invokeEmailRpc({
           supabaseUrl: environment.supabaseUrl, anonKey: environment.supabaseAnonKey, authorization,
-          functionName: "claim_evaluation_email_deliveries",
+          functionName: retryOnly ? "claim_due_evaluation_email_retries" : "claim_evaluation_email_deliveries",
           body: { p_capability: capability, p_limit: CLAIM_LIMIT }, fetchImpl,
         });
         const deliveries = parseDeliveries(claimed);

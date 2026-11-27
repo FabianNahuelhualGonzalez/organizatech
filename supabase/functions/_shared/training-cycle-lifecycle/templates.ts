@@ -4,7 +4,8 @@ export type TrainingCycleLifecycleEvent =
   | "expires_t2"
   | "expires_t1"
   | "expires_t0"
-  | "closed_t1";
+  | "closed_t1"
+  | "coach_updated";
 
 export interface TrainingCycleLifecycleEmailInput {
   readonly eventKind: TrainingCycleLifecycleEvent;
@@ -27,6 +28,7 @@ const EVENT_LABELS: Readonly<Record<TrainingCycleLifecycleEvent, string>> = {
   expires_t1: "CICLO · T-1",
   expires_t0: "CICLO · ÚLTIMO DÍA",
   closed_t1: "CICLO · CIERRE",
+  coach_updated: "RUTINA · ACTUALIZACIÓN DEL COACH",
 };
 
 function escapeHtml(value: string) {

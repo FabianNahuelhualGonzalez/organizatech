@@ -3,6 +3,15 @@ import test from "node:test";
 
 import { renderTrainingCycleLifecycleEmail } from "./templates";
 
+test("coach cycle activation email uses the existing student notification", () => {
+  const rendered = renderTrainingCycleLifecycleEmail({ eventKind: "coach_updated",
+    scheduledOn: "2026-11-27", title: "Tu coach actualizó tu rutina",
+    body: "Tu coach creó un nuevo ciclo de entrenamiento. Revisa la rutina antes de entrenar.",
+    appUrl: "https://qa.organizatech.cl" });
+  assert.match(rendered.subject, /Tu coach actualizó tu rutina/);
+  assert.match(rendered.htmlContent, /RUTINA · ACTUALIZACIÓN DEL COACH/);
+});
+
 test("renderiza lifecycle seguro con identidad visual y campana separada", () => {
   const rendered = renderTrainingCycleLifecycleEmail({
     eventKind: "expires_t1",

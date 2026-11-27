@@ -244,3 +244,80 @@ test("payload de invitación es allowlist exacta y rechaza código enviado por c
   }
   assert.equal(authCalls, 0);
 });
+
+test("scheduler reintenta una invitación reservada sólo después de revalidarla", async () => {
+  const calls: string[] = [];
+  const schedulerEnvironment = { ...environment, schedulerSecret: "s".repeat(48) };
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith("/rpc/claim_due_coach_invitation_emails")) {
+      assert.equal((init?.headers as Record<string,string>).authorization, `Bearer ${environment.supabaseAnonKey}`);
+      return Response.json([{ ...invitationDelivery("student"), coach_email: "marcos@example.com" }]);
+    }
+    if (url.endsWith("/rpc/authorize_due_coach_invitation_email")) return Response.json(true);
+    if (url.includes("api.brevo.com")) return Response.json({ messageId: "scheduler-message" });
+    if (url.endsWith("/rpc/complete_due_coach_invitation_email")) {
+      assert.equal((JSON.parse(String(init?.body)) as Record<string, unknown>).p_outcome, "sent");
+      return Response.json(true);
+    }
+    throw new Error("unexpected call");
+  };
+  const result = await createCoachLinkEmailHandler(schedulerEnvironment, fetchImpl)(new Request(
+    "https://project.supabase.co/functions/v1/send-coach-link-emails", { method: "POST",
+      headers: { authorization: `Bearer ${schedulerEnvironment.schedulerSecret}` },
+      body: JSON.stringify({ kind: "retry_pending" }) },
+  ));
+  assert.equal(result.status, 202);
+  assert.deepEqual(await result.json(), { accepted: true, claimed: 1, sent: 1, pending: 0 });
+  assert.match(calls.join(" "), /claim_due_coach_invitation_emails.*authorize_due_coach_invitation_email.*api\.brevo\.com.*complete_due_coach_invitation_email/);
+  assert.equal(calls.some((url) => url.includes("/auth/v1/user")), false);
+});
+
+test("scheduler no envía invitación cancelada ni acepta un JWT de coach para el reintento", async () => {
+  const schedulerEnvironment = { ...environment, schedulerSecret: "s".repeat(48) };
+  let providerCalls = 0;
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/rpc/claim_due_coach_invitation_emails")) {
+      return Response.json([{ ...invitationDelivery("student"), coach_email: "marcos@example.com" }]);
+    }
+    if (url.endsWith("/rpc/authorize_due_coach_invitation_email")) return Response.json(false);
+    if (url.endsWith("/rpc/complete_due_coach_invitation_email")) return Response.json(true);
+    if (url.includes("api.brevo.com")) providerCalls += 1;
+    throw new Error("unexpected call");
+  };
+  const handler = createCoachLinkEmailHandler(schedulerEnvironment, fetchImpl);
+  const url = "https://project.supabase.co/functions/v1/send-coach-link-emails";
+  const denied = await handler(new Request(url, { method: "POST", headers: { authorization: "Bearer coach-jwt" },
+    body: JSON.stringify({ kind: "retry_pending" }) }));
+  assert.equal(denied.status, 401);
+  const revoked = await handler(new Request(url, { method: "POST",
+    headers: { authorization: `Bearer ${schedulerEnvironment.schedulerSecret}` },
+    body: JSON.stringify({ kind: "retry_pending" }) }));
+  assert.equal(revoked.status, 202);
+  assert.equal(providerCalls, 0);
+});
+
+test("aceptación de Brevo con completion incierta no se comunica como entrega confirmada", async () => {
+  const schedulerEnvironment = { ...environment, schedulerSecret: "s".repeat(48) };
+  let completionCalls = 0;
+  const result = await createCoachLinkEmailHandler(schedulerEnvironment, async (input) => {
+    const url = String(input);
+    if (url.endsWith("/rpc/claim_due_coach_invitation_emails")) {
+      return Response.json([{ ...invitationDelivery("student"), coach_email: "marcos@example.com" }]);
+    }
+    if (url.endsWith("/rpc/authorize_due_coach_invitation_email")) return Response.json(true);
+    if (url.includes("api.brevo.com")) return Response.json({ messageId: "accepted" });
+    if (url.endsWith("/rpc/complete_due_coach_invitation_email")) {
+      completionCalls += 1;
+      return Response.json(false);
+    }
+    throw new Error("unexpected call");
+  })(new Request("https://project.supabase.co/functions/v1/send-coach-link-emails", { method: "POST",
+    headers: { authorization: `Bearer ${schedulerEnvironment.schedulerSecret}` },
+    body: JSON.stringify({ kind: "retry_pending" }) }));
+  assert.equal(result.status, 202);
+  assert.deepEqual(await result.json(), { accepted: true, claimed: 1, sent: 0, pending: 1 });
+  assert.equal(completionCalls, 1);
+});
