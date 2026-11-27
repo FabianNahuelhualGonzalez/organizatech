@@ -1,6 +1,7 @@
 import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { isOwnProfileAvatarPath } from "@/lib/profile/profile-avatar";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PATH_ID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -28,6 +29,8 @@ export interface CoachStudentRecordSubject {
   readonly studentName: string;
   readonly studentEmail: string;
   readonly linkedAt: string;
+  readonly avatarPath: string | null;
+  readonly avatarUpdatedAt: string | null;
 }
 export interface SharedStudentDocument {
   readonly assetId: string;
@@ -81,10 +84,15 @@ function page(value: unknown, limit: number): readonly unknown[] {
 }
 function subject(value: unknown): CoachStudentRecordSubject {
   const row = object(value);
+  const studentUserId = uuid(row.studentUserId);
+  const avatarPath = row.avatarPath == null ? null : text(row.avatarPath, 80);
+  if (avatarPath && !isOwnProfileAvatarPath(studentUserId, avatarPath)) invalid();
   return {
-    episodeId: uuid(row.episodeId), studentUserId: uuid(row.studentUserId),
+    episodeId: uuid(row.episodeId), studentUserId,
     studentName: text(row.studentName, 201), studentEmail: text(row.studentEmail, 254),
     linkedAt: timestamp(row.linkedAt),
+    avatarPath,
+    avatarUpdatedAt: row.avatarUpdatedAt == null ? null : timestamp(row.avatarUpdatedAt),
   };
 }
 function document(value: unknown): SharedStudentDocument {
@@ -176,6 +184,18 @@ export function createCoachStudentRecordGateway(
       const { data, error } = await client.storage.from(validated.bucketId).download(validated.objectName);
       if (error || !data) throw new CoachStudentRecordError("unavailable");
       await getSubject();
+      return data;
+    },
+    async downloadAvatar(expected: CoachStudentRecordSubject): Promise<Blob> {
+      const selected = await getSubject();
+      if (selected.studentUserId !== expected.studentUserId || !selected.avatarPath
+        || selected.avatarPath !== expected.avatarPath
+        || selected.avatarUpdatedAt !== expected.avatarUpdatedAt) invalid();
+      const { data, error } = await client.storage.from("profile-avatars").download(selected.avatarPath);
+      if (error || !data) throw new CoachStudentRecordError("unavailable");
+      const after = await getSubject();
+      if (after.studentUserId !== selected.studentUserId || after.avatarPath !== selected.avatarPath
+        || after.avatarUpdatedAt !== selected.avatarUpdatedAt) invalid();
       return data;
     },
   };
