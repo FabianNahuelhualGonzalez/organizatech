@@ -1,16 +1,17 @@
-.view { width: 100%; max-width: 430px; margin-inline: auto; padding: 20px 14px 28px; color: var(--text); }
-.heading { margin: 16px 0 18px; }
-.heading h2 { margin: 0; font-size: 22px; letter-spacing: -.03em; }
+.view { width: 100%; max-width: 430px; min-width: 0; margin-inline: auto; padding: 20px 32px 28px; color: var(--text); }
+.heading { margin: 24px 0 20px; }
+.heading h2 { margin: 0; font-size: 24px; letter-spacing: -.03em; }
 .heading p { margin: 7px 0 0; color: rgba(255,255,255,.62); font-size: 13px; line-height: 1.5; }
 .state, .empty, .error { border: 1px solid rgba(255,255,255,.16); border-radius: 14px; padding: 18px; background: rgba(255,255,255,.035); color: rgba(255,255,255,.78); line-height: 1.5; }
 .error { color: #ffd0d0; border-color: rgba(255,132,132,.45); }
 .retry { margin-top: 10px; border: 1px solid rgba(143,178,255,.55); border-radius: 10px; background: rgba(60,122,255,.13); color: #dbe8ff; padding: 9px 12px; font: inherit; font-size: 13px; font-weight: 700; }
 .list { display: grid; gap: 9px; }
-.report { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; text-align: left; border: 1px solid rgba(255,255,255,.18); border-radius: 14px; background: rgba(255,255,255,.035); color: inherit; padding: 14px; font: inherit; }
+.report { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; text-align: left; border: 1px solid rgba(255,255,255,.18); border-radius: 14px; background: rgba(255,255,255,.035); color: inherit; padding: 14px; font: inherit; }
 .report:focus-visible, .retry:focus-visible, .fileButton:focus-visible { outline: 2px solid #8fb2ff; outline-offset: 2px; }
-.reportName { font-size: 14px; font-weight: 700; }
-.reportMeta { color: rgba(255,255,255,.58); font-size: 11px; line-height: 1.5; }
-.badge { align-self: start; border: 1px solid rgba(143,178,255,.42); border-radius: 999px; color: #b7d0ff; font-size: 10px; font-weight: 700; padding: 4px 7px; }
+.reportCopy { display: grid; gap: 4px; min-width: 0; }
+.reportName { min-width: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 700; line-height: 1.35; }
+.reportMeta { min-width: 0; overflow-wrap: anywhere; color: rgba(255,255,255,.58); font-size: 11px; line-height: 1.5; }
+.badge { align-self: start; white-space: nowrap; border: 1px solid rgba(143,178,255,.42); border-radius: 999px; color: #b7d0ff; font-size: 10px; font-weight: 700; padding: 4px 7px; }
 .reviewed { color: rgba(255,255,255,.5); border-color: rgba(255,255,255,.2); }
 .detail { display: grid; gap: 12px; }
 .detailCard { border: 1px solid rgba(255,255,255,.18); border-radius: 14px; padding: 15px; background: rgba(255,255,255,.035); }
@@ -25,3 +26,4 @@
 .preview { grid-column: 1 / -1; width: 100%; max-height: 360px; object-fit: contain; margin-top: 11px; border-radius: 10px; background: #07101a; }
 .pdf { grid-column: 1 / -1; display: inline-block; margin-top: 11px; color: #c8dcff; font-size: 13px; font-weight: 700; }
 @media (min-width: 700px) { .view { max-width: 760px; } .list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 359px) { .view { padding-inline: 16px; } }

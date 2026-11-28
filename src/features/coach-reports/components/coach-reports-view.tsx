@@ -70,7 +70,7 @@ export function CoachReportsView({ state, onBack, onRetry, onOpen, onDownload }:
     {state.issue ? <><p className={styles.error} role="alert">{state.issue}</p><button className={styles.retry} type="button" onClick={onRetry}>Reintentar</button></> : null}
     {state.phase === "ready" && state.reports.length === 0 ? <p className={styles.empty}>Aún no tienes reportes de alumnos.</p> : null}
     {state.reports.length > 0 ? <div className={styles.list}>{state.reports.map((report) => <button className={styles.report} type="button" key={report.id} onClick={() => onOpen(report.id)}>
-      <span><span className={styles.reportName}>{report.studentName}</span><span className={styles.reportMeta}>{title(report.kind)} · {date(report.sentAt)} · {report.itemCount} {report.itemCount === 1 ? "archivo" : "archivos"}</span></span>
+      <span className={styles.reportCopy}><span className={styles.reportName}>{report.studentName}</span><span className={styles.reportMeta}>{title(report.kind)} · {date(report.sentAt)} · {report.itemCount} {report.itemCount === 1 ? "archivo" : "archivos"}</span></span>
       <span className={`${styles.badge} ${report.reviewedAt ? styles.reviewed : ""}`}>{report.reviewedAt ? "Revisado" : "Pendiente"}</span>
     </button>)}</div> : null}
     {state.detailPhase === "loading" ? <p className={styles.state} role="status">Abriendo reporte…</p> : null}
