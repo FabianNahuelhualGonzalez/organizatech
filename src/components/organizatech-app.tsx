@@ -36,6 +36,7 @@ import { ProfileScreen } from "@/components/profile/ProfileScreen";
 import { CycleHistoryProductiveContainer } from "@/components/training/cycle-history";
 import { GuidedTrainingScreen } from "@/features/active-workout/components/GuidedTrainingScreen";
 import { useActiveWorkoutBoundary } from "@/features/active-workout/hooks/useActiveWorkoutBoundary";
+import { useCoachWorkoutPresence } from "@/features/active-workout/hooks/use-coach-workout-presence";
 import { useActiveWorkoutDraftLifecycle } from "@/features/active-workout/hooks/useActiveWorkoutDraftLifecycle";
 import { useActiveWorkoutExerciseHistory } from "@/features/active-workout/hooks/useActiveWorkoutExerciseHistory";
 import type { ActiveWorkoutOperationContext } from "@/features/active-workout/model/active-workout-boundary-contract";
@@ -725,6 +726,8 @@ export function OrganizatechApp({
     readiness,
   });
   const { screen } = navigation;
+  useCoachWorkoutPresence(dataMode === "supabase" && screen === "entrenamiento"
+    && hasStartedTraining && !trainingCompletionSummary, supabaseUser?.id ?? null);
   const hasSupabaseSession = Boolean(
     supabaseSession && supabaseUser && supabaseSession.user.id === supabaseUser.id,
   );

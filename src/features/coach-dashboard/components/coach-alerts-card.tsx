@@ -5,11 +5,12 @@ import type { CoachAlertsView } from "./coach-dashboard-view";
 import common from "./coach-dashboard-card.module.css";
 import styles from "./coach-alerts-card.module.css";
 
-export function CoachAlertsCard({ view, onAdd, onAlert, onViewAlerts }: {
+export function CoachAlertsCard({ view, onAdd, onAlert, onViewAlerts, showAdd = true }: {
   readonly view: CoachAlertsView;
   readonly onAdd?: () => void;
   readonly onAlert?: (id: string) => void;
   readonly onViewAlerts?: () => void;
+  readonly showAdd?: boolean;
 }) {
   const titleId = useId();
   return (
@@ -19,7 +20,7 @@ export function CoachAlertsCard({ view, onAdd, onAlert, onViewAlerts }: {
           <h3 id={titleId} className={common.heading}>Requieren tu atención</h3>
           <p className={common.description}>{view.description}</p>
         </div>
-        <button className={styles.add} type="button" disabled={!onAdd} onClick={onAdd}><span>Agregar</span></button>
+        {showAdd ? <button className={styles.add} type="button" disabled={!onAdd} onClick={onAdd}><span>Agregar</span></button> : null}
       </div>
       {view.rows.length === 0 && view.emptyLabel !== null ? <p className={common.empty}>{view.emptyLabel}</p> : null}
       <ul className={styles.list}>

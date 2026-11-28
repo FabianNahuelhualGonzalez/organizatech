@@ -50,6 +50,7 @@ export type CoachClientDetailView =
       readonly state: "active";
       readonly identity: CoachClientAuthorizedIdentity;
       readonly facts: { readonly linkedOnLabel: string | null; readonly lastTrainingLabel: string | null; readonly sessionsLabel: string | null };
+      readonly isTraining?: boolean | null;
       /** An active relationship does not imply a cycle exists or a route is authorized. */
       readonly cycle: { readonly label: string | null; readonly canOpen: boolean } | null;
     })
@@ -92,6 +93,7 @@ export interface CoachClientDetailSheetProps extends CoachOverlayFocusProps {
   readonly confirmation: CoachClientUnlinkConfirmationView | null;
   readonly actions: CoachClientDetailActions;
   readonly commercialContent?: ReactNode;
+  readonly routineSummaryContent?: ReactNode;
 }
 
 export interface CoachClientUnlinkConfirmationProps extends CoachOverlayFocusProps {

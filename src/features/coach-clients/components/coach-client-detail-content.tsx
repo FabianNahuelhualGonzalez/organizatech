@@ -23,8 +23,10 @@ export function CoachClientDetailContent({ view, disabled, actions, commercialCo
   const canOpenRecord = !disabled && view.state === "active" && Boolean(actions.onOpenRecord);
   return <div className={styles.body}>
     <div className={styles.statusLine}>
-      <span className={styles.chip} data-state={view.state}><span aria-hidden="true" />{STATE_LABELS[view.state]}</span>
-      {view.statusDescription !== null ? <p>{view.statusDescription}</p> : null}
+      <span className={styles.chip} data-state={view.state === "active" ? view.isTraining === true ? "training" : "away" : view.state}>
+        <span aria-hidden="true" />{view.state === "active" ? view.isTraining === null || view.isTraining === undefined
+          ? "CONSULTANDO" : view.isTraining ? "ACTIVO" : "AUSENTE" : STATE_LABELS[view.state]}</span>
+      {view.statusDescription !== null ? <p data-link-active={view.state === "active"}>{view.statusDescription}</p> : null}
     </div>
     <dl className={styles.facts}>
       {facts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd data-known={fact.value !== null}>{fact.value ?? "—"}</dd></div>)}

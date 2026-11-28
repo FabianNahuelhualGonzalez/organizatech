@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import type {
   CoachAddClientView,
@@ -35,6 +35,8 @@ import { createCoachChatInterestRuntime } from "@/features/coach-dashboard/integ
 import { useCoachCommercialPortfolio } from "@/features/coach-dashboard/hooks/use-coach-commercial-portfolio";
 import { useCoachReports } from "@/features/coach-reports/hooks/use-coach-reports";
 import { buildCoachCommercialDashboardView } from "@/features/coach-dashboard/integration/coach-commercial-dashboard-presentation";
+import { createCoachStudentAttentionGateway, type CoachStudentAttentionPage,
+  type CoachStudentActivity } from "@/features/coach-dashboard/data/coach-student-attention";
 import {
   buildCoachClientsView,
   buildCoachDashboardView,
@@ -177,7 +179,35 @@ export function useCoachWorkspaceController(input: {
   );
   const commercial = useCoachCommercialPortfolio(connection);
   const reloadCommercial = commercial.reload;
-  const [screen, setScreen] = useState<"dashboard" | "clients" | "reports">("dashboard");
+  const [screen, setScreen] = useState<"dashboard" | "clients" | "reports" | "alerts">("dashboard");
+  const attentionGateway = useMemo(() => {
+    try { return connection ? createCoachStudentAttentionGateway(connection) : null; }
+    catch { return null; }
+  }, [connection]);
+  const [attention, setAttention] = useState<CoachStudentAttentionPage | null>(null);
+  const [attentionBusy, setAttentionBusy] = useState(false);
+  const reloadAttention = useCallback(async () => {
+    if (!attentionGateway) return;
+    try { setAttention(await attentionGateway.list()); }
+    catch { setAttention(null); }
+  }, [attentionGateway]);
+  const loadMoreAttention = useCallback(async () => {
+    if (!attentionGateway || !attention || attentionBusy || attention.rows.length >= attention.total) return;
+    setAttentionBusy(true);
+    try {
+      const page = await attentionGateway.list(attention.rows.length);
+      setAttention((prior) => prior && prior.rows.length === attention.rows.length
+        ? { ...page, rows: [...prior.rows, ...page.rows] } : prior);
+    } catch { /* The existing rows remain visible. */ }
+    finally { setAttentionBusy(false); }
+  }, [attentionGateway, attention, attentionBusy]);
+  useEffect(() => {
+    setAttention(null);
+    if (!attentionGateway) return;
+    void reloadAttention();
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void reloadAttention(); }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [attentionGateway, reloadAttention]);
   const reports = useCoachReports(connection);
   const [selectedMonthId, setSelectedMonthId] = useState<string | null>(null);
   const [tab, setTab] = useState<CoachClientTab>("active");
@@ -201,6 +231,22 @@ export function useCoachWorkspaceController(input: {
   } | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const [activity, setActivity] = useState<{ episodeId: string; value: CoachStudentActivity } | null>(null);
+  useEffect(() => {
+    const episodeId = selected?.kind === "relationship" ? selected.id : null;
+    setActivity(null);
+    if (!episodeId || !attentionGateway) return;
+    let live = true;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void attentionGateway.activity(episodeId).then((value) => {
+        if (live) setActivity({ episodeId, value });
+      }).catch(() => { if (live) setActivity(null); });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [selected, attentionGateway]);
   const promptedAgreementIds = useRef(new Set<string>());
   const loadCommercialStudent = commercial.loadStudent;
   const commercialPortfolio = commercial.snapshot.portfolio;
@@ -249,11 +295,11 @@ export function useCoachWorkspaceController(input: {
     if (typeof document === "undefined") return;
     const refreshOnReturn = () => {
       if (document.visibilityState !== "visible") return;
-      void Promise.all([base?.active.reload(), base?.pending.reload(), reloadCommercial()]);
+      void Promise.all([base?.active.reload(), base?.pending.reload(), reloadCommercial(), reloadAttention()]);
     };
     document.addEventListener("visibilitychange", refreshOnReturn);
     return () => document.removeEventListener("visibilitychange", refreshOnReturn);
-  }, [base, reloadCommercial]);
+  }, [base, reloadCommercial, reloadAttention]);
 
   useEffect(() => {
     if (screen !== "dashboard" || selected || active.phase !== "ready"
@@ -378,9 +424,11 @@ export function useCoachWorkspaceController(input: {
       statusDescription: "Vínculo activo",
       facts: Object.freeze({
         linkedOnLabel: formatDate(selectedActive.linkedAt),
-        lastTrainingLabel: null,
-        sessionsLabel: null,
+        lastTrainingLabel: activity?.episodeId === selectedActive.id && activity.value.lastTrainingOn
+          ? formatDate(`${activity.value.lastTrainingOn}T12:00:00Z`) : null,
+        sessionsLabel: activity?.episodeId === selectedActive.id ? String(activity.value.sessionsInCycle) : null,
       }),
+      isTraining: activity?.episodeId === selectedActive.id ? activity.value.isTraining : null,
       cycle: null,
       actionLabel: "Desvincular alumno",
       canAct: disconnection.confirmed?.kind === "relationship"
@@ -585,7 +633,7 @@ export function useCoachWorkspaceController(input: {
   const dashboardView = buildCoachCommercialDashboardView({
     base: dashboardBase,
     portfolio: commercial.snapshot.needsRefresh || commercial.snapshot.uncertain ? null : commercial.snapshot.portfolio,
-    selectedMonthId, pendingInvitations: pending.totalPending,
+    selectedMonthId, pendingInvitations: pending.totalPending, attention,
   });
   const clientsView = buildCoachClientsView({
     tab, query, active, pending,
@@ -595,7 +643,7 @@ export function useCoachWorkspaceController(input: {
   });
 
   async function refreshRelations() {
-    await Promise.all([base?.active.reload(), base?.pending.reload(), commercial.reload()]);
+    await Promise.all([base?.active.reload(), base?.pending.reload(), commercial.reload(), reloadAttention()]);
   }
 
   function codeForInvitation(invitationId: string): { code: string; expiresAt: string } | null {
@@ -639,6 +687,7 @@ export function useCoachWorkspaceController(input: {
     screen,
     tab,
     dashboardView,
+    attentionBusy,
     commercial,
     reports,
     clientsView,
@@ -656,6 +705,8 @@ export function useCoachWorkspaceController(input: {
     addClient,
     actions: {
       openDashboard: () => setScreen("dashboard"),
+      openAlerts: () => { setScreen("alerts"); void reloadAttention(); },
+      loadMoreAttention: () => { void loadMoreAttention(); },
       openReports: () => {
         setScreen("reports");
         void reports.reload();
@@ -674,9 +725,11 @@ export function useCoachWorkspaceController(input: {
           return;
         }
         const item = commercial.snapshot.portfolio?.items.find((candidate) => candidate.episodeId === id);
-        if (!item || item.unlinkedAt !== null || !base) return;
-        setQuery(item.studentName);
-        base.active.setQuery(item.studentName);
+        const alerted = attention?.rows.find((candidate) => candidate.episodeId === id);
+        if ((!item || item.unlinkedAt !== null) && !alerted || !base) return;
+        const name = item?.studentName ?? alerted!.studentName;
+        setQuery(name);
+        base.active.setQuery(name);
         void base.active.reload();
         setSelected({ kind: "relationship", id });
         setTab("active");

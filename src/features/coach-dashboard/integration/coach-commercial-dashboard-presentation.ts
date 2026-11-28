@@ -3,6 +3,7 @@ import { summarizeCoachCommercialPortfolio, type CoachCommercialItem,
   type CoachCommercialPortfolio } from "../model/coach-commercial-portfolio";
 import { civilDate, FREQUENCY_LABELS } from "../model/coach-commercial-display";
 import { formatCoachClpAmount } from "../model/coach-dashboard-money";
+import type { CoachStudentAttentionPage } from "../data/coach-student-attention";
 
 const unknown: CoachMetricView = { value: null, label: "Sin información" };
 const count = (value: number): CoachMetricView => ({ value, label: String(value) });
@@ -51,15 +52,27 @@ export function buildCoachCommercialDashboardView(input: {
   readonly portfolio: CoachCommercialPortfolio | null;
   readonly selectedMonthId: string | null;
   readonly pendingInvitations: number | null;
+  readonly attention?: CoachStudentAttentionPage | null;
 }): CoachDashboardViewModel {
   const { base, portfolio } = input;
+  const attentionView = input.attention === undefined ? null : {
+    metric: input.attention ? count(input.attention.total) : unknown,
+    rows: input.attention?.rows.map((row) => ({
+      id: row.episodeId, clientName: row.studentName, initials: initials(row.studentName),
+      reason: row.reasons.join(" · "), whenLabel: null,
+      dateLabel: row.dueOn ? civilDate(row.dueOn) : row.lastTrainingOn ? civilDate(row.lastTrainingOn) : null,
+      tone: row.reasons.includes("Pago vencido") ? "error" as const : "pending" as const,
+    })) ?? [],
+    emptyLabel: input.attention?.total === 0 ? "Ningún alumno requiere atención." : null,
+    footerLabel: input.attention && input.attention.rows.length < input.attention.total ? "Cargar más" : null,
+  };
   if (!portfolio) return {
     ...base,
     income: { ...base.income, amount: unknown, formulaLabel: null, atRisk: unknown,
       potential: unknown, potentialLabel: "PAGOS CONFIRMADOS", potentialNote: null },
-    portfolio: { ...base.portfolio, alert: unknown, inactive: unknown },
-    alerts: { description: "Acuerdos y renovaciones que necesitan atención.", rows: [],
-      emptyLabel: "Información comercial no disponible", footerLabel: null },
+    portfolio: { ...base.portfolio, alert: attentionView?.metric ?? unknown, inactive: unknown },
+    alerts: { description: "Pagos, rutinas y entrenamientos que necesitan atención.", rows: attentionView?.rows ?? [],
+      emptyLabel: attentionView?.emptyLabel ?? "Información no disponible", footerLabel: attentionView?.footerLabel ?? null },
     chart: { months: [], selectedMonthId: null, emptyLabel: "Histórico comercial no disponible", noSelectionLabel: null },
     renewals: { ...base.renewals, atStake: unknown, stack: null, rows: [],
       emptyLabel: "Información comercial no disponible", retentionLabel: null },
@@ -113,16 +126,16 @@ export function buildCoachCommercialDashboardView(input: {
         ? `${portfolio.stats?.monthlyRiskCount ?? monthlyRisk.length} renovaciones pendientes` : null,
       potential: money(currentMonth?.confirmedPaymentsClp ?? null), potentialLabel: "PAGOS CONFIRMADOS",
       potentialNote: currentMonth ? "Este mes" : null },
-    portfolio: { ...base.portfolio, active: count(summary.activeCount), alert: count(summary.alertCount),
+    portfolio: { ...base.portfolio, active: count(summary.activeCount), alert: attentionView?.metric ?? count(summary.alertCount),
       pending: input.pendingInvitations === null ? unknown : count(input.pendingInvitations),
       inactive: count(summary.unlinkedCount) },
-    alerts: { description: "Acuerdos y renovaciones que necesitan atención.",
-      rows: [...alerts.values()].map(({ item, reason, tone }) => ({
+    alerts: { description: attentionView ? "Pagos, rutinas y entrenamientos que necesitan atención." : "Acuerdos y renovaciones que necesitan atención.",
+      rows: attentionView?.rows ?? [...alerts.values()].map(({ item, reason, tone }) => ({
         id: item.episodeId, clientName: item.studentName, initials: initials(item.studentName), reason,
         whenLabel: null, dateLabel: item.latestPeriod ? civilDate(item.latestPeriod.endsBefore) : null, tone,
       })),
-      emptyLabel: summary.alertCount === 0 ? "No hay alertas comerciales registradas." : null,
-      footerLabel: portfolio.itemCursor ? "Cargar más" : null },
+      emptyLabel: attentionView?.emptyLabel ?? (attentionView ? null : summary.alertCount === 0 ? "No hay alertas comerciales registradas." : null),
+      footerLabel: attentionView ? attentionView.footerLabel : portfolio.itemCursor ? "Cargar más" : null },
     chart: { months, selectedMonthId: months.some((month) => month.id === input.selectedMonthId)
       ? input.selectedMonthId : null,
       emptyLabel: months.length === 0 ? "Aún no hay meses comerciales registrados." : null,
