@@ -38,3 +38,16 @@ test("las entregas de correo siguen siendo privadas e idempotentes", () => {
   assert.match(sql, /claimed\.idempotency_key/);
   assert.match(sql, /grant execute on function public\.list_own_coach_progress_reports\(integer\) to authenticated/);
 });
+
+test("rediseño de reportes separa lectura y revisión sin relajar permisos", () => {
+  const update = readFileSync("supabase/migrations/20261128143000_coach_reports_review_and_compare_v1.sql", "utf8");
+  assert.match(update, /create or replace function public\.get_own_coach_progress_report/);
+  assert.match(update, /create or replace function public\.set_own_coach_progress_report_reviewed/);
+  assert.match(update, /create or replace function public\.get_previous_own_coach_photo_report/);
+  assert.match(update, /create or replace function public\.page_own_coach_progress_reports/);
+  assert.match(update, /episode\.ended_at is null/g);
+  assert.match(update, /not private\.can_coach_read_medical_document_asset/);
+  assert.match(update, /private\.can_coach_read_shared_photo/);
+  assert.match(update, /revoke all on function public\.get_own_coach_progress_report/);
+  assert.doesNotMatch(update, /grant execute .* to anon|service_role/i);
+});

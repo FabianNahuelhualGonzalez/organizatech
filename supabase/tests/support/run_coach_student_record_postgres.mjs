@@ -128,7 +128,9 @@ try {
       byte_size integer, check_id uuid, checked_on date, pose text,
       width integer, height integer, display_name text, document_category text);
     create table private.progress_report_reviews(
-      report_id uuid, coach_user_id uuid, reviewed_at timestamptz);
+      report_id uuid primary key, coach_user_id uuid, reviewed_at timestamptz default clock_timestamp());
+    create table private.progress_report_notifications(
+      report_id uuid, recipient_user_id uuid, read_at timestamptz);
     create function private.can_coach_read_medical_document_asset(uuid,uuid)
       returns boolean language sql stable as $$ select false $$;
     create function private.require_own_active_student_relationship()
@@ -190,6 +192,7 @@ try {
   await admin.query(sql("20261126200839_coach_student_evaluation_read_v1.sql"));
   await admin.query(sql("20261126200850_progress_photo_individual_sharing_v1.sql"));
   await admin.query(sql("20261126200900_coach_student_training_read_v1.sql"));
+  await admin.query(sql("20261128143000_coach_reports_review_and_compare_v1.sql"));
   // Test-only wrappers emulate a Storage policy and the public Coach report
   // reader without exposing the private schema to authenticated clients.
   await admin.query(`
@@ -203,6 +206,39 @@ try {
   const student = await connect(ids.student);
   const coach = await connect(ids.coach);
   const other = await connect(ids.other);
+  stage = "Coach report review and comparison";
+  check((await value(coach, "select public.get_own_coach_progress_report($1) as value", [ids.report]))
+    .reviewedAt === null, "opening does not review");
+  const inbox = await value(coach,
+    "select public.page_own_coach_progress_reports('pending',null,'',20,0) as value");
+  check(inbox.pending === 1 && inbox.reviewed === 0 && inbox.items.length === 1
+    && inbox.hasMore === false, "inbox counts and first page follow authorized status");
+  check(inbox.items[0].episodeId === ids.episode,
+    "new page provides authorized episode for navigation");
+  await denied(value(other, "select public.get_own_coach_progress_report($1) as value", [ids.report]),
+    "unrelated Coach cannot open report");
+  await denied(value(other, "select public.set_own_coach_progress_report_reviewed($1,true) as value", [ids.report]),
+    "unrelated Coach cannot review report");
+  check(await value(coach, "select public.get_previous_own_coach_photo_report($1) as value", [ids.report]) === null,
+    "no previous photo report does not invent comparison");
+  await admin.query(`insert into private.progress_reports values
+      ('50000000-0000-4000-8000-000000000002',$1,$2,$3,'photos',null,now()-interval '7 days')`,
+    [ids.episode, ids.student, ids.coach]);
+  await admin.query(`insert into private.progress_report_items
+      (report_id,asset_id,asset_kind,bucket_id,object_name,position,mime_type,extension,
+       byte_size,check_id,checked_on,pose) values
+      ('50000000-0000-4000-8000-000000000002',$1,'photo','progress-check-photos',
+       'photo/a.jpg',1,'image/jpeg','jpg',100,$2,current_date-7,'frente')`,
+    [ids.photo, ids.check]);
+  check((await value(coach, "select public.get_previous_own_coach_photo_report($1) as value", [ids.report]))
+    .items.length === 1, "comparison only loads authorized earlier photos");
+  check((await value(coach, "select public.set_own_coach_progress_report_reviewed($1,true) as value", [ids.report]))
+    .reviewedAt !== null, "explicit review persists");
+  check((await value(coach,
+    "select public.page_own_coach_progress_reports('reviewed',null,'',20,0) as value"))
+    .items.length === 1, "reviewed filter follows persisted state");
+  check((await value(coach, "select public.set_own_coach_progress_report_reviewed($1,false) as value", [ids.report]))
+    .reviewedAt === null, "review can be reverted");
   stage = "active relationship and evaluation";
   check((await value(coach, "select public.get_own_coach_student_record_subject($1) as value",
     [ids.episode])).studentUserId === ids.student, "subject derives Student from episode");
@@ -245,6 +281,8 @@ try {
     [ids.episode]), "other Coach cannot enumerate shared photos");
   stage = "unlink and new Coach";
   await admin.query("update private.coach_relationship_episodes set ended_at=now() where id=$1", [ids.episode]);
+  await denied(value(coach, "select public.get_own_coach_progress_report($1) as value", [ids.report]),
+    "ended relationship cannot open report");
   await denied(value(coach, "select public.get_own_coach_student_record_subject($1) as value",
     [ids.episode]), "ended Coach loses subject access");
   await denied(value(coach, "select public.get_own_coach_student_training_cycle_version($1,$2,1) as value",

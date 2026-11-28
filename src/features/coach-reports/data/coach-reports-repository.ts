@@ -6,10 +6,23 @@ const PHOTO_PATH = new RegExp(`^${PATH_ID}/${PATH_ID}[.]jpg$`, "i");
 const MEDICAL_DOCUMENT_PATH = new RegExp(`^${PATH_ID}/${PATH_ID}[.]pdf$`, "i");
 
 export type CoachReportKind = "photos" | "medical_document";
+export interface CoachReportFilters {
+  readonly status: "pending" | "reviewed" | "all";
+  readonly kind: CoachReportKind | null;
+  readonly query: string;
+}
+export interface CoachReportPage {
+  readonly items: readonly CoachReportSummary[];
+  readonly pending: number;
+  readonly reviewed: number;
+  readonly hasMore: boolean;
+}
 
 export interface CoachReportSummary {
   readonly id: string;
   readonly studentName: string;
+  readonly studentUserId: string;
+  readonly episodeId: string;
   readonly kind: CoachReportKind;
   readonly sentAt: string;
   readonly reviewedAt: string | null;
@@ -31,6 +44,8 @@ export interface CoachReportItem {
 
 export interface CoachReportDetail {
   readonly id: string;
+  readonly studentName: string;
+  readonly episodeId: string;
   readonly kind: CoachReportKind;
   readonly message: string | null;
   readonly sentAt: string;
@@ -71,7 +86,8 @@ function parseKind(value: unknown): CoachReportKind {
 function parseSummary(value: unknown): CoachReportSummary {
   const row = record(value);
   return {
-    id: uuid(row.id), studentName: text(row.studentName, 201), kind: parseKind(row.kind),
+    id: uuid(row.id), studentName: text(row.studentName, 201),
+    studentUserId: uuid(row.studentUserId), episodeId: uuid(row.episodeId), kind: parseKind(row.kind),
     sentAt: timestamp(row.sentAt), reviewedAt: row.reviewedAt === null ? null : timestamp(row.reviewedAt),
     itemCount: integer(row.itemCount, 0, 30),
   };
@@ -112,10 +128,19 @@ function parseDetail(value: unknown): CoachReportDetail {
     throw new CoachReportsError("unavailable");
   }
   return {
-    id: uuid(row.id), kind: parseKind(row.kind), message: row.message,
+    id: uuid(row.id), studentName: text(row.studentName, 201), episodeId: uuid(row.episodeId),
+    kind: parseKind(row.kind), message: row.message,
     sentAt: timestamp(row.sentAt), reviewedAt: row.reviewedAt === null ? null : timestamp(row.reviewedAt),
     items: row.items.map(parseItem),
   };
+}
+function parsePage(value: unknown): CoachReportPage {
+  const row = record(value);
+  if (!Array.isArray(row.items) || row.items.length > 20 || typeof row.hasMore !== "boolean")
+    throw new CoachReportsError("unavailable");
+  return { items: row.items.map(parseSummary),
+    pending: integer(row.pending, 0, 100000), reviewed: integer(row.reviewed, 0, 100000),
+    hasMore: row.hasMore };
 }
 function errorCode(error: unknown): never {
   const code = error && typeof error === "object" && "code" in error ? error.code : null;
@@ -129,14 +154,28 @@ export function createCoachReportsRepository(client: SupabaseClient) {
     return result.data;
   }
   return {
-    async list(): Promise<readonly CoachReportSummary[]> {
-      const value = await rpc("list_own_coach_progress_reports", { p_limit: 50 });
-      if (!Array.isArray(value) || value.length > 50) throw new CoachReportsError("unavailable");
-      return value.map(parseSummary);
+    async list(filters: CoachReportFilters, offset = 0): Promise<CoachReportPage> {
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10000
+        || filters.query.length > 100) throw new CoachReportsError("unavailable");
+      return parsePage(await rpc("page_own_coach_progress_reports", {
+        p_status: filters.status, p_kind: filters.kind, p_query: filters.query.trim(),
+        p_limit: 20, p_offset: offset,
+      }));
     },
     async open(reportId: string): Promise<CoachReportDetail> {
       if (!UUID.test(reportId)) throw new CoachReportsError("unavailable");
-      return parseDetail(await rpc("review_own_coach_progress_report", { p_report_id: reportId }));
+      return parseDetail(await rpc("get_own_coach_progress_report", { p_report_id: reportId }));
+    },
+    async previous(reportId: string): Promise<CoachReportDetail | null> {
+      if (!UUID.test(reportId)) throw new CoachReportsError("unavailable");
+      const value = await rpc("get_previous_own_coach_photo_report", { p_report_id: reportId });
+      return value === null ? null : parseDetail(value);
+    },
+    async review(reportId: string, reviewed: boolean): Promise<CoachReportDetail> {
+      if (!UUID.test(reportId)) throw new CoachReportsError("unavailable");
+      return parseDetail(await rpc("set_own_coach_progress_report_reviewed", {
+        p_report_id: reportId, p_reviewed: reviewed,
+      }));
     },
     async download(item: CoachReportItem): Promise<Blob> {
       const result = await client.storage.from(item.bucketId).download(item.objectName);
