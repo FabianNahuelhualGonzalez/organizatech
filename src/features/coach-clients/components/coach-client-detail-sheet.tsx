@@ -6,12 +6,11 @@ import { CoachOverlay } from "@/ui/coach-overlays/coach-overlay";
 import type { CoachClientDetailSheetProps } from "./coach-client-detail-view";
 import { CoachClientDetailContent } from "./coach-client-detail-content";
 import { CoachClientUnlinkConfirmation } from "./coach-client-unlink-confirmation";
-import { CoachStudentRoutineSummary } from "./coach-student-routine-summary";
 import { CoachLinkedStudentAvatar } from "./coach-linked-student-avatar";
 import shared from "@/ui/coach-overlays/coach-overlay.module.css";
 import styles from "./coach-client-detail-sheet.module.css";
 
-export function CoachClientDetailSheet({ view, confirmation, actions, commercialContent, coachId, loadStudentAvatar, backgroundRef, restoreFocusRef }: CoachClientDetailSheetProps) {
+export function CoachClientDetailSheet({ view, confirmation, actions, commercialContent, routineSummaryContent, coachId, loadStudentAvatar, backgroundRef, restoreFocusRef }: CoachClientDetailSheetProps) {
   const id = useId();
   const detailBackgroundRef = useRef<HTMLDivElement>(null);
   const unlinkTriggerRef = useRef<HTMLElement>(null);
@@ -41,8 +40,7 @@ export function CoachClientDetailSheet({ view, confirmation, actions, commercial
             onClick={!disabled && view.canClose ? actions.onCancelDetail : undefined}><span><X size={13} aria-hidden="true" /></span></button>
         </div>
         <CoachClientDetailContent view={view} disabled={disabled} actions={actions} commercialContent={<>
-          {view.state === "active" && coachId && actions.onOpenRecord ? <CoachStudentRoutineSummary
-            coachId={coachId} episodeId={view.id} onOpenRecord={() => actions.onOpenRecord?.(view.id)} /> : null}
+          {view.state === "active" ? routineSummaryContent : null}
           {commercialContent}
         </>} />
       </CoachOverlay>

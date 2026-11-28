@@ -97,9 +97,19 @@ test("pending mobile actions stack full-width and detail scroll remains viewport
 test("active without a cycle remains active and unavailable cycle destination cannot navigate", () => {
   let opened = 0;
   const { markup, tree } = capture(CoachClientDetailContent, { view: active(), disabled: false, actions: { onOpenCycle: () => { opened++; } } });
-  assert.match(markup, /ACTIVO/); assert.doesNotMatch(markup, /PENDIENTE|Entrenando con ciclo vigente|SU CÓDIGO/);
+  assert.match(markup, /CONSULTANDO/); assert.doesNotMatch(markup, /PENDIENTE|Entrenando con ciclo vigente|SU CÓDIGO/);
   const cycle = buttons(tree)[0]; assert.equal(cycle.props.disabled, true); assert.equal(cycle.props.onClick, undefined); assert.equal(opened, 0);
   assert.match(markup, /data-known="false">—/);
+});
+
+test("workout presence is distinct from the green linked relationship", () => {
+  const training = capture(CoachClientDetailContent, { view: { ...active(), isTraining: true,
+    statusDescription: "Vínculo activo" }, disabled: false, actions: {} }).markup;
+  const away = capture(CoachClientDetailContent, { view: { ...active(), isTraining: false,
+    statusDescription: "Vínculo activo" }, disabled: false, actions: {} }).markup;
+  assert.match(training, /data-state="training"[^>]*>.*ACTIVO/);
+  assert.match(away, /data-state="away"[^>]*>.*AUSENTE/);
+  assert.match(away, /Vínculo activo/);
 });
 
 test("active cycle requires both an explicit capability and callback then forwards only the stable client id", () => {

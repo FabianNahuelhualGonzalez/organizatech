@@ -4,14 +4,17 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 
 import { CoachAddClientSheet } from "@/features/coach-clients/components/coach-add-client-sheet";
 import { CoachClientDetailSheet } from "@/features/coach-clients/components/coach-client-detail-sheet";
+import { CoachStudentRoutineSummary } from "@/features/coach-clients/components/coach-student-routine-summary";
 import { CoachClientsView } from "@/features/coach-clients/components/coach-clients";
 import { loadCoachLinkedStudentAvatar } from "../data/coach-linked-student-avatar";
 import { CoachChatComingSoonSheet } from "@/features/coach-dashboard/components/coach-chat-coming-soon-sheet";
 import { CoachDashboardView } from "@/features/coach-dashboard/components/coach-dashboard";
+import { CoachAlertsCard } from "@/features/coach-dashboard/components/coach-alerts-card";
 import { CoachCommercialStudent } from "@/features/coach-dashboard/commercial/components/coach-commercial-student";
 import { CoachReportsView } from "@/features/coach-reports/components/coach-reports-view";
 import { CoachStudentRecord } from "@/features/coach-student-record/components/coach-student-record";
 import { useCoachWorkspaceController } from "../hooks/use-coach-workspace-controller";
+import { useCoachStudentRoutineSummary } from "../hooks/use-coach-student-routine-summary";
 
 import styles from "./coach-workspace-boundary.module.css";
 
@@ -46,6 +49,8 @@ export function CoachWorkspaceBoundary({
   }) => void;
 }) {
   const controller = useCoachWorkspaceController({ userId, coachName, identityGeneration });
+  const routineSummary = useCoachStudentRoutineSummary(userId,
+    controller.detail?.state === "active" ? controller.detail.id : null);
   const [recordEpisodeId, setRecordEpisodeId] = useState<string | null>(null);
   const backgroundRef = useRef<HTMLDivElement>(null);
   const chatTriggerRef = useRef<HTMLElement>(null);
@@ -112,10 +117,11 @@ export function CoachWorkspaceBoundary({
               onManageRates: controller.available ? () => controller.actions.openClients("active") : undefined,
               onPortfolio: controller.available ? {
                 active: () => controller.actions.openClients("active"),
+                alert: controller.actions.openAlerts,
                 pending: () => controller.actions.openClients("pending"),
                 inactive: () => controller.actions.openClients("inactive"),
               } : undefined,
-              onAlert: controller.commercial.snapshot.portfolio ? openCommercialStudent : undefined,
+              onAlert: controller.available ? openCommercialStudent : undefined,
               onSelectMonth: controller.commercial.snapshot.portfolio ? controller.actions.selectMonth : undefined,
               onRenewal: controller.commercial.snapshot.portfolio ? openCommercialStudent : undefined,
               onLoadMoreCommercial: () => { void controller.commercial.loadMoreItems(); },
@@ -129,6 +135,13 @@ export function CoachWorkspaceBoundary({
               onReports: controller.available ? controller.actions.openReports : undefined,
             }}
           />
+        ) : controller.screen === "alerts" ? (
+          <section className={styles.alertsScreen} aria-label="Alumnos en alerta">
+            <button type="button" className={styles.back} onClick={controller.actions.openDashboard}>← Volver al panel</button>
+            <h2>Alumnos en alerta</h2>
+            <CoachAlertsCard view={controller.dashboardView.alerts} showAdd={false} onAlert={openCommercialStudent}
+              onViewAlerts={controller.attentionBusy ? undefined : controller.actions.loadMoreAttention} />
+          </section>
         ) : controller.screen === "clients" ? (
           <CoachClientsView
             coachId={userId}
@@ -183,6 +196,9 @@ export function CoachWorkspaceBoundary({
         <CoachClientDetailSheet
           coachId={userId}
           loadStudentAvatar={loadCoachLinkedStudentAvatar}
+          routineSummaryContent={controller.detail.state === "active" ? <CoachStudentRoutineSummary
+            cycle={routineSummary?.cycle ?? null} hasMore={routineSummary?.hasMore ?? false}
+            state={routineSummary?.state ?? "loading"} /> : undefined}
           view={controller.detail}
           confirmation={controller.confirmation}
           backgroundRef={backgroundRef}

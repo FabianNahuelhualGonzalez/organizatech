@@ -19,7 +19,7 @@ export function CoachDashboardView({ view, actions }: CoachDashboardViewProps) {
         <CoachIncomeCard view={view.income} onManageRates={actions.onManageRates} />
         <CoachPortfolioGrid view={view.portfolio} onSelect={actions.onPortfolio} />
         <CoachAlertsCard view={view.alerts} onAdd={actions.onLink} onAlert={actions.onAlert}
-          onViewAlerts={view.alerts.footerLabel === "Cargar más" ? actions.onLoadMoreCommercial : actions.onPortfolio?.alert} />
+          onViewAlerts={actions.onPortfolio?.alert} />
         <CoachQuickActions onCalendar={actions.onCalendar} onLink={actions.onLink} onChat={actions.onChat}
           onReports={actions.onReports} />
         <CoachMonthlyChart view={view.chart} onSelectMonth={actions.onSelectMonth}

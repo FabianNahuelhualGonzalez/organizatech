@@ -16,6 +16,9 @@
 .chip { flex: none; display: flex; align-items: center; gap: 5px; font-size: 9px; font-weight: 700; padding: 5px 8px; border-radius: 20px; }
 .chip > span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .chip[data-state="active"] { color: #4ade80; background: rgba(74, 222, 128, .14); }
+.chip[data-state="training"] { color: #4ade80; background: rgba(74, 222, 128, .14); }
+.chip[data-state="away"] { color: rgba(255, 255, 255, .62); background: rgba(255, 255, 255, .1); }
+.statusLine p[data-link-active="true"] { color: #4ade80; font-weight: 700; }
 .chip[data-state="pending"] { color: #fbbf24; background: rgba(251, 191, 36, .14); }
 .chip[data-state="inactive"] { color: rgba(255, 255, 255, .62); background: rgba(255, 255, 255, .1); }
 .facts { border: 1px solid rgba(255, 255, 255, .14); border-radius: 13px; overflow: hidden; margin: 0 0 16px; }
