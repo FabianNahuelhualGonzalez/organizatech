@@ -159,9 +159,14 @@ export function CoachWorkspaceBoundary({
         ) : (
           <CoachReportsView
             state={controller.reports.state}
-            onBack={controller.actions.openDashboard}
+            onBack={() => { controller.reports.close(); controller.actions.openDashboard(); }}
+            onCloseDetail={controller.reports.close}
             onRetry={() => { void controller.reports.reload(); }}
             onOpen={(reportId) => { void controller.reports.open(reportId); }}
+            onReview={controller.reports.review}
+            onFilter={controller.reports.setFilters}
+            onLoadMore={() => { void controller.reports.loadMore(); }}
+            onStudentRecord={(episodeId) => { setRecordEpisodeId(episodeId); }}
             onDownload={controller.reports.download}
           />
         ))}
